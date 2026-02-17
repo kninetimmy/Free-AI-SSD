@@ -1,34 +1,21 @@
-Free-AI-SSD Quickstart (Windows)
+Free-AI-SSD Quickstart (Windows + macOS targets)
 
 Recommended for end users: download the official release ZIP.
 
-1) Download Free-AI-SSD.zip from GitHub Releases (for example v0.3.0).
-2) Extract the ZIP anywhere on your Windows PC.
+1) Download Free-AI-SSD.zip from GitHub Releases.
+2) Extract the ZIP on a Windows machine.
 3) Run FreeAiSsd.PrepApp.exe.
-4) Select your external SSD.
-5) Use Model Manager to add/select model tags (freeform tags supported).
-6) Pull models.
-7) Run "Check SSD Readiness" until all checks are green.
+4) Select your external SSD (exFAT recommended for cross-platform use).
+5) In Drive Preparation, choose target(s): Windows, macOS, or both.
+6) Use Model Manager to add model tags and pull models.
+7) Run "Check SSD Readiness".
 8) Click "Finalize SSD".
-9) On the target PC, run <SSD>\runner\FreeAiSsd.Runner.exe.
 
-10) Optional: Use "Format & Prepare Drive" (admin only) to erase a removable drive, label it (default Portable AI), and recreate SSD folders.
-
-Model Manager extras
-- Remove/Delete opens choices: config-only removal or delete from disk (`ollama rm`).
-- Models found on disk but missing in config appear as OnDiskOnly and can be added to config.
+Run on target machines:
+- Windows: <SSD>\windows\runner\FreeAiSsd.Runner.exe
+- macOS: <SSD>/mac/Runner.app
 
 Notes
-- PrepApp now shows per-model sizing warnings for RAM/VRAM/disk and asks for confirmation before Pull Selected when the machine may be undersized.
-- Runner shows a startup informational warning if installed models may struggle on current hardware; you can disable this warning per machine.
-- Internet is required for model pulls; prereq updates are attempted online during finalize but bundled prereqs are used if offline.
-- After setup, Runner works offline from the SSD.
-- GitHub Actions artifacts are dev builds for testing; Releases are the official downloads.
-
-
-Offline prerequisites
-- Release ZIP includes offline installers under tools/prereqs with prereqs-manifest.json. PrepApp verifies the bundle during finalize and warns if files or hashes drift.
-- On first run, Runner checks compatibility (GPU/CPU/OS) and dependency presence.
-- If a required dependency is missing, Runner can install it offline from SSD media after validating allow-listed IDs, expected filenames, SHA256 hashes, and Microsoft signatures (when available).
-
-- If prerequisite validation fails in Runner, run PrepApp on an online machine and click **Update Prereqs**, then re-run Runner.
+- PrepApp can stage both OS payloads from one Windows host.
+- The prepared SSD is designed for offline runtime use on Windows/macOS.
+- macOS Runner is built, signed, and notarized in CI releases.
