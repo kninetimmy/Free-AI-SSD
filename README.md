@@ -119,6 +119,8 @@ Notes:
 
 
 Offline prerequisites
-- Release ZIP now includes offline installers under tools/prereqs with prereqs-manifest.json. PrepApp copies them to <SSD>\tools\prereqs during finalize.
+- Release ZIP includes offline installers under tools/prereqs with prereqs-manifest.json. PrepApp verifies the bundle during finalize and warns if files or hashes drift.
 - On first run, Runner checks compatibility (GPU/CPU/OS) and dependency presence.
-- If a required dependency is missing, Runner can install it offline from SSD media using <SSD>\tools\prereqs\prereqs-manifest.json and may request Administrator elevation.
+- If a required dependency is missing, Runner can install it offline from SSD media after validating allow-listed IDs, expected filenames, SHA256 hashes, and Microsoft signatures (when available).
+
+- If prerequisite validation fails in Runner, run PrepApp on an online machine and click **Update Prereqs**, then re-run Runner.

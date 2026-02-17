@@ -100,7 +100,7 @@ public partial class MainWindow : System.Windows.Window
 
         startInfo.Environment["OLLAMA_MODELS"] = Path.Combine(_ssdRoot, SsdLayout.Models);
         startInfo.Environment["OLLAMA_HOST"] = $"127.0.0.1:{_currentPort.Value}";
-        startInfo.Environment["OLLAMA_ORIGINS"] = "*";
+        startInfo.Environment["OLLAMA_ORIGINS"] = "http://127.0.0.1,http://localhost";
 
         _ollama = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         _ollama.OutputDataReceived += (_, args) => { if (!string.IsNullOrWhiteSpace(args.Data)) AppendLog(args.Data); };
@@ -290,6 +290,24 @@ public partial class MainWindow : System.Windows.Window
 
         var manifestPath = PrereqCatalog.GetManifestPath(_ssdRoot);
         var manifest = PrereqManifest.Load(manifestPath);
+        var prereqDir = Path.Combine(_ssdRoot, SsdLayout.Prereqs);
+        var bundleIssues = PrereqInstallValidator.ValidateBundleHealth(prereqDir, manifest);
+        if (bundleIssues.Count > 0)
+        {
+            foreach (var issue in bundleIssues)
+            {
+                AppendLog($"Prerequisite bundle warning: {issue}");
+                _logger?.Error($"Prerequisite bundle invalid: {issue}");
+            }
+
+            System.Windows.MessageBox.Show(
+                "Offline prerequisites are unavailable or incomplete. " + PrereqInstallValidator.RefreshMessage,
+                "Prerequisites unavailable",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Warning);
+            return false;
+        }
+
         var dialog = new DependencyInstallDialog(_lastDependencyCheck.MissingItems, manifest.Prerequisites) { Owner = this };
         var result = dialog.ShowDialog();
 
@@ -331,31 +349,62 @@ public partial class MainWindow : System.Windows.Window
             return false;
         }
 
-        foreach (var entry in dialog.SelectedEntries)
-        {
-            var installerPath = Path.Combine(_ssdRoot, SsdLayout.Prereqs, entry.Filename);
-            if (!File.Exists(installerPath))
+        var selectedIds = dialog.SelectedEntries.Select(x => x.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var requestedMissing = _lastDependencyCheck.MissingItems
+            .Where(x => selectedIds.Contains(x.Id))
+            .ToList();
+
+        var installPlan = PrereqInstallValidator.BuildValidatedInstallPlan(
+            _ssdRoot,
+            requestedMissing,
+            manifest,
+            AppendLog,
+            warning =>
             {
-                AppendLog($"Missing installer on SSD: {installerPath}");
-                continue;
+                AppendLog($"Warning: {warning}");
+                _logger?.Info($"Prereq warning: {warning}");
+            },
+            out var validationErrors);
+
+        if (validationErrors.Count > 0)
+        {
+            foreach (var error in validationErrors)
+            {
+                AppendLog($"Prerequisite install blocked: {error}");
+                _logger?.Error($"Prereq install blocked: {error}");
             }
 
-            AppendLog($"Installing {entry.DisplayName}...");
+            System.Windows.MessageBox.Show(
+                "Prerequisite installation blocked due to validation failure. "
+                + PrereqInstallValidator.RefreshMessage,
+                "Prerequisite validation failed",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Warning);
+            return false;
+        }
+
+        foreach (var item in installPlan)
+        {
+            AppendLog($"Installing {item.Definition.DisplayName}...");
+            _logger?.Info($"Installing prerequisite: {item.Definition.Id}");
+
             var installer = Process.Start(new ProcessStartInfo
             {
-                FileName = installerPath,
-                Arguments = entry.SilentArgs,
+                FileName = item.InstallerPath,
+                Arguments = item.SilentArgs,
                 UseShellExecute = true
             });
 
             if (installer is null)
             {
-                AppendLog($"Failed to launch installer: {entry.DisplayName}");
+                AppendLog($"Failed to launch installer: {item.Definition.DisplayName}");
+                _logger?.Error($"Failed to launch installer for prerequisite: {item.Definition.Id}");
                 continue;
             }
 
             await installer.WaitForExitAsync();
-            AppendLog($"Installer exit code for {entry.DisplayName}: {installer.ExitCode}");
+            AppendLog($"Installer exit code for {item.Definition.DisplayName}: {installer.ExitCode}");
+            _logger?.Info($"Installer exit code for prerequisite {item.Definition.Id}: {installer.ExitCode}");
         }
 
         _lastDependencyCheck = DependencyChecker.Check(_ssdRoot);
