@@ -19,12 +19,12 @@ Model Manager extras
 - Models found on disk but missing in config appear as OnDiskOnly and can be added to config.
 
 Notes
-- Internet is required during PrepApp setup (download + model pull).
+- Internet is required for model pulls; prereq updates are attempted online during finalize but bundled prereqs are used if offline.
 - After setup, Runner works offline from the SSD.
 - GitHub Actions artifacts are dev builds for testing; Releases are the official downloads.
 
 
 Offline prerequisites
-- PrepApp now stages offline installers at <SSD>\tools\prereqs and writes <SSD>\config\deps-manifest.json during finalize.
+- Release ZIP now includes offline installers under tools/prereqs with prereqs-manifest.json. PrepApp copies them to <SSD>\tools\prereqs during finalize.
 - On first run, Runner checks compatibility (GPU/CPU/OS) and dependency presence.
-- If a required dependency is missing, Runner can install it offline from SSD media and may request Administrator elevation.
+- If a required dependency is missing, Runner can install it offline from SSD media using <SSD>\tools\prereqs\prereqs-manifest.json and may request Administrator elevation.

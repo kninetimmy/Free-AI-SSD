@@ -1,33 +1,39 @@
 using Microsoft.Win32;
+using System.Diagnostics;
 using System.Runtime.Versioning;
 
 namespace FreeAiSsd.Shared;
 
 public sealed record DependencyCheckResult(bool IsSatisfied, IReadOnlyList<MissingDependency> MissingItems);
 
-public sealed record MissingDependency(string Id, string DisplayName, bool RequiresAdmin);
+public sealed record MissingDependency(string Id, string DisplayName, bool RequiresAdmin, bool IsOptional = false);
 
 public static class DependencyChecker
 {
     public static DependencyCheckResult Check(string ssdRoot)
     {
-        // Offline runner support targets Windows. On non-Windows hosts, skip Windows registry probing.
         if (!OperatingSystem.IsWindows())
         {
             return new DependencyCheckResult(true, Array.Empty<MissingDependency>());
         }
 
         var missing = new List<MissingDependency>();
-        if (!HasVcRuntimeX64Windows())
+
+        var hasVcRuntime = HasVcRuntimeX64Windows() || HasVcRuntimeByOllamaProbe(ssdRoot);
+        if (!hasVcRuntime)
         {
-            missing.Add(new MissingDependency(
-                PrereqCatalog.VcRedistX64Id,
-                "Microsoft Visual C++ Redistributable (x64)",
-                RequiresAdmin: true));
+            missing.Add(new MissingDependency(PrereqCatalog.VcRedistX64Id, "Microsoft Visual C++ Redistributable (x64)", RequiresAdmin: true));
+        }
+
+        if (!IsDotnetDesktopOptional() && !HasDotnetDesktopRuntimeWindows())
+        {
+            missing.Add(new MissingDependency(PrereqCatalog.DotnetDesktop8X64Id, ".NET 8 Windows Desktop Runtime (x64)", RequiresAdmin: true));
         }
 
         return new DependencyCheckResult(missing.Count == 0, missing);
     }
+
+    public static bool IsDotnetDesktopOptional() => true;
 
     [SupportedOSPlatform("windows")]
     private static bool HasVcRuntimeX64Windows()
@@ -60,5 +66,79 @@ public static class DependencyChecker
         }
 
         return false;
+    }
+
+    private static bool HasVcRuntimeByOllamaProbe(string ssdRoot)
+    {
+        try
+        {
+            var ollamaPath = Path.Combine(ssdRoot, SsdLayout.Ollama, "ollama.exe");
+            if (!File.Exists(ollamaPath))
+            {
+                return false;
+            }
+
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = ollamaPath,
+                Arguments = "--version",
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            });
+
+            if (process is null)
+            {
+                return false;
+            }
+
+            if (!process.WaitForExit(5000))
+            {
+                process.Kill(entireProcessTree: true);
+                return false;
+            }
+
+            var stderr = process.StandardError.ReadToEnd();
+            return !stderr.Contains("VCRUNTIME", StringComparison.OrdinalIgnoreCase)
+                && !stderr.Contains("MSVCP", StringComparison.OrdinalIgnoreCase)
+                && !stderr.Contains("api-ms-win-crt", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static bool HasDotnetDesktopRuntimeWindows()
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = "dotnet",
+                Arguments = "--list-runtimes",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            });
+
+            if (process is null)
+            {
+                return false;
+            }
+
+            var output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit(5000);
+            return output.Split('\n').Any(line =>
+                line.Contains("Microsoft.WindowsDesktop.App", StringComparison.OrdinalIgnoreCase)
+                && line.Contains(" 8.", StringComparison.Ordinal));
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

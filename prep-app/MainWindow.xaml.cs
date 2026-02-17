@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.IO.Compression;
+using System.Net.Http;
 using System.Security.Principal;
 using FreeAiSsd.Shared;
 
@@ -632,32 +633,116 @@ public partial class MainWindow : System.Windows.Window
 
     private async Task StagePrerequisitesAsync(string root, SsdLogger logger, CancellationToken ct)
     {
-        var prereqDir = Path.Combine(root, SsdLayout.Prereqs);
-        Directory.CreateDirectory(prereqDir);
+        var ssdPrereqDir = Path.Combine(root, SsdLayout.Prereqs);
+        Directory.CreateDirectory(ssdPrereqDir);
 
-        var entry = PrereqCatalog.CreateVcRedistEntry();
-        var targetPath = Path.Combine(prereqDir, entry.File);
+        var bundledPrereqDir = Path.Combine(AppContext.BaseDirectory, SsdLayout.Prereqs);
+        if (!Directory.Exists(bundledPrereqDir))
+        {
+            throw new DirectoryNotFoundException($"Bundled prerequisites folder is missing: {bundledPrereqDir}");
+        }
+
+        var bundledManifestPath = Path.Combine(bundledPrereqDir, PrereqCatalog.ManifestFileName);
+        var ssdManifestPath = PrereqCatalog.GetManifestPath(root);
+
+        var manifest = File.Exists(bundledManifestPath)
+            ? PrereqManifest.Load(bundledManifestPath)
+            : new PrereqManifest();
+
+        foreach (var definition in PrereqCatalog.Tier1)
+        {
+            var sourcePath = Path.Combine(bundledPrereqDir, definition.TargetFileName);
+            var targetPath = Path.Combine(ssdPrereqDir, definition.TargetFileName);
+            if (!File.Exists(sourcePath))
+            {
+                throw new FileNotFoundException($"Bundled installer is missing: {sourcePath}");
+            }
+
+            File.Copy(sourcePath, targetPath, overwrite: true);
+            logger.Info($"Copied bundled prerequisite: {definition.DisplayName}");
+            AppendLog($"Prereqs: bundled {definition.DisplayName}");
+
+            var entry = manifest.Prerequisites.FirstOrDefault(p => string.Equals(p.Id, definition.Id, StringComparison.OrdinalIgnoreCase));
+            if (entry is null)
+            {
+                entry = PrereqCatalog.CreateManifestEntry(definition, DownloadManager.ComputeSha256(targetPath), new FileInfo(targetPath).Length);
+                manifest.Prerequisites.Add(entry);
+            }
+        }
+
+        await manifest.SaveAsync(ssdManifestPath);
+        PrereqStatusText.Text = "Prereqs: bundled";
+        AppendLog($"Wrote prerequisite manifest: {ssdManifestPath}");
 
         try
         {
-            AppendLog($"Downloading prerequisite: {entry.DisplayName}");
-            await _downloadManager.DownloadFileWithResumeAsync(new DownloadRequest(PrereqCatalog.VcRedistX64Url, targetPath), null, ct);
-            logger.Info($"Staged prerequisite: {entry.DisplayName}");
-
-            entry.Sha256 = DownloadManager.ComputeSha256(targetPath);
+            PrereqStatusText.Text = "Prereqs: updating";
+            await UpdatePrereqsOnlineAsync(ssdPrereqDir, manifest, logger, ct);
+            await manifest.SaveAsync(ssdManifestPath);
+            PrereqStatusText.Text = "Prereqs: up-to-date";
         }
         catch (Exception ex)
         {
-            AppendLog($"Warning: Failed to download {entry.DisplayName}. You can retry finalize later. ({ex.Message})");
-            logger.Error($"Prerequisite download failed: {ex}");
+            PrereqStatusText.Text = "Prereqs: failed";
+            AppendLog($"Prereq update check failed, using bundled installers: {ex.Message}");
+            logger.Error($"Prereq update check failed: {ex}");
         }
+    }
 
-        var manifest = new PrereqManifest();
-        manifest.Prerequisites.Add(entry);
+    private async Task UpdatePrereqsOnlineAsync(string prereqDir, PrereqManifest manifest, SsdLogger logger, CancellationToken ct)
+    {
+        using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
 
-        var manifestPath = Path.Combine(root, SsdLayout.Config, "deps-manifest.json");
-        await manifest.SaveAsync(manifestPath);
-        AppendLog($"Wrote prerequisite manifest: {manifestPath}");
+        foreach (var definition in PrereqCatalog.Tier1)
+        {
+            var destinationPath = Path.Combine(prereqDir, definition.TargetFileName);
+            var tempPath = destinationPath + ".download";
+
+            AppendLog($"Checking prerequisite update: {definition.DisplayName}");
+            using var response = await client.GetAsync(definition.SourceUrl, HttpCompletionOption.ResponseHeadersRead, ct);
+            response.EnsureSuccessStatusCode();
+
+            await using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                await response.Content.CopyToAsync(fs, ct);
+            }
+
+            var downloadedSha = DownloadManager.ComputeSha256(tempPath);
+            var existingSha = File.Exists(destinationPath) ? DownloadManager.ComputeSha256(destinationPath) : string.Empty;
+
+            if (string.Equals(downloadedSha, existingSha, StringComparison.OrdinalIgnoreCase))
+            {
+                File.Delete(tempPath);
+                AppendLog($"Prereq already up-to-date: {definition.DisplayName}");
+            }
+            else
+            {
+                File.Move(tempPath, destinationPath, overwrite: true);
+                AppendLog($"Updated prerequisite: {definition.DisplayName}");
+                logger.Info($"Updated prerequisite: {definition.DisplayName}");
+            }
+
+            var size = new FileInfo(destinationPath).Length;
+            var existingEntry = manifest.Prerequisites.FirstOrDefault(p => string.Equals(p.Id, definition.Id, StringComparison.OrdinalIgnoreCase));
+            var updated = PrereqCatalog.CreateManifestEntry(definition, DownloadManager.ComputeSha256(destinationPath), size);
+
+            if (existingEntry is null)
+            {
+                manifest.Prerequisites.Add(updated);
+            }
+            else
+            {
+                existingEntry.DisplayName = updated.DisplayName;
+                existingEntry.Filename = updated.Filename;
+                existingEntry.SourceUrl = updated.SourceUrl;
+                existingEntry.DownloadedAtUtc = updated.DownloadedAtUtc;
+                existingEntry.Sha256 = updated.Sha256;
+                existingEntry.SizeBytes = updated.SizeBytes;
+                existingEntry.SilentArgs = updated.SilentArgs;
+                existingEntry.RequiresAdmin = updated.RequiresAdmin;
+                existingEntry.IsOptional = updated.IsOptional;
+            }
+        }
     }
 
     private async Task StageRunnerAsync(string ssdRoot, SsdLogger logger)
@@ -749,6 +834,35 @@ public partial class MainWindow : System.Windows.Window
         var config = await PortableConfig.LoadAsync(configPath);
         var discovered = ModelOperations.DiscoverModelsOnDisk(Path.Combine(drive.RootPath, SsdLayout.Models));
         RefreshModelStatusGrid(config.Models, discovered);
+    }
+
+
+    private async void CheckPrereqUpdates_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (DriveCombo.SelectedItem is not DriveTarget drive)
+        {
+            AppendLog("Select a target drive first.");
+            return;
+        }
+
+        var logger = new SsdLogger(drive.RootPath, "prep");
+        var manifestPath = PrereqCatalog.GetManifestPath(drive.RootPath);
+        var manifest = PrereqManifest.Load(manifestPath);
+        PrereqStatusText.Text = "Prereqs: updating";
+
+        try
+        {
+            await UpdatePrereqsOnlineAsync(Path.Combine(drive.RootPath, SsdLayout.Prereqs), manifest, logger, CancellationToken.None);
+            await manifest.SaveAsync(manifestPath);
+            PrereqStatusText.Text = "Prereqs: up-to-date";
+            AppendLog("Prereq update check complete.");
+        }
+        catch (Exception ex)
+        {
+            PrereqStatusText.Text = "Prereqs: failed";
+            AppendLog($"Prereq update check failed: {ex.Message}");
+            logger.Error(ex.ToString());
+        }
     }
 
     private async void CheckReadiness_Click(object sender, System.Windows.RoutedEventArgs e)
@@ -958,6 +1072,7 @@ public partial class MainWindow : System.Windows.Window
         AddOrphanButton.IsEnabled = !running && GetSelectedModelRows().Any(r => r.IsOnDiskOnly);
         CancelOperationButton.IsEnabled = running;
         FormatPrepareButton.IsEnabled = !running && DriveCombo.SelectedItem is DriveTarget d && d.IsRemovable;
+        CheckPrereqUpdatesButton.IsEnabled = !running;
         if (!string.IsNullOrWhiteSpace(status))
         {
             StatusText.Text = status;
@@ -975,6 +1090,7 @@ public partial class MainWindow : System.Windows.Window
         PullSelectedButton.IsEnabled = !_isModelOperationRunning && hasConfiguredSelection;
         AddOrphanButton.IsEnabled = !_isModelOperationRunning && hasOrphanedSelection;
         FormatPrepareButton.IsEnabled = !_isModelOperationRunning && DriveCombo.SelectedItem is DriveTarget d && d.IsRemovable;
+        CheckPrereqUpdatesButton.IsEnabled = !_isModelOperationRunning && DriveCombo.SelectedItem is not null;
     }
 
     private static bool IsRunningAsAdministrator()

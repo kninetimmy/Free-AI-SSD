@@ -58,7 +58,7 @@ public partial class DependencyInstallDialog : System.Windows.Window
             {
                 Id = missing.Id,
                 DisplayName = missing.DisplayName,
-                File = string.Empty,
+                Filename = string.Empty,
                 SilentArgs = string.Empty,
                 RequiresAdmin = missing.RequiresAdmin
             };
@@ -68,8 +68,8 @@ public partial class DependencyInstallDialog : System.Windows.Window
         public PrereqManifestEntry Entry { get; }
         public bool IsSelected { get; set; } = true;
         public string DisplayLabel =>
-            Entry.File.Length > 0
-                ? $"{Missing.DisplayName} ({Entry.File})"
+            Entry.Filename.Length > 0
+                ? $"{Missing.DisplayName} ({Entry.Filename})"
                 : $"{Missing.DisplayName} (installer not found in manifest)";
     }
 }

@@ -215,7 +215,7 @@ public partial class MainWindow : System.Windows.Window
             return false;
         }
 
-        var manifestPath = Path.Combine(_ssdRoot, SsdLayout.Config, "deps-manifest.json");
+        var manifestPath = PrereqCatalog.GetManifestPath(_ssdRoot);
         var manifest = PrereqManifest.Load(manifestPath);
         var dialog = new DependencyInstallDialog(_lastDependencyCheck.MissingItems, manifest.Prerequisites) { Owner = this };
         var result = dialog.ShowDialog();
@@ -260,7 +260,7 @@ public partial class MainWindow : System.Windows.Window
 
         foreach (var entry in dialog.SelectedEntries)
         {
-            var installerPath = Path.Combine(_ssdRoot, SsdLayout.Prereqs, entry.File);
+            var installerPath = Path.Combine(_ssdRoot, SsdLayout.Prereqs, entry.Filename);
             if (!File.Exists(installerPath))
             {
                 AppendLog($"Missing installer on SSD: {installerPath}");
