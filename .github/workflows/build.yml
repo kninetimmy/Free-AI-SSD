@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - v*.*.*
 
 jobs:
   build:
@@ -51,16 +53,24 @@ jobs:
           Copy-Item "out/prepapp-publish/*" $distRoot -Recurse -Force
           Copy-Item $runnerPublishDir (Join-Path $distRoot "runner-publish") -Recurse -Force
           Copy-Item "docs/QUICKSTART.txt" (Join-Path $distRoot "QUICKSTART.txt") -Force
+          Copy-Item "LICENSE" (Join-Path $distRoot "LICENSE") -Force
 
       - name: Create ZIP
         shell: pwsh
         run: Compress-Archive -Path dist/Free-AI-SSD/* -DestinationPath dist/Free-AI-SSD.zip -Force
+
 
       - name: Upload ZIP artifact
         uses: actions/upload-artifact@v4
         with:
           name: Free-AI-SSD-win-x64
           path: dist/Free-AI-SSD.zip
+
+      - name: Attach ZIP to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Free-AI-SSD.zip
 
       - name: Diagnostics on failure
         if: failure()
