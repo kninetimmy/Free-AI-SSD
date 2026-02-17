@@ -19,6 +19,8 @@ Model Manager extras
 - Models found on disk but missing in config appear as OnDiskOnly and can be added to config.
 
 Notes
+- PrepApp now shows per-model sizing warnings for RAM/VRAM/disk and asks for confirmation before Pull Selected when the machine may be undersized.
+- Runner shows a startup informational warning if installed models may struggle on current hardware; you can disable this warning per machine.
 - Internet is required for model pulls; prereq updates are attempted online during finalize but bundled prereqs are used if offline.
 - After setup, Runner works offline from the SSD.
 - GitHub Actions artifacts are dev builds for testing; Releases are the official downloads.

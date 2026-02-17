@@ -14,6 +14,8 @@ public partial class MainWindow : System.Windows.Window
     private readonly ModelOperations _modelOperations = new();
     private CancellationTokenSource? _modelOperationCts;
     private bool _isModelOperationRunning;
+    private int? _systemRamGb;
+    private int? _gpuVramGb;
 
     public MainWindow()
     {
@@ -22,6 +24,8 @@ public partial class MainWindow : System.Windows.Window
         RefreshModelStatusGrid(Array.Empty<ModelConfigEntry>(), Array.Empty<string>());
         RefreshReadinessGrid(Array.Empty<ReadinessItem>());
         UpdateModelActionButtons();
+        _systemRamGb = SystemResources.GetTotalSystemRamGb();
+        _gpuVramGb = SystemResources.GetGpuVramGb();
     }
 
     private void RefreshDrives_Click(object sender, System.Windows.RoutedEventArgs e) => LoadDrives();
@@ -105,6 +109,32 @@ public partial class MainWindow : System.Windows.Window
             return;
         }
 
+        if (DriveCombo.SelectedItem is DriveTarget drive)
+        {
+            var pullWarnings = BuildPullSelectionWarnings(selected, drive.RootPath);
+            if (pullWarnings.Count > 0)
+            {
+                var message = "Some selected models may run poorly on this machine or exceed available resources."
+                    + Environment.NewLine + Environment.NewLine
+                    + string.Join(Environment.NewLine, pullWarnings.Select(w => $"- {w}"))
+                    + Environment.NewLine + Environment.NewLine
+                    + "Continue anyway?";
+
+                var result = System.Windows.MessageBox.Show(
+                    message,
+                    "Model sizing warnings",
+                    System.Windows.MessageBoxButton.YesNo,
+                    System.Windows.MessageBoxImage.Warning,
+                    System.Windows.MessageBoxResult.No);
+
+                if (result != System.Windows.MessageBoxResult.Yes)
+                {
+                    AppendLog("Pull selected cancelled after sizing warning.");
+                    return;
+                }
+            }
+        }
+
         await PullModelsForSelectedDriveAsync(selected);
     }
 
@@ -115,6 +145,32 @@ public partial class MainWindow : System.Windows.Window
         {
             AppendLog("Select one or more configured model rows for pull.");
             return;
+        }
+
+        if (DriveCombo.SelectedItem is DriveTarget drive)
+        {
+            var pullWarnings = BuildPullSelectionWarnings(selected, drive.RootPath);
+            if (pullWarnings.Count > 0)
+            {
+                var message = "Some selected models may run poorly on this machine or exceed available resources."
+                    + Environment.NewLine + Environment.NewLine
+                    + string.Join(Environment.NewLine, pullWarnings.Select(w => $"- {w}"))
+                    + Environment.NewLine + Environment.NewLine
+                    + "Continue anyway?";
+
+                var result = System.Windows.MessageBox.Show(
+                    message,
+                    "Model sizing warnings",
+                    System.Windows.MessageBoxButton.YesNo,
+                    System.Windows.MessageBoxImage.Warning,
+                    System.Windows.MessageBoxResult.No);
+
+                if (result != System.Windows.MessageBoxResult.Yes)
+                {
+                    AppendLog("Pull selected cancelled after sizing warning.");
+                    return;
+                }
+            }
         }
 
         await PullModelsForSelectedDriveAsync(selected);
@@ -962,15 +1018,18 @@ public partial class MainWindow : System.Windows.Window
     {
         var rows = new List<ModelGridRow>();
         var configured = configModels.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        var freeDiskGb = DriveCombo.SelectedItem is DriveTarget drive ? SystemResources.GetFreeDiskSpaceGb(drive.RootPath) : null;
 
         foreach (var model in configured)
         {
             var onDisk = discoveredOnDisk.Contains(model.Name);
             var state = DetermineConfiguredState(model, onDisk);
+            var warnings = GetSizingWarnings(model.Name, freeDiskGb);
             rows.Add(new ModelGridRow(
                 model.Name,
                 state,
                 "Config",
+                warnings.Count == 0 ? "OK" : string.Join("; ", warnings),
                 model.SizeBytes.HasValue ? FormatSize(model.SizeBytes.Value) : "—",
                 string.IsNullOrWhiteSpace(model.Sha256) ? "—" : model.Sha256[..Math.Min(8, model.Sha256.Length)],
                 model.LastVerifiedUtc.HasValue ? model.LastVerifiedUtc.Value.ToLocalTime().ToString("u") : "—",
@@ -980,7 +1039,8 @@ public partial class MainWindow : System.Windows.Window
         var configuredNames = new HashSet<string>(configured.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
         foreach (var discovered in discoveredOnDisk.Where(d => !configuredNames.Contains(d)).OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
         {
-            rows.Add(new ModelGridRow(discovered, "OnDiskOnly", "Disk", "—", "—", "—", true));
+            var warnings = GetSizingWarnings(discovered, freeDiskGb);
+            rows.Add(new ModelGridRow(discovered, "OnDiskOnly", "Disk", warnings.Count == 0 ? "OK" : string.Join("; ", warnings), "—", "—", "—", true));
         }
 
         ModelStatusGrid.ItemsSource = rows;
@@ -1000,6 +1060,61 @@ public partial class MainWindow : System.Windows.Window
         }
 
         return model.Status.ToString();
+    }
+
+    private List<string> BuildPullSelectionWarnings(IReadOnlyList<string> models, string rootPath)
+    {
+        var warnings = new List<string>();
+        var freeDiskGb = SystemResources.GetFreeDiskSpaceGb(rootPath);
+        var estimatedDiskGb = 0;
+
+        foreach (var model in models)
+        {
+            var modelWarnings = GetSizingWarnings(model, freeDiskGb);
+            if (modelWarnings.Count > 0)
+            {
+                warnings.Add($"{model}: {string.Join("; ", modelWarnings)}");
+            }
+
+            estimatedDiskGb += ModelSizingCatalog.Suggest(model).ApproxDiskGb;
+        }
+
+        if (freeDiskGb.HasValue && freeDiskGb.Value < estimatedDiskGb)
+        {
+            warnings.Add($"Selection total needs ~{estimatedDiskGb} GB, but only ~{freeDiskGb.Value} GB is free.");
+        }
+
+        return warnings;
+    }
+
+    private List<string> GetSizingWarnings(string modelTag, int? freeDiskGb)
+    {
+        var sizing = ModelSizingCatalog.Suggest(modelTag);
+        var warnings = new List<string>();
+
+        if (_systemRamGb.HasValue && _systemRamGb.Value < sizing.RecommendedSystemRamGb)
+        {
+            warnings.Add($"Low RAM: model recommends {sizing.RecommendedSystemRamGb} GB");
+        }
+
+        if (sizing.RecommendedVramGb.HasValue)
+        {
+            if (!_gpuVramGb.HasValue)
+            {
+                warnings.Add($"VRAM unknown: model recommends {sizing.RecommendedVramGb.Value} GB (may run on CPU)");
+            }
+            else if (_gpuVramGb.Value < sizing.RecommendedVramGb.Value)
+            {
+                warnings.Add($"Low VRAM: model recommends {sizing.RecommendedVramGb.Value} GB (may run on CPU)");
+            }
+        }
+
+        if (freeDiskGb.HasValue && freeDiskGb.Value < sizing.ApproxDiskGb)
+        {
+            warnings.Add($"Low disk space: needs ~{sizing.ApproxDiskGb} GB");
+        }
+
+        return warnings;
     }
 
     private static string FormatSize(long sizeBytes)
@@ -1058,6 +1173,8 @@ public partial class MainWindow : System.Windows.Window
     private void ModelStatusGrid_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
         UpdateModelActionButtons();
+        _systemRamGb = SystemResources.GetTotalSystemRamGb();
+        _gpuVramGb = SystemResources.GetGpuVramGb();
     }
 
     private void SetModelOperationUiState(bool running, string? status = null)
@@ -1148,5 +1265,5 @@ public partial class MainWindow : System.Windows.Window
         public static ReadinessItem Fail(string check, string reason) => new(check, false, reason);
     }
 
-    private sealed record ModelGridRow(string Name, string Status, string Source, string SizeDisplay, string ShaPreview, string LastVerifiedDisplay, bool IsOnDiskOnly);
+    private sealed record ModelGridRow(string Name, string Status, string Source, string SizingWarning, string SizeDisplay, string ShaPreview, string LastVerifiedDisplay, bool IsOnDiskOnly);
 }
