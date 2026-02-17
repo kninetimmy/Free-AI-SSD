@@ -90,10 +90,12 @@
             <StackPanel Orientation="Horizontal">
                 <Button x:Name="FinalizeButton" Content="Finalize SSD" Padding="16,8" Click="Finalize_Click"/>
                 <Button Content="Check SSD Readiness" Padding="16,8" Margin="8,0,0,0" Click="CheckReadiness_Click"/>
+                <Button x:Name="CheckPrereqUpdatesButton" Content="Check for prereq updates" Padding="16,8" Margin="8,0,0,0" Click="CheckPrereqUpdates_Click"/>
                 <ProgressBar x:Name="Progress" Width="250" Height="22" Margin="12,0,0,0"/>
                 <TextBlock x:Name="StatusText" Margin="12,0,0,0" VerticalAlignment="Center"/>
             </StackPanel>
-            <TextBlock x:Name="WarningText" Grid.Row="1" Foreground="DarkOrange" Margin="0,8,0,8"/>
+            <TextBlock x:Name="PrereqStatusText" Grid.Row="1" Foreground="DarkSlateBlue" Margin="0,8,0,8" Text="Prereqs: bundled"/>
+            <TextBlock x:Name="WarningText" Grid.Row="1" Foreground="DarkOrange" Margin="0,32,0,8"/>
             <Grid Grid.Row="2">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="2*"/>

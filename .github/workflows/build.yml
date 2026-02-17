@@ -42,6 +42,44 @@ jobs:
         shell: pwsh
         run: dotnet publish prep-app/FreeAiSsd.PrepApp.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=false -o out/prepapp-publish
 
+      - name: Download offline prerequisites
+        shell: pwsh
+        run: |
+          $prereqDir = "out/tools/prereqs"
+          New-Item -ItemType Directory -Path $prereqDir -Force | Out-Null
+
+          $prereqs = @(
+            @{ id = "vcredist_x64"; displayName = "Microsoft Visual C++ Redistributable (x64)"; sourceUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"; filename = "vc_redist.x64.exe"; silentArgs = "/install /quiet /norestart"; requiresAdmin = $true; isOptional = $false },
+            @{ id = "dotnet8_desktop_x64"; displayName = ".NET 8 Windows Desktop Runtime (x64)"; sourceUrl = "https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/8.0.18/windowsdesktop-runtime-8.0.18-win-x64.exe"; filename = "windowsdesktop-runtime-8-win-x64.exe"; silentArgs = "/install /quiet /norestart"; requiresAdmin = $true; isOptional = $true }
+          )
+
+          $manifestEntries = @()
+          foreach ($prereq in $prereqs) {
+            $target = Join-Path $prereqDir $prereq.filename
+            Invoke-WebRequest -Uri $prereq.sourceUrl -OutFile $target -UseBasicParsing
+
+            if (!(Test-Path $target)) {
+              throw "Failed to download prereq '$($prereq.id)'"
+            }
+
+            $hash = (Get-FileHash -Path $target -Algorithm SHA256).Hash.ToLowerInvariant()
+            $size = (Get-Item $target).Length
+            $manifestEntries += [ordered]@{
+              id = $prereq.id
+              displayName = $prereq.displayName
+              filename = $prereq.filename
+              sourceUrl = $prereq.sourceUrl
+              downloadedAtUtc = [DateTime]::UtcNow.ToString("o")
+              sha256 = $hash
+              sizeBytes = $size
+              silentArgs = $prereq.silentArgs
+              requiresAdmin = $prereq.requiresAdmin
+              isOptional = $prereq.isOptional
+            }
+          }
+
+          [ordered]@{ prerequisites = $manifestEntries } | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $prereqDir "prereqs-manifest.json") -Encoding UTF8
+
       - name: Assemble distributable
         shell: pwsh
         run: |
@@ -60,6 +98,7 @@ jobs:
           Copy-Item "out/prepapp-publish/*" $distRoot -Recurse -Force
           Copy-Item $runnerPublishDir (Join-Path $distRoot "runner-publish") -Recurse -Force
           Copy-Item "docs/QUICKSTART.txt" (Join-Path $distRoot "QUICKSTART.txt") -Force
+          Copy-Item "out/tools" (Join-Path $distRoot "tools") -Recurse -Force
           Copy-Item "LICENSE" (Join-Path $distRoot "LICENSE") -Force
 
       - name: Create ZIP
