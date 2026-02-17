@@ -1,6 +1,5 @@
+using System.Globalization;
 using System.IO.Compression;
-using System.IO;
-using System.Security.Cryptography;
 using FreeAiSsd.Shared;
 
 namespace FreeAiSsd.PrepApp;
@@ -8,6 +7,9 @@ namespace FreeAiSsd.PrepApp;
 public partial class MainWindow : System.Windows.Window
 {
     private readonly DownloadManager _downloadManager = new();
+    private readonly ModelOperations _modelOperations = new();
+    private CancellationTokenSource? _modelOperationCts;
+    private bool _isModelOperationRunning;
 
     public MainWindow()
     {
@@ -15,6 +17,7 @@ public partial class MainWindow : System.Windows.Window
         LoadDrives();
         RefreshModelStatusGrid(Array.Empty<ModelConfigEntry>());
         RefreshReadinessGrid(Array.Empty<ReadinessItem>());
+        UpdateModelActionButtons();
     }
 
     private void RefreshDrives_Click(object sender, System.Windows.RoutedEventArgs e) => LoadDrives();
@@ -37,8 +40,247 @@ public partial class MainWindow : System.Windows.Window
         _ = RefreshModelStatusesForSelectedDriveAsync();
     }
 
+    private async void AddModel_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        var tag = (ModelTagText.Text ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(tag))
+        {
+            AppendLog("Enter a model tag before adding.");
+            return;
+        }
+
+        if (DriveCombo.SelectedItem is not DriveTarget drive)
+        {
+            AppendLog("Select a target drive first.");
+            return;
+        }
+
+        var configPath = GetConfigPath(drive.RootPath);
+        SsdLayout.EnsureStructure(drive.RootPath);
+        var config = await PortableConfig.LoadAsync(configPath);
+        UpsertModel(config.Models, tag, ModelInstallStatus.NotInstalled);
+        await config.SaveAsync(configPath);
+        RefreshModelStatusGrid(config.Models);
+        ModelTagText.Text = string.Empty;
+        AppendLog($"Added model '{tag}' to config.");
+    }
+
+    private async void PullInstall_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        var selected = GetSelectedModelNames().Take(1).ToList();
+        if (selected.Count == 0)
+        {
+            AppendLog("Select a model row to pull/install.");
+            return;
+        }
+
+        await PullModelsForSelectedDriveAsync(selected);
+    }
+
+    private async void PullSelected_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        var selected = GetSelectedModelNames();
+        if (selected.Count == 0)
+        {
+            AppendLog("Select one or more model rows for pull.");
+            return;
+        }
+
+        await PullModelsForSelectedDriveAsync(selected);
+    }
+
+    private async Task PullModelsForSelectedDriveAsync(IReadOnlyList<string> models)
+    {
+        if (_isModelOperationRunning)
+        {
+            AppendLog("A model operation is already running.");
+            return;
+        }
+
+        if (DriveCombo.SelectedItem is not DriveTarget drive)
+        {
+            AppendLog("Select a target drive first.");
+            return;
+        }
+
+        var logger = new SsdLogger(drive.RootPath, "prep");
+        var configPath = GetConfigPath(drive.RootPath);
+
+        _modelOperationCts = new CancellationTokenSource();
+        SetModelOperationUiState(true, "Pulling...");
+        Progress.IsIndeterminate = true;
+
+        try
+        {
+            var ollamaExe = await EnsureOllamaReadyAsync(drive.RootPath, logger, _modelOperationCts.Token);
+            var modelsRoot = Path.Combine(drive.RootPath, SsdLayout.Models);
+
+            foreach (var model in models)
+            {
+                _modelOperationCts.Token.ThrowIfCancellationRequested();
+                await UpdateModelStatusAsync(configPath, model, ModelInstallStatus.Downloading);
+                StatusText.Text = $"Pulling {model}...";
+                AppendLog($"Pulling {model}...");
+                logger.Info($"Pulling {model}...");
+
+                try
+                {
+                    var result = await _modelOperations.PullModelAsync(
+                        ollamaExe,
+                        modelsRoot,
+                        model,
+                        line =>
+                        {
+                            AppendLog(line);
+                            logger.Info(line);
+                            Dispatcher.Invoke(() => StatusText.Text = ParseProgressLabel(line));
+                        },
+                        _modelOperationCts.Token);
+
+                    await UpdateModelStatusAsync(configPath, model, ModelInstallStatus.Installed, result.Sha256, result.SizeBytes, DateTime.UtcNow);
+                    AppendLog($"Installed {model} ({FormatSize(result.SizeBytes)}). Sha256 {result.Sha256[..8]}...");
+                    logger.Info($"Installed {model}.");
+                }
+                catch (OperationCanceledException)
+                {
+                    await UpdateModelStatusAsync(configPath, model, ModelInstallStatus.NotInstalled);
+                    AppendLog($"Pull cancelled for {model}.");
+                    logger.Info($"Pull cancelled for {model}.");
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    await UpdateModelStatusAsync(configPath, model, ModelInstallStatus.Failed);
+                    AppendLog($"Failed to install {model}: {ex.Message}");
+                    logger.Error(ex.ToString());
+                }
+            }
+
+            StatusText.Text = "Model pull complete";
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText.Text = "Model operation cancelled";
+        }
+        finally
+        {
+            Progress.IsIndeterminate = false;
+            SetModelOperationUiState(false, StatusText.Text);
+            _modelOperationCts?.Dispose();
+            _modelOperationCts = null;
+            await RefreshModelStatusesForSelectedDriveAsync();
+        }
+    }
+
+    private async void Verify_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_isModelOperationRunning)
+        {
+            AppendLog("Cannot verify while another model operation is running.");
+            return;
+        }
+
+        if (DriveCombo.SelectedItem is not DriveTarget drive)
+        {
+            AppendLog("Select a target drive first.");
+            return;
+        }
+
+        var selected = GetSelectedModelNames().Take(1).ToList();
+        if (selected.Count == 0)
+        {
+            AppendLog("Select a model row to verify.");
+            return;
+        }
+
+        var modelName = selected[0];
+        var configPath = GetConfigPath(drive.RootPath);
+        var config = await PortableConfig.LoadAsync(configPath);
+        var model = config.Models.FirstOrDefault(m => string.Equals(m.Name, modelName, StringComparison.OrdinalIgnoreCase));
+        if (model is null || string.IsNullOrWhiteSpace(model.Sha256))
+        {
+            AppendLog($"Cannot verify {modelName}: no stored hash in config.");
+            return;
+        }
+
+        var logger = new SsdLogger(drive.RootPath, "prep");
+        SetModelOperationUiState(true, "Verifying model...");
+
+        try
+        {
+            var ok = await _modelOperations.VerifyModelAsync(Path.Combine(drive.RootPath, SsdLayout.Models), modelName, model.Sha256, line =>
+            {
+                AppendLog(line);
+                logger.Info(line);
+            }, CancellationToken.None);
+
+            if (!ok)
+            {
+                await UpdateModelStatusAsync(configPath, modelName, ModelInstallStatus.Failed);
+            }
+            else
+            {
+                await UpdateModelStatusAsync(configPath, modelName, ModelInstallStatus.Installed, model.Sha256, model.SizeBytes, DateTime.UtcNow);
+            }
+        }
+        finally
+        {
+            SetModelOperationUiState(false, "Verify complete");
+        }
+    }
+
+    private async void Remove_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_isModelOperationRunning)
+        {
+            AppendLog("Cannot remove while another model operation is running.");
+            return;
+        }
+
+        if (DriveCombo.SelectedItem is not DriveTarget drive)
+        {
+            AppendLog("Select a target drive first.");
+            return;
+        }
+
+        var selected = GetSelectedModelNames().Take(1).ToList();
+        if (selected.Count == 0)
+        {
+            AppendLog("Select a model row to remove.");
+            return;
+        }
+
+        var configPath = GetConfigPath(drive.RootPath);
+        var config = await PortableConfig.LoadAsync(configPath);
+        var model = config.Models.FirstOrDefault(m => string.Equals(m.Name, selected[0], StringComparison.OrdinalIgnoreCase));
+        if (model is null)
+        {
+            return;
+        }
+
+        model.Status = ModelInstallStatus.NotInstalled;
+        model.Sha256 = null;
+        model.SizeBytes = null;
+        model.LastVerifiedUtc = null;
+        await config.SaveAsync(configPath);
+        RefreshModelStatusGrid(config.Models);
+        AppendLog($"{model.Name}: model removed from config; storage cleanup not implemented yet.");
+    }
+
+    private void CancelOperation_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        _modelOperationCts?.Cancel();
+        AppendLog("Cancellation requested for current model operation.");
+    }
+
     private async void Finalize_Click(object sender, System.Windows.RoutedEventArgs e)
     {
+        if (_isModelOperationRunning)
+        {
+            AppendLog("Finalize is disabled while model operations are running.");
+            return;
+        }
+
         if (DriveCombo.SelectedItem is not DriveTarget drive)
         {
             AppendLog("Select a target drive first.");
@@ -51,13 +293,6 @@ public partial class MainWindow : System.Windows.Window
             return;
         }
 
-        var selectedModels = GetSelectedModels();
-        if (!selectedModels.Any())
-        {
-            AppendLog("Select at least one model.");
-            return;
-        }
-
         var root = drive.RootPath;
         var logger = new SsdLogger(root, "prep");
         try
@@ -67,36 +302,32 @@ public partial class MainWindow : System.Windows.Window
             SsdLayout.EnsureStructure(root);
             logger.Info($"Preparing SSD at {root}");
 
-            var configPath = Path.Combine(root, new PortableConfig().ConfigRelativePath);
+            var configPath = GetConfigPath(root);
             var config = await PortableConfig.LoadAsync(configPath);
             config.PreparedAtUtc = DateTime.UtcNow;
             config.OllamaPort = 11434;
             config.PreferredCompute = "cpu";
-            config.Models = MergeModelSelection(config.Models, selectedModels);
             await config.SaveAsync(configPath);
             RefreshModelStatusGrid(config.Models);
 
-            var ollamaZipPath = Path.Combine(root, SsdLayout.Cache, "ollama-windows-amd64.zip");
-            StatusText.Text = "Downloading Ollama package...";
-            await _downloadManager.DownloadFileWithResumeAsync(
-                new DownloadRequest(OllamaUrlText.Text.Trim(), ollamaZipPath),
-                new Progress<DownloadProgress>(p =>
-                {
-                    Progress.Value = p.Percent;
-                    StatusText.Text = $"Downloading Ollama {p.Percent:F1}%";
-                }));
+            var installedCount = config.Models.Count(m => m.Status == ModelInstallStatus.Installed);
+            if (installedCount == 0)
+            {
+                System.Windows.MessageBox.Show(
+                    "Cannot finalize SSD with zero installed models. Use Model Manager to pull at least one model first.",
+                    "Finalize blocked",
+                    System.Windows.MessageBoxButton.OK,
+                    System.Windows.MessageBoxImage.Warning);
+                AppendLog("Finalize blocked: zero installed models.");
+                StatusText.Text = "Finalize blocked";
+                return;
+            }
 
-            var ollamaDir = Path.Combine(root, SsdLayout.Ollama);
-            ExtractOllamaZip(ollamaZipPath, ollamaDir);
-            logger.Info("Ollama package staged.");
-
-            var ollamaExe = ResolveOllamaExe(ollamaDir);
-            await PullModelsAsync(ollamaExe, root, selectedModels, logger, configPath);
+            await EnsureOllamaReadyAsync(root, logger, CancellationToken.None);
 
             StatusText.Text = "Staging runner payload...";
             await StageRunnerAsync(root, logger);
 
-            // Final readiness gate before allowing completion.
             var readiness = await RunReadinessChecksAsync(root, logger);
             RefreshReadinessGrid(readiness);
             if (readiness.Any(r => !r.Passed))
@@ -153,8 +384,42 @@ public partial class MainWindow : System.Windows.Window
         return secondConfirm == System.Windows.MessageBoxResult.Yes;
     }
 
+    private async Task<string> EnsureOllamaReadyAsync(string root, SsdLogger logger, CancellationToken ct)
+    {
+        SsdLayout.EnsureStructure(root);
+        var ollamaZipPath = Path.Combine(root, SsdLayout.Cache, "ollama-windows-amd64.zip");
+        var ollamaDir = Path.Combine(root, SsdLayout.Ollama);
+
+        var ollamaExe = ResolveOllamaExe(ollamaDir);
+        if (ollamaExe is not null)
+        {
+            return ollamaExe;
+        }
+
+        StatusText.Text = "Downloading Ollama package...";
+        await _downloadManager.DownloadFileWithResumeAsync(
+            new DownloadRequest(OllamaUrlText.Text.Trim(), ollamaZipPath),
+            new Progress<DownloadProgress>(p =>
+            {
+                Progress.IsIndeterminate = false;
+                Progress.Value = p.Percent;
+                StatusText.Text = $"Downloading Ollama {p.Percent:F1}%";
+            }),
+            ct);
+
+        ExtractOllamaZip(ollamaZipPath, ollamaDir);
+        logger.Info("Ollama package staged.");
+
+        return ResolveOllamaExe(ollamaDir) ?? throw new FileNotFoundException($"Unable to locate ollama.exe under {ollamaDir}");
+    }
+
     private static void ExtractOllamaZip(string zipPath, string destination)
     {
+        if (!File.Exists(zipPath))
+        {
+            throw new FileNotFoundException($"Ollama ZIP not found at {zipPath}");
+        }
+
         if (Directory.Exists(destination))
         {
             Directory.Delete(destination, recursive: true);
@@ -164,114 +429,32 @@ public partial class MainWindow : System.Windows.Window
         ZipFile.ExtractToDirectory(zipPath, destination, overwriteFiles: true);
     }
 
-    private static string ResolveOllamaExe(string ollamaDir)
+    private static string? ResolveOllamaExe(string ollamaDir)
     {
-        var direct = Path.Combine(ollamaDir, "ollama.exe");
-        if (File.Exists(direct))
+        if (!Directory.Exists(ollamaDir))
         {
-            return direct;
+            return null;
         }
 
-        var nested = Directory.EnumerateFiles(ollamaDir, "ollama.exe", SearchOption.AllDirectories).FirstOrDefault();
-        return nested ?? throw new FileNotFoundException("ollama.exe not found after extraction.");
+        return Directory.EnumerateFiles(ollamaDir, "ollama.exe", SearchOption.AllDirectories).FirstOrDefault();
     }
 
-    private async Task PullModelsAsync(string ollamaExe, string ssdRoot, IReadOnlyList<string> models, SsdLogger logger, string configPath)
+    private static string GetConfigPath(string root) => Path.Combine(root, new PortableConfig().ConfigRelativePath);
+
+    private static void UpsertModel(List<ModelConfigEntry> models, string name, ModelInstallStatus status)
     {
-        var modelPath = Path.Combine(ssdRoot, SsdLayout.Models);
-        var pullPort = NetUtils.FindFreePort(11434);
-        var env = new Dictionary<string, string>
+        var model = models.FirstOrDefault(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (model is null)
         {
-            ["OLLAMA_MODELS"] = modelPath,
-            ["OLLAMA_HOST"] = $"127.0.0.1:{pullPort}"
-        };
-
-        logger.Info($"Using OLLAMA_MODELS={modelPath} for model pulls.");
-        logger.Info($"Using dynamic OLLAMA_HOST port {pullPort} for model pulls.");
-
-        foreach (var model in models)
-        {
-            StatusText.Text = $"Pulling model {model}...";
-            await UpdateModelStatusAsync(configPath, model, ModelInstallStatus.Downloading);
-
-            var exitCode = await ProcessRunner.RunAsync(ollamaExe, $"pull {model}", Path.GetDirectoryName(ollamaExe)!, env,
-                onOutput: line =>
-                {
-                    AppendLog(line);
-                    logger.Info(line);
-                });
-
-            if (exitCode != 0)
+            models.Add(new ModelConfigEntry
             {
-                await UpdateModelStatusAsync(configPath, model, ModelInstallStatus.Failed);
-                throw new InvalidOperationException($"Failed to pull model {model}. Exit code: {exitCode}");
-            }
-
-            var modelFile = FindModelBlobForModel(modelPath, model);
-            if (modelFile is null)
-            {
-                await UpdateModelStatusAsync(configPath, model, ModelInstallStatus.Failed);
-                throw new FileNotFoundException($"Unable to locate model blob for {model} in {modelPath}.");
-            }
-
-            var sha256 = await ComputeSha256Async(modelFile);
-            var size = new FileInfo(modelFile).Length;
-            await UpdateModelStatusAsync(configPath, model, ModelInstallStatus.Installed, sha256, size, DateTime.UtcNow);
-        }
-    }
-
-    private static string? FindModelBlobForModel(string modelRoot, string model)
-    {
-        var manifestTag = model.Replace(':', '-');
-        var manifestsPath = Path.Combine(modelRoot, "manifests", "registry.ollama.ai", "library");
-        if (!Directory.Exists(manifestsPath))
-        {
-            return null;
+                Name = name,
+                Status = status
+            });
+            return;
         }
 
-        var manifest = Directory.EnumerateFiles(manifestsPath, manifestTag, SearchOption.AllDirectories).FirstOrDefault();
-        if (manifest is null)
-        {
-            return null;
-        }
-
-        var content = File.ReadAllText(manifest);
-        var digestLine = content.Split('\n').FirstOrDefault(l => l.Contains("\"digest\"", StringComparison.OrdinalIgnoreCase));
-        if (digestLine is null)
-        {
-            return null;
-        }
-
-        var marker = "sha256:";
-        var idx = digestLine.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        if (idx < 0)
-        {
-            return null;
-        }
-
-        var hashStart = idx + marker.Length;
-        var hashChars = new string(digestLine.Skip(hashStart).TakeWhile(char.IsLetterOrDigit).ToArray());
-        if (string.IsNullOrWhiteSpace(hashChars))
-        {
-            return null;
-        }
-
-        var blob = Path.Combine(modelRoot, "blobs", $"sha256-{hashChars}");
-        return File.Exists(blob) ? blob : null;
-    }
-
-    private static async Task<string> ComputeSha256Async(string modelPath)
-    {
-        await using var stream = File.OpenRead(modelPath);
-        using var sha = SHA256.Create();
-        var hash = await sha.ComputeHashAsync(stream);
-        return Convert.ToHexString(hash).ToLowerInvariant();
-    }
-
-    private static async Task<bool> VerifyModelIntegrity(string modelPath, string expectedHash)
-    {
-        var actualHash = await ComputeSha256Async(modelPath);
-        return string.Equals(actualHash, expectedHash, StringComparison.OrdinalIgnoreCase);
+        model.Status = status;
     }
 
     private async Task UpdateModelStatusAsync(string configPath, string modelName, ModelInstallStatus status, string? sha256 = null, long? sizeBytes = null, DateTime? lastVerifiedUtc = null)
@@ -285,34 +468,12 @@ public partial class MainWindow : System.Windows.Window
         }
 
         model.Status = status;
-        if (sha256 is not null)
-        {
-            model.Sha256 = sha256;
-        }
-
-        if (sizeBytes.HasValue)
-        {
-            model.SizeBytes = sizeBytes.Value;
-        }
-
+        model.Sha256 = sha256;
+        model.SizeBytes = sizeBytes;
         model.LastVerifiedUtc = lastVerifiedUtc;
 
         await config.SaveAsync(configPath);
         RefreshModelStatusGrid(config.Models);
-    }
-
-    private static List<ModelConfigEntry> MergeModelSelection(List<ModelConfigEntry> existing, IReadOnlyList<string> selected)
-    {
-        var byName = existing.ToDictionary(m => m.Name, StringComparer.OrdinalIgnoreCase);
-        foreach (var model in selected)
-        {
-            if (!byName.ContainsKey(model))
-            {
-                byName[model] = new ModelConfigEntry { Name = model, Status = ModelInstallStatus.NotInstalled };
-            }
-        }
-
-        return byName.Values.OrderBy(m => m.Name).ToList();
     }
 
     private async Task StageRunnerAsync(string ssdRoot, SsdLogger logger)
@@ -392,14 +553,6 @@ public partial class MainWindow : System.Windows.Window
         return Directory.Exists(path) && File.Exists(Path.Combine(path, "FreeAiSsd.Runner.exe"));
     }
 
-    private List<string> GetSelectedModels()
-    {
-        var models = new List<string>();
-        if (ModelLlama.IsChecked == true) models.Add("llama3.2:3b");
-        if (ModelQwen.IsChecked == true) models.Add("qwen2.5:3b");
-        return models;
-    }
-
     private async Task RefreshModelStatusesForSelectedDriveAsync()
     {
         if (DriveCombo.SelectedItem is not DriveTarget drive)
@@ -408,17 +561,15 @@ public partial class MainWindow : System.Windows.Window
             return;
         }
 
-        var configPath = Path.Combine(drive.RootPath, new PortableConfig().ConfigRelativePath);
+        var configPath = GetConfigPath(drive.RootPath);
         if (!File.Exists(configPath))
         {
-            var selected = GetSelectedModels().Select(m => new ModelConfigEntry { Name = m, Status = ModelInstallStatus.NotInstalled }).ToList();
-            RefreshModelStatusGrid(selected);
+            RefreshModelStatusGrid(Array.Empty<ModelConfigEntry>());
             return;
         }
 
         var config = await PortableConfig.LoadAsync(configPath);
-        var merged = MergeModelSelection(config.Models, GetSelectedModels());
-        RefreshModelStatusGrid(merged);
+        RefreshModelStatusGrid(config.Models);
     }
 
     private async void CheckReadiness_Click(object sender, System.Windows.RoutedEventArgs e)
@@ -451,7 +602,7 @@ public partial class MainWindow : System.Windows.Window
             ? ReadinessItem.Pass("Runner files present")
             : ReadinessItem.Fail("Runner files present", "Runner executable not found in SSD/runner."));
 
-        var configPath = Path.Combine(root, new PortableConfig().ConfigRelativePath);
+        var configPath = GetConfigPath(root);
         var (config, configIsValid) = await PortableConfig.LoadWithValidationAsync(configPath);
 
         checks.Add(configIsValid
@@ -485,18 +636,10 @@ public partial class MainWindow : System.Windows.Window
                     continue;
                 }
 
-                var modelBlob = FindModelBlobForModel(modelsDir, model.Name);
-                if (modelBlob is null)
-                {
-                    invalidModels.Add($"{model.Name} (blob missing)");
-                    model.Status = ModelInstallStatus.Failed;
-                    continue;
-                }
-
-                var ok = await VerifyModelIntegrity(modelBlob, model.Sha256);
+                var ok = await _modelOperations.VerifyModelAsync(modelsDir, model.Name, model.Sha256, _ => { }, CancellationToken.None);
                 if (!ok)
                 {
-                    invalidModels.Add($"{model.Name} (hash mismatch)");
+                    invalidModels.Add($"{model.Name} (hash mismatch or blob missing)");
                     model.Status = ModelInstallStatus.Failed;
                 }
                 else
@@ -524,10 +667,43 @@ public partial class MainWindow : System.Windows.Window
 
     private void RefreshModelStatusGrid(IEnumerable<ModelConfigEntry> models)
     {
-        ModelStatusGrid.ItemsSource = models
+        var rows = models
             .OrderBy(m => m.Name)
-            .Select(m => new { m.Name, Status = m.Status.ToString() })
+            .Select(m => new ModelGridRow(
+                m.Name,
+                m.Status.ToString(),
+                m.SizeBytes.HasValue ? FormatSize(m.SizeBytes.Value) : "—",
+                string.IsNullOrWhiteSpace(m.Sha256) ? "—" : m.Sha256[..Math.Min(8, m.Sha256.Length)],
+                m.LastVerifiedUtc.HasValue ? m.LastVerifiedUtc.Value.ToLocalTime().ToString("u") : "—"))
             .ToList();
+
+        ModelStatusGrid.ItemsSource = rows;
+        UpdateModelActionButtons();
+    }
+
+    private static string FormatSize(long sizeBytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        double size = sizeBytes;
+        var unit = 0;
+        while (size >= 1024 && unit < units.Length - 1)
+        {
+            size /= 1024;
+            unit++;
+        }
+
+        return string.Format(CultureInfo.InvariantCulture, "{0:0.##} {1}", size, units[unit]);
+    }
+
+    private string ParseProgressLabel(string line)
+    {
+        var percentMatch = System.Text.RegularExpressions.Regex.Match(line, @"(\d{1,3})%");
+        if (percentMatch.Success)
+        {
+            return $"Pulling... {percentMatch.Groups[1].Value}%";
+        }
+
+        return $"Pulling... {line}";
     }
 
     private void RefreshReadinessGrid(IEnumerable<ReadinessItem> checks)
@@ -551,9 +727,50 @@ public partial class MainWindow : System.Windows.Window
         });
     }
 
+    private List<string> GetSelectedModelNames()
+    {
+        return ModelStatusGrid.SelectedItems
+            .OfType<ModelGridRow>()
+            .Select(r => r.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private void ModelStatusGrid_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        UpdateModelActionButtons();
+    }
+
+    private void SetModelOperationUiState(bool running, string? status = null)
+    {
+        _isModelOperationRunning = running;
+        FinalizeButton.IsEnabled = !running;
+        AddModelButton.IsEnabled = !running;
+        PullInstallButton.IsEnabled = !running && GetSelectedModelNames().Count > 0;
+        VerifyButton.IsEnabled = !running && GetSelectedModelNames().Count > 0;
+        RemoveButton.IsEnabled = !running && GetSelectedModelNames().Count > 0;
+        PullSelectedButton.IsEnabled = !running && GetSelectedModelNames().Count > 0;
+        CancelOperationButton.IsEnabled = running;
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            StatusText.Text = status;
+        }
+    }
+
+    private void UpdateModelActionButtons()
+    {
+        var hasSelection = GetSelectedModelNames().Count > 0;
+        PullInstallButton.IsEnabled = !_isModelOperationRunning && hasSelection;
+        VerifyButton.IsEnabled = !_isModelOperationRunning && hasSelection;
+        RemoveButton.IsEnabled = !_isModelOperationRunning && hasSelection;
+        PullSelectedButton.IsEnabled = !_isModelOperationRunning && hasSelection;
+    }
+
     private sealed record ReadinessItem(string Check, bool Passed, string Result)
     {
         public static ReadinessItem Pass(string check) => new(check, true, "OK");
         public static ReadinessItem Fail(string check, string reason) => new(check, false, reason);
     }
+
+    private sealed record ModelGridRow(string Name, string Status, string SizeDisplay, string ShaPreview, string LastVerifiedDisplay);
 }
