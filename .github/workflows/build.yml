@@ -14,6 +14,9 @@ on:
 permissions:
   contents: write
 
+env:
+  MAC_SIGNING_ENABLED: "false"
+
 jobs:
   windows-build:
     runs-on: windows-latest
@@ -85,7 +88,9 @@ jobs:
           <plist version="1.0"><dict><key>CFBundleExecutable</key><string>Runner</string><key>CFBundleIdentifier</key><string>com.freeaissd.runner</string><key>CFBundleName</key><string>Runner</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>1.0</string><key>LSMinimumSystemVersion</key><string>12.0</string></dict></plist>
           PLIST
           chmod +x out/Runner.app/Contents/MacOS/Runner
+      # Signing is intentionally disabled until Apple cert + notarization pipeline is ready.
       - name: Import signing certificate
+        if: env.MAC_SIGNING_ENABLED == 'true'
         env:
           MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
@@ -97,11 +102,13 @@ jobs:
           security import cert.p12 -k build.keychain -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k actions build.keychain
       - name: Sign app
+        if: env.MAC_SIGNING_ENABLED == 'true'
         env:
           MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
         run: |
           codesign --force --deep --options runtime --sign "$MACOS_SIGN_IDENTITY" out/Runner.app
       - name: Notarize and staple app
+        if: env.MAC_SIGNING_ENABLED == 'true'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
@@ -111,6 +118,10 @@ jobs:
           xcrun notarytool submit out/Runner.app.zip --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait
           xcrun stapler staple out/Runner.app
           ditto -c -k --keepParent out/Runner.app out/Runner.app.zip
+      - name: Package Runner.app zip artifact
+        run: |
+          ditto -c -k --keepParent out/Runner.app out/Runner.app.zip
+
       - uses: actions/upload-artifact@v4
         with:
           name: mac-runner-artifact
