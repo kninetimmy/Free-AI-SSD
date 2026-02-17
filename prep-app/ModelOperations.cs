@@ -72,7 +72,7 @@ public sealed class ModelOperations
         foreach (var manifestPath in Directory.EnumerateFiles(manifestsPath, "*", SearchOption.AllDirectories))
         {
             var relative = Path.GetRelativePath(manifestsPath, manifestPath);
-            var parts = relative.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries);
+            var parts = relative.Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length < 2)
             {
                 continue;

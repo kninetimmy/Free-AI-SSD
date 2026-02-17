@@ -669,7 +669,7 @@ public partial class MainWindow : System.Windows.Window
             return null;
         }
 
-        var buildConfigurations = ["Release", "Debug"];
+        var buildConfigurations = new[] { "Release", "Debug" };
         foreach (var configuration in buildConfigurations)
         {
             var candidate = Path.Combine(repoRoot, "prep-app", "bin", configuration, "net8.0-windows", "runner-publish");
@@ -856,7 +856,7 @@ public partial class MainWindow : System.Windows.Window
 
     private static string FormatSize(long sizeBytes)
     {
-        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        string[] units = new[] { "B", "KB", "MB", "GB", "TB" };
         double size = sizeBytes;
         var unit = 0;
         while (size >= 1024 && unit < units.Length - 1)
