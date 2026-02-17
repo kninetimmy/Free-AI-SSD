@@ -28,11 +28,31 @@
         </StackPanel>
 
         <GroupBox Header="Models to pre-download" Grid.Row="2" Margin="0,0,0,10">
-            <StackPanel Margin="8">
-                <CheckBox x:Name="ModelLlama" Content="llama3.2:3b" IsChecked="True"/>
-                <CheckBox x:Name="ModelQwen" Content="qwen2.5:3b" IsChecked="True"/>
-                <TextBlock Foreground="Gray" Text="Models are pulled using staged ollama.exe into SSD/models."/>
-            </StackPanel>
+            <Grid Margin="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2*"/>
+                    <ColumnDefinition Width="3*"/>
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Margin="0,0,12,0">
+                    <CheckBox x:Name="ModelLlama" Content="llama3.2:3b" IsChecked="True"/>
+                    <CheckBox x:Name="ModelQwen" Content="qwen2.5:3b" IsChecked="True"/>
+                    <TextBlock Foreground="Gray" Text="Models are pulled using staged ollama.exe into SSD/models."/>
+                </StackPanel>
+
+                <DataGrid x:Name="ModelStatusGrid"
+                          Grid.Column="1"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          HeadersVisibility="Column"
+                          CanUserAddRows="False"
+                          Height="120">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Model" Binding="{Binding Name}" Width="*"/>
+                        <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid>
         </GroupBox>
 
         <Grid Grid.Row="3">
@@ -44,11 +64,30 @@
 
             <StackPanel Orientation="Horizontal">
                 <Button Content="Finalize SSD" Padding="16,8" Click="Finalize_Click"/>
+                <Button Content="Check SSD Readiness" Padding="16,8" Margin="8,0,0,0" Click="CheckReadiness_Click"/>
                 <ProgressBar x:Name="Progress" Width="250" Height="22" Margin="12,0,0,0"/>
                 <TextBlock x:Name="StatusText" Margin="12,0,0,0" VerticalAlignment="Center"/>
             </StackPanel>
             <TextBlock x:Name="WarningText" Grid.Row="1" Foreground="DarkOrange" Margin="0,8,0,8"/>
-            <TextBox x:Name="LogText" Grid.Row="2" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextWrapping="Wrap"/>
+            <Grid Grid.Row="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="2*"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <TextBox x:Name="LogText" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                <DataGrid x:Name="ReadinessGrid"
+                          Grid.Row="1"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          CanUserAddRows="False"
+                          HeadersVisibility="Column">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Check" Binding="{Binding Check}" Width="2*"/>
+                        <DataGridTextColumn Header="Result" Binding="{Binding Result}" Width="3*"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid>
         </Grid>
     </Grid>
 </Window>

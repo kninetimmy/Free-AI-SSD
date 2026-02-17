@@ -39,8 +39,12 @@ public partial class MainWindow : System.Windows.Window
         }
 
         _config = PortableConfig.Load(configPath);
-        ModelCombo.ItemsSource = _config.Models;
-        ModelCombo.SelectedIndex = _config.Models.Count > 0 ? 0 : -1;
+        var installedModels = _config.Models
+            .Where(m => m.Status == ModelInstallStatus.Installed)
+            .Select(m => m.Name)
+            .ToList();
+        ModelCombo.ItemsSource = installedModels;
+        ModelCombo.SelectedIndex = installedModels.Count > 0 ? 0 : -1;
         _logger = new SsdLogger(_ssdRoot, "runner");
         StatusText.Text = "Ready (not running)";
         AppendLog($"Loaded config from {configPath}");
