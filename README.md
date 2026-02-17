@@ -1,6 +1,6 @@
 # Free-AI-SSD
 
-Prepare a portable SSD with Ollama + LLMs once, then run them offline on any Windows PC.
+Prepare a portable SSD with Ollama + LLMs once, then run them offline on Windows and/or macOS.
 
 ## 🚀 Quick Start (No CLI Required)
 
@@ -12,7 +12,10 @@ Prepare a portable SSD with Ollama + LLMs once, then run them offline on any Win
 6. Pull your selected models.
 7. Run **Check SSD Readiness** until every check is green.
 8. Click **Finalize SSD**.
-9. On the target PC, run `<SSD>\runner\FreeAiSsd.Runner.exe`.
+9. In Drive Preparation select target OS: **Windows**, **macOS**, or **Both**.
+10. On target machine:
+   - Windows: run `<SSD>\windows\runner\FreeAiSsd.Runner.exe`
+   - macOS: open `<SSD>/mac/Runner.app`
 
 Internet is required only while preparing the SSD in PrepApp (download/pull phase). After finalization, Runner is designed to work offline from the SSD.
 
@@ -57,16 +60,17 @@ Internet is required only while preparing the SSD in PrepApp (download/pull phas
 
 ## SSD Layout & Integrity
 
-PrepApp creates and uses this SSD layout:
+PrepApp creates and uses this SSD layout (single volume, exFAT recommended for cross-platform):
 
-- `tools/`
-- `tools/ollama/`
-- `models/`
-- `models/blobs/`
 - `config/`
+- `models/`
 - `logs/`
+- `windows/runner/`
+- `windows/tools/ollama/`
+- `windows/tools/prereqs/`
+- `mac/Runner.app`
+- `mac/tools/ollama/`
 - `cache/`
-- `runner/`
 
 Integrity behavior:
 
@@ -78,9 +82,10 @@ Integrity behavior:
 
 After PrepApp setup is complete:
 
-1. Connect the SSD to another Windows PC.
-2. Run `<SSD>\runner\FreeAiSsd.Runner.exe`.
-3. Runner starts Ollama from SSD paths and serves locally.
+1. Connect the SSD to a Windows or macOS machine.
+2. Windows: run `<SSD>\windows\runner\FreeAiSsd.Runner.exe`.
+3. macOS: open `<SSD>/mac/Runner.app`.
+4. Runner starts Ollama from SSD paths and serves locally.
 
 No internet is required for normal offline inference after assets are prepared.
 
@@ -124,3 +129,15 @@ Offline prerequisites
 - If a required dependency is missing, Runner can install it offline from SSD media after validating allow-listed IDs, expected filenames, SHA256 hashes, and Microsoft signatures (when available).
 
 - If prerequisite validation fails in Runner, run PrepApp on an online machine and click **Update Prereqs**, then re-run Runner.
+
+
+## macOS signing/notarization
+
+CI expects the following repository secrets for Developer ID signing + notarization:
+
+- `MACOS_CERT_P12_BASE64`
+- `MACOS_CERT_PASSWORD`
+- `APPLE_TEAM_ID`
+- `APPLE_ID`
+- `APPLE_APP_SPECIFIC_PASSWORD`
+- `MACOS_SIGN_IDENTITY` (optional if derived)

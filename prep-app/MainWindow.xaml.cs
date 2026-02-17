@@ -8,6 +8,14 @@ using FreeAiSsd.Shared;
 
 namespace FreeAiSsd.PrepApp;
 
+[Flags]
+public enum PrepTargets
+{
+    None = 0,
+    Windows = 1,
+    Mac = 2
+}
+
 public partial class MainWindow : System.Windows.Window
 {
     private readonly DownloadManager _downloadManager = new();
@@ -46,6 +54,14 @@ public partial class MainWindow : System.Windows.Window
     {
         UpdateWarning();
         _ = RefreshModelStatusesForSelectedDriveAsync();
+    }
+
+    private PrepTargets GetSelectedPrepTargets()
+    {
+        var targets = PrepTargets.None;
+        if (PrepareWindowsCheckBox?.IsChecked == true) targets |= PrepTargets.Windows;
+        if (PrepareMacCheckBox?.IsChecked == true) targets |= PrepTargets.Mac;
+        return targets;
     }
 
     private async void AddModel_Click(object sender, System.Windows.RoutedEventArgs e)
@@ -531,13 +547,32 @@ public partial class MainWindow : System.Windows.Window
                 return;
             }
 
-            await EnsureOllamaReadyAsync(root, logger, CancellationToken.None);
+            var targets = GetSelectedPrepTargets();
+            if (targets == PrepTargets.None)
+            {
+                System.Windows.MessageBox.Show("Select at least one prep target (Windows and/or macOS).", "Finalize blocked", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+                AppendLog("Finalize blocked: no prep target selected.");
+                return;
+            }
 
-            StatusText.Text = "Staging offline prerequisites...";
-            await StagePrerequisitesAsync(root, logger, CancellationToken.None);
+            if (targets.HasFlag(PrepTargets.Windows))
+            {
+                await EnsureOllamaReadyAsync(root, logger, CancellationToken.None);
 
-            StatusText.Text = "Staging runner payload...";
-            await StageRunnerAsync(root, logger);
+                StatusText.Text = "Staging offline prerequisites...";
+                await StagePrerequisitesAsync(root, logger, CancellationToken.None);
+
+                StatusText.Text = "Staging Windows runner payload...";
+                await StageRunnerAsync(root, logger);
+            }
+
+            if (targets.HasFlag(PrepTargets.Mac))
+            {
+                StatusText.Text = "Staging macOS Runner...";
+                await StageMacRunnerAsync(root, logger, CancellationToken.None);
+                StatusText.Text = "Downloading/staging macOS Ollama runtime...";
+                await StageMacOllamaAsync(root, logger, CancellationToken.None);
+            }
 
             var readiness = await RunReadinessChecksAsync(root, logger);
             RefreshReadinessGrid(readiness);
@@ -858,6 +893,66 @@ public partial class MainWindow : System.Windows.Window
         logger.Info("Runner artifacts staged.");
     }
 
+    private async Task StageMacRunnerAsync(string ssdRoot, SsdLogger logger, CancellationToken ct)
+    {
+        var sourceRunnerZip = Path.Combine(AppContext.BaseDirectory, "mac", "Runner.app.zip");
+        if (!File.Exists(sourceRunnerZip))
+        {
+            throw new FileNotFoundException($"Missing staged mac Runner bundle: {sourceRunnerZip}");
+        }
+
+        var macRoot = Path.Combine(ssdRoot, SsdLayout.Mac);
+        Directory.CreateDirectory(macRoot);
+        var targetZip = Path.Combine(macRoot, "Runner.app.zip");
+        File.Copy(sourceRunnerZip, targetZip, overwrite: true);
+
+        var extractedRunner = Path.Combine(macRoot, "Runner.app");
+        if (Directory.Exists(extractedRunner))
+        {
+            Directory.Delete(extractedRunner, recursive: true);
+        }
+
+        ZipFile.ExtractToDirectory(targetZip, macRoot, overwriteFiles: true);
+        logger.Info("Staged macOS Runner.app and archive.");
+        await Task.CompletedTask;
+    }
+
+    private async Task StageMacOllamaAsync(string ssdRoot, SsdLogger logger, CancellationToken ct)
+    {
+        var cacheArchive = Path.Combine(ssdRoot, SsdLayout.Cache, MacToolCatalog.Ollama.ArchiveFileName);
+        await _downloadManager.DownloadFileWithResumeAsync(new DownloadRequest(MacToolCatalog.Ollama.SourceUrl, cacheArchive), null, ct);
+
+        var actualSha = DownloadManager.ComputeSha256(cacheArchive);
+
+        var ollamaDir = Path.Combine(ssdRoot, SsdLayout.MacOllama);
+        if (Directory.Exists(ollamaDir))
+        {
+            Directory.Delete(ollamaDir, recursive: true);
+        }
+
+        Directory.CreateDirectory(ollamaDir);
+        ZipFile.ExtractToDirectory(cacheArchive, ollamaDir, overwriteFiles: true);
+
+        var cliPath = Directory.EnumerateFiles(ollamaDir, "ollama", SearchOption.AllDirectories).FirstOrDefault();
+        if (cliPath is null)
+        {
+            throw new FileNotFoundException("Could not locate macOS ollama binary after extraction.");
+        }
+
+        var finalCliPath = Path.Combine(ollamaDir, "ollama");
+        File.Copy(cliPath, finalCliPath, overwrite: true);
+
+        var manifest = "{\n"
+            + $"  \"id\": \"{MacToolCatalog.Ollama.Id}\",\n"
+            + $"  \"sourceUrl\": \"{MacToolCatalog.Ollama.SourceUrl}\",\n"
+            + $"  \"archive\": \"{MacToolCatalog.Ollama.ArchiveFileName}\",\n"
+            + $"  \"sha256\": \"{actualSha}\",\n"
+            + $"  \"downloadedAtUtc\": \"{DateTime.UtcNow:O}\"\n"
+            + "}";
+        await File.WriteAllTextAsync(MacToolCatalog.GetManifestPath(ssdRoot), manifest, ct);
+        logger.Info("Staged macOS Ollama runtime.");
+    }
+
     private static string? ResolveRunnerPublishDirectory()
     {
         var baseDirCandidate = Path.Combine(AppContext.BaseDirectory, "runner-publish");
@@ -976,8 +1071,13 @@ public partial class MainWindow : System.Windows.Window
         var runnerDir = Path.Combine(root, SsdLayout.Runner);
         var runnerExe = Path.Combine(runnerDir, "FreeAiSsd.Runner.exe");
         checks.Add(File.Exists(runnerExe)
-            ? ReadinessItem.Pass("Runner files present")
-            : ReadinessItem.Fail("Runner files present", "Runner executable not found in SSD/runner."));
+            ? ReadinessItem.Pass("Windows runner files present")
+            : ReadinessItem.Warn("Windows runner files present", "Runner executable not found in SSD/windows/runner (ok if mac-only prep)."));
+
+        var macRunnerDir = Path.Combine(root, SsdLayout.MacRunner);
+        checks.Add(Directory.Exists(macRunnerDir)
+            ? ReadinessItem.Pass("macOS Runner.app present")
+            : ReadinessItem.Warn("macOS Runner.app present", "Runner.app not found in SSD/mac (ok if Windows-only prep)."));
 
         var configPath = GetConfigPath(root);
         var (config, configIsValid) = await PortableConfig.LoadWithValidationAsync(configPath);
@@ -988,8 +1088,13 @@ public partial class MainWindow : System.Windows.Window
 
         var ollamaExe = Path.Combine(root, config.OllamaRelativePath);
         checks.Add(File.Exists(ollamaExe)
-            ? ReadinessItem.Pass("Ollama executable present")
-            : ReadinessItem.Fail("Ollama executable present", "ollama.exe is missing in staged tools path."));
+            ? ReadinessItem.Pass("Windows Ollama executable present")
+            : ReadinessItem.Warn("Windows Ollama executable present", "ollama.exe missing under SSD/windows/tools/ollama (ok if mac-only prep)."));
+
+        var macOllamaExe = Path.Combine(root, SsdLayout.MacOllama, "ollama");
+        checks.Add(File.Exists(macOllamaExe)
+            ? ReadinessItem.Pass("macOS Ollama executable present")
+            : ReadinessItem.Warn("macOS Ollama executable present", "ollama missing under SSD/mac/tools/ollama (ok if Windows-only prep)."));
 
         var modelsDir = Path.Combine(root, SsdLayout.Models);
         checks.Add(Directory.Exists(modelsDir)

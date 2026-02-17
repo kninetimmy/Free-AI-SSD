@@ -35,9 +35,15 @@ public partial class MainWindow : System.Windows.Window
     private void LoadConfig()
     {
         _ssdRoot = AppContext.BaseDirectory;
-        if (_ssdRoot.TrimEnd(Path.DirectorySeparatorChar).EndsWith("runner", StringComparison.OrdinalIgnoreCase))
+        var baseTrimmed = _ssdRoot.TrimEnd(Path.DirectorySeparatorChar);
+        if (baseTrimmed.EndsWith($"windows{Path.DirectorySeparatorChar}runner", StringComparison.OrdinalIgnoreCase))
         {
-            _ssdRoot = Directory.GetParent(_ssdRoot)!.FullName;
+            _ssdRoot = Directory.GetParent(Directory.GetParent(baseTrimmed)!.FullName)!.FullName;
+        }
+        else if (baseTrimmed.EndsWith("runner", StringComparison.OrdinalIgnoreCase))
+        {
+            // Backward compatibility with old layout (<SSD>/runner).
+            _ssdRoot = Directory.GetParent(baseTrimmed)!.FullName;
         }
 
         var configPath = Path.Combine(_ssdRoot, "config", "portable-config.json");

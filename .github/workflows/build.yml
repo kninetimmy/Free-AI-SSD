@@ -3,8 +3,7 @@ name: Build and Package
 on:
   pull_request:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
     inputs:
       version:
@@ -16,109 +15,138 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  windows-build:
     runs-on: windows-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-
-      - name: Restore
-        run: dotnet restore FreeAiSsd.sln
-
-      - name: Build
-        run: dotnet build FreeAiSsd.sln -c Release --no-restore
-
+      - run: dotnet restore FreeAiSsd.sln
+      - run: dotnet build FreeAiSsd.sln -c Release --no-restore
       - name: Stage runner publish into prep-app
         shell: pwsh
         run: ./build.ps1 -Configuration Release -Runtime win-x64
-
       - name: Publish PrepApp
         shell: pwsh
         run: dotnet publish prep-app/FreeAiSsd.PrepApp.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=false -o out/prepapp-publish
-
-      - name: Download offline prerequisites
+      - name: Download macOS ollama runtime for staging
         shell: pwsh
         run: |
-          $prereqDir = "out/tools/prereqs"
-          New-Item -ItemType Directory -Path $prereqDir -Force | Out-Null
+          $macDir = "out/mac/tools/ollama"
+          New-Item -ItemType Directory -Path $macDir -Force | Out-Null
+          $archive = Join-Path $macDir "ollama-darwin.zip"
+          Invoke-WebRequest -Uri "https://github.com/ollama/ollama/releases/latest/download/ollama-darwin.zip" -OutFile $archive -UseBasicParsing
+          $hash = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          [ordered]@{ id="ollama_macos_universal"; sourceUrl="https://github.com/ollama/ollama/releases/latest/download/ollama-darwin.zip"; archive="ollama-darwin.zip"; sha256=$hash; downloadedAtUtc=[DateTime]::UtcNow.ToString("o") } | ConvertTo-Json | Set-Content -Path (Join-Path $macDir "mac-tools-manifest.json") -Encoding UTF8
 
+      - name: Download offline Windows prerequisites
+        shell: pwsh
+        run: |
+          $prereqDir = "out/windows/tools/prereqs"
+          New-Item -ItemType Directory -Path $prereqDir -Force | Out-Null
           $prereqs = @(
             @{ id = "vcredist_x64"; displayName = "Microsoft Visual C++ Redistributable (x64)"; sourceUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"; filename = "vc_redist.x64.exe"; silentArgs = "/install /quiet /norestart"; requiresAdmin = $true; isOptional = $false },
             @{ id = "dotnet8_desktop_x64"; displayName = ".NET 8 Windows Desktop Runtime (x64)"; sourceUrl = "https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/8.0.18/windowsdesktop-runtime-8.0.18-win-x64.exe"; filename = "windowsdesktop-runtime-8-win-x64.exe"; silentArgs = "/install /quiet /norestart"; requiresAdmin = $true; isOptional = $true }
           )
-
           $manifestEntries = @()
           foreach ($prereq in $prereqs) {
             $target = Join-Path $prereqDir $prereq.filename
             Invoke-WebRequest -Uri $prereq.sourceUrl -OutFile $target -UseBasicParsing
-
-            if (!(Test-Path $target)) {
-              throw "Failed to download prereq '$($prereq.id)'"
-            }
-
             $hash = (Get-FileHash -Path $target -Algorithm SHA256).Hash.ToLowerInvariant()
             $size = (Get-Item $target).Length
-            $manifestEntries += [ordered]@{
-              id = $prereq.id
-              displayName = $prereq.displayName
-              filename = $prereq.filename
-              sourceUrl = $prereq.sourceUrl
-              downloadedAtUtc = [DateTime]::UtcNow.ToString("o")
-              sha256 = $hash
-              sizeBytes = $size
-              silentArgs = $prereq.silentArgs
-              requiresAdmin = $prereq.requiresAdmin
-              isOptional = $prereq.isOptional
-            }
+            $manifestEntries += [ordered]@{ id=$prereq.id; displayName=$prereq.displayName; filename=$prereq.filename; sourceUrl=$prereq.sourceUrl; downloadedAtUtc=[DateTime]::UtcNow.ToString("o"); sha256=$hash; sizeBytes=$size; silentArgs=$prereq.silentArgs; requiresAdmin=$prereq.requiresAdmin; isOptional=$prereq.isOptional }
           }
-
           [ordered]@{ prerequisites = $manifestEntries } | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $prereqDir "prereqs-manifest.json") -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-output
+          path: |
+            out/prepapp-publish
+            prep-app/bin/Release/net8.0-windows/runner-publish
+            out/windows/tools/prereqs
+            out/mac/tools/ollama
+            docs/QUICKSTART.txt
+            LICENSE
 
+  mac-runner-build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Runner.app bundle
+        run: |
+          mkdir -p out/Runner.app/Contents/MacOS out/Runner.app/Contents/Resources
+          swiftc mac-runner/Sources/main.swift -O -o out/Runner.app/Contents/MacOS/Runner -framework SwiftUI -framework AppKit
+          cat > out/Runner.app/Contents/Info.plist <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict><key>CFBundleExecutable</key><string>Runner</string><key>CFBundleIdentifier</key><string>com.freeaissd.runner</string><key>CFBundleName</key><string>Runner</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>1.0</string><key>LSMinimumSystemVersion</key><string>12.0</string></dict></plist>
+          PLIST
+          chmod +x out/Runner.app/Contents/MacOS/Runner
+      - name: Import signing certificate
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          security create-keychain -p actions build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p actions build.keychain
+          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > cert.p12
+          security import cert.p12 -k build.keychain -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k actions build.keychain
+      - name: Sign app
+        env:
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: |
+          codesign --force --deep --options runtime --sign "$MACOS_SIGN_IDENTITY" out/Runner.app
+      - name: Notarize and staple app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          ditto -c -k --keepParent out/Runner.app out/Runner.app.zip
+          xcrun notarytool submit out/Runner.app.zip --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD" --wait
+          xcrun stapler staple out/Runner.app
+          ditto -c -k --keepParent out/Runner.app out/Runner.app.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-runner-artifact
+          path: out/Runner.app.zip
+
+  package-release:
+    runs-on: windows-latest
+    needs: [windows-build, mac-runner-build]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-build-output
+          path: in/windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-runner-artifact
+          path: in/mac
       - name: Assemble distributable
         shell: pwsh
         run: |
-          $runnerPublishDir = "prep-app/bin/Release/net8.0-windows/runner-publish"
-          if (!(Test-Path $runnerPublishDir)) {
-            throw "runner-publish folder is missing at '$runnerPublishDir'. Ensure build.ps1 completed and staged runner artifacts."
-          }
-
-          if (!(Test-Path (Join-Path $runnerPublishDir "FreeAiSsd.Runner.exe"))) {
-            throw "runner-publish was found, but FreeAiSsd.Runner.exe is missing from '$runnerPublishDir'."
-          }
-
           $distRoot = "dist/Free-AI-SSD"
           New-Item -ItemType Directory -Path $distRoot -Force | Out-Null
-
-          Copy-Item "out/prepapp-publish/*" $distRoot -Recurse -Force
-          Copy-Item $runnerPublishDir (Join-Path $distRoot "runner-publish") -Recurse -Force
-          Copy-Item "docs/QUICKSTART.txt" (Join-Path $distRoot "QUICKSTART.txt") -Force
-          Copy-Item "out/tools" (Join-Path $distRoot "tools") -Recurse -Force
-          Copy-Item "LICENSE" (Join-Path $distRoot "LICENSE") -Force
-
+          Copy-Item "in/windows/out/prepapp-publish/*" $distRoot -Recurse -Force
+          Copy-Item "in/windows/prep-app/bin/Release/net8.0-windows/runner-publish" (Join-Path $distRoot "runner-publish") -Recurse -Force
+          Copy-Item "in/windows/out/windows" (Join-Path $distRoot "windows") -Recurse -Force
+          New-Item -ItemType Directory -Path (Join-Path $distRoot "mac") -Force | Out-Null
+          Copy-Item "in/mac/Runner.app.zip" (Join-Path $distRoot "mac/Runner.app.zip") -Force
+          Copy-Item "in/windows/out/mac/tools" (Join-Path $distRoot "mac/tools") -Recurse -Force
+          Copy-Item "in/windows/docs/QUICKSTART.txt" (Join-Path $distRoot "QUICKSTART.txt") -Force
+          Copy-Item "in/windows/LICENSE" (Join-Path $distRoot "LICENSE") -Force
       - name: Create ZIP
         shell: pwsh
         run: Compress-Archive -Path dist/Free-AI-SSD/* -DestinationPath dist/Free-AI-SSD.zip -Force
-
-      - name: Verify ZIP exists
-        shell: pwsh
-        run: |
-          if (!(Test-Path "dist/Free-AI-SSD.zip")) {
-            Write-Error "ZIP not found!"
-            exit 1
-          }
-
-      - name: Upload ZIP artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: Free-AI-SSD-win-x64
+          name: Free-AI-SSD-win-mac-universal
           path: dist/Free-AI-SSD.zip
-
       - name: Create Release
         if: github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
@@ -126,28 +154,3 @@ jobs:
           tag_name: v${{ inputs.version }}
           name: v${{ inputs.version }}
           files: dist/Free-AI-SSD.zip
-
-      - name: Diagnostics on failure
-        if: failure()
-        shell: pwsh
-        run: |
-          Write-Host "=== out/prepapp-publish ==="
-          if (Test-Path "out/prepapp-publish") {
-            Get-ChildItem "out/prepapp-publish" -Recurse | Select-Object FullName, Length
-          } else {
-            Write-Host "(missing)"
-          }
-
-          Write-Host "=== prep-app/bin/Release/net8.0-windows/runner-publish ==="
-          if (Test-Path "prep-app/bin/Release/net8.0-windows/runner-publish") {
-            Get-ChildItem "prep-app/bin/Release/net8.0-windows/runner-publish" -Recurse | Select-Object FullName, Length
-          } else {
-            Write-Host "(missing)"
-          }
-
-          Write-Host "=== dist ==="
-          if (Test-Path "dist") {
-            Get-ChildItem "dist" -Recurse | Select-Object FullName, Length
-          } else {
-            Write-Host "(missing)"
-          }

@@ -24,7 +24,7 @@ public sealed class PortableConfig
 {
     public string Version { get; set; } = "1.0";
     public int OllamaPort { get; set; } = 11434;
-    public string OllamaRelativePath { get; set; } = @"tools\\ollama\\ollama.exe";
+    public string OllamaRelativePath { get; set; } = @"windows\tools\ollama\ollama.exe";
     public List<ModelConfigEntry> Models { get; set; } = new();
     public string PreferredCompute { get; set; } = "cpu";
     public DateTime PreparedAtUtc { get; set; } = DateTime.UtcNow;

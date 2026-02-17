@@ -74,10 +74,17 @@
         </GroupBox>
 
         <GroupBox Header="Drive Preparation" Grid.Row="3" Margin="0,0,0,10">
-            <StackPanel Orientation="Horizontal" Margin="8">
-                <TextBlock Text="Volume label:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                <TextBox x:Name="VolumeLabelText" Width="240" Text="Portable AI"/>
-                <Button x:Name="FormatPrepareButton" Content="Format &amp; Prepare Drive" Margin="12,0,0,0" Click="FormatPrepare_Click"/>
+            <StackPanel Margin="8">
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="Prep targets:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <CheckBox x:Name="PrepareWindowsCheckBox" Content="Prepare for Windows" IsChecked="True" Margin="0,0,10,0"/>
+                    <CheckBox x:Name="PrepareMacCheckBox" Content="Prepare for macOS"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Volume label:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBox x:Name="VolumeLabelText" Width="240" Text="Portable AI"/>
+                    <Button x:Name="FormatPrepareButton" Content="Format &amp; Prepare Drive" Margin="12,0,0,0" Click="FormatPrepare_Click"/>
+                </StackPanel>
             </StackPanel>
         </GroupBox>
 
