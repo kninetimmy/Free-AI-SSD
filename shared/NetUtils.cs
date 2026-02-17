@@ -23,4 +23,23 @@ public static class NetUtils
             listener?.Stop();
         }
     }
+
+    public static int FindFreePort(int preferredPort = 11434)
+    {
+        if (IsPortFree(preferredPort))
+        {
+            return preferredPort;
+        }
+
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            return ((IPEndPoint)listener.LocalEndpoint).Port;
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
 }

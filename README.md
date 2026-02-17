@@ -2,6 +2,21 @@
 
 Free-AI-SSD is a Windows-first toolkit for preparing an external SSD so Ollama + selected models can run portably from that SSD across Windows 10/11 machines.
 
+## Downloads (no local build required)
+
+For normal usage, you do **not** need to build from source.
+
+1. Download the `Free-AI-SSD.zip` bundle from GitHub **Releases** or **Actions artifacts**.
+2. Extract the ZIP.
+3. Run `FreeAiSsd.PrepApp.exe`.
+4. Click **Finalize SSD** to:
+   - download/extract Ollama,
+   - pull selected models,
+   - stage the packaged `runner-publish` payload to SSD `runner/`,
+   - write portable config.
+
+First setup requires internet access. After finalize completes, the SSD can be used offline.
+
 ## Architecture (Iteration 1 Vertical Slice)
 
 The solution is split into 3 projects:
