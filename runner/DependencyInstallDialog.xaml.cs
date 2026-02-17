@@ -12,20 +12,26 @@ public enum DependencyDialogAction
 
 public partial class DependencyInstallDialog : System.Windows.Window
 {
-    private readonly List<PrereqManifestEntry> _catalog;
+    private readonly Dictionary<string, PrereqManifestEntry> _manifestById;
     public DependencyDialogAction Action { get; private set; }
     public IReadOnlyList<PrereqManifestEntry> SelectedEntries =>
         MissingList.Items.OfType<DependencySelectionItem>().Where(i => i.IsSelected).Select(i => i.Entry).ToList();
 
-    public DependencyInstallDialog(IReadOnlyList<MissingDependency> missing, IReadOnlyList<PrereqManifestEntry> catalog)
+    public DependencyInstallDialog(IReadOnlyList<MissingDependency> missing, IReadOnlyList<PrereqManifestEntry> manifestEntries)
     {
         InitializeComponent();
-        _catalog = catalog.ToList();
+        _manifestById = manifestEntries
+            .Where(x => !string.IsNullOrWhiteSpace(x.Id))
+            .GroupBy(x => x.Id, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
+        var catalogById = PrereqCatalog.Tier1.ToDictionary(x => x.Id, StringComparer.OrdinalIgnoreCase);
         var selections = missing
+            .Where(m => catalogById.ContainsKey(m.Id))
             .Select(m => new DependencySelectionItem(
                 m,
-                _catalog.FirstOrDefault(c => string.Equals(c.Id, m.Id, StringComparison.OrdinalIgnoreCase))))
+                catalogById[m.Id],
+                _manifestById.TryGetValue(m.Id, out var manifest) ? manifest : null))
             .ToList();
 
         MissingList.ItemsSource = selections;
@@ -51,25 +57,29 @@ public partial class DependencyInstallDialog : System.Windows.Window
 
     private sealed class DependencySelectionItem
     {
-        public DependencySelectionItem(MissingDependency missing, PrereqManifestEntry? entry)
+        public DependencySelectionItem(MissingDependency missing, PrereqDefinition catalog, PrereqManifestEntry? manifest)
         {
             Missing = missing;
-            Entry = entry ?? new PrereqManifestEntry
+            Catalog = catalog;
+            Manifest = manifest;
+            Entry = manifest ?? new PrereqManifestEntry
             {
                 Id = missing.Id,
                 DisplayName = missing.DisplayName,
-                Filename = string.Empty,
-                SilentArgs = string.Empty,
-                RequiresAdmin = missing.RequiresAdmin
+                Filename = catalog.TargetFileName,
+                SilentArgs = catalog.SilentArgs,
+                RequiresAdmin = catalog.RequiresAdmin
             };
         }
 
         public MissingDependency Missing { get; }
+        public PrereqDefinition Catalog { get; }
+        public PrereqManifestEntry? Manifest { get; }
         public PrereqManifestEntry Entry { get; }
         public bool IsSelected { get; set; } = true;
         public string DisplayLabel =>
-            Entry.Filename.Length > 0
-                ? $"{Missing.DisplayName} ({Entry.Filename})"
-                : $"{Missing.DisplayName} (installer not found in manifest)";
+            Manifest is null
+                ? $"{Missing.DisplayName} (missing from prereqs-manifest.json)"
+                : $"{Missing.DisplayName} ({Catalog.TargetFileName})";
     }
 }

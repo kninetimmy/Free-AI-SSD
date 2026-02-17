@@ -730,6 +730,34 @@ public partial class MainWindow : System.Windows.Window
         PrereqStatusText.Text = "Prereqs: bundled";
         AppendLog($"Wrote prerequisite manifest: {ssdManifestPath}");
 
+        var bundleIssues = PrereqInstallValidator.ValidateBundleHealth(ssdPrereqDir, manifest);
+        if (bundleIssues.Count > 0)
+        {
+            foreach (var issue in bundleIssues)
+            {
+                AppendLog($"Prereq bundle issue: {issue}");
+                logger.Error($"Prereq bundle issue: {issue}");
+            }
+
+            var fixNow = System.Windows.MessageBox.Show(
+                "Prerequisite bundle is missing or inconsistent. Re-download prerequisites now (online) and rewrite manifest?",
+                "Prerequisite bundle verification",
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Warning,
+                System.Windows.MessageBoxResult.Yes);
+
+            if (fixNow == System.Windows.MessageBoxResult.Yes)
+            {
+                await UpdatePrereqsOnlineAsync(ssdPrereqDir, manifest, logger, ct);
+                await manifest.SaveAsync(ssdManifestPath);
+                bundleIssues = PrereqInstallValidator.ValidateBundleHealth(ssdPrereqDir, manifest);
+            }
+            else
+            {
+                AppendLog("Continuing with warning: offline prerequisite install may fail until prereqs are refreshed.");
+            }
+        }
+
         try
         {
             PrereqStatusText.Text = "Prereqs: updating";
@@ -739,7 +767,7 @@ public partial class MainWindow : System.Windows.Window
         }
         catch (Exception ex)
         {
-            PrereqStatusText.Text = "Prereqs: failed";
+            PrereqStatusText.Text = "Prereqs: warning";
             AppendLog($"Prereq update check failed, using bundled installers: {ex.Message}");
             logger.Error($"Prereq update check failed: {ex}");
         }
@@ -967,6 +995,14 @@ public partial class MainWindow : System.Windows.Window
         checks.Add(Directory.Exists(modelsDir)
             ? ReadinessItem.Pass("Models directory present")
             : ReadinessItem.Fail("Models directory present", "SSD/models directory is missing."));
+
+        var prereqDir = Path.Combine(root, SsdLayout.Prereqs);
+        var prereqManifestPath = PrereqCatalog.GetManifestPath(root);
+        var prereqManifest = PrereqManifest.Load(prereqManifestPath);
+        var prereqIssues = PrereqInstallValidator.ValidateBundleHealth(prereqDir, prereqManifest);
+        checks.Add(prereqIssues.Count == 0
+            ? ReadinessItem.Pass("Prereq bundle verified")
+            : ReadinessItem.Warn("Prereq bundle verified", "Warning: " + string.Join("; ", prereqIssues.Take(3))));
 
         var installedModels = config.Models.Where(m => m.Status == ModelInstallStatus.Installed).ToList();
         if (installedModels.Count == 0)
@@ -1263,6 +1299,7 @@ public partial class MainWindow : System.Windows.Window
     {
         public static ReadinessItem Pass(string check) => new(check, true, "OK");
         public static ReadinessItem Fail(string check, string reason) => new(check, false, reason);
+        public static ReadinessItem Warn(string check, string reason) => new(check, true, reason);
     }
 
     private sealed record ModelGridRow(string Name, string Status, string Source, string SizingWarning, string SizeDisplay, string ShaPreview, string LastVerifiedDisplay, bool IsOnDiskOnly);

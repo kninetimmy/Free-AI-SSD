@@ -10,8 +10,7 @@ public sealed class ModelOperations
     {
         var env = new Dictionary<string, string>
         {
-            ["OLLAMA_MODELS"] = modelRoot,
-            ["OLLAMA_HOST"] = "127.0.0.1:11500"
+            ["OLLAMA_MODELS"] = modelRoot
         };
 
         var exitCode = await RunProcessStreamingAsync(ollamaExe, $"pull {modelTag}", Path.GetDirectoryName(ollamaExe)!, env, onLog, ct);
@@ -49,8 +48,7 @@ public sealed class ModelOperations
     {
         var env = new Dictionary<string, string>
         {
-            ["OLLAMA_MODELS"] = modelRoot,
-            ["OLLAMA_HOST"] = "127.0.0.1:11501"
+            ["OLLAMA_MODELS"] = modelRoot
         };
 
         var exitCode = await RunProcessStreamingAsync(ollamaExe, $"rm {modelTag}", Path.GetDirectoryName(ollamaExe)!, env, onLog, ct);
