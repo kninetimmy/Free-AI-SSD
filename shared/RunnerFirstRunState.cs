@@ -5,6 +5,7 @@ namespace FreeAiSsd.Shared;
 public sealed class RunnerFirstRunState
 {
     public bool DependencyPromptShown { get; set; }
+    public bool SizingWarningDismissed { get; set; }
     public DateTime LastCheckedUtc { get; set; } = DateTime.UtcNow;
 
     public static RunnerFirstRunState Load(string path)

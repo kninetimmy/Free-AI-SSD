@@ -22,6 +22,7 @@ public partial class MainWindow : System.Windows.Window
     {
         InitializeComponent();
         LoadConfig();
+        _ = ShowModelSizingWarningsOnStartupAsync();
         _ = InitializeCompatibilityAsync();
     }
 
@@ -194,6 +195,78 @@ public partial class MainWindow : System.Windows.Window
             FileName = folder,
             UseShellExecute = true
         });
+    }
+
+    private async Task ShowModelSizingWarningsOnStartupAsync()
+    {
+        if (_config is null)
+        {
+            return;
+        }
+
+        var statePath = Path.Combine(_ssdRoot, SsdLayout.Config, "runner-first-run.json");
+        var state = RunnerFirstRunState.Load(statePath);
+        if (state.SizingWarningDismissed)
+        {
+            return;
+        }
+
+        var ramGb = SystemResources.GetTotalSystemRamGb();
+        var vramGb = SystemResources.GetGpuVramGb();
+        var warnings = new List<string>();
+
+        foreach (var model in _config.Models.Where(m => m.Status == ModelInstallStatus.Installed))
+        {
+            var sizing = ModelSizingCatalog.Suggest(model.Name);
+            var reasons = new List<string>();
+
+            if (ramGb.HasValue && ramGb.Value < sizing.RecommendedSystemRamGb)
+            {
+                reasons.Add($"RAM {ramGb.Value} GB < recommended {sizing.RecommendedSystemRamGb} GB");
+            }
+
+            if (sizing.RecommendedVramGb.HasValue)
+            {
+                if (!vramGb.HasValue)
+                {
+                    reasons.Add($"VRAM unknown; recommends {sizing.RecommendedVramGb.Value} GB (may run on CPU)");
+                }
+                else if (vramGb.Value < sizing.RecommendedVramGb.Value)
+                {
+                    reasons.Add($"VRAM {vramGb.Value} GB < recommended {sizing.RecommendedVramGb.Value} GB (may run on CPU)");
+                }
+            }
+
+            if (reasons.Count > 0)
+            {
+                warnings.Add($"{model.Name}: {string.Join("; ", reasons)}");
+            }
+        }
+
+        if (warnings.Count == 0)
+        {
+            return;
+        }
+
+        var message = "This PC may struggle with the following models:"
+            + Environment.NewLine + Environment.NewLine
+            + string.Join(Environment.NewLine, warnings.Select(w => $"- {w}"))
+            + Environment.NewLine + Environment.NewLine
+            + "Select Yes to continue showing this warning on startup, or No for 'Don't show again on this machine'.";
+
+        var result = System.Windows.MessageBox.Show(
+            message,
+            "Model sizing warning",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Information,
+            System.Windows.MessageBoxResult.Yes);
+
+        if (result == System.Windows.MessageBoxResult.No)
+        {
+            state.SizingWarningDismissed = true;
+            state.LastCheckedUtc = DateTime.UtcNow;
+            await state.SaveAsync(statePath);
+        }
     }
 
     private async Task<bool> EnsureDependenciesReadyAsync(bool forcePrompt, bool userTriggered)
