@@ -4,6 +4,7 @@ public static class SsdLayout
 {
     public const string Tools = "tools";
     public const string Ollama = "tools/ollama";
+    public const string Prereqs = "tools/prereqs";
     public const string Models = "models";
     public const string Blobs = "models/blobs";
     public const string Config = "config";
@@ -13,7 +14,7 @@ public static class SsdLayout
 
     public static void EnsureStructure(string root)
     {
-        foreach (var relative in new[] { Tools, Ollama, Models, Blobs, Config, Logs, Cache, Runner })
+        foreach (var relative in new[] { Tools, Ollama, Prereqs, Models, Blobs, Config, Logs, Cache, Runner })
         {
             Directory.CreateDirectory(Path.Combine(root, relative));
         }
