@@ -14,6 +14,12 @@
             <TextBlock Text="Target Drive:" VerticalAlignment="Center" Margin="0,0,8,0"/>
             <ComboBox x:Name="DriveCombo" Width="500" DisplayMemberPath="Name" SelectionChanged="DriveCombo_SelectionChanged"/>
             <Button Content="Refresh" Margin="8,0,0,0" Click="RefreshDrives_Click"/>
+            <CheckBox x:Name="ShowFixedDrivesCheckBox"
+                      Margin="12,0,0,0"
+                      VerticalAlignment="Center"
+                      Content="Show fixed drives (advanced)"
+                      Checked="ShowFixedDrivesChanged"
+                      Unchecked="ShowFixedDrivesChanged"/>
         </StackPanel>
 
         <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
