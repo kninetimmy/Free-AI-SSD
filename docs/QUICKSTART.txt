@@ -12,6 +12,12 @@ Recommended for end users: download the official release ZIP.
 8) Click "Finalize SSD".
 9) On the target PC, run <SSD>\runner\FreeAiSsd.Runner.exe.
 
+10) Optional: Use "Format & Prepare Drive" (admin only) to erase a removable drive, label it (default Portable AI), and recreate SSD folders.
+
+Model Manager extras
+- Remove/Delete opens choices: config-only removal or delete from disk (`ollama rm`).
+- Models found on disk but missing in config appear as OnDiskOnly and can be added to config.
+
 Notes
 - Internet is required during PrepApp setup (download + model pull).
 - After setup, Runner works offline from the SSD.

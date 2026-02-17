@@ -1,7 +1,9 @@
+using System.Diagnostics;
 using System.Globalization;
-using System.IO.Compression;
-using FreeAiSsd.Shared;
 using System.IO;
+using System.IO.Compression;
+using System.Security.Principal;
+using FreeAiSsd.Shared;
 
 namespace FreeAiSsd.PrepApp;
 
@@ -16,7 +18,7 @@ public partial class MainWindow : System.Windows.Window
     {
         InitializeComponent();
         LoadDrives();
-        RefreshModelStatusGrid(Array.Empty<ModelConfigEntry>());
+        RefreshModelStatusGrid(Array.Empty<ModelConfigEntry>(), Array.Empty<string>());
         RefreshReadinessGrid(Array.Empty<ReadinessItem>());
         UpdateModelActionButtons();
     }
@@ -61,14 +63,41 @@ public partial class MainWindow : System.Windows.Window
         var config = await PortableConfig.LoadAsync(configPath);
         UpsertModel(config.Models, tag, ModelInstallStatus.NotInstalled);
         await config.SaveAsync(configPath);
-        RefreshModelStatusGrid(config.Models);
+        await RefreshModelStatusesForSelectedDriveAsync();
         ModelTagText.Text = string.Empty;
         AppendLog($"Added model '{tag}' to config.");
     }
 
+    private async void AddOrphanToConfig_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (DriveCombo.SelectedItem is not DriveTarget drive)
+        {
+            AppendLog("Select a target drive first.");
+            return;
+        }
+
+        var selectedOrphans = GetSelectedModelRows().Where(r => r.IsOnDiskOnly).ToList();
+        if (selectedOrphans.Count == 0)
+        {
+            AppendLog("Select one or more OnDiskOnly model rows to add to config.");
+            return;
+        }
+
+        var configPath = GetConfigPath(drive.RootPath);
+        var config = await PortableConfig.LoadAsync(configPath);
+        foreach (var row in selectedOrphans)
+        {
+            UpsertModel(config.Models, row.Name, ModelInstallStatus.NotInstalled);
+            AppendLog($"Added orphaned model '{row.Name}' to config.");
+        }
+
+        await config.SaveAsync(configPath);
+        await RefreshModelStatusesForSelectedDriveAsync();
+    }
+
     private async void PullInstall_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        var selected = GetSelectedModelNames().Take(1).ToList();
+        var selected = GetSelectedModelRows().Where(r => !r.IsOnDiskOnly).Select(r => r.Name).Take(1).ToList();
         if (selected.Count == 0)
         {
             AppendLog("Select a model row to pull/install.");
@@ -80,10 +109,10 @@ public partial class MainWindow : System.Windows.Window
 
     private async void PullSelected_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        var selected = GetSelectedModelNames();
+        var selected = GetSelectedModelRows().Where(r => !r.IsOnDiskOnly).Select(r => r.Name).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (selected.Count == 0)
         {
-            AppendLog("Select one or more model rows for pull.");
+            AppendLog("Select one or more configured model rows for pull.");
             return;
         }
 
@@ -187,10 +216,10 @@ public partial class MainWindow : System.Windows.Window
             return;
         }
 
-        var selected = GetSelectedModelNames().Take(1).ToList();
+        var selected = GetSelectedModelRows().Where(r => !r.IsOnDiskOnly).Select(r => r.Name).Take(1).ToList();
         if (selected.Count == 0)
         {
-            AppendLog("Select a model row to verify.");
+            AppendLog("Select a configured model row to verify.");
             return;
         }
 
@@ -244,28 +273,149 @@ public partial class MainWindow : System.Windows.Window
             return;
         }
 
-        var selected = GetSelectedModelNames().Take(1).ToList();
-        if (selected.Count == 0)
+        var selectedRow = GetSelectedModelRows().Take(1).FirstOrDefault();
+        if (selectedRow is null)
         {
             AppendLog("Select a model row to remove.");
             return;
         }
 
-        var configPath = GetConfigPath(drive.RootPath);
-        var config = await PortableConfig.LoadAsync(configPath);
-        var model = config.Models.FirstOrDefault(m => string.Equals(m.Name, selected[0], StringComparison.OrdinalIgnoreCase));
-        if (model is null)
+        var dialog = new RemoveModelDialog(selectedRow.Name) { Owner = this };
+        var result = dialog.ShowDialog();
+        if (result != true || dialog.Choice == ModelRemoveChoice.Cancel)
         {
+            AppendLog("Remove/Delete cancelled.");
             return;
         }
 
-        model.Status = ModelInstallStatus.NotInstalled;
-        model.Sha256 = null;
-        model.SizeBytes = null;
-        model.LastVerifiedUtc = null;
-        await config.SaveAsync(configPath);
-        RefreshModelStatusGrid(config.Models);
-        AppendLog($"{model.Name}: model removed from config; storage cleanup not implemented yet.");
+        var logger = new SsdLogger(drive.RootPath, "prep");
+        var configPath = GetConfigPath(drive.RootPath);
+        var config = await PortableConfig.LoadAsync(configPath);
+        var model = config.Models.FirstOrDefault(m => string.Equals(m.Name, selectedRow.Name, StringComparison.OrdinalIgnoreCase));
+
+        if (dialog.Choice == ModelRemoveChoice.ConfigOnly)
+        {
+            if (model is null)
+            {
+                AppendLog($"{selectedRow.Name} is already on-disk-only and not in config.");
+                return;
+            }
+
+            model.Status = ModelInstallStatus.NotInstalled;
+            model.Sha256 = null;
+            model.SizeBytes = null;
+            model.LastVerifiedUtc = null;
+            await config.SaveAsync(configPath);
+            await RefreshModelStatusesForSelectedDriveAsync();
+            AppendLog($"{model.Name}: removed from config only (disk contents kept).");
+            logger.Info($"{model.Name}: removed from config only.");
+            return;
+        }
+
+        SetModelOperationUiState(true, $"Deleting {selectedRow.Name} from disk...");
+        try
+        {
+            var ollamaExe = await EnsureOllamaReadyAsync(drive.RootPath, logger, CancellationToken.None);
+            var modelsRoot = Path.Combine(drive.RootPath, SsdLayout.Models);
+            AppendLog($"Deleting {selectedRow.Name} from disk with ollama rm...");
+            logger.Info($"Deleting {selectedRow.Name} from disk with ollama rm...");
+
+            await _modelOperations.DeleteModelAsync(ollamaExe, modelsRoot, selectedRow.Name, line =>
+            {
+                AppendLog(line);
+                logger.Info(line);
+            }, CancellationToken.None);
+
+            if (model is not null)
+            {
+                model.Status = ModelInstallStatus.NotInstalled;
+                model.Sha256 = null;
+                model.SizeBytes = null;
+                model.LastVerifiedUtc = null;
+                await config.SaveAsync(configPath);
+            }
+
+            AppendLog($"{selectedRow.Name}: deleted from disk.");
+            logger.Info($"{selectedRow.Name}: deleted from disk.");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Delete failed for {selectedRow.Name}: {ex.Message}");
+            logger.Error(ex.ToString());
+            System.Windows.MessageBox.Show(
+                $"Failed to delete model from disk: {ex.Message}",
+                "Delete failed",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Error);
+        }
+        finally
+        {
+            SetModelOperationUiState(false);
+            await RefreshModelStatusesForSelectedDriveAsync();
+        }
+    }
+
+    private async void FormatPrepare_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (DriveCombo.SelectedItem is not DriveTarget drive)
+        {
+            AppendLog("Select a target drive first.");
+            return;
+        }
+
+        if (!drive.IsRemovable)
+        {
+            System.Windows.MessageBox.Show("Formatting is only allowed for removable drives.", "Not allowed", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            return;
+        }
+
+        if (!IsRunningAsAdministrator())
+        {
+            System.Windows.MessageBox.Show("Formatting requires Administrator. Please re-run PrepApp as Administrator.", "Administrator required", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+            return;
+        }
+
+        var label = string.IsNullOrWhiteSpace(VolumeLabelText.Text) ? "Portable AI" : VolumeLabelText.Text.Trim();
+        var confirm = new EraseConfirmDialog(drive.RootPath, FormatSize(drive.TotalBytes)) { Owner = this };
+        var accepted = confirm.ShowDialog() == true && confirm.IsConfirmed;
+        if (!accepted)
+        {
+            AppendLog("Format & prepare cancelled (ERASE confirmation not provided).");
+            return;
+        }
+
+        var logger = new SsdLogger(drive.RootPath, "prep");
+        try
+        {
+            SetModelOperationUiState(true, "Formatting drive...");
+            var driveLetter = drive.RootPath.TrimEnd('\\').TrimEnd(':')[0];
+            var command = $"Format-Volume -DriveLetter {driveLetter} -FileSystem NTFS -NewFileSystemLabel '{label.Replace("'", "''")}' -Force";
+            AppendLog($"Formatting {drive.RootPath} as NTFS with label '{label}'...");
+            logger.Info($"Formatting drive {drive.RootPath}.");
+
+            var formatResult = await RunPowerShellAsync(command);
+            foreach (var line in formatResult)
+            {
+                AppendLog(line);
+                logger.Info(line);
+            }
+
+            SsdLayout.EnsureStructure(drive.RootPath);
+            AppendLog("Drive structure prepared.");
+            logger.Info("Drive structure prepared after format.");
+            StatusText.Text = "Format & prepare complete";
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Format & prepare failed: {ex.Message}");
+            logger.Error(ex.ToString());
+            StatusText.Text = "Format & prepare failed";
+        }
+        finally
+        {
+            SetModelOperationUiState(false);
+            LoadDrives();
+        }
     }
 
     private void CancelOperation_Click(object sender, System.Windows.RoutedEventArgs e)
@@ -309,7 +459,7 @@ public partial class MainWindow : System.Windows.Window
             config.OllamaPort = 11434;
             config.PreferredCompute = "cpu";
             await config.SaveAsync(configPath);
-            RefreshModelStatusGrid(config.Models);
+            await RefreshModelStatusesForSelectedDriveAsync();
 
             var installedCount = config.Models.Count(m => m.Status == ModelInstallStatus.Installed);
             if (installedCount == 0)
@@ -474,7 +624,6 @@ public partial class MainWindow : System.Windows.Window
         model.LastVerifiedUtc = lastVerifiedUtc;
 
         await config.SaveAsync(configPath);
-        RefreshModelStatusGrid(config.Models);
     }
 
     private async Task StageRunnerAsync(string ssdRoot, SsdLogger logger)
@@ -520,7 +669,7 @@ public partial class MainWindow : System.Windows.Window
             return null;
         }
 
-        var buildConfigurations = new[] { "Release", "Debug" };
+        var buildConfigurations = ["Release", "Debug"];
         foreach (var configuration in buildConfigurations)
         {
             var candidate = Path.Combine(repoRoot, "prep-app", "bin", configuration, "net8.0-windows", "runner-publish");
@@ -558,19 +707,14 @@ public partial class MainWindow : System.Windows.Window
     {
         if (DriveCombo.SelectedItem is not DriveTarget drive)
         {
-            RefreshModelStatusGrid(Array.Empty<ModelConfigEntry>());
+            RefreshModelStatusGrid(Array.Empty<ModelConfigEntry>(), Array.Empty<string>());
             return;
         }
 
         var configPath = GetConfigPath(drive.RootPath);
-        if (!File.Exists(configPath))
-        {
-            RefreshModelStatusGrid(Array.Empty<ModelConfigEntry>());
-            return;
-        }
-
         var config = await PortableConfig.LoadAsync(configPath);
-        RefreshModelStatusGrid(config.Models);
+        var discovered = ModelOperations.DiscoverModelsOnDisk(Path.Combine(drive.RootPath, SsdLayout.Models));
+        RefreshModelStatusGrid(config.Models, discovered);
     }
 
     private async void CheckReadiness_Click(object sender, System.Windows.RoutedEventArgs e)
@@ -662,24 +806,52 @@ public partial class MainWindow : System.Windows.Window
             }
         }
 
-        RefreshModelStatusGrid(config.Models);
+        await RefreshModelStatusesForSelectedDriveAsync();
         return checks;
     }
 
-    private void RefreshModelStatusGrid(IEnumerable<ModelConfigEntry> models)
+    private void RefreshModelStatusGrid(IEnumerable<ModelConfigEntry> configModels, IReadOnlyCollection<string> discoveredOnDisk)
     {
-        var rows = models
-            .OrderBy(m => m.Name)
-            .Select(m => new ModelGridRow(
-                m.Name,
-                m.Status.ToString(),
-                m.SizeBytes.HasValue ? FormatSize(m.SizeBytes.Value) : "—",
-                string.IsNullOrWhiteSpace(m.Sha256) ? "—" : m.Sha256[..Math.Min(8, m.Sha256.Length)],
-                m.LastVerifiedUtc.HasValue ? m.LastVerifiedUtc.Value.ToLocalTime().ToString("u") : "—"))
-            .ToList();
+        var rows = new List<ModelGridRow>();
+        var configured = configModels.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase).ToList();
+
+        foreach (var model in configured)
+        {
+            var onDisk = discoveredOnDisk.Contains(model.Name);
+            var state = DetermineConfiguredState(model, onDisk);
+            rows.Add(new ModelGridRow(
+                model.Name,
+                state,
+                "Config",
+                model.SizeBytes.HasValue ? FormatSize(model.SizeBytes.Value) : "—",
+                string.IsNullOrWhiteSpace(model.Sha256) ? "—" : model.Sha256[..Math.Min(8, model.Sha256.Length)],
+                model.LastVerifiedUtc.HasValue ? model.LastVerifiedUtc.Value.ToLocalTime().ToString("u") : "—",
+                false));
+        }
+
+        var configuredNames = new HashSet<string>(configured.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
+        foreach (var discovered in discoveredOnDisk.Where(d => !configuredNames.Contains(d)).OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
+        {
+            rows.Add(new ModelGridRow(discovered, "OnDiskOnly", "Disk", "—", "—", "—", true));
+        }
 
         ModelStatusGrid.ItemsSource = rows;
         UpdateModelActionButtons();
+    }
+
+    private static string DetermineConfiguredState(ModelConfigEntry model, bool onDisk)
+    {
+        if (model.Status == ModelInstallStatus.Installed)
+        {
+            return "Ready";
+        }
+
+        if ((model.Status == ModelInstallStatus.NotInstalled || model.Status == ModelInstallStatus.Failed) && !onDisk)
+        {
+            return "ConfiguredNotDownloaded";
+        }
+
+        return model.Status.ToString();
     }
 
     private static string FormatSize(long sizeBytes)
@@ -728,12 +900,10 @@ public partial class MainWindow : System.Windows.Window
         });
     }
 
-    private List<string> GetSelectedModelNames()
+    private List<ModelGridRow> GetSelectedModelRows()
     {
         return ModelStatusGrid.SelectedItems
             .OfType<ModelGridRow>()
-            .Select(r => r.Name)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
@@ -747,11 +917,13 @@ public partial class MainWindow : System.Windows.Window
         _isModelOperationRunning = running;
         FinalizeButton.IsEnabled = !running;
         AddModelButton.IsEnabled = !running;
-        PullInstallButton.IsEnabled = !running && GetSelectedModelNames().Count > 0;
-        VerifyButton.IsEnabled = !running && GetSelectedModelNames().Count > 0;
-        RemoveButton.IsEnabled = !running && GetSelectedModelNames().Count > 0;
-        PullSelectedButton.IsEnabled = !running && GetSelectedModelNames().Count > 0;
+        PullInstallButton.IsEnabled = !running && GetSelectedModelRows().Any(r => !r.IsOnDiskOnly);
+        VerifyButton.IsEnabled = !running && GetSelectedModelRows().Any(r => !r.IsOnDiskOnly);
+        RemoveButton.IsEnabled = !running && GetSelectedModelRows().Count > 0;
+        PullSelectedButton.IsEnabled = !running && GetSelectedModelRows().Any(r => !r.IsOnDiskOnly);
+        AddOrphanButton.IsEnabled = !running && GetSelectedModelRows().Any(r => r.IsOnDiskOnly);
         CancelOperationButton.IsEnabled = running;
+        FormatPrepareButton.IsEnabled = !running && DriveCombo.SelectedItem is DriveTarget d && d.IsRemovable;
         if (!string.IsNullOrWhiteSpace(status))
         {
             StatusText.Text = status;
@@ -760,11 +932,64 @@ public partial class MainWindow : System.Windows.Window
 
     private void UpdateModelActionButtons()
     {
-        var hasSelection = GetSelectedModelNames().Count > 0;
-        PullInstallButton.IsEnabled = !_isModelOperationRunning && hasSelection;
-        VerifyButton.IsEnabled = !_isModelOperationRunning && hasSelection;
-        RemoveButton.IsEnabled = !_isModelOperationRunning && hasSelection;
-        PullSelectedButton.IsEnabled = !_isModelOperationRunning && hasSelection;
+        var selected = GetSelectedModelRows();
+        var hasConfiguredSelection = selected.Any(r => !r.IsOnDiskOnly);
+        var hasOrphanedSelection = selected.Any(r => r.IsOnDiskOnly);
+        PullInstallButton.IsEnabled = !_isModelOperationRunning && hasConfiguredSelection;
+        VerifyButton.IsEnabled = !_isModelOperationRunning && hasConfiguredSelection;
+        RemoveButton.IsEnabled = !_isModelOperationRunning && selected.Count > 0;
+        PullSelectedButton.IsEnabled = !_isModelOperationRunning && hasConfiguredSelection;
+        AddOrphanButton.IsEnabled = !_isModelOperationRunning && hasOrphanedSelection;
+        FormatPrepareButton.IsEnabled = !_isModelOperationRunning && DriveCombo.SelectedItem is DriveTarget d && d.IsRemovable;
+    }
+
+    private static bool IsRunningAsAdministrator()
+    {
+        var identity = WindowsIdentity.GetCurrent();
+        var principal = new WindowsPrincipal(identity);
+        return principal.IsInRole(WindowsBuiltInRole.Administrator);
+    }
+
+    private static async Task<List<string>> RunPowerShellAsync(string command)
+    {
+        var output = new List<string>();
+        var psi = new ProcessStartInfo
+        {
+            FileName = "powershell.exe",
+            Arguments = $"-NoProfile -ExecutionPolicy Bypass -Command \"{command}\"",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        using var process = new Process { StartInfo = psi };
+        process.Start();
+        while (!process.StandardOutput.EndOfStream)
+        {
+            var line = await process.StandardOutput.ReadLineAsync();
+            if (!string.IsNullOrWhiteSpace(line))
+            {
+                output.Add(line);
+            }
+        }
+
+        while (!process.StandardError.EndOfStream)
+        {
+            var line = await process.StandardError.ReadLineAsync();
+            if (!string.IsNullOrWhiteSpace(line))
+            {
+                output.Add("ERR: " + line);
+            }
+        }
+
+        await process.WaitForExitAsync();
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException($"PowerShell command failed with exit code {process.ExitCode}.");
+        }
+
+        return output;
     }
 
     private sealed record ReadinessItem(string Check, bool Passed, string Result)
@@ -773,5 +998,5 @@ public partial class MainWindow : System.Windows.Window
         public static ReadinessItem Fail(string check, string reason) => new(check, false, reason);
     }
 
-    private sealed record ModelGridRow(string Name, string Status, string SizeDisplay, string ShaPreview, string LastVerifiedDisplay);
+    private sealed record ModelGridRow(string Name, string Status, string Source, string SizeDisplay, string ShaPreview, string LastVerifiedDisplay, bool IsOnDiskOnly);
 }

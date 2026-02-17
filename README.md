@@ -37,7 +37,7 @@ Internet is required only while preparing the SSD in PrepApp (download/pull phas
 - Drive selection with safety warnings (for example, filesystem checks).
 - Model Manager:
   - Add custom model tags (freeform).
-  - Status tracking: `NotInstalled`, `Downloading`, `Installed`, `Failed`.
+  - Status tracking includes `ConfiguredNotDownloaded`, `OnDiskOnly`, and `Ready` delineation in the grid.
   - SHA256 + size tracking for installed models.
   - Verify model integrity against stored hashes.
 - SSD Readiness checklist with re-verification support.
@@ -50,7 +50,10 @@ Internet is required only while preparing the SSD in PrepApp (download/pull phas
 - Sends prompt → local Ollama API → response.
 - Writes logs to SSD.
 
-> Removing a model updates config; storage cleanup is not yet implemented.
+- Remove/Delete options: remove from config only, or delete from disk via `ollama rm` using SSD model path.
+- Orphaned (on-disk-only) models can be added to config from the grid.
+- Drive Preparation section can format removable drives as NTFS with a custom label (default `Portable AI`) and then prepare SSD folders.
+- Formatting requires running PrepApp as Administrator and explicit `ERASE` confirmation.
 
 ## SSD Layout & Integrity
 

@@ -45,6 +45,46 @@ public sealed class ModelOperations
         return matches;
     }
 
+    public async Task DeleteModelAsync(string ollamaExe, string modelRoot, string modelTag, Action<string> onLog, CancellationToken ct)
+    {
+        var env = new Dictionary<string, string>
+        {
+            ["OLLAMA_MODELS"] = modelRoot,
+            ["OLLAMA_HOST"] = "127.0.0.1:11501"
+        };
+
+        var exitCode = await RunProcessStreamingAsync(ollamaExe, $"rm {modelTag}", Path.GetDirectoryName(ollamaExe)!, env, onLog, ct);
+        if (exitCode != 0)
+        {
+            throw new InvalidOperationException($"Failed to delete model {modelTag} from disk. Exit code: {exitCode}");
+        }
+    }
+
+    public static IReadOnlyCollection<string> DiscoverModelsOnDisk(string modelRoot)
+    {
+        var manifestsPath = Path.Combine(modelRoot, "manifests");
+        if (!Directory.Exists(manifestsPath))
+        {
+            return Array.Empty<string>();
+        }
+
+        var discovered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var manifestPath in Directory.EnumerateFiles(manifestsPath, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(manifestsPath, manifestPath);
+            var parts = relative.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2)
+            {
+                continue;
+            }
+
+            var modelId = $"{parts[^2]}:{parts[^1]}";
+            discovered.Add(modelId);
+        }
+
+        return discovered.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
     public static string? FindModelBlobForModel(string modelRoot, string model)
     {
         var manifestTag = model.Replace(':', '-');

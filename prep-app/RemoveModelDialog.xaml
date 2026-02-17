@@ -1,0 +1,23 @@
+<Window x:Class="FreeAiSsd.PrepApp.RemoveModelDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Remove model"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        SizeToContent="WidthAndHeight">
+    <Grid Margin="16" MinWidth="420">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="PromptText" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+        <StackPanel Grid.Row="1" Orientation="Vertical">
+            <Button Content="Remove from list (config only)" Padding="10,6" Click="RemoveConfigOnly_Click" Margin="0,0,0,6"/>
+            <Button Content="Delete from disk" Padding="10,6" Click="DeleteFromDisk_Click" Margin="0,0,0,6"/>
+            <Button Content="Cancel" Padding="10,6" Click="Cancel_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
