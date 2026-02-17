@@ -116,3 +116,9 @@ Notes:
 - End users should download the ZIP from Releases instead.
 
 </details>
+
+
+Offline prerequisites
+- PrepApp now stages offline installers at <SSD>\tools\prereqs and writes <SSD>\config\deps-manifest.json during finalize.
+- On first run, Runner checks compatibility (GPU/CPU/OS) and dependency presence.
+- If a required dependency is missing, Runner can install it offline from SSD media and may request Administrator elevation.

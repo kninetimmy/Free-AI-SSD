@@ -476,6 +476,9 @@ public partial class MainWindow : System.Windows.Window
 
             await EnsureOllamaReadyAsync(root, logger, CancellationToken.None);
 
+            StatusText.Text = "Staging offline prerequisites...";
+            await StagePrerequisitesAsync(root, logger, CancellationToken.None);
+
             StatusText.Text = "Staging runner payload...";
             await StageRunnerAsync(root, logger);
 
@@ -624,6 +627,37 @@ public partial class MainWindow : System.Windows.Window
         model.LastVerifiedUtc = lastVerifiedUtc;
 
         await config.SaveAsync(configPath);
+    }
+
+
+    private async Task StagePrerequisitesAsync(string root, SsdLogger logger, CancellationToken ct)
+    {
+        var prereqDir = Path.Combine(root, SsdLayout.Prereqs);
+        Directory.CreateDirectory(prereqDir);
+
+        var entry = PrereqCatalog.CreateVcRedistEntry();
+        var targetPath = Path.Combine(prereqDir, entry.File);
+
+        try
+        {
+            AppendLog($"Downloading prerequisite: {entry.DisplayName}");
+            await _downloadManager.DownloadFileWithResumeAsync(new DownloadRequest(PrereqCatalog.VcRedistX64Url, targetPath), null, ct);
+            logger.Info($"Staged prerequisite: {entry.DisplayName}");
+
+            entry.Sha256 = DownloadManager.ComputeSha256(targetPath);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Warning: Failed to download {entry.DisplayName}. You can retry finalize later. ({ex.Message})");
+            logger.Error($"Prerequisite download failed: {ex}");
+        }
+
+        var manifest = new PrereqManifest();
+        manifest.Prerequisites.Add(entry);
+
+        var manifestPath = Path.Combine(root, SsdLayout.Config, "deps-manifest.json");
+        await manifest.SaveAsync(manifestPath);
+        AppendLog($"Wrote prerequisite manifest: {manifestPath}");
     }
 
     private async Task StageRunnerAsync(string ssdRoot, SsdLogger logger)

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Security.Principal;
 using System.Text.Json;
 using FreeAiSsd.Shared;
 
@@ -15,11 +16,19 @@ public partial class MainWindow : System.Windows.Window
     private Process? _ollama;
     private SsdLogger? _logger;
     private int? _currentPort;
+    private DependencyCheckResult _lastDependencyCheck = new(true, Array.Empty<MissingDependency>());
 
     public MainWindow()
     {
         InitializeComponent();
         LoadConfig();
+        _ = InitializeCompatibilityAsync();
+    }
+
+    private async Task InitializeCompatibilityAsync()
+    {
+        RefreshCompatibilityUi();
+        await EnsureDependenciesReadyAsync(forcePrompt: CommandLineHas("--postinstall"), userTriggered: false);
     }
 
     private void LoadConfig()
@@ -53,6 +62,11 @@ public partial class MainWindow : System.Windows.Window
     private async void Start_Click(object sender, System.Windows.RoutedEventArgs e)
     {
         if (_config is null || _ollama is { HasExited: false }) return;
+
+        if (!await EnsureDependenciesReadyAsync(forcePrompt: false, userTriggered: true))
+        {
+            return;
+        }
 
         var ollamaExe = Path.Combine(_ssdRoot, _config.OllamaRelativePath);
         if (!File.Exists(ollamaExe))
@@ -164,6 +178,176 @@ public partial class MainWindow : System.Windows.Window
             FileName = $"http://{host}",
             UseShellExecute = true
         });
+    }
+
+    private async void RerunDependencyCheck_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        await EnsureDependenciesReadyAsync(forcePrompt: true, userTriggered: true);
+    }
+
+    private void OpenPrereqsFolder_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        var folder = Path.Combine(_ssdRoot, SsdLayout.Prereqs);
+        Directory.CreateDirectory(folder);
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = folder,
+            UseShellExecute = true
+        });
+    }
+
+    private async Task<bool> EnsureDependenciesReadyAsync(bool forcePrompt, bool userTriggered)
+    {
+        _lastDependencyCheck = DependencyChecker.Check(_ssdRoot);
+        RefreshCompatibilityUi();
+
+        if (_lastDependencyCheck.IsSatisfied)
+        {
+            await SaveFirstRunStateAsync(promptShown: true);
+            return true;
+        }
+
+        var statePath = Path.Combine(_ssdRoot, SsdLayout.Config, "runner-first-run.json");
+        var state = RunnerFirstRunState.Load(statePath);
+        if (!forcePrompt && state.DependencyPromptShown)
+        {
+            AppendLog("Dependencies still missing. Use 'Re-run dependency check' to retry installation.");
+            return false;
+        }
+
+        var manifestPath = Path.Combine(_ssdRoot, SsdLayout.Config, "deps-manifest.json");
+        var manifest = PrereqManifest.Load(manifestPath);
+        var dialog = new DependencyInstallDialog(_lastDependencyCheck.MissingItems, manifest.Prerequisites) { Owner = this };
+        var result = dialog.ShowDialog();
+
+        if (result != true)
+        {
+            if (!userTriggered)
+            {
+                System.Windows.Application.Current.Shutdown();
+            }
+
+            return false;
+        }
+
+        if (dialog.Action == DependencyDialogAction.Skip)
+        {
+            AppendLog("User chose to skip prerequisite install.");
+            await SaveFirstRunStateAsync(promptShown: true);
+            return false;
+        }
+
+        if (dialog.Action != DependencyDialogAction.Install || dialog.SelectedEntries.Count == 0)
+        {
+            return false;
+        }
+
+        if (dialog.SelectedEntries.Any(e => e.RequiresAdmin) && !IsRunningAsAdministrator())
+        {
+            var elevate = System.Windows.MessageBox.Show(
+                "Administrator permissions required. Relaunch as Administrator?",
+                "Admin required",
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Question);
+
+            if (elevate == System.Windows.MessageBoxResult.Yes)
+            {
+                RelaunchAsAdmin("--postinstall");
+            }
+
+            return false;
+        }
+
+        foreach (var entry in dialog.SelectedEntries)
+        {
+            var installerPath = Path.Combine(_ssdRoot, SsdLayout.Prereqs, entry.File);
+            if (!File.Exists(installerPath))
+            {
+                AppendLog($"Missing installer on SSD: {installerPath}");
+                continue;
+            }
+
+            AppendLog($"Installing {entry.DisplayName}...");
+            var installer = Process.Start(new ProcessStartInfo
+            {
+                FileName = installerPath,
+                Arguments = entry.SilentArgs,
+                UseShellExecute = true
+            });
+
+            if (installer is null)
+            {
+                AppendLog($"Failed to launch installer: {entry.DisplayName}");
+                continue;
+            }
+
+            await installer.WaitForExitAsync();
+            AppendLog($"Installer exit code for {entry.DisplayName}: {installer.ExitCode}");
+        }
+
+        _lastDependencyCheck = DependencyChecker.Check(_ssdRoot);
+        RefreshCompatibilityUi();
+        await SaveFirstRunStateAsync(promptShown: true);
+
+        if (!_lastDependencyCheck.IsSatisfied)
+        {
+            AppendLog("Dependencies remain missing after install attempt.");
+            return false;
+        }
+
+        return true;
+    }
+
+    private void RefreshCompatibilityUi()
+    {
+        var snapshot = SystemCompatibilityDetector.Detect();
+        CompatibilityGpuText.Text = $"GPU: {snapshot.BestGpuSummary}";
+        CompatibilityCpuText.Text = $"CPU Architecture: {snapshot.CpuArchitecture}";
+        CompatibilityOsText.Text = $"OS: {snapshot.OsVersion}";
+        CompatibilityDepsText.Text = _lastDependencyCheck.IsSatisfied
+            ? "Dependency status: OK"
+            : $"Dependency status: Missing ({string.Join(", ", _lastDependencyCheck.MissingItems.Select(m => m.DisplayName))})";
+    }
+
+    private async Task SaveFirstRunStateAsync(bool promptShown)
+    {
+        var statePath = Path.Combine(_ssdRoot, SsdLayout.Config, "runner-first-run.json");
+        var state = RunnerFirstRunState.Load(statePath);
+        state.DependencyPromptShown = promptShown;
+        state.LastCheckedUtc = DateTime.UtcNow;
+        await state.SaveAsync(statePath);
+    }
+
+    private void RelaunchAsAdmin(string args)
+    {
+        var exePath = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
+        if (string.IsNullOrWhiteSpace(exePath))
+        {
+            AppendLog("Unable to relaunch as admin: executable path unavailable.");
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = exePath,
+            Arguments = args,
+            Verb = "runas",
+            UseShellExecute = true
+        });
+
+        System.Windows.Application.Current.Shutdown();
+    }
+
+    private static bool CommandLineHas(string flag)
+    {
+        return Environment.GetCommandLineArgs().Any(a => string.Equals(a, flag, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsRunningAsAdministrator()
+    {
+        var identity = WindowsIdentity.GetCurrent();
+        var principal = new WindowsPrincipal(identity);
+        return principal.IsInRole(WindowsBuiltInRole.Administrator);
     }
 
     private bool TryGetCurrentHost(out string host)

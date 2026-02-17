@@ -70,12 +70,17 @@ public sealed class DownloadManager
 
     public static void VerifySha256(string filePath, string expectedSha256)
     {
-        using var stream = File.OpenRead(filePath);
-        var hash = SHA256.HashData(stream);
-        var actual = Convert.ToHexString(hash);
+        var actual = ComputeSha256(filePath);
         if (!actual.Equals(expectedSha256, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException($"SHA256 mismatch for {filePath}. Expected {expectedSha256}, got {actual}.");
         }
+    }
+
+    public static string ComputeSha256(string filePath)
+    {
+        using var stream = File.OpenRead(filePath);
+        var hash = SHA256.HashData(stream);
+        return Convert.ToHexString(hash);
     }
 }
