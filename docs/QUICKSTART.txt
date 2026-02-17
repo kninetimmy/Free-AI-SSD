@@ -1,0 +1,16 @@
+Free-AI-SSD Quick Start (Windows)
+=================================
+
+1) Extract the ZIP to a writable folder.
+2) Run FreeAiSsd.PrepApp.exe.
+3) Select your target external SSD and choose model(s).
+4) Click "Finalize SSD" and wait for setup to finish.
+
+What PrepApp does:
+- Creates the required SSD folder layout.
+- Downloads and stages Ollama runtime to the SSD.
+- Pulls selected model(s) onto the SSD.
+- Stages the portable runner app so the SSD can run on other PCs.
+
+First-time setup requires internet access.
+After setup is complete, the SSD contains the runtime + models and can be used offline with the runner.
