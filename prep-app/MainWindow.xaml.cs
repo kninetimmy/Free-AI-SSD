@@ -15,9 +15,12 @@ public partial class MainWindow : System.Windows.Window
 
     private void RefreshDrives_Click(object sender, System.Windows.RoutedEventArgs e) => LoadDrives();
 
+    private void ShowFixedDrivesChanged(object sender, System.Windows.RoutedEventArgs e) => LoadDrives();
+
     private void LoadDrives()
     {
-        var drives = DriveInspector.GetCandidateDrives();
+        var includeFixed = ShowFixedDrivesCheckBox?.IsChecked == true;
+        var drives = DriveInspector.GetCandidateDrives(includeFixed);
         DriveCombo.ItemsSource = drives;
         DriveCombo.SelectedIndex = drives.Count > 0 ? 0 : -1;
         UpdateWarning();
@@ -30,6 +33,12 @@ public partial class MainWindow : System.Windows.Window
         if (DriveCombo.SelectedItem is not DriveTarget drive)
         {
             AppendLog("Select a target drive first.");
+            return;
+        }
+
+        if (!ConfirmDriveSelection(drive))
+        {
+            AppendLog("Finalize cancelled.");
             return;
         }
 
@@ -89,6 +98,35 @@ public partial class MainWindow : System.Windows.Window
         }
     }
 
+    private bool ConfirmDriveSelection(DriveTarget drive)
+    {
+        if (!drive.IsFixed)
+        {
+            return true;
+        }
+
+        var firstConfirm = System.Windows.MessageBox.Show(
+            $"You selected a fixed drive: {drive.RootPath}\n\nThis can overwrite or modify files on that drive. Continue?",
+            "Advanced warning",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Warning,
+            System.Windows.MessageBoxResult.No);
+
+        if (firstConfirm != System.Windows.MessageBoxResult.Yes)
+        {
+            return false;
+        }
+
+        var secondConfirm = System.Windows.MessageBox.Show(
+            "Final confirmation: this action may modify important files.\n\nClick Yes only if you fully understand the risk.",
+            "Confirm fixed drive selection",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Exclamation,
+            System.Windows.MessageBoxResult.No);
+
+        return secondConfirm == System.Windows.MessageBoxResult.Yes;
+    }
+
     private static void ExtractOllamaZip(string zipPath, string destination)
     {
         if (Directory.Exists(destination))
@@ -145,7 +183,7 @@ public partial class MainWindow : System.Windows.Window
 
         if (!Directory.Exists(sourceRunnerDir))
         {
-            var hint = "Runner publish folder not found. Build runner and copy publish output to prep-app/bin/.../runner-publish.";
+            var hint = "Runner publish folder not found. Run build.ps1 from repo root to stage runner artifacts for prep-app.";
             AppendLog(hint);
             logger.Error(hint);
             return;

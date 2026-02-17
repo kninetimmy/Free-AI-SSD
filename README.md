@@ -68,7 +68,7 @@ Runner also sets `WorkingDirectory` to the staged Ollama folder.
 ### Port selection/conflicts
 
 Config stores preferred port (default `11434`).
-Runner probes preferred port and, if occupied, scans next ports up to `preferred+19`.
+Runner resolves an available port once at startup, stores it as the active port, and reuses that same port for API calls and browser launch.
 
 ### Downloads + integrity
 
@@ -117,24 +117,19 @@ Prerequisites:
 - .NET 8 SDK
 - internet access for prep phase
 
-### Build solution
+### Recommended: one-step build + staging
 
 ```powershell
-dotnet build FreeAiSsd.sln -c Release
+./build.ps1
 ```
 
-### Publish runner as single EXE
+`build.ps1` performs all required setup steps:
 
-```powershell
-dotnet publish runner/FreeAiSsd.Runner.csproj -c Release -r win-x64
-```
+1. Builds `FreeAiSsd.sln` in Release.
+2. Publishes runner as self-contained single-file `win-x64`.
+3. Copies runner publish output to `prep-app/bin/Release/net8.0-windows/runner-publish/` so prep can stage runner artifacts without manual copy steps.
 
-Copy the publish output into prep app output under a `runner-publish` folder so prep can stage it automatically:
-
-```powershell
-# Example paths; adjust for your machine
-Copy-Item runner\bin\Release\net8.0-windows\win-x64\publish\* prep-app\bin\Release\net8.0-windows\runner-publish\ -Recurse -Force
-```
+You can still run the commands manually if needed, but `build.ps1` is the preferred workflow.
 
 ### Run prep app
 
