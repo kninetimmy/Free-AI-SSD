@@ -180,7 +180,7 @@ public partial class MainWindow : System.Windows.Window
     {
         for (var port = preferred; port < preferred + 20; port++)
         {
-            if (NetUtils.IsPortFree(port)) return port;
+            if (FreeAiSsd.Shared.NetUtils.IsPortFree(port)) return port;
         }
 
         throw new InvalidOperationException("No free ports in range.");
