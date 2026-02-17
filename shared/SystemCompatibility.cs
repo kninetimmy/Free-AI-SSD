@@ -1,5 +1,6 @@
 using System.Management;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 
 namespace FreeAiSsd.Shared;
 
@@ -32,6 +33,17 @@ public static class SystemCompatibilityDetector
     }
 
     public static IReadOnlyList<GpuInfo> DetectGpus()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return new[] { new GpuInfo("Unknown GPU", "Unknown", null, false, false) };
+        }
+
+        return DetectGpusWindows();
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static IReadOnlyList<GpuInfo> DetectGpusWindows()
     {
         try
         {
@@ -83,6 +95,7 @@ public static class SystemCompatibilityDetector
             || text.Contains("APU");
     }
 
+    [SupportedOSPlatform("windows")]
     private static string? ReadProperty(ManagementObject obj, string propertyName)
     {
         return obj.Properties[propertyName]?.Value?.ToString()?.Trim();

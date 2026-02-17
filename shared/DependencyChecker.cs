@@ -1,4 +1,5 @@
 using Microsoft.Win32;
+using System.Runtime.Versioning;
 
 namespace FreeAiSsd.Shared;
 
@@ -10,19 +11,26 @@ public static class DependencyChecker
 {
     public static DependencyCheckResult Check(string ssdRoot)
     {
+        // Offline runner support targets Windows. On non-Windows hosts, skip Windows registry probing.
+        if (!OperatingSystem.IsWindows())
+        {
+            return new DependencyCheckResult(true, Array.Empty<MissingDependency>());
+        }
+
         var missing = new List<MissingDependency>();
-        if (!HasVcRuntimeX64())
+        if (!HasVcRuntimeX64Windows())
         {
             missing.Add(new MissingDependency(
                 PrereqCatalog.VcRedistX64Id,
                 "Microsoft Visual C++ Redistributable (x64)",
-                requiresAdmin: true));
+                RequiresAdmin: true));
         }
 
         return new DependencyCheckResult(missing.Count == 0, missing);
     }
 
-    private static bool HasVcRuntimeX64()
+    [SupportedOSPlatform("windows")]
+    private static bool HasVcRuntimeX64Windows()
     {
         var keys = new[]
         {
