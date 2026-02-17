@@ -76,7 +76,9 @@ jobs:
       - name: Build Runner.app bundle
         run: |
           mkdir -p out/Runner.app/Contents/MacOS out/Runner.app/Contents/Resources
-          swiftc mac-runner/Sources/main.swift -O -o out/Runner.app/Contents/MacOS/Runner -framework SwiftUI -framework AppKit
+          SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+          TARGET_ARCH="$(uname -m)"
+          swiftc mac-runner/Sources/main.swift             -parse-as-library             -sdk "$SDK_PATH"             -target "$TARGET_ARCH-apple-macos12.0"             -O             -o out/Runner.app/Contents/MacOS/Runner             -framework SwiftUI             -framework AppKit
           cat > out/Runner.app/Contents/Info.plist <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
