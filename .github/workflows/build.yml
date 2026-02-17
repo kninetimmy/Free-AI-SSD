@@ -33,20 +33,21 @@ jobs:
         shell: pwsh
         run: ./build.ps1 -Configuration Release -Runtime win-x64
 
-      - name: Publish PrepApp (win-x64)
+      - name: Publish PrepApp (win-x64, self-contained multi-file)
         shell: pwsh
         run: |
           $publishDir = Join-Path $env:GITHUB_WORKSPACE 'out/prepapp-publish'
-          dotnet publish ./prep-app/FreeAiSsd.PrepApp.csproj `
-            -c Release `
-            -r win-x64 `
-            --self-contained true `
-            -o $publishDir `
-            /p:PublishSingleFile=true `
-            /p:IncludeNativeLibrariesForSelfExtract=true `
-            /p:DebugType=None `
-            /p:DebugSymbols=false `
-            /p:ContinuousIntegrationBuild=true
+          $publishArgs = @(
+            'publish', './prep-app/FreeAiSsd.PrepApp.csproj',
+            '-c', 'Release',
+            '-r', 'win-x64',
+            '--self-contained', 'true',
+            '-o', $publishDir,
+            '/p:DebugType=None',
+            '/p:DebugSymbols=false',
+            '/p:ContinuousIntegrationBuild=true'
+          )
+          dotnet @publishArgs
 
       - name: Compute package names
         id: package-names
@@ -69,8 +70,18 @@ jobs:
         shell: pwsh
         run: |
           $publishDir = Join-Path $env:GITHUB_WORKSPACE 'out/prepapp-publish'
+          $stagedRunnerDir = Join-Path $env:GITHUB_WORKSPACE 'prep-app/bin/Release/net8.0-windows/runner-publish'
           $distRoot = Join-Path $env:GITHUB_WORKSPACE 'dist/Free-AI-SSD'
+          $distRunnerDir = Join-Path $distRoot 'runner-publish'
           $zipPath = Join-Path $env:GITHUB_WORKSPACE "dist/$env:ZIP_NAME"
+
+          if (!(Test-Path $publishDir)) {
+            throw "PrepApp publish output not found at $publishDir"
+          }
+
+          if (!(Test-Path $stagedRunnerDir)) {
+            throw "Staged runner payload not found at $stagedRunnerDir"
+          }
 
           if (Test-Path $distRoot) {
             Remove-Item $distRoot -Recurse -Force
@@ -79,6 +90,7 @@ jobs:
           New-Item -ItemType Directory -Path $distRoot -Force | Out-Null
 
           Copy-Item (Join-Path $publishDir '*') $distRoot -Recurse -Force
+          Copy-Item $stagedRunnerDir $distRunnerDir -Recurse -Force
           Copy-Item ./docs/QUICKSTART.txt (Join-Path $distRoot 'QUICKSTART.txt') -Force
 
           if (Test-Path ./LICENSE) {
@@ -108,3 +120,28 @@ jobs:
         with:
           files: dist/${{ env.ZIP_NAME }}
           generate_release_notes: true
+
+      - name: Diagnostics (on failure)
+        if: failure()
+        shell: pwsh
+        run: |
+          Write-Host '--- out ---'
+          if (Test-Path ./out) {
+            Get-ChildItem ./out -Recurse | Select-Object FullName
+          } else {
+            Write-Host 'out directory not found'
+          }
+
+          Write-Host '--- prep-app/bin/Release/net8.0-windows ---'
+          if (Test-Path ./prep-app/bin/Release/net8.0-windows) {
+            Get-ChildItem ./prep-app/bin/Release/net8.0-windows -Recurse | Select-Object FullName
+          } else {
+            Write-Host 'prep-app/bin/Release/net8.0-windows directory not found'
+          }
+
+          Write-Host '--- dist ---'
+          if (Test-Path ./dist) {
+            Get-ChildItem ./dist -Recurse | Select-Object FullName
+          } else {
+            Write-Host 'dist directory not found'
+          }
