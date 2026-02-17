@@ -6,6 +6,13 @@ Free-AI-SSD is a Windows-first toolkit for preparing an external SSD so Ollama +
 
 For normal usage, you do **not** need to build from source.
 
+- Every commit to `main` and every pull request run produces `Free-AI-SSD.zip` as a GitHub Actions artifact.
+- Official versioned downloads are created from the **Actions** tab using the **Build and Package** workflow.
+- Maintainers click **Run workflow**, choose a version like `0.2.0`, and run it manually.
+- The workflow creates release tag `v0.2.0`, publishes release `v0.2.0`, and attaches `dist/Free-AI-SSD.zip` automatically.
+
+To use the package:
+
 1. Download the `Free-AI-SSD.zip` bundle from GitHub **Releases** or **Actions artifacts**.
 2. Extract the ZIP.
 3. Run `FreeAiSsd.PrepApp.exe`.
