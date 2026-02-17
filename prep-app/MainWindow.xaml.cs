@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.IO;
 using FreeAiSsd.Shared;
 
 namespace FreeAiSsd.PrepApp;
