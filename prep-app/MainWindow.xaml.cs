@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.IO;
 using FreeAiSsd.Shared;
 
 namespace FreeAiSsd.PrepApp;
@@ -184,18 +185,20 @@ public partial class MainWindow : System.Windows.Window
 
     private async Task StageRunnerAsync(string ssdRoot, SsdLogger logger)
     {
-        var sourceRunnerDir = Path.Combine(AppContext.BaseDirectory, "runner-publish");
+        var sourceRunnerDir = ResolveRunnerPublishDirectory();
         var targetRunnerDir = Path.Combine(ssdRoot, SsdLayout.Runner);
         Directory.CreateDirectory(targetRunnerDir);
 
-        if (!Directory.Exists(sourceRunnerDir))
+        if (sourceRunnerDir is null)
         {
-            var hint = "Runner publish folder not found. Re-download the ZIP and ensure runner-publish is next to FreeAiSsd.PrepApp.exe.";
+            var hint = "Runner publish folder not found. Re-download the ZIP and ensure runner-publish is next to FreeAiSsd.PrepApp.exe, or run ./build.ps1 to stage runner artifacts for local development.";
             StatusText.Text = "Finalize failed: runner-publish missing";
             AppendLog(hint);
             logger.Error(hint);
             throw new DirectoryNotFoundException(hint);
         }
+
+        logger.Info($"Using runner payload from: {sourceRunnerDir}");
 
         foreach (var file in Directory.EnumerateFiles(sourceRunnerDir, "*", SearchOption.AllDirectories))
         {
@@ -207,6 +210,54 @@ public partial class MainWindow : System.Windows.Window
 
         await Task.CompletedTask;
         logger.Info("Runner artifacts staged.");
+    }
+
+    private static string? ResolveRunnerPublishDirectory()
+    {
+        var baseDirCandidate = Path.Combine(AppContext.BaseDirectory, "runner-publish");
+        if (DirectoryContainsRunner(baseDirCandidate))
+        {
+            return baseDirCandidate;
+        }
+
+        var repoRoot = FindRepoRoot(AppContext.BaseDirectory);
+        if (repoRoot is null)
+        {
+            return null;
+        }
+
+        var buildConfigurations = new[] { "Release", "Debug" };
+        foreach (var configuration in buildConfigurations)
+        {
+            var candidate = Path.Combine(repoRoot, "prep-app", "bin", configuration, "net8.0-windows", "runner-publish");
+            if (DirectoryContainsRunner(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? FindRepoRoot(string startDirectory)
+    {
+        var directory = new DirectoryInfo(startDirectory);
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "FreeAiSsd.sln")))
+            {
+                return directory.FullName;
+            }
+
+            directory = directory.Parent;
+        }
+
+        return null;
+    }
+
+    private static bool DirectoryContainsRunner(string path)
+    {
+        return Directory.Exists(path) && File.Exists(Path.Combine(path, "FreeAiSsd.Runner.exe"));
     }
 
     private List<string> GetSelectedModels()
