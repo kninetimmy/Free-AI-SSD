@@ -1,176 +1,115 @@
 # Free-AI-SSD
 
-Free-AI-SSD is a Windows-first toolkit for preparing an external SSD so Ollama + selected models can run portably from that SSD across Windows 10/11 machines.
+Prepare a portable SSD with Ollama + LLMs once, then run them offline on any Windows PC.
 
-## Downloads (no local build required)
+## 🚀 Quick Start (No CLI Required)
 
-For normal usage, you do **not** need to build from source.
-
-- Every commit to `main` and every pull request run produces `Free-AI-SSD.zip` as a GitHub Actions artifact.
-- Official versioned downloads are created from the **Actions** tab using the **Build and Package** workflow.
-- Maintainers click **Run workflow**, choose a version like `0.2.0`, and run it manually.
-- The workflow creates release tag `v0.2.0`, publishes release `v0.2.0`, and attaches `dist/Free-AI-SSD.zip` automatically.
-
-To use the package:
-
-1. Download the `Free-AI-SSD.zip` bundle from GitHub **Releases** or **Actions artifacts**.
-2. Extract the ZIP.
+1. Download `Free-AI-SSD.zip` from GitHub Releases.
+2. Extract it anywhere on your Windows machine.
 3. Run `FreeAiSsd.PrepApp.exe`.
-4. Click **Finalize SSD** to:
-   - download/extract Ollama,
-   - pull selected models,
-   - stage the packaged `runner-publish` payload to SSD `runner/`,
-   - write portable config.
+4. Select your external SSD.
+5. Use **Model Manager** to add/select model tags (freeform tags are supported).
+6. Pull your selected models.
+7. Run **Check SSD Readiness** until every check is green.
+8. Click **Finalize SSD**.
+9. On the target PC, run `<SSD>\runner\FreeAiSsd.Runner.exe`.
 
-First setup requires internet access. After finalize completes, the SSD can be used offline.
+Internet is required only while preparing the SSD in PrepApp (download/pull phase). After finalization, Runner is designed to work offline from the SSD.
 
-## Architecture (Iteration 1 Vertical Slice)
+## Downloads
 
-The solution is split into 3 projects:
+### Official Releases
 
-- `prep-app/` (WPF GUI): run on an online host machine to prepare the SSD.
-- `runner/` (WPF GUI): copied to SSD and launched later on any target machine.
-- `shared/` (.NET library): drive inspection, config, download, process, and logging utilities.
+- Official downloads are published on GitHub **Releases**.
+- Maintainers create them manually from **Actions → Build and Package → Run workflow**.
+- Enter a version such as `0.3.0`.
+- The workflow creates tag/release `vX.Y.Z` (for example `v0.3.0`) and attaches `Free-AI-SSD.zip`.
 
-### Chosen Ollama distribution strategy
+### Dev Builds
 
-**Approach:** stage an Ollama Windows binary package on the SSD (portable runtime style) rather than requiring a per-host install.
+- Every CI build also publishes GitHub Actions artifacts.
+- These artifacts are intended for testing/validation, not stable distribution.
 
-- Prep downloads `ollama-windows-amd64.zip` (configurable URL), resumes partial downloads, and extracts it to `tools/ollama` on the SSD.
-- Prep then uses the staged `ollama.exe` with `OLLAMA_MODELS=<SSD>\\models` to pull selected models directly onto SSD.
-- Runner later executes the same staged `ollama.exe` from SSD.
+## Current Features
 
-**Why this approach is reliable for portable/offline goals:**
+### PrepApp (GUI)
 
-- avoids system-wide install requirements on each host,
-- keeps model/data on SSD,
-- supports offline run after prep because runtime + model payloads are pre-staged.
+- Drive selection with safety warnings (for example, filesystem checks).
+- Model Manager:
+  - Add custom model tags (freeform).
+  - Status tracking: `NotInstalled`, `Downloading`, `Installed`, `Failed`.
+  - SHA256 + size tracking for installed models.
+  - Verify model integrity against stored hashes.
+- SSD Readiness checklist with re-verification support.
+- Atomic config writes for `config/portable-config.json`.
 
-If a future Ollama release changes packaging, update the URL and extraction logic in `prep-app`.
+### Runner (GUI)
 
-## SSD Layout
+- Starts/stops Ollama directly from SSD.
+- Uses SSD-stored models and config.
+- Sends prompt → local Ollama API → response.
+- Writes logs to SSD.
 
-Created by prep under SSD root:
+> Removing a model updates config; storage cleanup is not yet implemented.
 
-- `tools/ollama/` - staged Ollama binaries.
-- `models/` - Ollama model store.
-- `models/blobs/` - model blob content.
-- `config/portable-config.json` - persisted portable settings.
-- `logs/` - prep and runner logs.
-- `cache/` - downloaded archives.
-- `runner/` - published runner executable + dependencies.
+## SSD Layout & Integrity
 
-## Offline Mode
+PrepApp creates and uses this SSD layout:
 
-After prep completes:
+- `tools/`
+- `tools/ollama/`
+- `models/`
+- `models/blobs/`
+- `config/`
+- `logs/`
+- `cache/`
+- `runner/`
 
-1. Plug SSD into another Windows PC.
-2. Launch `runner/FreeAiSsd.Runner.exe` from SSD.
-3. Runner reads `config/portable-config.json`, starts `tools/ollama/ollama.exe serve`, and points Ollama storage to SSD.
-4. Runner can send generation requests to local Ollama API without network.
+Integrity behavior:
 
-## Path and process behavior details
+- Ollama archive download supports SHA256 verification.
+- For each model, SHA256, size, and last-verified timestamp are stored in config.
+- **Check SSD Readiness** can re-verify installed models and update verification status.
 
-### Detecting “this SSD” in runner
+## Offline Use
 
-Runner uses `AppContext.BaseDirectory`:
+After PrepApp setup is complete:
 
-- if executable is in `...\\runner\\`, it resolves SSD root to parent folder,
-- then loads `config\\portable-config.json` from SSD root.
+1. Connect the SSD to another Windows PC.
+2. Run `<SSD>\runner\FreeAiSsd.Runner.exe`.
+3. Runner starts Ollama from SSD paths and serves locally.
 
-### Enforcing SSD model/data location
+No internet is required for normal offline inference after assets are prepared.
 
-Both prep and runner set:
+<details>
+<summary><b>Developer / Build from Source (CLI)</b></summary>
 
-- `OLLAMA_MODELS=<SSD>\\models`
-- `OLLAMA_HOST=127.0.0.1:<port>`
+### Prerequisites
 
-Runner also sets `WorkingDirectory` to the staged Ollama folder.
-
-### Port selection/conflicts
-
-Config stores preferred port (default `11434`).
-Runner resolves an available port once at startup, stores it as the active port, and reuses that same port for API calls and browser launch.
-
-### Downloads + integrity
-
-- `DownloadManager` supports resumable archive download via HTTP Range and `.part` files.
-- Optional SHA256 verification is supported when expected hash is provided in `DownloadRequest`.
-- Current vertical slice leaves model integrity to Ollama pull semantics.
-
-### Multiple host machines
-
-Persisted on SSD:
-
-- Ollama runtime package,
-- all pulled models,
-- portable config,
-- logs.
-
-Host-specific state should remain minimal. Some unavoidable temporary writes may occur in system temp directories by .NET/Windows process runtime.
-
-## Current GUI features (vertical slice)
-
-### Prep app
-
-- select target drive,
-- filesystem warning for non-NTFS,
-- choose model list (`llama3.2:3b`, `qwen2.5:3b`),
-- finalize flow:
-  - create folders,
-  - download/extract Ollama package,
-  - pull selected models into SSD model path,
-  - stage runner artifacts,
-  - write config JSON.
-
-### Runner app
-
-- Start/Stop Ollama,
-- model dropdown populated from config,
-- simple prompt textbox + send button using local `/api/generate`,
-- Open browser button for local endpoint,
-- writes logs to SSD `logs/`.
-
-## Build and run
-
-Prerequisites:
-
-- Windows 10/11
+- Windows
 - .NET 8 SDK
-- internet access for prep phase
 
-### Recommended: one-step build + staging
+### Build
+
+```powershell
+dotnet build FreeAiSsd.sln
+```
+
+### Stage runner payload
 
 ```powershell
 ./build.ps1
 ```
 
-`build.ps1` performs all required setup steps:
-
-1. Builds `FreeAiSsd.sln` in Release.
-2. Publishes runner as self-contained single-file `win-x64`.
-3. Copies runner publish output to `prep-app/bin/Release/net8.0-windows/runner-publish/` so prep can stage runner artifacts without manual copy steps.
-
-You can still run the commands manually if needed, but `build.ps1` is the preferred workflow.
-
-### Run prep app
+### Run PrepApp from source
 
 ```powershell
-dotnet run --project prep-app/FreeAiSsd.PrepApp.csproj
+dotnet run --project prep-app
 ```
 
-Select drive, choose models, click **Finalize SSD**.
+Notes:
 
-### Run portable runner from SSD
+- Intended for contributors only.
+- End users should download the ZIP from Releases instead.
 
-```powershell
-<SSD>\\runner\\FreeAiSsd.Runner.exe
-```
-
-## Limitations (known)
-
-- Uses assumed Ollama zip package URL; validate against current official release channel.
-- Model pull progress is logged from CLI output (not token-perfect progress bars yet).
-- No code-signing validation yet; checksum hook exists and should be wired to a trusted manifest.
-- GPU acceleration selection is not implemented yet (defaults to CPU-friendly behavior).
-- AutoRun for removable media is intentionally not used.
+</details>
