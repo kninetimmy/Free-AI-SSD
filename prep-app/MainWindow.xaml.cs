@@ -75,6 +75,7 @@ public partial class MainWindow : System.Windows.Window
             var ollamaExe = ResolveOllamaExe(ollamaDir);
             await PullModelsAsync(ollamaExe, root, selectedModels, logger);
 
+            StatusText.Text = "Staging runner payload...";
             await StageRunnerAsync(root, logger);
 
             var config = new PortableConfig
@@ -93,6 +94,7 @@ public partial class MainWindow : System.Windows.Window
         }
         catch (Exception ex)
         {
+            StatusText.Text = "Finalize failed";
             AppendLog($"Finalize failed: {ex.Message}");
             logger.Error(ex.ToString());
         }
@@ -152,11 +154,16 @@ public partial class MainWindow : System.Windows.Window
 
     private async Task PullModelsAsync(string ollamaExe, string ssdRoot, IReadOnlyList<string> models, SsdLogger logger)
     {
+        var modelPath = Path.Combine(ssdRoot, SsdLayout.Models);
+        var pullPort = NetUtils.FindFreePort(11434);
         var env = new Dictionary<string, string>
         {
-            ["OLLAMA_MODELS"] = Path.Combine(ssdRoot, SsdLayout.Models),
-            ["OLLAMA_HOST"] = "127.0.0.1:11434"
+            ["OLLAMA_MODELS"] = modelPath,
+            ["OLLAMA_HOST"] = $"127.0.0.1:{pullPort}"
         };
+
+        logger.Info($"Using OLLAMA_MODELS={modelPath} for model pulls.");
+        logger.Info($"Using dynamic OLLAMA_HOST port {pullPort} for model pulls.");
 
         foreach (var model in models)
         {
@@ -183,10 +190,11 @@ public partial class MainWindow : System.Windows.Window
 
         if (!Directory.Exists(sourceRunnerDir))
         {
-            var hint = "Runner publish folder not found. Run build.ps1 from repo root to stage runner artifacts for prep-app.";
+            var hint = "Runner publish folder not found. Re-download the ZIP and ensure runner-publish is next to FreeAiSsd.PrepApp.exe.";
+            StatusText.Text = "Finalize failed: runner-publish missing";
             AppendLog(hint);
             logger.Error(hint);
-            return;
+            throw new DirectoryNotFoundException(hint);
         }
 
         foreach (var file in Directory.EnumerateFiles(sourceRunnerDir, "*", SearchOption.AllDirectories))

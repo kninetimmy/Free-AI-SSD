@@ -1,0 +1,88 @@
+name: Build and Package
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore FreeAiSsd.sln
+
+      - name: Build
+        run: dotnet build FreeAiSsd.sln -c Release --no-restore
+
+      - name: Stage runner publish into prep-app
+        shell: pwsh
+        run: ./build.ps1 -Configuration Release -Runtime win-x64
+
+      - name: Publish PrepApp
+        shell: pwsh
+        run: dotnet publish prep-app/FreeAiSsd.PrepApp.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=false -o out/prepapp-publish
+
+      - name: Assemble distributable
+        shell: pwsh
+        run: |
+          $runnerPublishDir = "prep-app/bin/Release/net8.0-windows/runner-publish"
+          if (!(Test-Path $runnerPublishDir)) {
+            throw "runner-publish folder is missing at '$runnerPublishDir'. Ensure build.ps1 completed and staged runner artifacts."
+          }
+
+          if (!(Test-Path (Join-Path $runnerPublishDir "FreeAiSsd.Runner.exe"))) {
+            throw "runner-publish was found, but FreeAiSsd.Runner.exe is missing from '$runnerPublishDir'."
+          }
+
+          $distRoot = "dist/Free-AI-SSD"
+          New-Item -ItemType Directory -Path $distRoot -Force | Out-Null
+
+          Copy-Item "out/prepapp-publish/*" $distRoot -Recurse -Force
+          Copy-Item $runnerPublishDir (Join-Path $distRoot "runner-publish") -Recurse -Force
+          Copy-Item "docs/QUICKSTART.txt" (Join-Path $distRoot "QUICKSTART.txt") -Force
+
+      - name: Create ZIP
+        shell: pwsh
+        run: Compress-Archive -Path dist/Free-AI-SSD/* -DestinationPath dist/Free-AI-SSD.zip -Force
+
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Free-AI-SSD-win-x64
+          path: dist/Free-AI-SSD.zip
+
+      - name: Diagnostics on failure
+        if: failure()
+        shell: pwsh
+        run: |
+          Write-Host "=== out/prepapp-publish ==="
+          if (Test-Path "out/prepapp-publish") {
+            Get-ChildItem "out/prepapp-publish" -Recurse | Select-Object FullName, Length
+          } else {
+            Write-Host "(missing)"
+          }
+
+          Write-Host "=== prep-app/bin/Release/net8.0-windows/runner-publish ==="
+          if (Test-Path "prep-app/bin/Release/net8.0-windows/runner-publish") {
+            Get-ChildItem "prep-app/bin/Release/net8.0-windows/runner-publish" -Recurse | Select-Object FullName, Length
+          } else {
+            Write-Host "(missing)"
+          }
+
+          Write-Host "=== dist ==="
+          if (Test-Path "dist") {
+            Get-ChildItem "dist" -Recurse | Select-Object FullName, Length
+          } else {
+            Write-Host "(missing)"
+          }

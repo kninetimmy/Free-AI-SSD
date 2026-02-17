@@ -1,0 +1,24 @@
+Free-AI-SSD Quickstart (Windows)
+
+1) Download the latest Free-AI-SSD ZIP from either:
+   - GitHub Releases, or
+   - GitHub Actions build artifacts.
+
+2) Extract the ZIP to a normal folder on your PC.
+
+3) Run FreeAiSsd.PrepApp.exe from the extracted folder.
+
+4) In PrepApp, choose your SSD and click "Finalize SSD".
+   PrepApp package already includes the runner payload (runner-publish)
+   and will stage it onto the SSD automatically.
+
+5) Keep internet available during first setup.
+   PrepApp downloads/extracts Ollama and pulls selected models.
+
+6) After finalize succeeds, use the SSD offline:
+   - plug into another Windows machine
+   - run <SSD>\runner\FreeAiSsd.Runner.exe
+
+Notes
+- "Complete" means all setup steps succeeded (including runner staging).
+- If runner-publish is missing/corrupt, Finalize fails with a clear error.
