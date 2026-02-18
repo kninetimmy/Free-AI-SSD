@@ -28,6 +28,8 @@ public sealed class PortableConfig
     public List<ModelConfigEntry> Models { get; set; } = new();
     public string PreferredCompute { get; set; } = "cpu";
     public DateTime PreparedAtUtc { get; set; } = DateTime.UtcNow;
+    public bool IsEncrypted { get; set; }
+    public string? EncryptionScheme { get; set; }
 
     [JsonIgnore]
     public string ConfigRelativePath => @"config\\portable-config.json";
