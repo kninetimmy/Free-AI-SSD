@@ -151,7 +151,7 @@
 
             <StackPanel Orientation="Horizontal">
                 <Button x:Name="FinalizeButton" Content="Finalize SSD" Padding="16,8" Click="Finalize_Click"/>
-                <Button Content="Check SSD Readiness" Padding="16,8" Margin="8,0,0,0" Click="CheckReadiness_Click"/>
+                <Button x:Name="CheckReadinessButton" Content="Check SSD Readiness" Padding="16,8" Margin="8,0,0,0" Click="CheckReadiness_Click"/>
                 <Button x:Name="CheckPrereqUpdatesButton" Content="Check for prereq updates" Padding="16,8" Margin="8,0,0,0" Click="CheckPrereqUpdates_Click"/>
                 <ProgressBar x:Name="Progress" Width="250" Height="22" Margin="12,0,0,0"/>
                 <TextBlock x:Name="StatusText" Margin="12,0,0,0" VerticalAlignment="Center"/>
