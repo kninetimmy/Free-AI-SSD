@@ -30,6 +30,7 @@ public partial class MainWindow : System.Windows.Window
     private bool _suppressPrepTargetPersistence;
     private bool _macFallbackDialogShown;
     private readonly List<StarterModelRow> _starterModelRows = new();
+    private bool _isSelectedDriveEncrypted;
 
     public MainWindow()
     {
@@ -54,14 +55,18 @@ public partial class MainWindow : System.Windows.Window
         var drives = DriveInspector.GetCandidateDrives(includeFixed);
         DriveCombo.ItemsSource = drives;
         DriveCombo.SelectedIndex = drives.Count > 0 ? 0 : -1;
+        RefreshSelectedDriveEncryptionState();
         UpdateWarning();
+        UpdateModelActionButtons();
         RefreshStarterModelSizingWarnings();
         _ = RefreshModelStatusesForSelectedDriveAsync();
     }
 
     private void DriveCombo_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
+        RefreshSelectedDriveEncryptionState();
         UpdateWarning();
+        UpdateModelActionButtons();
         RefreshStarterModelSizingWarnings();
         _ = RefreshModelStatusesForSelectedDriveAsync();
     }
@@ -172,6 +177,11 @@ public partial class MainWindow : System.Windows.Window
             return;
         }
 
+        if (!EnsureSelectedDriveWritableForPrep("Add model"))
+        {
+            return;
+        }
+
         var configPath = GetConfigPath(drive.RootPath);
         SsdLayout.EnsureStructure(drive.RootPath);
         var config = await PortableConfig.LoadAsync(configPath);
@@ -252,6 +262,11 @@ public partial class MainWindow : System.Windows.Window
             return;
         }
 
+        if (!EnsureSelectedDriveWritableForPrep("Add starter models"))
+        {
+            return;
+        }
+
         var configPath = GetConfigPath(drive.RootPath);
         SsdLayout.EnsureStructure(drive.RootPath);
         var config = await PortableConfig.LoadAsync(configPath);
@@ -291,7 +306,7 @@ public partial class MainWindow : System.Windows.Window
     private void UpdateStarterCatalogButtons()
     {
         var hasSelection = _starterModelRows.Any(r => r.IsSelected);
-        AddStarterModelsButton.IsEnabled = !_isModelOperationRunning && hasSelection;
+        AddStarterModelsButton.IsEnabled = !_isModelOperationRunning && !_isSelectedDriveEncrypted && hasSelection;
         ClearStarterModelsSelectionButton.IsEnabled = hasSelection;
     }
 
@@ -300,6 +315,11 @@ public partial class MainWindow : System.Windows.Window
         if (DriveCombo.SelectedItem is not DriveTarget drive)
         {
             AppendLog("Select a target drive first.");
+            return;
+        }
+
+        if (!EnsureSelectedDriveWritableForPrep("Add on-disk model to config"))
+        {
             return;
         }
 
@@ -324,6 +344,11 @@ public partial class MainWindow : System.Windows.Window
 
     private async void PullInstall_Click(object sender, System.Windows.RoutedEventArgs e)
     {
+        if (!EnsureSelectedDriveWritableForPrep("Pull/install model"))
+        {
+            return;
+        }
+
         var selected = GetSelectedModelRows().Where(r => !r.IsOnDiskOnly).Select(r => r.Name).Take(1).ToList();
         if (selected.Count == 0)
         {
@@ -362,6 +387,11 @@ public partial class MainWindow : System.Windows.Window
 
     private async void PullSelected_Click(object sender, System.Windows.RoutedEventArgs e)
     {
+        if (!EnsureSelectedDriveWritableForPrep("Pull selected models"))
+        {
+            return;
+        }
+
         var selected = GetSelectedModelRows().Where(r => !r.IsOnDiskOnly).Select(r => r.Name).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (selected.Count == 0)
         {
@@ -409,6 +439,11 @@ public partial class MainWindow : System.Windows.Window
         if (DriveCombo.SelectedItem is not DriveTarget drive)
         {
             AppendLog("Select a target drive first.");
+            return;
+        }
+
+        if (!EnsureSelectedDriveWritableForPrep("Pull model operation"))
+        {
             return;
         }
 
@@ -495,6 +530,11 @@ public partial class MainWindow : System.Windows.Window
             return;
         }
 
+        if (!EnsureSelectedDriveWritableForPrep("Verify model"))
+        {
+            return;
+        }
+
         var selected = GetSelectedModelRows().Where(r => !r.IsOnDiskOnly).Select(r => r.Name).Take(1).ToList();
         if (selected.Count == 0)
         {
@@ -549,6 +589,11 @@ public partial class MainWindow : System.Windows.Window
         if (DriveCombo.SelectedItem is not DriveTarget drive)
         {
             AppendLog("Select a target drive first.");
+            return;
+        }
+
+        if (!EnsureSelectedDriveWritableForPrep("Remove/delete model"))
+        {
             return;
         }
 
@@ -642,6 +687,11 @@ public partial class MainWindow : System.Windows.Window
             return;
         }
 
+        if (!EnsureSelectedDriveWritableForPrep("Format and prepare drive"))
+        {
+            return;
+        }
+
         if (!drive.IsRemovable)
         {
             System.Windows.MessageBox.Show("Formatting is only allowed for removable drives.", "Not allowed", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
@@ -717,6 +767,11 @@ public partial class MainWindow : System.Windows.Window
             return;
         }
 
+        if (!EnsureSelectedDriveWritableForPrep("Finalize SSD"))
+        {
+            return;
+        }
+
         if (!ConfirmDriveSelection(drive))
         {
             AppendLog("Finalize cancelled.");
@@ -724,18 +779,6 @@ public partial class MainWindow : System.Windows.Window
         }
 
         var root = drive.RootPath;
-        if (SsdEncryption.IsEncryptionEnabled(root))
-        {
-            System.Windows.MessageBox.Show(
-                "This SSD is already encrypted. Re-preparing encrypted drives is not supported yet.",
-                "Finalize blocked",
-                System.Windows.MessageBoxButton.OK,
-                System.Windows.MessageBoxImage.Warning);
-            AppendLog("Finalize blocked: drive is already encrypted.");
-            StatusText.Text = "Finalize blocked";
-            return;
-        }
-
         var logger = new SsdLogger(root, "prep");
         var enableEncryption = EnableDriveEncryptionCheckBox?.IsChecked == true;
         try
@@ -1340,6 +1383,11 @@ public partial class MainWindow : System.Windows.Window
             return;
         }
 
+        if (!EnsureSelectedDriveWritableForPrep("Check prerequisite updates"))
+        {
+            return;
+        }
+
         var logger = new SsdLogger(drive.RootPath, "prep");
         var manifestPath = PrereqCatalog.GetManifestPath(drive.RootPath);
         var manifest = PrereqManifest.Load(manifestPath);
@@ -1365,6 +1413,11 @@ public partial class MainWindow : System.Windows.Window
         if (DriveCombo.SelectedItem is not DriveTarget drive)
         {
             AppendLog("Select a target drive first.");
+            return;
+        }
+
+        if (!EnsureSelectedDriveWritableForPrep("Check SSD readiness"))
+        {
             return;
         }
 
@@ -1606,9 +1659,46 @@ public partial class MainWindow : System.Windows.Window
             .ToList();
     }
 
+    private void RefreshSelectedDriveEncryptionState()
+    {
+        _isSelectedDriveEncrypted = DriveCombo.SelectedItem is DriveTarget drive
+            && SsdEncryption.IsEncryptionEnabled(drive.RootPath);
+        if (_isSelectedDriveEncrypted && !_isModelOperationRunning)
+        {
+            StatusText.Text = "Encrypted drive selected (read-only in PrepApp)";
+        }
+    }
+
+    private bool EnsureSelectedDriveWritableForPrep(string operationName)
+    {
+        RefreshSelectedDriveEncryptionState();
+        if (!PrepDriveWriteGuard.IsWriteBlocked(_isSelectedDriveEncrypted))
+        {
+            return true;
+        }
+
+        var message = PrepDriveWriteGuard.BuildBlockedOperationMessage(operationName);
+        StatusText.Text = "Encrypted drive selected (read-only in PrepApp)";
+        AppendLog(message);
+        UpdateWarning();
+        UpdateModelActionButtons();
+        return false;
+    }
+
     private void UpdateWarning()
     {
-        WarningText.Text = DriveCombo.SelectedItem is DriveTarget d ? d.Warning : string.Empty;
+        var warnings = new List<string>();
+        if (DriveCombo.SelectedItem is DriveTarget drive && !string.IsNullOrWhiteSpace(drive.Warning))
+        {
+            warnings.Add(drive.Warning);
+        }
+
+        if (_isSelectedDriveEncrypted)
+        {
+            warnings.Add(PrepDriveWriteGuard.ReadOnlyReason);
+        }
+
+        WarningText.Text = string.Join(Environment.NewLine, warnings);
     }
 
     private void AppendLog(string line)
@@ -1637,17 +1727,7 @@ public partial class MainWindow : System.Windows.Window
     private void SetModelOperationUiState(bool running, string? status = null)
     {
         _isModelOperationRunning = running;
-        FinalizeButton.IsEnabled = !running;
-        AddModelButton.IsEnabled = !running;
-        PullInstallButton.IsEnabled = !running && GetSelectedModelRows().Any(r => !r.IsOnDiskOnly);
-        VerifyButton.IsEnabled = !running && GetSelectedModelRows().Any(r => !r.IsOnDiskOnly);
-        RemoveButton.IsEnabled = !running && GetSelectedModelRows().Count > 0;
-        PullSelectedButton.IsEnabled = !running && GetSelectedModelRows().Any(r => !r.IsOnDiskOnly);
-        AddOrphanButton.IsEnabled = !running && GetSelectedModelRows().Any(r => r.IsOnDiskOnly);
-        CancelOperationButton.IsEnabled = running;
-        FormatPrepareButton.IsEnabled = !running && DriveCombo.SelectedItem is DriveTarget d && d.IsRemovable;
-        CheckPrereqUpdatesButton.IsEnabled = !running;
-        UpdateStarterCatalogButtons();
+        UpdateModelActionButtons();
         if (!string.IsNullOrWhiteSpace(status))
         {
             StatusText.Text = status;
@@ -1656,16 +1736,27 @@ public partial class MainWindow : System.Windows.Window
 
     private void UpdateModelActionButtons()
     {
+        RefreshSelectedDriveEncryptionState();
         var selected = GetSelectedModelRows();
+        var selectedDrive = DriveCombo.SelectedItem as DriveTarget;
+        var hasDriveSelected = selectedDrive is not null;
         var hasConfiguredSelection = selected.Any(r => !r.IsOnDiskOnly);
         var hasOrphanedSelection = selected.Any(r => r.IsOnDiskOnly);
-        PullInstallButton.IsEnabled = !_isModelOperationRunning && hasConfiguredSelection;
-        VerifyButton.IsEnabled = !_isModelOperationRunning && hasConfiguredSelection;
-        RemoveButton.IsEnabled = !_isModelOperationRunning && selected.Count > 0;
-        PullSelectedButton.IsEnabled = !_isModelOperationRunning && hasConfiguredSelection;
-        AddOrphanButton.IsEnabled = !_isModelOperationRunning && hasOrphanedSelection;
-        FormatPrepareButton.IsEnabled = !_isModelOperationRunning && DriveCombo.SelectedItem is DriveTarget d && d.IsRemovable;
-        CheckPrereqUpdatesButton.IsEnabled = !_isModelOperationRunning && DriveCombo.SelectedItem is not null;
+        var canMutateDrive = !_isModelOperationRunning && !_isSelectedDriveEncrypted;
+
+        AddModelButton.IsEnabled = canMutateDrive && hasDriveSelected;
+        ModelTagText.IsEnabled = canMutateDrive;
+        FinalizeButton.IsEnabled = canMutateDrive && hasDriveSelected;
+        EnableDriveEncryptionCheckBox.IsEnabled = canMutateDrive && hasDriveSelected;
+        PullInstallButton.IsEnabled = canMutateDrive && hasConfiguredSelection;
+        VerifyButton.IsEnabled = canMutateDrive && hasConfiguredSelection;
+        RemoveButton.IsEnabled = canMutateDrive && selected.Count > 0;
+        PullSelectedButton.IsEnabled = canMutateDrive && hasConfiguredSelection;
+        AddOrphanButton.IsEnabled = canMutateDrive && hasOrphanedSelection;
+        CancelOperationButton.IsEnabled = _isModelOperationRunning && !_isSelectedDriveEncrypted;
+        FormatPrepareButton.IsEnabled = canMutateDrive && selectedDrive?.IsRemovable == true;
+        CheckPrereqUpdatesButton.IsEnabled = canMutateDrive && hasDriveSelected;
+        CheckReadinessButton.IsEnabled = canMutateDrive && hasDriveSelected;
         UpdateStarterCatalogButtons();
     }
 
