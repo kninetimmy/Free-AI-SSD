@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -28,6 +29,7 @@ public partial class MainWindow : System.Windows.Window
     private MacArtifactAvailabilityResult _macArtifactAvailability = MacArtifactAvailability.Evaluate(AppContext.BaseDirectory);
     private bool _suppressPrepTargetPersistence;
     private bool _macFallbackDialogShown;
+    private readonly List<StarterModelRow> _starterModelRows = new();
 
     public MainWindow()
     {
@@ -39,6 +41,7 @@ public partial class MainWindow : System.Windows.Window
         UpdateModelActionButtons();
         _systemRamGb = SystemResources.GetTotalSystemRamGb();
         _gpuVramGb = SystemResources.GetGpuVramGb();
+        LoadStarterCatalog();
     }
 
     private void RefreshDrives_Click(object sender, System.Windows.RoutedEventArgs e) => LoadDrives();
@@ -52,12 +55,14 @@ public partial class MainWindow : System.Windows.Window
         DriveCombo.ItemsSource = drives;
         DriveCombo.SelectedIndex = drives.Count > 0 ? 0 : -1;
         UpdateWarning();
+        RefreshStarterModelSizingWarnings();
         _ = RefreshModelStatusesForSelectedDriveAsync();
     }
 
     private void DriveCombo_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
         UpdateWarning();
+        RefreshStarterModelSizingWarnings();
         _ = RefreshModelStatusesForSelectedDriveAsync();
     }
 
@@ -175,6 +180,119 @@ public partial class MainWindow : System.Windows.Window
         await RefreshModelStatusesForSelectedDriveAsync();
         ModelTagText.Text = string.Empty;
         AppendLog($"Added model '{tag}' to config.");
+    }
+
+    private void LoadStarterCatalog()
+    {
+        var loadResult = StarterModelCatalogLoader.Load(AppContext.BaseDirectory);
+        if (!string.IsNullOrWhiteSpace(loadResult.Warning))
+        {
+            StarterCatalogWarningText.Text = loadResult.Warning;
+            StarterCatalogWarningText.Visibility = System.Windows.Visibility.Visible;
+            AppendLog(loadResult.Warning);
+        }
+        else
+        {
+            StarterCatalogWarningText.Text = string.Empty;
+            StarterCatalogWarningText.Visibility = System.Windows.Visibility.Collapsed;
+        }
+
+        var tierOrder = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Small"] = 0,
+            ["Medium"] = 1,
+            ["Large"] = 2
+        };
+
+        _starterModelRows.Clear();
+        foreach (var entry in loadResult.Catalog.Models
+                     .OrderBy(m => tierOrder.TryGetValue(m.SizeTier, out var order) ? order : int.MaxValue)
+                     .ThenBy(m => m.Tag, StringComparer.OrdinalIgnoreCase))
+        {
+            _starterModelRows.Add(new StarterModelRow(
+                entry.Tag,
+                entry.Params,
+                entry.SizeTier,
+                entry.Description,
+                string.Join(", ", entry.UseCases),
+                string.Empty));
+        }
+
+        var collectionView = new System.Windows.Data.ListCollectionView(_starterModelRows);
+        collectionView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(StarterModelRow.SizeTier)));
+        StarterModelGrid.ItemsSource = collectionView;
+        RefreshStarterModelSizingWarnings();
+        UpdateStarterCatalogButtons();
+    }
+
+    private void RefreshStarterModelSizingWarnings()
+    {
+        var freeDiskGb = DriveCombo.SelectedItem is DriveTarget drive ? SystemResources.GetFreeDiskSpaceGb(drive.RootPath) : null;
+        foreach (var row in _starterModelRows)
+        {
+            var warnings = GetSizingWarnings(row.Tag, freeDiskGb);
+            row.SizingWarning = warnings.Count == 0 ? "OK" : string.Join("; ", warnings);
+        }
+
+        StarterModelGrid.Items.Refresh();
+    }
+
+    private async void AddSelectedStarterModels_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        var selectedRows = _starterModelRows.Where(r => r.IsSelected).ToList();
+        if (selectedRows.Count == 0)
+        {
+            AppendLog("Select one or more starter models first.");
+            return;
+        }
+
+        if (DriveCombo.SelectedItem is not DriveTarget drive)
+        {
+            AppendLog("Select a target drive first.");
+            return;
+        }
+
+        var configPath = GetConfigPath(drive.RootPath);
+        SsdLayout.EnsureStructure(drive.RootPath);
+        var config = await PortableConfig.LoadAsync(configPath);
+
+        foreach (var row in selectedRows)
+        {
+            UpsertModel(config.Models, row.Tag, ModelInstallStatus.NotInstalled);
+            AppendLog($"Added starter model '{row.Tag}' to config.");
+        }
+
+        await config.SaveAsync(configPath);
+        await RefreshModelStatusesForSelectedDriveAsync();
+        ClearStarterSelection();
+    }
+
+    private void ClearStarterModelSelection_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        ClearStarterSelection();
+    }
+
+    private void ClearStarterSelection()
+    {
+        foreach (var row in _starterModelRows)
+        {
+            row.IsSelected = false;
+        }
+
+        StarterModelGrid.Items.Refresh();
+        UpdateStarterCatalogButtons();
+    }
+
+    private void StarterModelSelectionChanged(object sender, System.Windows.RoutedEventArgs e)
+    {
+        UpdateStarterCatalogButtons();
+    }
+
+    private void UpdateStarterCatalogButtons()
+    {
+        var hasSelection = _starterModelRows.Any(r => r.IsSelected);
+        AddStarterModelsButton.IsEnabled = !_isModelOperationRunning && hasSelection;
+        ClearStarterModelsSelectionButton.IsEnabled = hasSelection;
     }
 
     private async void AddOrphanToConfig_Click(object sender, System.Windows.RoutedEventArgs e)
@@ -1471,6 +1589,7 @@ public partial class MainWindow : System.Windows.Window
         CancelOperationButton.IsEnabled = running;
         FormatPrepareButton.IsEnabled = !running && DriveCombo.SelectedItem is DriveTarget d && d.IsRemovable;
         CheckPrereqUpdatesButton.IsEnabled = !running;
+        UpdateStarterCatalogButtons();
         if (!string.IsNullOrWhiteSpace(status))
         {
             StatusText.Text = status;
@@ -1489,6 +1608,7 @@ public partial class MainWindow : System.Windows.Window
         AddOrphanButton.IsEnabled = !_isModelOperationRunning && hasOrphanedSelection;
         FormatPrepareButton.IsEnabled = !_isModelOperationRunning && DriveCombo.SelectedItem is DriveTarget d && d.IsRemovable;
         CheckPrereqUpdatesButton.IsEnabled = !_isModelOperationRunning && DriveCombo.SelectedItem is not null;
+        UpdateStarterCatalogButtons();
     }
 
     private static bool IsRunningAsAdministrator()
@@ -1548,4 +1668,22 @@ public partial class MainWindow : System.Windows.Window
     }
 
     private sealed record ModelGridRow(string Name, string Status, string Source, string SizingWarning, string SizeDisplay, string ShaPreview, string LastVerifiedDisplay, bool IsOnDiskOnly);
+
+    private sealed class StarterModelRow(
+        string tag,
+        string @params,
+        string sizeTier,
+        string description,
+        string useCasesDisplay,
+        string sizingWarning)
+    {
+        public bool IsSelected { get; set; }
+        public string Tag { get; } = tag;
+        public string Params { get; } = @params;
+        public string SizeTier { get; } = sizeTier;
+        public string Description { get; } = description;
+        public string UseCasesDisplay { get; } = useCasesDisplay;
+        public string SizingWarning { get; set; } = sizingWarning;
+    }
 }
+

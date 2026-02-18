@@ -10,4 +10,10 @@
   <ItemGroup>
     <ProjectReference Include="..\shared\FreeAiSsd.Shared.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Content Include="Resources\starter-models.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <EmbeddedResource Include="Resources\starter-models.json" />
+  </ItemGroup>
 </Project>

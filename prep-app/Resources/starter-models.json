@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "models": [
+    {
+      "tag": "llama3.2:1b",
+      "params": "1B",
+      "sizeTier": "Small",
+      "useCases": ["fast", "low-ram", "laptop"],
+      "description": "Very lightweight assistant for quick prompts, notes, and short summaries."
+    },
+    {
+      "tag": "llama3.2:3b",
+      "params": "3B",
+      "sizeTier": "Small",
+      "useCases": ["general", "fast", "laptop"],
+      "description": "Balanced small model for everyday Q&A and document summaries."
+    },
+    {
+      "tag": "qwen2.5:3b",
+      "params": "3B",
+      "sizeTier": "Small",
+      "useCases": ["reasoning", "general", "laptop"],
+      "description": "Strong small general model with good instruction-following quality."
+    },
+    {
+      "tag": "gemma2:2b",
+      "params": "2B",
+      "sizeTier": "Small",
+      "useCases": ["fast", "starter", "cpu-friendly"],
+      "description": "Good starter option when hardware is limited and responsiveness matters."
+    },
+    {
+      "tag": "mistral:7b",
+      "params": "7B",
+      "sizeTier": "Medium",
+      "useCases": ["chat", "general", "stable"],
+      "description": "Reliable 7B default for broad conversational and assistant tasks."
+    },
+    {
+      "tag": "qwen2.5:7b",
+      "params": "7B",
+      "sizeTier": "Medium",
+      "useCases": ["reasoning", "coding", "general"],
+      "description": "Versatile 7B model with solid reasoning and coding support."
+    },
+    {
+      "tag": "llama3.1:8b",
+      "params": "8B",
+      "sizeTier": "Medium",
+      "useCases": ["general", "quality", "chat"],
+      "description": "High-quality default model for assistant-style workflows."
+    },
+    {
+      "tag": "llama3:8b",
+      "params": "8B",
+      "sizeTier": "Medium",
+      "useCases": ["general", "chat", "common"],
+      "description": "Commonly used 8B option that is easy to get running with Ollama."
+    },
+    {
+      "tag": "gemma2:9b",
+      "params": "9B",
+      "sizeTier": "Medium",
+      "useCases": ["reasoning", "writing", "analysis"],
+      "description": "Good quality/size balance for analysis and longer written responses."
+    },
+    {
+      "tag": "phi3:14b",
+      "params": "14B",
+      "sizeTier": "Large",
+      "useCases": ["quality", "reasoning", "longer-context"],
+      "description": "Higher-quality responses for deeper reasoning on stronger hardware."
+    },
+    {
+      "tag": "qwen2.5:14b",
+      "params": "14B",
+      "sizeTier": "Large",
+      "useCases": ["reasoning", "coding", "quality"],
+      "description": "Powerful 14B model for tougher coding and multi-step reasoning tasks."
+    },
+    {
+      "tag": "codellama:13b",
+      "params": "13B",
+      "sizeTier": "Large",
+      "useCases": ["coding", "refactor", "code-review"],
+      "description": "Larger coding-focused model for code generation and review workflows."
+    }
+  ]
+}
