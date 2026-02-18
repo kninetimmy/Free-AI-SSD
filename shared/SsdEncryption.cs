@@ -26,7 +26,7 @@ public static class SsdEncryption
 
         try
         {
-            var state = JsonSerializer.Deserialize<EncryptionState>(File.ReadAllText(statePath));
+            var state = JsonSerializer.Deserialize<EncryptionState>(File.ReadAllText(statePath), JsonOptions());
             return state?.Enabled == true;
         }
         catch
@@ -115,8 +115,8 @@ public static class SsdEncryption
         EncryptedConfig? encrypted;
         try
         {
-            state = JsonSerializer.Deserialize<EncryptionState>(File.ReadAllText(statePath));
-            encrypted = JsonSerializer.Deserialize<EncryptedConfig>(File.ReadAllText(encryptedPath));
+            state = JsonSerializer.Deserialize<EncryptionState>(File.ReadAllText(statePath), JsonOptions());
+            encrypted = JsonSerializer.Deserialize<EncryptedConfig>(File.ReadAllText(encryptedPath), JsonOptions());
         }
         catch
         {
