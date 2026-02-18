@@ -32,6 +32,10 @@ jobs:
           global-json-file: global.json
       - run: dotnet restore FreeAiSsd.sln
       - run: dotnet build FreeAiSsd.sln -c Release --no-restore
+      - name: Compile WPF apps (guard rail)
+        run: |
+          dotnet build prep-app/FreeAiSsd.PrepApp.csproj -c Release --no-restore -v:minimal
+          dotnet build runner/FreeAiSsd.Runner.csproj -c Release --no-restore -v:minimal
       - name: Stage runner publish into prep-app
         shell: pwsh
         run: ./build.ps1 -Configuration Release -Runtime win-x64
