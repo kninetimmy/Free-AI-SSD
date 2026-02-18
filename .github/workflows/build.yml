@@ -170,6 +170,16 @@ jobs:
             New-Item -ItemType Directory -Path (Join-Path $betaRoot "mac") -Force | Out-Null
             Copy-Item "in/mac/Runner.app.zip" (Join-Path $betaRoot "mac/Runner.app.zip") -Force
             Copy-Item "in/windows/out/mac/tools" (Join-Path $betaRoot "mac/tools") -Recurse -Force
+
+            $macManifest = [ordered]@{
+              schemaVersion = 1
+              artifacts = @(
+                [ordered]@{ id = "mac_runner"; relativePath = "mac/Runner.app.zip" },
+                [ordered]@{ id = "mac_ollama"; relativePath = "mac/tools/ollama/ollama-darwin.zip" },
+                [ordered]@{ id = "mac_ollama_manifest"; relativePath = "mac/tools/ollama/mac-tools-manifest.json" }
+              )
+            }
+            $macManifest | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $betaRoot "mac/mac-artifacts.manifest.json") -Encoding UTF8
           }
       - name: Create Windows ZIP
         shell: pwsh

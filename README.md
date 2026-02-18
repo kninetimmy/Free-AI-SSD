@@ -12,7 +12,7 @@ Prepare a portable SSD with Ollama + LLMs once, then run them offline on Windows
 6. Pull your selected models.
 7. Run **Check SSD Readiness** until every check is green.
 8. Click **Finalize SSD**.
-9. In Drive Preparation select target OS: **Windows**, **macOS**, or **Both**.
+9. In Drive Preparation select target OS. In **stable** (`Free-AI-SSD-win.zip`) builds, only Windows prep is available. In **beta cross-platform** builds, Windows, macOS, or Both are available.
 10. On target machine:
    - Windows: run `<SSD>\windows\runner\FreeAiSsd.Runner.exe`
    - macOS: open `<SSD>/mac/Runner.app`
@@ -24,9 +24,8 @@ Internet is required only while preparing the SSD in PrepApp (download/pull phas
 ### Official Releases
 
 - Official downloads are published on GitHub **Releases**.
-- **Windows Stable ZIP (recommended):** `Free-AI-SSD-win.zip`.
-- **Optional beta cross-platform ZIP:** `Free-AI-SSD-beta-crossplatform.zip`.
-  - Includes experimental macOS support.
+- **Windows Stable ZIP (recommended):** `Free-AI-SSD-win.zip` (Windows-only prep; mac options are hidden/disabled).
+- **Optional beta cross-platform ZIP:** `Free-AI-SSD-beta-crossplatform.zip` (includes `mac/mac-artifacts.manifest.json` + mac payloads; enables mac prep).
   - Unsigned for now and may trigger Gatekeeper warnings.
 - Maintainers create releases manually from **Actions → Build and Package → Run workflow**.
   - `include_macos=false` → produces only `Free-AI-SSD-win.zip`.
