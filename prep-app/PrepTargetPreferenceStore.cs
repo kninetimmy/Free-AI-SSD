@@ -1,3 +1,8 @@
+using System;
+using System.IO;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace FreeAiSsd.PrepApp;
 
 public sealed class PrepTargetPreferenceStore
@@ -26,7 +31,7 @@ public sealed class PrepTargetPreferenceStore
                 return PrepTargets.Windows;
             }
 
-            return Enum.TryParse<PrepTargets>(model.PrepTargets, out var parsed) && parsed != PrepTargets.None
+            return Enum.TryParse<PrepTargets>(model.PrepTargetsValue, out var parsed) && parsed != PrepTargets.None
                 ? parsed
                 : PrepTargets.Windows;
         }
@@ -41,7 +46,7 @@ public sealed class PrepTargetPreferenceStore
         var safeTargets = targets == PrepTargets.None ? PrepTargets.Windows : targets;
         var model = new PrepAppSettings
         {
-            PrepTargets = safeTargets.ToString()
+            PrepTargetsValue = safeTargets.ToString()
         };
 
         var json = JsonSerializer.Serialize(model, new JsonSerializerOptions { WriteIndented = true });
@@ -50,10 +55,10 @@ public sealed class PrepTargetPreferenceStore
 
     private sealed class PrepAppSettings
     {
-        [System.Text.Json.Serialization.JsonPropertyName("schemaVersion")]
+        [JsonPropertyName("schemaVersion")]
         public int SchemaVersion { get; init; } = 1;
 
-        [System.Text.Json.Serialization.JsonPropertyName("prepTargets")]
-        public string PrepTargets { get; init; } = nameof(PrepTargets.Windows);
+        [JsonPropertyName("prepTargets")]
+        public string PrepTargetsValue { get; init; } = nameof(FreeAiSsd.PrepApp.PrepTargets.Windows);
     }
 }

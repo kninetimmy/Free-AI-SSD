@@ -1,4 +1,8 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace FreeAiSsd.PrepApp;
 
@@ -38,17 +42,7 @@ public static class MacArtifactAvailability
                     return MacArtifactAvailabilityResult.Unavailable(IncompleteManifestMessage);
                 }
 
-                if (Path.IsPathRooted(artifact.RelativePath))
-                {
-                    return MacArtifactAvailabilityResult.Unavailable(IncompleteManifestMessage);
-                }
-
-                string fullPath;
-                try
-                {
-                    fullPath = PathGuards.EnsureUnderRoot(appDirectory, Path.Combine(appDirectory, artifact.RelativePath));
-                }
-                catch
+                if (!TryResolveUnderAppDirectory(appDirectory, artifact.RelativePath, out var fullPath))
                 {
                     return MacArtifactAvailabilityResult.Unavailable(IncompleteManifestMessage);
                 }
@@ -67,21 +61,47 @@ public static class MacArtifactAvailability
         return MacArtifactAvailabilityResult.Available();
     }
 
+    private static bool TryResolveUnderAppDirectory(string appDirectory, string relativePath, out string fullPath)
+    {
+        fullPath = string.Empty;
+
+        if (Path.IsPathRooted(relativePath))
+        {
+            return false;
+        }
+
+        var normalizedAppDir = Path.GetFullPath(appDirectory);
+        var normalizedAppDirWithSeparator = normalizedAppDir.EndsWith(Path.DirectorySeparatorChar)
+            ? normalizedAppDir
+            : normalizedAppDir + Path.DirectorySeparatorChar;
+
+        var combinedPath = Path.Combine(normalizedAppDir, relativePath);
+        var normalizedArtifactPath = Path.GetFullPath(combinedPath);
+
+        if (!normalizedArtifactPath.StartsWith(normalizedAppDirWithSeparator, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        fullPath = normalizedArtifactPath;
+        return true;
+    }
+
     private sealed class MacArtifactsManifest
     {
-        [System.Text.Json.Serialization.JsonPropertyName("schemaVersion")]
+        [JsonPropertyName("schemaVersion")]
         public int SchemaVersion { get; init; }
 
-        [System.Text.Json.Serialization.JsonPropertyName("artifacts")]
+        [JsonPropertyName("artifacts")]
         public List<MacArtifactEntry> Artifacts { get; init; } = new();
     }
 
     private sealed class MacArtifactEntry
     {
-        [System.Text.Json.Serialization.JsonPropertyName("id")]
+        [JsonPropertyName("id")]
         public string Id { get; init; } = string.Empty;
 
-        [System.Text.Json.Serialization.JsonPropertyName("relativePath")]
+        [JsonPropertyName("relativePath")]
         public string RelativePath { get; init; } = string.Empty;
     }
 }
