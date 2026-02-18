@@ -24,10 +24,15 @@ public partial class MainWindow : System.Windows.Window
     private bool _isModelOperationRunning;
     private int? _systemRamGb;
     private int? _gpuVramGb;
+    private readonly PrepTargetPreferenceStore _prepTargetPreferenceStore = new();
+    private MacArtifactAvailabilityResult _macArtifactAvailability = MacArtifactAvailability.Evaluate(AppContext.BaseDirectory);
+    private bool _suppressPrepTargetPersistence;
+    private bool _macFallbackDialogShown;
 
     public MainWindow()
     {
         InitializeComponent();
+        ApplyMacArtifactAvailability(forceDialogForPersistedMacPreference: true);
         LoadDrives();
         RefreshModelStatusGrid(Array.Empty<ModelConfigEntry>(), Array.Empty<string>());
         RefreshReadinessGrid(Array.Empty<ReadinessItem>());
@@ -62,6 +67,89 @@ public partial class MainWindow : System.Windows.Window
         if (PrepareWindowsCheckBox?.IsChecked == true) targets |= PrepTargets.Windows;
         if (PrepareMacCheckBox?.IsChecked == true) targets |= PrepTargets.Mac;
         return targets;
+    }
+
+
+    private void PrepTargetSelectionChanged(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_suppressPrepTargetPersistence)
+        {
+            return;
+        }
+
+        PersistPrepTargetSelection();
+    }
+
+    private void ApplyMacArtifactAvailability(bool forceDialogForPersistedMacPreference)
+    {
+        _macArtifactAvailability = MacArtifactAvailability.Evaluate(AppContext.BaseDirectory);
+        var persistedTargets = _prepTargetPreferenceStore.Load();
+        var fallbackApplied = false;
+
+        if (!_macArtifactAvailability.MacArtifactsAvailable)
+        {
+            if (persistedTargets.HasFlag(PrepTargets.Mac))
+            {
+                fallbackApplied = true;
+                persistedTargets = PrepTargets.Windows;
+                _prepTargetPreferenceStore.Save(persistedTargets);
+            }
+
+            PrepareMacCheckBox.IsEnabled = false;
+            PrepareMacCheckBox.IsChecked = false;
+            MacPrepAvailabilityText.Text = _macArtifactAvailability.MacArtifactsProblem ?? string.Empty;
+            MacPrepAvailabilityText.Visibility = System.Windows.Visibility.Visible;
+        }
+        else
+        {
+            PrepareMacCheckBox.IsEnabled = true;
+            MacPrepAvailabilityText.Text = string.Empty;
+            MacPrepAvailabilityText.Visibility = System.Windows.Visibility.Collapsed;
+        }
+
+        ApplyPrepTargetSelection(persistedTargets);
+
+        if (fallbackApplied && forceDialogForPersistedMacPreference && !_macFallbackDialogShown)
+        {
+            _macFallbackDialogShown = true;
+            var message = (_macArtifactAvailability.MacArtifactsProblem ?? "macOS preparation is unavailable.")
+                + Environment.NewLine + Environment.NewLine
+                + "Prep target has been reset to Windows.";
+            System.Windows.MessageBox.Show(
+                message,
+                "macOS prep requires beta ZIP",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Information);
+        }
+    }
+
+    private void ApplyPrepTargetSelection(PrepTargets targets)
+    {
+        _suppressPrepTargetPersistence = true;
+        try
+        {
+            if (!_macArtifactAvailability.MacArtifactsAvailable)
+            {
+                targets &= ~PrepTargets.Mac;
+            }
+
+            if (targets == PrepTargets.None)
+            {
+                targets = PrepTargets.Windows;
+            }
+
+            PrepareWindowsCheckBox.IsChecked = targets.HasFlag(PrepTargets.Windows);
+            PrepareMacCheckBox.IsChecked = targets.HasFlag(PrepTargets.Mac);
+        }
+        finally
+        {
+            _suppressPrepTargetPersistence = false;
+        }
+    }
+
+    private void PersistPrepTargetSelection()
+    {
+        _prepTargetPreferenceStore.Save(GetSelectedPrepTargets());
     }
 
     private async void AddModel_Click(object sender, System.Windows.RoutedEventArgs e)
@@ -547,6 +635,12 @@ public partial class MainWindow : System.Windows.Window
                 return;
             }
 
+            _macArtifactAvailability = MacArtifactAvailability.Evaluate(AppContext.BaseDirectory);
+            if (!_macArtifactAvailability.MacArtifactsAvailable && PrepareMacCheckBox.IsEnabled)
+            {
+                ApplyMacArtifactAvailability(forceDialogForPersistedMacPreference: false);
+            }
+
             var targets = GetSelectedPrepTargets();
             if (targets == PrepTargets.None)
             {
@@ -568,9 +662,24 @@ public partial class MainWindow : System.Windows.Window
 
             if (targets.HasFlag(PrepTargets.Mac))
             {
+                var macAvailability = MacArtifactAvailability.Evaluate(AppContext.BaseDirectory);
+                if (!macAvailability.MacArtifactsAvailable)
+                {
+                    var message = macAvailability.MacArtifactsProblem ?? "macOS artifacts are unavailable.";
+                    AppendLog($"Finalize blocked: {message}");
+                    logger.Error($"Finalize blocked: {message}");
+                    System.Windows.MessageBox.Show(
+                        message,
+                        "macOS prep unavailable",
+                        System.Windows.MessageBoxButton.OK,
+                        System.Windows.MessageBoxImage.Warning);
+                    StatusText.Text = "Finalize blocked";
+                    return;
+                }
+
                 StatusText.Text = "Staging macOS Runner...";
                 await StageMacRunnerAsync(root, logger, CancellationToken.None);
-                StatusText.Text = "Downloading/staging macOS Ollama runtime...";
+                StatusText.Text = "Staging macOS Ollama runtime...";
                 await StageMacOllamaAsync(root, logger, CancellationToken.None);
             }
 
@@ -895,12 +1004,21 @@ public partial class MainWindow : System.Windows.Window
 
     private async Task StageMacRunnerAsync(string ssdRoot, SsdLogger logger, CancellationToken ct)
     {
-        var sourceRunnerZip = Path.Combine(AppContext.BaseDirectory, "mac", "Runner.app.zip");
-        if (!File.Exists(sourceRunnerZip))
+        var macAvailability = MacArtifactAvailability.Evaluate(AppContext.BaseDirectory);
+        if (!macAvailability.MacArtifactsAvailable)
         {
-            throw new FileNotFoundException($"Missing staged mac Runner bundle: {sourceRunnerZip}");
+            var message = macAvailability.MacArtifactsProblem ?? "macOS artifacts are unavailable.";
+            logger.Error($"Skipped macOS runner staging: {message}");
+            AppendLog($"Skipped macOS runner staging: {message}");
+            System.Windows.MessageBox.Show(
+                message,
+                "macOS prep unavailable",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Warning);
+            return;
         }
 
+        var sourceRunnerZip = Path.Combine(AppContext.BaseDirectory, "mac", "Runner.app.zip");
         var macRoot = Path.Combine(ssdRoot, SsdLayout.Mac);
         Directory.CreateDirectory(macRoot);
         var targetZip = Path.Combine(macRoot, "Runner.app.zip");
@@ -919,9 +1037,24 @@ public partial class MainWindow : System.Windows.Window
 
     private async Task StageMacOllamaAsync(string ssdRoot, SsdLogger logger, CancellationToken ct)
     {
-        var cacheArchive = Path.Combine(ssdRoot, SsdLayout.Cache, MacToolCatalog.Ollama.ArchiveFileName);
-        await _downloadManager.DownloadFileWithResumeAsync(new DownloadRequest(MacToolCatalog.Ollama.SourceUrl, cacheArchive), null, ct);
+        var macAvailability = MacArtifactAvailability.Evaluate(AppContext.BaseDirectory);
+        if (!macAvailability.MacArtifactsAvailable)
+        {
+            var message = macAvailability.MacArtifactsProblem ?? "macOS artifacts are unavailable.";
+            logger.Error($"Skipped macOS Ollama staging: {message}");
+            AppendLog($"Skipped macOS Ollama staging: {message}");
+            System.Windows.MessageBox.Show(
+                message,
+                "macOS prep unavailable",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Warning);
+            return;
+        }
 
+        var bundledArchive = Path.Combine(AppContext.BaseDirectory, "mac", "tools", "ollama", "ollama-darwin.zip");
+        var cacheArchive = Path.Combine(ssdRoot, SsdLayout.Cache, "ollama-darwin.zip");
+        Directory.CreateDirectory(Path.GetDirectoryName(cacheArchive)!);
+        File.Copy(bundledArchive, cacheArchive, overwrite: true);
         var actualSha = DownloadManager.ComputeSha256(cacheArchive);
 
         var ollamaDir = Path.Combine(ssdRoot, SsdLayout.MacOllama);
@@ -942,13 +1075,20 @@ public partial class MainWindow : System.Windows.Window
         var finalCliPath = Path.Combine(ollamaDir, "ollama");
         File.Copy(cliPath, finalCliPath, overwrite: true);
 
-        var manifest = "{\n"
-            + $"  \"id\": \"{MacToolCatalog.Ollama.Id}\",\n"
-            + $"  \"sourceUrl\": \"{MacToolCatalog.Ollama.SourceUrl}\",\n"
-            + $"  \"archive\": \"{MacToolCatalog.Ollama.ArchiveFileName}\",\n"
-            + $"  \"sha256\": \"{actualSha}\",\n"
-            + $"  \"downloadedAtUtc\": \"{DateTime.UtcNow:O}\"\n"
-            + "}";
+        var sourceManifest = Path.Combine(AppContext.BaseDirectory, "mac", "tools", "ollama", "mac-tools-manifest.json");
+        if (File.Exists(sourceManifest))
+        {
+            File.Copy(sourceManifest, Path.Combine(ollamaDir, "mac-tools-manifest.json"), overwrite: true);
+        }
+
+        var manifest = JsonSerializer.Serialize(new
+        {
+            id = MacToolCatalog.Ollama.Id,
+            sourceUrl = MacToolCatalog.Ollama.SourceUrl,
+            archive = MacToolCatalog.Ollama.ArchiveFileName,
+            sha256 = actualSha,
+            downloadedAtUtc = DateTime.UtcNow.ToString("O")
+        }, new JsonSerializerOptions { WriteIndented = true });
         await File.WriteAllTextAsync(MacToolCatalog.GetManifestPath(ssdRoot), manifest, ct);
         logger.Info("Staged macOS Ollama runtime.");
     }

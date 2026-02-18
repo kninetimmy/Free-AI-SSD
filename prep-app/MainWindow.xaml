@@ -77,9 +77,10 @@
             <StackPanel Margin="8">
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                     <TextBlock Text="Prep targets:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <CheckBox x:Name="PrepareWindowsCheckBox" Content="Prepare for Windows" IsChecked="True" Margin="0,0,10,0"/>
-                    <CheckBox x:Name="PrepareMacCheckBox" Content="Prepare for macOS"/>
+                    <CheckBox x:Name="PrepareWindowsCheckBox" Content="Prepare for Windows" IsChecked="True" Margin="0,0,10,0" Checked="PrepTargetSelectionChanged" Unchecked="PrepTargetSelectionChanged"/>
+                    <CheckBox x:Name="PrepareMacCheckBox" Content="Prepare for macOS" Checked="PrepTargetSelectionChanged" Unchecked="PrepTargetSelectionChanged"/>
                 </StackPanel>
+                <TextBlock x:Name="MacPrepAvailabilityText" Margin="0,0,0,8" Foreground="DarkOrange" Visibility="Collapsed" TextWrapping="Wrap"/>
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="Volume label:" VerticalAlignment="Center" Margin="0,0,8,0"/>
                     <TextBox x:Name="VolumeLabelText" Width="240" Text="Portable AI"/>

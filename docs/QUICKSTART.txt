@@ -1,12 +1,16 @@
-Free-AI-SSD Quickstart (Windows + macOS targets)
+Free-AI-SSD Quickstart (Windows stable + beta cross-platform)
 
 Recommended for end users: download the official release ZIP.
 
-1) Download Free-AI-SSD.zip from GitHub Releases.
+1) Download a ZIP from GitHub Releases:
+   - Stable: Free-AI-SSD-win.zip (Windows-only prep)
+   - Beta: Free-AI-SSD-beta-crossplatform.zip (enables mac prep)
 2) Extract the ZIP on a Windows machine.
 3) Run FreeAiSsd.PrepApp.exe.
 4) Select your external SSD (exFAT recommended for cross-platform use).
-5) In Drive Preparation, choose target(s): Windows, macOS, or both.
+5) In Drive Preparation, choose targets:
+   - Stable ZIP: Windows only (mac options are disabled)
+   - Beta ZIP: Windows, macOS, or both
 6) Use Model Manager to add model tags and pull models.
 7) Run "Check SSD Readiness".
 8) Click "Finalize SSD".
@@ -16,6 +20,6 @@ Run on target machines:
 - macOS: <SSD>/mac/Runner.app
 
 Notes
-- PrepApp can stage both OS payloads from one Windows host.
+- PrepApp can stage both OS payloads from one Windows host when using the beta ZIP.
 - The prepared SSD is designed for offline runtime use on Windows/macOS.
-- macOS Runner is built, signed, and notarized in CI releases.
+- If you need macOS preparation, use the beta cross-platform ZIP.
