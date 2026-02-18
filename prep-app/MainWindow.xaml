@@ -136,6 +136,9 @@
                     <TextBox x:Name="VolumeLabelText" Width="240" Text="Portable AI"/>
                     <Button x:Name="FormatPrepareButton" Content="Format &amp; Prepare Drive" Margin="12,0,0,0" Click="FormatPrepare_Click"/>
                 </StackPanel>
+                <CheckBox x:Name="EnableDriveEncryptionCheckBox"
+                          Margin="0,10,0,0"
+                          Content="Require passphrase to unlock SSD at runtime (encrypt portable config)"/>
             </StackPanel>
         </GroupBox>
 

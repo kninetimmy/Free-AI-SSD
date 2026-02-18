@@ -724,7 +724,20 @@ public partial class MainWindow : System.Windows.Window
         }
 
         var root = drive.RootPath;
+        if (SsdEncryption.IsEncryptionEnabled(root))
+        {
+            System.Windows.MessageBox.Show(
+                "This SSD is already encrypted. Re-preparing encrypted drives is not supported yet.",
+                "Finalize blocked",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Warning);
+            AppendLog("Finalize blocked: drive is already encrypted.");
+            StatusText.Text = "Finalize blocked";
+            return;
+        }
+
         var logger = new SsdLogger(root, "prep");
+        var enableEncryption = EnableDriveEncryptionCheckBox?.IsChecked == true;
         try
         {
             Progress.Value = 0;
@@ -737,6 +750,8 @@ public partial class MainWindow : System.Windows.Window
             config.PreparedAtUtc = DateTime.UtcNow;
             config.OllamaPort = 11434;
             config.PreferredCompute = "cpu";
+            config.IsEncrypted = false;
+            config.EncryptionScheme = null;
             await config.SaveAsync(configPath);
             await RefreshModelStatusesForSelectedDriveAsync();
 
@@ -813,6 +828,24 @@ public partial class MainWindow : System.Windows.Window
                     System.Windows.MessageBoxImage.Warning);
                 StatusText.Text = "Finalize blocked (readiness failed)";
                 return;
+            }
+
+            if (enableEncryption)
+            {
+                var passphrase = PromptForEncryptionPassword();
+                if (passphrase is null)
+                {
+                    AppendLog("Finalize cancelled: encryption passphrase setup cancelled.");
+                    StatusText.Text = "Finalize blocked";
+                    return;
+                }
+
+                config.IsEncrypted = true;
+                config.EncryptionScheme = SsdEncryption.SchemeName;
+                await config.SaveAsync(configPath);
+                await SsdEncryption.EnableConfigEncryptionAsync(root, configPath, passphrase);
+                AppendLog("Drive encryption enabled. Runner will now require unlock before use.");
+                logger.Info("Drive encryption enabled.");
             }
 
             Progress.Value = 100;
@@ -932,6 +965,12 @@ public partial class MainWindow : System.Windows.Window
     }
 
     private static string GetConfigPath(string root) => Path.Combine(root, new PortableConfig().ConfigRelativePath);
+
+    private string? PromptForEncryptionPassword()
+    {
+        var dialog = new EncryptionSetupDialog { Owner = this };
+        return dialog.ShowDialog() == true ? dialog.Password : null;
+    }
 
     private static void UpsertModel(List<ModelConfigEntry> models, string name, ModelInstallStatus status)
     {

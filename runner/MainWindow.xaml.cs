@@ -17,6 +17,8 @@ public partial class MainWindow : System.Windows.Window
     private SsdLogger? _logger;
     private int? _currentPort;
     private DependencyCheckResult _lastDependencyCheck = new(true, Array.Empty<MissingDependency>());
+    private bool _isEncryptedDrive;
+    private bool _isUnlocked;
 
     public MainWindow()
     {
@@ -46,6 +48,22 @@ public partial class MainWindow : System.Windows.Window
             _ssdRoot = Directory.GetParent(baseTrimmed)!.FullName;
         }
 
+        _logger = new SsdLogger(_ssdRoot, "runner");
+        if (SsdEncryption.IsEncryptionEnabled(_ssdRoot))
+        {
+            _isEncryptedDrive = true;
+            _isUnlocked = false;
+            _config = null;
+            UpdateEncryptionUiState();
+            StatusText.Text = "Encrypted drive locked";
+            AppendLog("Encrypted drive detected. Click 'Unlock Drive' to continue.");
+            return;
+        }
+
+        _isEncryptedDrive = false;
+        _isUnlocked = true;
+        UpdateEncryptionUiState();
+
         var configPath = Path.Combine(_ssdRoot, "config", "portable-config.json");
         if (!File.Exists(configPath))
         {
@@ -55,19 +73,71 @@ public partial class MainWindow : System.Windows.Window
         }
 
         _config = PortableConfig.Load(configPath);
-        var installedModels = _config.Models
-            .Where(m => m.Status == ModelInstallStatus.Installed)
-            .Select(m => m.Name)
-            .ToList();
-        ModelCombo.ItemsSource = installedModels;
-        ModelCombo.SelectedIndex = installedModels.Count > 0 ? 0 : -1;
-        _logger = new SsdLogger(_ssdRoot, "runner");
+        PopulateModelCombo();
         StatusText.Text = "Ready (not running)";
         AppendLog($"Loaded config from {configPath}");
     }
 
+    private void PopulateModelCombo()
+    {
+        var installedModels = _config?.Models
+            .Where(m => m.Status == ModelInstallStatus.Installed)
+            .Select(m => m.Name)
+            .ToList() ?? new List<string>();
+        ModelCombo.ItemsSource = installedModels;
+        ModelCombo.SelectedIndex = installedModels.Count > 0 ? 0 : -1;
+    }
+
+    private void UpdateEncryptionUiState()
+    {
+        UnlockDriveButton.Visibility = _isEncryptedDrive ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+        UnlockDriveButton.IsEnabled = _isEncryptedDrive && !_isUnlocked;
+    }
+
+    private bool TryUnlockEncryptedDrive()
+    {
+        if (!_isEncryptedDrive)
+        {
+            return true;
+        }
+
+        if (_isUnlocked && _config is not null)
+        {
+            return true;
+        }
+
+        var dialog = new UnlockDriveDialog { Owner = this };
+        if (dialog.ShowDialog() != true)
+        {
+            StatusText.Text = "Encrypted drive locked";
+            AppendLog("Unlock cancelled.");
+            return false;
+        }
+
+        if (!SsdEncryption.TryUnlockPortableConfig(_ssdRoot, dialog.Password, out var unlockedConfig, out var error) || unlockedConfig is null)
+        {
+            StatusText.Text = "Unlock failed";
+            AppendLog($"Unlock failed: {error}");
+            return false;
+        }
+
+        _config = unlockedConfig;
+        _isUnlocked = true;
+        UpdateEncryptionUiState();
+        PopulateModelCombo();
+        StatusText.Text = "Unlocked and ready";
+        AppendLog("SSD unlocked successfully.");
+        _ = SaveEncryptionUnlockStateAsync();
+        return true;
+    }
+
     private async void Start_Click(object sender, System.Windows.RoutedEventArgs e)
     {
+        if (_isEncryptedDrive && !TryUnlockEncryptedDrive())
+        {
+            return;
+        }
+
         if (_config is null || _ollama is { HasExited: false }) return;
 
         var trustGate = OllamaPackageTrustPolicy.ValidateExecutionAttestation(_ssdRoot, OllamaPackageTrustPolicy.DefaultWindowsPackage.Url);
@@ -454,6 +524,15 @@ public partial class MainWindow : System.Windows.Window
         await state.SaveAsync(statePath);
     }
 
+    private async Task SaveEncryptionUnlockStateAsync()
+    {
+        var statePath = Path.Combine(_ssdRoot, SsdLayout.Config, "runner-first-run.json");
+        var state = RunnerFirstRunState.Load(statePath);
+        state.EncryptionUnlockedAtUtc = DateTime.UtcNow;
+        state.LastCheckedUtc = DateTime.UtcNow;
+        await state.SaveAsync(statePath);
+    }
+
     private void RelaunchAsAdmin(string args)
     {
         var exePath = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
@@ -519,5 +598,10 @@ public partial class MainWindow : System.Windows.Window
             LogText.ScrollToEnd();
         });
         _logger?.Info(line);
+    }
+
+    private void UnlockDrive_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        TryUnlockEncryptedDrive();
     }
 }

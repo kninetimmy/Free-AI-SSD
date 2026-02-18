@@ -17,6 +17,7 @@ final class RunnerViewModel: ObservableObject {
     @Published var prompt: String = ""
     @Published var response: String = ""
     @Published var status: String = "Idle"
+    @Published var isEncryptedLocked: Bool = false
 
     private var process: Process?
     private var hostPort = 11434
@@ -50,6 +51,16 @@ final class RunnerViewModel: ObservableObject {
 
     func loadConfig() {
         guard let root = ssdRoot else { return }
+        let encryptionStateURL = root.appendingPathComponent("config/encryption-state.json")
+        if FileManager.default.fileExists(atPath: encryptionStateURL.path) {
+            isEncryptedLocked = true
+            modelNames = []
+            selectedModel = ""
+            status = "Encrypted SSD locked (mac unlock not supported yet)"
+            return
+        }
+
+        isEncryptedLocked = false
         let configURL = root.appendingPathComponent("config/portable-config.json")
         guard let data = try? Data(contentsOf: configURL),
               let config = try? JSONDecoder().decode(PortableConfig.self, from: data) else {
@@ -62,6 +73,11 @@ final class RunnerViewModel: ObservableObject {
 
     func startOllama() {
         guard process == nil, let root = ssdRoot else { return }
+        if isEncryptedLocked {
+            status = "Unlock encrypted SSD first (use Windows runner)"
+            return
+        }
+
         let ollama = root.appendingPathComponent("mac/tools/ollama/ollama")
         guard FileManager.default.fileExists(atPath: ollama.path) else { status = "Missing mac/tools/ollama/ollama"; return }
 

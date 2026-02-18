@@ -13,6 +13,7 @@
 
         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
             <Button Content="Start Ollama" Padding="12,6" Click="Start_Click"/>
+            <Button x:Name="UnlockDriveButton" Content="Unlock Drive" Padding="12,6" Margin="8,0,0,0" Click="UnlockDrive_Click" Visibility="Collapsed"/>
             <Button Content="Stop Ollama" Padding="12,6" Margin="8,0,0,0" Click="Stop_Click"/>
             <Button Content="Open Chat UI (browser)" Padding="12,6" Margin="8,0,0,0" Click="OpenBrowser_Click"/>
             <TextBlock x:Name="StatusText" Margin="12,0,0,0" VerticalAlignment="Center"/>
