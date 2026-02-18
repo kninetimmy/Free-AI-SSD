@@ -34,6 +34,7 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
@@ -42,8 +43,57 @@
                     <Button x:Name="AddModelButton" Content="Add" Margin="8,0,0,0" Click="AddModel_Click"/>
                 </StackPanel>
 
+                <GroupBox Grid.Row="1" Header="Starter models (recommended)" Margin="0,0,0,8">
+                    <DockPanel Margin="8">
+                        <TextBlock x:Name="StarterCatalogWarningText"
+                                   DockPanel.Dock="Top"
+                                   Foreground="DarkOrange"
+                                   Margin="0,0,0,6"
+                                   TextWrapping="Wrap"
+                                   Visibility="Collapsed"/>
+                        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
+                            <Button x:Name="AddStarterModelsButton" Content="Add selected to configuration" Click="AddSelectedStarterModels_Click"/>
+                            <Button x:Name="ClearStarterModelsSelectionButton" Content="Clear selection" Margin="8,0,0,0" Click="ClearStarterModelSelection_Click"/>
+                        </StackPanel>
+                        <DataGrid x:Name="StarterModelGrid"
+                                  AutoGenerateColumns="False"
+                                  CanUserAddRows="False"
+                                  IsReadOnly="False"
+                                  HeadersVisibility="Column"
+                                  Height="230">
+                            <DataGrid.GroupStyle>
+                                <GroupStyle>
+                                    <GroupStyle.HeaderTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Name}" FontWeight="Bold" Margin="4,8,0,4"/>
+                                        </DataTemplate>
+                                    </GroupStyle.HeaderTemplate>
+                                </GroupStyle>
+                            </DataGrid.GroupStyle>
+                            <DataGrid.Columns>
+                                <DataGridTemplateColumn Header="Select" Width="Auto">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                      Checked="StarterModelSelectionChanged"
+                                                      Unchecked="StarterModelSelectionChanged"
+                                                      HorizontalAlignment="Center"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                                <DataGridTextColumn Header="Tag" Binding="{Binding Tag}" Width="2*" IsReadOnly="True"/>
+                                <DataGridTextColumn Header="Params" Binding="{Binding Params}" Width="*" IsReadOnly="True"/>
+                                <DataGridTextColumn Header="Tier" Binding="{Binding SizeTier}" Width="*" IsReadOnly="True"/>
+                                <DataGridTextColumn Header="Best at" Binding="{Binding Description}" Width="3*" IsReadOnly="True"/>
+                                <DataGridTextColumn Header="Use cases" Binding="{Binding UseCasesDisplay}" Width="2*" IsReadOnly="True"/>
+                                <DataGridTextColumn Header="Sizing info" Binding="{Binding SizingWarning}" Width="2*" IsReadOnly="True"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </DockPanel>
+                </GroupBox>
+
                 <DataGrid x:Name="ModelStatusGrid"
-                          Grid.Row="1"
+                          Grid.Row="2"
                           AutoGenerateColumns="False"
                           IsReadOnly="True"
                           HeadersVisibility="Column"
@@ -62,7 +112,7 @@
                     </DataGrid.Columns>
                 </DataGrid>
 
-                <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,0">
+                <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,8,0,0">
                     <Button x:Name="PullInstallButton" Content="Pull/Install" Click="PullInstall_Click"/>
                     <Button x:Name="VerifyButton" Content="Verify" Margin="8,0,0,0" Click="Verify_Click"/>
                     <Button x:Name="RemoveButton" Content="Remove/Delete..." Margin="8,0,0,0" Click="Remove_Click"/>
