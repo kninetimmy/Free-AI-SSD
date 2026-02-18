@@ -4,7 +4,7 @@ Prepare a portable SSD with Ollama + LLMs once, then run them offline on Windows
 
 ## 🚀 Quick Start (No CLI Required)
 
-1. Download `Free-AI-SSD.zip` from GitHub Releases.
+1. Download `Free-AI-SSD-win.zip` (recommended stable) from GitHub Releases.
 2. Extract it anywhere on your Windows machine.
 3. Run `FreeAiSsd.PrepApp.exe`.
 4. Select your external SSD.
@@ -24,9 +24,14 @@ Internet is required only while preparing the SSD in PrepApp (download/pull phas
 ### Official Releases
 
 - Official downloads are published on GitHub **Releases**.
-- Maintainers create them manually from **Actions → Build and Package → Run workflow**.
-- Enter a version such as `0.3.0`.
-- The workflow creates tag/release `vX.Y.Z` (for example `v0.3.0`) and attaches `Free-AI-SSD.zip`.
+- **Windows Stable ZIP (recommended):** `Free-AI-SSD-win.zip`.
+- **Optional beta cross-platform ZIP:** `Free-AI-SSD-beta-crossplatform.zip`.
+  - Includes experimental macOS support.
+  - Unsigned for now and may trigger Gatekeeper warnings.
+- Maintainers create releases manually from **Actions → Build and Package → Run workflow**.
+  - `include_macos=false` → produces only `Free-AI-SSD-win.zip`.
+  - `include_macos=true` → produces both `Free-AI-SSD-win.zip` and `Free-AI-SSD-beta-crossplatform.zip`.
+- Enter a version such as `0.3.0`; the workflow creates tag/release `vX.Y.Z` (for example `v0.3.0`).
 
 ### Dev Builds
 
