@@ -70,6 +70,14 @@ public partial class MainWindow : System.Windows.Window
     {
         if (_config is null || _ollama is { HasExited: false }) return;
 
+        var trustGate = OllamaPackageTrustPolicy.ValidateExecutionAttestation(_ssdRoot, OllamaPackageTrustPolicy.DefaultWindowsPackage.Url);
+        if (!trustGate.IsTrusted)
+        {
+            StatusText.Text = "Blocked: untrusted Ollama package";
+            AppendLog($"Start blocked: {trustGate.Message}");
+            return;
+        }
+
         if (!await EnsureDependenciesReadyAsync(forcePrompt: false, userTriggered: true))
         {
             return;

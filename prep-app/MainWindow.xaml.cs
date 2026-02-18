@@ -860,18 +860,30 @@ public partial class MainWindow : System.Windows.Window
     private async Task<string> EnsureOllamaReadyAsync(string root, SsdLogger logger, CancellationToken ct)
     {
         SsdLayout.EnsureStructure(root);
+        var sourceValidation = OllamaPackageTrustPolicy.ValidatePackageSource(OllamaUrlText.Text);
+        if (!sourceValidation.IsTrusted || sourceValidation.Metadata is null)
+        {
+            throw new InvalidOperationException(sourceValidation.Message);
+        }
+
         var ollamaZipPath = Path.Combine(root, SsdLayout.Cache, "ollama-windows-amd64.zip");
         var ollamaDir = Path.Combine(root, SsdLayout.Ollama);
 
         var ollamaExe = ResolveOllamaExe(ollamaDir);
         if (ollamaExe is not null)
         {
+            var executionGate = OllamaPackageTrustPolicy.ValidateExecutionAttestation(root, sourceValidation.Metadata.Url);
+            if (!executionGate.IsTrusted)
+            {
+                throw new InvalidOperationException(executionGate.Message);
+            }
+
             return ollamaExe;
         }
 
         StatusText.Text = "Downloading Ollama package...";
         await _downloadManager.DownloadFileWithResumeAsync(
-            new DownloadRequest(OllamaUrlText.Text.Trim(), ollamaZipPath),
+            new DownloadRequest(sourceValidation.Metadata.Url, ollamaZipPath),
             new Progress<DownloadProgress>(p =>
             {
                 Progress.IsIndeterminate = false;
@@ -880,7 +892,14 @@ public partial class MainWindow : System.Windows.Window
             }),
             ct);
 
+        var digestValidation = OllamaPackageTrustPolicy.ValidateDownloadedPackage(ollamaZipPath, sourceValidation.Metadata);
+        if (!digestValidation.IsTrusted)
+        {
+            throw new InvalidOperationException(digestValidation.Message);
+        }
+
         ExtractOllamaZip(ollamaZipPath, ollamaDir);
+        OllamaPackageTrustPolicy.WriteTrustAttestation(root, sourceValidation.Metadata);
         logger.Info("Ollama package staged.");
 
         return ResolveOllamaExe(ollamaDir) ?? throw new FileNotFoundException($"Unable to locate ollama.exe under {ollamaDir}");
@@ -1686,4 +1705,3 @@ public partial class MainWindow : System.Windows.Window
         public string SizingWarning { get; set; } = sizingWarning;
     }
 }
-

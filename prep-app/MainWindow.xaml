@@ -25,7 +25,7 @@
 
         <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
             <TextBlock Text="Ollama Package URL:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-            <TextBox x:Name="OllamaUrlText" Width="620" Text="https://github.com/ollama/ollama/releases/latest/download/ollama-windows-amd64.zip"/>
+            <TextBox x:Name="OllamaUrlText" Width="620" Text="https://github.com/ollama/ollama/releases/download/v0.5.7/ollama-windows-amd64.zip"/>
         </StackPanel>
 
         <GroupBox Header="Model Manager" Grid.Row="2" Margin="0,0,0,10">
