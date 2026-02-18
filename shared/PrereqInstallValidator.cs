@@ -156,7 +156,7 @@ public static class PrereqInstallValidator
 
         try
         {
-            var ps = Process.Start(new ProcessStartInfo
+            using var ps = Process.Start(new ProcessStartInfo
             {
                 FileName = "powershell",
                 Arguments = $"-NoProfile -ExecutionPolicy Bypass -Command \"$s = Get-AuthenticodeSignature -FilePath '{installerPath.Replace("'", "''")}'; Write-Output ($s.Status.ToString()); Write-Output ($s.SignerCertificate.Subject)\"",
@@ -172,9 +172,11 @@ public static class PrereqInstallValidator
                 return (true, "Authenticode unavailable");
             }
 
-            var output = ps.StandardOutput.ReadToEnd().Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-            var err = ps.StandardError.ReadToEnd();
-            ps.WaitForExit(10000);
+            if (!TryCaptureProcessOutput(ps, 10000, out var output, out var err))
+            {
+                onWarn?.Invoke($"Authenticode validation timed out for {definition.Id}; falling back to hash-only validation.");
+                return (true, "Authenticode unavailable");
+            }
 
             if (ps.ExitCode != 0 || output.Length == 0)
             {
@@ -201,5 +203,57 @@ public static class PrereqInstallValidator
             onWarn?.Invoke($"Authenticode check failed for {definition.Id}: {ex.Message}. Falling back to hash-only validation.");
             return (true, "Authenticode unavailable");
         }
+    }
+
+    internal static bool TryCaptureProcessOutput(Process process, int timeoutMs, out string[] output, out string error)
+    {
+        var outputLines = new List<string>();
+        var errorLines = new List<string>();
+
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (!string.IsNullOrWhiteSpace(e.Data))
+            {
+                lock (outputLines)
+                {
+                    outputLines.Add(e.Data);
+                }
+            }
+        };
+
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (!string.IsNullOrWhiteSpace(e.Data))
+            {
+                lock (errorLines)
+                {
+                    errorLines.Add(e.Data);
+                }
+            }
+        };
+
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+
+        if (!process.WaitForExit(timeoutMs))
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+                // best effort
+            }
+
+            output = Array.Empty<string>();
+            error = string.Empty;
+            return false;
+        }
+
+        process.WaitForExit();
+        output = outputLines.ToArray();
+        error = string.Join(Environment.NewLine, errorLines);
+        return true;
     }
 }

@@ -16,12 +16,7 @@ public static class PathGuards
 
         var normalizedRoot = Path.GetFullPath(root);
         var normalizedPath = Path.GetFullPath(path);
-
-        var rootWithSeparator = normalizedRoot.EndsWith(Path.DirectorySeparatorChar)
-            ? normalizedRoot
-            : normalizedRoot + Path.DirectorySeparatorChar;
-
-        if (!normalizedPath.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase))
+        if (!IsPathUnderRoot(normalizedRoot, normalizedPath, OperatingSystem.IsWindows()))
         {
             throw new InvalidOperationException("Path escapes expected root.");
         }
@@ -30,8 +25,19 @@ public static class PathGuards
         return normalizedPath;
     }
 
+    internal static bool IsPathUnderRoot(string normalizedRoot, string normalizedPath, bool isWindows)
+    {
+        var comparison = isWindows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var rootWithSeparator = normalizedRoot.EndsWith(Path.DirectorySeparatorChar)
+            ? normalizedRoot
+            : normalizedRoot + Path.DirectorySeparatorChar;
+
+        return normalizedPath.StartsWith(rootWithSeparator, comparison);
+    }
+
     private static void EnsureNoReparsePoint(string path, string root)
     {
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var current = new DirectoryInfo(Path.GetDirectoryName(path) ?? root);
         while (current is not null)
         {
@@ -40,7 +46,7 @@ public static class PathGuards
                 throw new InvalidOperationException($"Path contains a reparse point: {current.FullName}");
             }
 
-            if (string.Equals(current.FullName.TrimEnd(Path.DirectorySeparatorChar), root.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(current.FullName.TrimEnd(Path.DirectorySeparatorChar), root.TrimEnd(Path.DirectorySeparatorChar), comparison))
             {
                 break;
             }

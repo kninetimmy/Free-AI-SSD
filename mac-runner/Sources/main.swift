@@ -68,11 +68,19 @@ final class RunnerViewModel: ObservableObject {
         let p = Process()
         p.executableURL = ollama
         p.arguments = ["serve"]
-        p.environment = [
-            "OLLAMA_MODELS": root.appendingPathComponent("models").path,
-            "OLLAMA_HOST": "127.0.0.1:\(hostPort)",
-            "OLLAMA_ORIGINS": "http://127.0.0.1,http://localhost"
-        ]
+        var env = ProcessInfo.processInfo.environment
+        env["OLLAMA_MODELS"] = root.appendingPathComponent("models").path
+        env["OLLAMA_HOST"] = "127.0.0.1:\(hostPort)"
+        env["OLLAMA_ORIGINS"] = "http://127.0.0.1,http://localhost"
+        p.environment = env
+        p.terminationHandler = { [weak self] proc in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.process = nil
+                self.status = "Stopped"
+                self.log("Ollama exited with code \(proc.terminationStatus)")
+            }
+        }
         do {
             try p.run()
             process = p

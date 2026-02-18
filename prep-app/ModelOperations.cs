@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO;
 using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace FreeAiSsd.PrepApp;
 
@@ -13,7 +14,7 @@ public sealed class ModelOperations
             ["OLLAMA_MODELS"] = modelRoot
         };
 
-        var exitCode = await RunProcessStreamingAsync(ollamaExe, $"pull {modelTag}", Path.GetDirectoryName(ollamaExe)!, env, onLog, ct);
+        var exitCode = await RunProcessStreamingAsync(ollamaExe, BuildOllamaArgs("pull", modelTag), Path.GetDirectoryName(ollamaExe)!, env, onLog, ct);
         if (exitCode != 0)
         {
             throw new InvalidOperationException($"Failed to pull model {modelTag}. Exit code: {exitCode}");
@@ -51,7 +52,7 @@ public sealed class ModelOperations
             ["OLLAMA_MODELS"] = modelRoot
         };
 
-        var exitCode = await RunProcessStreamingAsync(ollamaExe, $"rm {modelTag}", Path.GetDirectoryName(ollamaExe)!, env, onLog, ct);
+        var exitCode = await RunProcessStreamingAsync(ollamaExe, BuildOllamaArgs("rm", modelTag), Path.GetDirectoryName(ollamaExe)!, env, onLog, ct);
         if (exitCode != 0)
         {
             throw new InvalidOperationException($"Failed to delete model {modelTag} from disk. Exit code: {exitCode}");
@@ -99,28 +100,102 @@ public sealed class ModelOperations
         }
 
         var content = File.ReadAllText(manifest);
-        var digestLine = content.Split('\n').FirstOrDefault(l => l.Contains("\"digest\"", StringComparison.OrdinalIgnoreCase));
-        if (digestLine is null)
+        if (!TrySelectModelLayerDigest(content, out var normalizedDigest))
         {
             return null;
         }
 
-        var marker = "sha256:";
-        var idx = digestLine.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-        if (idx < 0)
-        {
-            return null;
-        }
-
-        var hashStart = idx + marker.Length;
-        var hashChars = new string(digestLine.Skip(hashStart).TakeWhile(char.IsLetterOrDigit).ToArray());
-        if (string.IsNullOrWhiteSpace(hashChars))
-        {
-            return null;
-        }
-
-        var blob = Path.Combine(modelRoot, "blobs", $"sha256-{hashChars}");
+        var blob = Path.Combine(modelRoot, "blobs", normalizedDigest.Replace(':', '-'));
         return File.Exists(blob) ? blob : null;
+    }
+
+    internal static IReadOnlyList<string> BuildOllamaArgs(string command, string modelTag)
+        => new[] { command, modelTag };
+
+    internal static bool TrySelectModelLayerDigest(string manifestJson, out string normalizedDigest)
+    {
+        normalizedDigest = string.Empty;
+
+        using var doc = JsonDocument.Parse(manifestJson);
+        if (!doc.RootElement.TryGetProperty("layers", out var layersElement) || layersElement.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        var layers = new List<ManifestLayer>();
+        foreach (var layer in layersElement.EnumerateArray())
+        {
+            if (!layer.TryGetProperty("digest", out var digestElement) || digestElement.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var digest = NormalizeDigest(digestElement.GetString());
+            if (digest is null)
+            {
+                continue;
+            }
+
+            var mediaType = layer.TryGetProperty("mediaType", out var mediaTypeElement) && mediaTypeElement.ValueKind == JsonValueKind.String
+                ? mediaTypeElement.GetString()
+                : null;
+
+            long? size = null;
+            if (layer.TryGetProperty("size", out var sizeElement) && sizeElement.TryGetInt64(out var parsedSize))
+            {
+                size = parsedSize;
+            }
+
+            layers.Add(new ManifestLayer(digest, mediaType, size));
+        }
+
+        if (layers.Count == 0)
+        {
+            return false;
+        }
+
+        var mediaTypeLayer = layers.FirstOrDefault(l =>
+            !string.IsNullOrWhiteSpace(l.MediaType) &&
+            l.MediaType.Contains("model", StringComparison.OrdinalIgnoreCase));
+        if (mediaTypeLayer is not null)
+        {
+            normalizedDigest = mediaTypeLayer.Digest;
+            return true;
+        }
+
+        if (layers.Count > 1 && layers.All(l => l.Size.HasValue))
+        {
+            normalizedDigest = layers
+                .OrderByDescending(l => l.Size!.Value)
+                .First()
+                .Digest;
+            return true;
+        }
+
+        normalizedDigest = layers[^1].Digest;
+        return true;
+    }
+
+    private static string? NormalizeDigest(string? digest)
+    {
+        if (string.IsNullOrWhiteSpace(digest))
+        {
+            return null;
+        }
+
+        var trimmed = digest.Trim();
+        if (!trimmed.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var hash = trimmed["sha256:".Length..];
+        if (hash.Length == 0 || hash.Any(c => !char.IsLetterOrDigit(c)))
+        {
+            return null;
+        }
+
+        return $"sha256:{hash.ToLowerInvariant()}";
     }
 
     private static async Task<string> ComputeSha256Async(string modelPath, CancellationToken ct)
@@ -131,12 +206,11 @@ public sealed class ModelOperations
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    private static async Task<int> RunProcessStreamingAsync(string fileName, string arguments, string workingDirectory, IDictionary<string, string> env, Action<string> onOutput, CancellationToken ct)
+    private static async Task<int> RunProcessStreamingAsync(string fileName, IReadOnlyList<string> arguments, string workingDirectory, IDictionary<string, string> env, Action<string> onOutput, CancellationToken ct)
     {
         var startInfo = new ProcessStartInfo
         {
             FileName = fileName,
-            Arguments = arguments,
             WorkingDirectory = workingDirectory,
             RedirectStandardError = true,
             RedirectStandardOutput = true,
@@ -147,6 +221,11 @@ public sealed class ModelOperations
         foreach (var pair in env)
         {
             startInfo.Environment[pair.Key] = pair.Value;
+        }
+
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
         }
 
         using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
@@ -187,5 +266,7 @@ public sealed class ModelOperations
         }
     }
 }
+
+internal sealed record ManifestLayer(string Digest, string? MediaType, long? Size);
 
 public sealed record PullModelResult(string Sha256, long SizeBytes);
