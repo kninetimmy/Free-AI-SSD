@@ -86,14 +86,18 @@ public sealed class ModelOperations
 
     public static string? FindModelBlobForModel(string modelRoot, string model)
     {
-        var manifestTag = model.Replace(':', '-');
-        var manifestsPath = Path.Combine(modelRoot, "manifests", "registry.ollama.ai", "library");
+        if (!TryParseModelReference(model, out var modelName, out var manifestTag))
+        {
+            return null;
+        }
+
+        var manifestsPath = Path.Combine(modelRoot, "manifests", "registry.ollama.ai", "library", modelName);
         if (!Directory.Exists(manifestsPath))
         {
             return null;
         }
 
-        var manifest = Directory.EnumerateFiles(manifestsPath, manifestTag, SearchOption.AllDirectories).FirstOrDefault();
+        var manifest = Directory.EnumerateFiles(manifestsPath, manifestTag, SearchOption.TopDirectoryOnly).FirstOrDefault();
         if (manifest is null)
         {
             return null;
@@ -111,6 +115,27 @@ public sealed class ModelOperations
 
     internal static IReadOnlyList<string> BuildOllamaArgs(string command, string modelTag)
         => new[] { command, modelTag };
+
+    private static bool TryParseModelReference(string model, out string modelName, out string tag)
+    {
+        modelName = string.Empty;
+        tag = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return false;
+        }
+
+        var separatorIndex = model.LastIndexOf(':');
+        if (separatorIndex <= 0 || separatorIndex >= model.Length - 1)
+        {
+            return false;
+        }
+
+        modelName = model[..separatorIndex].Trim();
+        tag = model[(separatorIndex + 1)..].Trim();
+        return modelName.Length > 0 && tag.Length > 0;
+    }
 
     internal static bool TrySelectModelLayerDigest(string manifestJson, out string normalizedDigest)
     {
