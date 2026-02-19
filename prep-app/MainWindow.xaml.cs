@@ -1662,7 +1662,7 @@ public partial class MainWindow : System.Windows.Window
     private void RefreshSelectedDriveEncryptionState()
     {
         _isSelectedDriveEncrypted = DriveCombo.SelectedItem is DriveTarget drive
-            && SsdEncryption.IsEncryptionEnabled(drive.RootPath);
+            && SsdEncryption.IsEffectivelyEncryptedForWriteGuard(drive.RootPath);
         if (_isSelectedDriveEncrypted && !_isModelOperationRunning)
         {
             StatusText.Text = "Encrypted drive selected (read-only in PrepApp)";
