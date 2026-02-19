@@ -73,10 +73,10 @@ Prepare a portable SSD with Ollama + LLMs once, then run them offline on Windows
 - **Recommendation**: Extract service interfaces (IDownloadService, IOllamaService, IDependencyChecker) and use dependency injection to enable unit testing of business logic without WPF dependencies.
 
 ### Test Coverage
-- 42 tests total (41 pass on Linux, 1 Windows-specific path test expected to fail)
-- Well-covered: SsdEncryption (12 tests), OllamaPackageTrustPolicy (9 tests), PrepDriveWriteGuard (7 tests)
+- 62 tests total (61 pass on Linux, 1 Windows-specific path test expected to fail)
+- Well-covered: SsdEncryption (12 tests), OllamaPackageTrustPolicy (9 tests), PrepDriveWriteGuard (7 tests), PrepViewModel (20 tests)
 - Covered: ModelOperations (5 tests), PathGuards (3 tests), PrereqInstallValidator (1 test)
-- Not covered: DownloadManager, DriveInspector, SsdLayout, SystemCompatibility, PortableConfig, all UI workflows
+- Not covered: DownloadManager, DriveInspector, SsdLayout, SystemCompatibility, PortableConfig
 
 ### Improvement Recommendations (Priority Order)
 1. **MVVM Refactoring**: Extract MainWindow logic into ViewModels + Services
@@ -90,7 +90,23 @@ Prepare a portable SSD with Ollama + LLMs once, then run them offline on Windows
 - Documented: 20 shared library files, 5 prep-app files, runner MainWindow, 6 test files
 - Comments explain purpose, parameters, security considerations, and architectural context
 
+## MVVM Refactoring (shared/)
+| Directory | Files | Purpose |
+|-----------|-------|---------|
+| shared/Mvvm/ | BaseViewModel.cs, RelayCommand.cs, AsyncRelayCommand.cs | MVVM infrastructure (INotifyPropertyChanged, ICommand implementations) |
+| shared/Services/ | IDriveService, IModelService, IOllamaPackageService, IPrereqService, IArtifactStagingService, IReadinessService, IEncryptionService, IDialogService, ILogService | Service interfaces for dependency injection |
+| shared/Models/ | PrepModels.cs | DTOs: ReadinessItem, ModelGridRow, StarterModelRow, PrepTargets, ModelRemoveChoice |
+| shared/ViewModels/ | PrepViewModel.cs | PrepApp ViewModel with commands, properties, and service orchestration |
+
+### Design Decisions
+- Service interfaces in shared/ (net8.0) for cross-platform testability
+- PrepViewModel in shared/ so it can be unit tested on Linux without WPF
+- IDialogService abstracts all MessageBox/dialog interactions
+- Service implementations go in prep-app/ (net8.0-windows) - future task
+- Moq 4.20.72 used for mocking in tests
+
 ## Recent Changes
 - 2026-02-19: Initial Replit setup with .NET 8, build+test workflow configured
 - 2026-02-19: Comprehensive code review completed with architecture, security, and quality findings
 - 2026-02-19: Added XML documentation comments to all source files (shared, prep-app, runner, tests)
+- 2026-02-19: MVVM refactoring Phase 1 complete: base classes, 9 service interfaces, shared DTOs, PrepViewModel, 20 unit tests
