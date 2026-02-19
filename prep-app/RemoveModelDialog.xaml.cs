@@ -1,11 +1,6 @@
-namespace FreeAiSsd.PrepApp;
+using FreeAiSsd.Shared.Models;
 
-public enum ModelRemoveChoice
-{
-    Cancel,
-    ConfigOnly,
-    DeleteFromDisk
-}
+namespace FreeAiSsd.PrepApp;
 
 public partial class RemoveModelDialog : System.Windows.Window
 {
