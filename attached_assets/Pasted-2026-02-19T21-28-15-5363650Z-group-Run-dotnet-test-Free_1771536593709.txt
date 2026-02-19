@@ -1,0 +1,35 @@
+2026-02-19T21:28:15.5363650Z ##[group]Run dotnet test FreeAiSsd.sln -c Release --no-build
+2026-02-19T21:28:15.5364417Z [36;1mdotnet test FreeAiSsd.sln -c Release --no-build[0m
+2026-02-19T21:28:15.5499613Z shell: C:\Program Files\PowerShell\7\pwsh.EXE -command ". '{0}'"
+2026-02-19T21:28:15.5500220Z env:
+2026-02-19T21:28:15.5500499Z   MAC_SIGNING_ENABLED: false
+2026-02-19T21:28:15.5500901Z   DOTNET_ROOT: C:\Program Files\dotnet
+2026-02-19T21:28:15.5501304Z ##[endgroup]
+2026-02-19T21:28:17.8448613Z Test run for D:\a\Free-AI-SSD\Free-AI-SSD\tests\bin\Release\net8.0\FreeAiSsd.Tests.dll (.NETCoreApp,Version=v8.0)
+2026-02-19T21:28:18.0386963Z VSTest version 17.11.1 (x64)
+2026-02-19T21:28:18.0424012Z 
+2026-02-19T21:28:18.4007567Z Starting test execution, please wait...
+2026-02-19T21:28:18.4469893Z A total of 1 test files matched the specified pattern.
+2026-02-19T21:28:19.3683534Z [xUnit.net 00:00:00.53]     FreeAiSsd.Tests.PrepViewModelTests.AddModelCommand_ValidTag_UpsertAndSaves [FAIL]
+2026-02-19T21:28:19.3684852Z   Failed FreeAiSsd.Tests.PrepViewModelTests.AddModelCommand_ValidTag_UpsertAndSaves [116 ms]
+2026-02-19T21:28:19.3687097Z   Error Message:
+2026-02-19T21:28:19.3687497Z    Moq.MockException : 
+2026-02-19T21:28:19.3688930Z Expected invocation on the mock once, but was 0 times: m => m.UpsertModel(It.IsAny<List<ModelConfigEntry>>(), "llama3:latest", ModelInstallStatus.NotInstalled)
+2026-02-19T21:28:19.3732216Z 
+2026-02-19T21:28:19.3735456Z Performed invocations:
+2026-02-19T21:28:19.3735942Z 
+2026-02-19T21:28:19.3736068Z    Mock<IModelService:10> (m):
+2026-02-19T21:28:19.3736234Z 
+2026-02-19T21:28:19.3736721Z       IModelService.LoadConfigAsync("E:\config\\portable-config.json")
+2026-02-19T21:28:19.3737414Z       IModelService.DiscoverModelsOnDisk("E:\models")
+2026-02-19T21:28:19.3737788Z 
+2026-02-19T21:28:19.3737892Z   Stack Trace:
+2026-02-19T21:28:19.3738664Z      at Moq.Mock.Verify(Mock mock, LambdaExpression expression, Times times, String failMessage) in /_/src/Moq/Mock.cs:line 332
+2026-02-19T21:28:19.3739934Z    at Moq.Mock`1.Verify(Expression`1 expression, Times times) in /_/src/Moq/Mock`1.cs:line 727
+2026-02-19T21:28:19.3742841Z    at Moq.Mock`1.Verify(Expression`1 expression, Func`1 times) in /_/src/Moq/Mock`1.cs:line 741
+2026-02-19T21:28:19.3744306Z    at FreeAiSsd.Tests.PrepViewModelTests.AddModelCommand_ValidTag_UpsertAndSaves() in D:\a\Free-AI-SSD\Free-AI-SSD\tests\PrepViewModelTests.cs:line 170
+2026-02-19T21:28:19.3745994Z    at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
+2026-02-19T21:28:19.3747291Z    at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
+2026-02-19T21:28:19.6905854Z 
+2026-02-19T21:28:19.6947135Z Failed!  - Failed:     1, Passed:    61, Skipped:     0, Total:    62, Duration: 585 ms - FreeAiSsd.Tests.dll (net8.0)
+2026-02-19T21:28:19.9403411Z ##[error]Process completed with exit code 1.

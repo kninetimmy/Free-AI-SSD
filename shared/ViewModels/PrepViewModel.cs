@@ -345,7 +345,7 @@ public class PrepViewModel : BaseViewModel
         if (!EnsureWritable("Add model")) return;
 
         var configPath = GetConfigPath(_selectedDrive.RootPath);
-        SsdLayout.EnsureStructure(_selectedDrive.RootPath);
+        _driveService.EnsureSsdStructure(_selectedDrive.RootPath);
         var config = await _modelService.LoadConfigAsync(configPath);
         _modelService.UpsertModel(config.Models, tag, ModelInstallStatus.NotInstalled);
         await _modelService.SaveConfigAsync(configPath, config);
@@ -370,7 +370,7 @@ public class PrepViewModel : BaseViewModel
         if (!EnsureWritable("Add starter models")) return;
 
         var configPath = GetConfigPath(_selectedDrive.RootPath);
-        SsdLayout.EnsureStructure(_selectedDrive.RootPath);
+        _driveService.EnsureSsdStructure(_selectedDrive.RootPath);
         var config = await _modelService.LoadConfigAsync(configPath);
         foreach (var row in selectedRows)
         {
@@ -706,7 +706,7 @@ public class PrepViewModel : BaseViewModel
         {
             StatusText = "Preparing drive structure...";
             var root = _selectedDrive.RootPath;
-            SsdLayout.EnsureStructure(root);
+            _driveService.EnsureSsdStructure(root);
 
             var configPath = GetConfigPath(root);
             var config = new PortableConfig
@@ -756,7 +756,7 @@ public class PrepViewModel : BaseViewModel
         {
             ProgressValue = 0;
             StatusText = "Preparing folders...";
-            SsdLayout.EnsureStructure(root);
+            _driveService.EnsureSsdStructure(root);
 
             var configPath = GetConfigPath(root);
             var config = await _modelService.LoadConfigAsync(configPath);

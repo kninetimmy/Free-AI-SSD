@@ -26,4 +26,7 @@ public sealed class DriveService : IDriveService
 
     public int? GetFreeDiskSpaceGb(string rootPath)
         => SystemResources.GetFreeDiskSpaceGb(rootPath);
+
+    public void EnsureSsdStructure(string rootPath)
+        => SsdLayout.EnsureStructure(rootPath);
 }

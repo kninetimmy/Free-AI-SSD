@@ -6,4 +6,5 @@ public interface IDriveService
     bool IsDriveEncrypted(string rootPath);
     bool EnsureWritable(string rootPath, string operationName, out string? blockedMessage);
     int? GetFreeDiskSpaceGb(string rootPath);
+    void EnsureSsdStructure(string rootPath);
 }
