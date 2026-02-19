@@ -3,8 +3,19 @@ using FreeAiSsd.Shared;
 
 namespace FreeAiSsd.Tests;
 
+/// <summary>
+/// Tests for PrereqInstallValidator — the process output capture utility.
+/// Currently covers the timeout behavior of TryCaptureProcessOutput, which is
+/// used to detect installed runtimes by running version-check commands with
+/// strict time limits. A process that exceeds the timeout returns false with
+/// empty output, preventing the Runner from hanging on unresponsive commands.
+/// </summary>
 public sealed class PrereqInstallValidatorTests
 {
+    /// <summary>
+    /// Verifies that a long-running process (sleep 2s) times out with a 1ms limit
+    /// and returns false with empty output. Uses bash on Linux and PowerShell on Windows.
+    /// </summary>
     [Fact]
     public void TryCaptureProcessOutput_TimesOutAndReturnsFalse()
     {
@@ -19,6 +30,10 @@ public sealed class PrereqInstallValidatorTests
         Assert.Equal(string.Empty, error);
     }
 
+    /// <summary>
+    /// Creates a platform-appropriate process that sleeps for 2 seconds,
+    /// used as the target for timeout testing.
+    /// </summary>
     private static ProcessStartInfo BuildSleepProcessStartInfo()
     {
         if (OperatingSystem.IsWindows())

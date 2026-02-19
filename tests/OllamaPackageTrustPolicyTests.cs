@@ -2,8 +2,17 @@ using FreeAiSsd.Shared;
 
 namespace FreeAiSsd.Tests;
 
+/// <summary>
+/// Tests for the Ollama package trust policy — the security gate that validates
+/// download URLs, verifies SHA-256 digests of downloaded packages, and checks
+/// execution attestation before allowing Ollama to run.
+///
+/// Covers: URL validation (scheme, host allowlist, malformed), digest verification
+/// (match, mismatch, missing), and execution attestation (present/absent).
+/// </summary>
 public sealed class OllamaPackageTrustPolicyTests
 {
+    /// <summary>Rejects non-HTTPS URLs to prevent insecure downloads.</summary>
     [Fact]
     public void ValidatePackageSource_RejectsHttp()
     {
@@ -13,6 +22,7 @@ public sealed class OllamaPackageTrustPolicyTests
         Assert.Equal(OllamaPackageTrustFailureReason.UrlSchemeNotHttps, result.Reason);
     }
 
+    /// <summary>Rejects HTTPS URLs from non-allowlisted hosts (only github.com allowed).</summary>
     [Fact]
     public void ValidatePackageSource_RejectsNonAllowlistedHost()
     {
@@ -22,6 +32,7 @@ public sealed class OllamaPackageTrustPolicyTests
         Assert.Equal(OllamaPackageTrustFailureReason.UrlHostNotAllowlisted, result.Reason);
     }
 
+    /// <summary>Rejects completely malformed URLs that can't be parsed.</summary>
     [Fact]
     public void ValidatePackageSource_RejectsMalformedUrl()
     {
@@ -31,6 +42,7 @@ public sealed class OllamaPackageTrustPolicyTests
         Assert.Equal(OllamaPackageTrustFailureReason.UrlMalformed, result.Reason);
     }
 
+    /// <summary>Accepts the default allowlisted HTTPS URL for the Ollama Windows package.</summary>
     [Fact]
     public void ValidatePackageSource_AcceptsAllowlistedHttpsUrl()
     {
@@ -40,6 +52,9 @@ public sealed class OllamaPackageTrustPolicyTests
         Assert.NotNull(result.Metadata);
     }
 
+    /// <summary>
+    /// Verifies that a file with a matching SHA-256 hash passes digest validation.
+    /// </summary>
     [Fact]
     public void ValidateDownloadedPackage_PassesOnExactSha256Match()
     {
@@ -60,6 +75,10 @@ public sealed class OllamaPackageTrustPolicyTests
         }
     }
 
+    /// <summary>
+    /// Verifies that a mismatched SHA-256 hash is detected and reported.
+    /// Prevents execution of tampered or corrupted downloads.
+    /// </summary>
     [Fact]
     public void ValidateDownloadedPackage_FailsOnDigestMismatch()
     {
@@ -80,6 +99,10 @@ public sealed class OllamaPackageTrustPolicyTests
         }
     }
 
+    /// <summary>
+    /// Verifies that an empty expected digest blocks execution.
+    /// This catches configuration errors where the hash wasn't recorded.
+    /// </summary>
     [Fact]
     public void ValidateDownloadedPackage_FailsWhenExpectedDigestMissing()
     {
@@ -100,6 +123,10 @@ public sealed class OllamaPackageTrustPolicyTests
         }
     }
 
+    /// <summary>
+    /// Verifies that execution is blocked when no trust attestation file exists.
+    /// The Runner must see an attestation written by PrepApp before it will run Ollama.
+    /// </summary>
     [Fact]
     public void ValidateExecutionAttestation_BlocksWhenAttestationMissing()
     {
@@ -119,6 +146,9 @@ public sealed class OllamaPackageTrustPolicyTests
         }
     }
 
+    /// <summary>
+    /// Verifies the full trust chain: write attestation → validate → execution allowed.
+    /// </summary>
     [Fact]
     public void ValidateExecutionAttestation_AllowsExecutionAfterAttestation()
     {

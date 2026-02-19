@@ -5,8 +5,25 @@ using System.Text.Json;
 
 namespace FreeAiSsd.PrepApp;
 
+/// <summary>
+/// Manages Ollama model lifecycle operations: pulling (downloading), verifying,
+/// deleting, and discovering models on the SSD. Interacts with the Ollama CLI
+/// binary to perform model operations, and parses Ollama's OCI-compatible
+/// manifest format to locate model blobs for integrity verification.
+/// </summary>
 public sealed class ModelOperations
 {
+    /// <summary>
+    /// Downloads a model from the Ollama registry using the bundled Ollama CLI.
+    /// Sets OLLAMA_MODELS to redirect storage to the SSD's models directory.
+    /// After pulling, locates the model's primary blob and computes its SHA-256 hash.
+    /// </summary>
+    /// <param name="ollamaExe">Path to the Ollama executable.</param>
+    /// <param name="modelRoot">Path to the SSD's models directory.</param>
+    /// <param name="modelTag">Model tag to pull (e.g., "llama3.2:3b").</param>
+    /// <param name="onLog">Callback for streaming pull progress to the UI.</param>
+    /// <param name="ct">Cancellation token for aborting the download.</param>
+    /// <returns>Pull result containing the SHA-256 hash and file size of the model blob.</returns>
     public async Task<PullModelResult> PullModelAsync(string ollamaExe, string modelRoot, string modelTag, Action<string> onLog, CancellationToken ct)
     {
         var env = new Dictionary<string, string>
@@ -20,6 +37,7 @@ public sealed class ModelOperations
             throw new InvalidOperationException($"Failed to pull model {modelTag}. Exit code: {exitCode}");
         }
 
+        // After successful pull, locate the model blob to compute its integrity hash.
         var modelFile = FindModelBlobForModel(modelRoot, modelTag)
                         ?? throw new FileNotFoundException($"Unable to locate model blob for {modelTag} in {modelRoot}.");
 
@@ -28,6 +46,16 @@ public sealed class ModelOperations
         return new PullModelResult(sha256, size);
     }
 
+    /// <summary>
+    /// Verifies a model's integrity by comparing its blob's SHA-256 hash
+    /// against the expected hash stored in the config.
+    /// </summary>
+    /// <param name="modelRoot">Path to the SSD's models directory.</param>
+    /// <param name="modelTag">Model tag to verify.</param>
+    /// <param name="expectedHash">Expected SHA-256 hash from the config.</param>
+    /// <param name="onLog">Callback for verification status messages.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>True if the hash matches; false if the blob is missing or hash differs.</returns>
     public async Task<bool> VerifyModelAsync(string modelRoot, string modelTag, string expectedHash, Action<string> onLog, CancellationToken ct)
     {
         var modelBlob = FindModelBlobForModel(modelRoot, modelTag);
@@ -45,6 +73,9 @@ public sealed class ModelOperations
         return matches;
     }
 
+    /// <summary>
+    /// Deletes a model from disk using the Ollama CLI "rm" command.
+    /// </summary>
     public async Task DeleteModelAsync(string ollamaExe, string modelRoot, string modelTag, Action<string> onLog, CancellationToken ct)
     {
         var env = new Dictionary<string, string>
@@ -59,6 +90,14 @@ public sealed class ModelOperations
         }
     }
 
+    /// <summary>
+    /// Scans the models/manifests directory to discover all models present on disk.
+    /// Ollama stores manifests in a nested directory structure:
+    /// manifests/registry.ollama.ai/library/{model}/{tag}
+    /// This method reconstructs the "model:tag" format from the directory structure.
+    /// </summary>
+    /// <param name="modelRoot">Path to the SSD's models directory.</param>
+    /// <returns>Sorted set of discovered model tags (e.g., "llama3.2:3b").</returns>
     public static IReadOnlyCollection<string> DiscoverModelsOnDisk(string modelRoot)
     {
         var manifestsPath = Path.Combine(modelRoot, "manifests");
@@ -77,6 +116,7 @@ public sealed class ModelOperations
                 continue;
             }
 
+            // Last two path segments are the model name and tag.
             var modelId = $"{parts[^2]}:{parts[^1]}";
             discovered.Add(modelId);
         }
@@ -84,6 +124,14 @@ public sealed class ModelOperations
         return discovered.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
+    /// <summary>
+    /// Locates the primary model blob file for a given model tag by reading
+    /// its OCI manifest and finding the layer with the "model" media type.
+    /// Returns the full path to the blob file, or null if not found.
+    /// </summary>
+    /// <param name="modelRoot">Path to the SSD's models directory.</param>
+    /// <param name="model">Model tag (e.g., "llama3:8b").</param>
+    /// <returns>Full path to the model blob file, or null.</returns>
     public static string? FindModelBlobForModel(string modelRoot, string model)
     {
         if (!TryParseModelReference(model, out var modelName, out var manifestTag))
@@ -109,13 +157,23 @@ public sealed class ModelOperations
             return null;
         }
 
+        // Blob filenames replace ":" with "-" (e.g., "sha256-abcdef...").
         var blob = Path.Combine(modelRoot, "blobs", normalizedDigest.Replace(':', '-'));
         return File.Exists(blob) ? blob : null;
     }
 
+    /// <summary>
+    /// Builds a safe argument list for the Ollama CLI. Uses ArgumentList
+    /// (not string concatenation) to prevent shell injection with model tags
+    /// that may contain special characters.
+    /// </summary>
     internal static IReadOnlyList<string> BuildOllamaArgs(string command, string modelTag)
         => new[] { command, modelTag };
 
+    /// <summary>
+    /// Parses a model reference string "name:tag" into its components.
+    /// Handles the last colon as the separator (supports names with colons).
+    /// </summary>
     private static bool TryParseModelReference(string model, out string modelName, out string tag)
     {
         modelName = string.Empty;
@@ -137,6 +195,14 @@ public sealed class ModelOperations
         return modelName.Length > 0 && tag.Length > 0;
     }
 
+    /// <summary>
+    /// Selects the correct layer digest from an OCI manifest JSON.
+    /// Priority order:
+    /// 1. Layer with media type containing "model" (e.g., "application/vnd.ollama.image.layer.model").
+    /// 2. Largest layer by size (if all layers report sizes).
+    /// 3. Last layer in the array (fallback).
+    /// This ensures we identify the actual model weights blob, not config or template layers.
+    /// </summary>
     internal static bool TrySelectModelLayerDigest(string manifestJson, out string normalizedDigest)
     {
         normalizedDigest = string.Empty;
@@ -179,6 +245,7 @@ public sealed class ModelOperations
             return false;
         }
 
+        // Priority 1: Layer with "model" in its media type.
         var mediaTypeLayer = layers.FirstOrDefault(l =>
             !string.IsNullOrWhiteSpace(l.MediaType) &&
             l.MediaType.Contains("model", StringComparison.OrdinalIgnoreCase));
@@ -188,6 +255,7 @@ public sealed class ModelOperations
             return true;
         }
 
+        // Priority 2: Largest layer by size.
         if (layers.Count > 1 && layers.All(l => l.Size.HasValue))
         {
             normalizedDigest = layers
@@ -197,10 +265,15 @@ public sealed class ModelOperations
             return true;
         }
 
+        // Priority 3: Last layer (fallback when sizes are unknown).
         normalizedDigest = layers[^1].Digest;
         return true;
     }
 
+    /// <summary>
+    /// Normalizes a digest string to lowercase "sha256:hex" format.
+    /// Rejects digests that don't start with "sha256:" or contain non-alphanumeric characters.
+    /// </summary>
     private static string? NormalizeDigest(string? digest)
     {
         if (string.IsNullOrWhiteSpace(digest))
@@ -223,6 +296,10 @@ public sealed class ModelOperations
         return $"sha256:{hash.ToLowerInvariant()}";
     }
 
+    /// <summary>
+    /// Asynchronously computes the SHA-256 hash of a model blob file.
+    /// Returns the hash as a lowercase hex string.
+    /// </summary>
     private static async Task<string> ComputeSha256Async(string modelPath, CancellationToken ct)
     {
         await using var stream = File.OpenRead(modelPath);
@@ -231,6 +308,11 @@ public sealed class ModelOperations
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
+    /// <summary>
+    /// Runs an external process with streaming stdout/stderr output.
+    /// Uses ArgumentList (not Arguments string) for safe argument passing.
+    /// Registers a cancellation callback that kills the process tree on cancellation.
+    /// </summary>
     private static async Task<int> RunProcessStreamingAsync(string fileName, IReadOnlyList<string> arguments, string workingDirectory, IDictionary<string, string> env, Action<string> onOutput, CancellationToken ct)
     {
         var startInfo = new ProcessStartInfo
@@ -248,6 +330,7 @@ public sealed class ModelOperations
             startInfo.Environment[pair.Key] = pair.Value;
         }
 
+        // Use ArgumentList for safe argument passing (prevents shell injection).
         foreach (var argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
@@ -256,6 +339,7 @@ public sealed class ModelOperations
         using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         process.Start();
 
+        // Register cancellation to kill the process tree if the user cancels.
         using var reg = ct.Register(() =>
         {
             try
@@ -267,10 +351,11 @@ public sealed class ModelOperations
             }
             catch
             {
-                // no-op best effort
+                // Best-effort kill; process may have already exited.
             }
         });
 
+        // Consume stdout and stderr concurrently to prevent buffer deadlocks.
         var outputTask = Consume(process.StandardOutput, onOutput, ct);
         var errorTask = Consume(process.StandardError, onOutput, ct);
 
@@ -279,6 +364,10 @@ public sealed class ModelOperations
         return process.ExitCode;
     }
 
+    /// <summary>
+    /// Reads lines from a stream reader asynchronously, invoking the callback
+    /// for each non-empty line until EOF.
+    /// </summary>
     private static async Task Consume(StreamReader reader, Action<string> onOutput, CancellationToken ct)
     {
         while (!reader.EndOfStream)
@@ -292,6 +381,14 @@ public sealed class ModelOperations
     }
 }
 
+/// <summary>
+/// Internal representation of a layer entry from an OCI manifest,
+/// used during model blob resolution.
+/// </summary>
 internal sealed record ManifestLayer(string Digest, string? MediaType, long? Size);
 
+/// <summary>
+/// Result of a successful model pull, containing the SHA-256 hash
+/// and size of the model's primary blob file.
+/// </summary>
 public sealed record PullModelResult(string Sha256, long SizeBytes);

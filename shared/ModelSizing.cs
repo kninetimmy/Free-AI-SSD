@@ -2,6 +2,11 @@ using System.Text.RegularExpressions;
 
 namespace FreeAiSsd.Shared;
 
+/// <summary>
+/// Hardware requirement estimates for a specific model, including RAM,
+/// VRAM, and disk space needed. Used to warn users before pulling
+/// models that may not run well on their hardware.
+/// </summary>
 public sealed record ModelSizing(
     string? ModelTagPattern,
     string? ModelTag,
@@ -13,8 +18,17 @@ public sealed record ModelSizing(
     int ApproxDiskGb,
     string Notes);
 
+/// <summary>
+/// Provides hardware sizing estimates for LLM models based on their tag names.
+/// Uses a built-in catalog for known models and falls back to heuristic sizing
+/// by parsing the parameter count (e.g., "7b") from unknown model tags.
+/// </summary>
 public static class ModelSizingCatalog
 {
+    /// <summary>
+    /// Built-in sizing data for well-known models and wildcard size tiers.
+    /// Entries are matched by exact model tag first, then by parameter count heuristics.
+    /// </summary>
     private static readonly IReadOnlyList<ModelSizing> BuiltIn = new List<ModelSizing>
     {
         new(null, "llama3.2:1b", "Llama 3.2 1B", 4, 8, null, null, 2, "Small starter model; CPU-only is possible but slower."),
@@ -31,6 +45,13 @@ public static class ModelSizingCatalog
         new(null, "*:30b", "~30B+ class model", 32, 64, 20, 24, 40, "Heuristic sizing for unknown 30B+ tags.")
     };
 
+    /// <summary>
+    /// Suggests hardware requirements for a given model tag. Tries exact match
+    /// against the built-in catalog first, then falls back to parsing the parameter
+    /// count suffix (e.g., ":7b") and applying size-tier heuristics.
+    /// </summary>
+    /// <param name="modelTag">The Ollama model tag (e.g., "llama3.2:3b").</param>
+    /// <returns>Sizing estimates for the model, possibly heuristic-based.</returns>
     public static ModelSizing Suggest(string modelTag)
     {
         if (string.IsNullOrWhiteSpace(modelTag))
@@ -39,18 +60,22 @@ public static class ModelSizingCatalog
         }
 
         var normalized = modelTag.Trim();
+
+        // Try exact match against known model tags.
         var exact = BuiltIn.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.ModelTag) && string.Equals(x.ModelTag, normalized, StringComparison.OrdinalIgnoreCase));
         if (exact is not null)
         {
             return exact;
         }
 
+        // Parse the parameter count from the tag suffix (e.g., ":7b" → 7).
         var billions = TryParseBillions(normalized);
         if (billions is null)
         {
             return BuildFallback(normalized, 12, 16, 6, 8, 10, "Could not parse parameter size; medium heuristic applied.");
         }
 
+        // Apply size-tier heuristics based on parameter count.
         if (billions <= 3)
         {
             return BuildFallback(normalized, 8, 16, 4, 6, 4, "1B-3B heuristic sizing.");
@@ -74,9 +99,16 @@ public static class ModelSizingCatalog
         return BuildFallback(normalized, 20, 32, 12, 16, 24, "General mid/high heuristic sizing.");
     }
 
+    /// <summary>
+    /// Creates a fallback ModelSizing record for models not in the built-in catalog.
+    /// </summary>
     private static ModelSizing BuildFallback(string modelTag, int minRam, int recRam, int? minVram, int? recVram, int disk, string note)
         => new(null, modelTag, modelTag, minRam, recRam, minVram, recVram, disk, note);
 
+    /// <summary>
+    /// Extracts the parameter count (in billions) from a model tag suffix.
+    /// Matches patterns like ":7b", ":13b", ":1b" (case-insensitive).
+    /// </summary>
     private static int? TryParseBillions(string modelTag)
     {
         var match = Regex.Match(modelTag, @":(?<size>\d{1,3})b", RegexOptions.IgnoreCase);
