@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using FreeAiSsd.PrepApp.Services;
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Models;
@@ -39,7 +41,7 @@ public partial class MainWindow : Window
             dialogService,
             logService);
 
-        _viewModel.SystemRamGb = SystemResources.GetSystemRamGb();
+        _viewModel.SystemRamGb = SystemResources.GetTotalSystemRamGb();
         _viewModel.GpuVramGb = SystemResources.GetGpuVramGb();
 
         DataContext = _viewModel;
@@ -53,20 +55,7 @@ public partial class MainWindow : Window
     {
         _viewModel.Initialize();
 
-        var starterCatalog = StarterModelCatalog.Build(
-            _viewModel.SystemRamGb,
-            _viewModel.GpuVramGb);
-
-        foreach (var row in starterCatalog)
-            _viewModel.StarterModels.Add(row);
-
-        if (StarterModelGrid.ItemsSource is ICollectionView view ||
-            System.Windows.Data.CollectionViewSource.GetDefaultView(_viewModel.StarterModels) is ICollectionView defaultView)
-        {
-            var cv = System.Windows.Data.CollectionViewSource.GetDefaultView(_viewModel.StarterModels);
-            cv.GroupDescriptions.Clear();
-            cv.GroupDescriptions.Add(new System.Windows.Data.PropertyGroupDescription("SizeTier"));
-        }
+        LoadStarterCatalog();
 
         var prefStore = new PrepTargetPreferenceStore();
         var targets = prefStore.Load();
@@ -80,6 +69,46 @@ public partial class MainWindow : Window
             if (_viewModel.PrepareMac) current |= PrepTargets.Mac;
             prefStore.Save(current);
         };
+    }
+
+    private void LoadStarterCatalog()
+    {
+        var loadResult = StarterModelCatalogLoader.Load(AppContext.BaseDirectory);
+        if (!string.IsNullOrWhiteSpace(loadResult.Warning))
+        {
+            StarterCatalogWarningText.Text = loadResult.Warning;
+            StarterCatalogWarningText.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            StarterCatalogWarningText.Text = string.Empty;
+            StarterCatalogWarningText.Visibility = Visibility.Collapsed;
+        }
+
+        var tierOrder = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Small"] = 0,
+            ["Medium"] = 1,
+            ["Large"] = 2
+        };
+
+        _viewModel.StarterModels.Clear();
+        foreach (var entry in loadResult.Catalog.Models
+                     .OrderBy(m => tierOrder.TryGetValue(m.SizeTier, out var order) ? order : int.MaxValue)
+                     .ThenBy(m => m.Tag, StringComparer.OrdinalIgnoreCase))
+        {
+            _viewModel.StarterModels.Add(new StarterModelRow(
+                entry.Tag,
+                entry.Params,
+                entry.SizeTier,
+                entry.Description,
+                string.Join(", ", entry.UseCases),
+                string.Empty));
+        }
+
+        var collectionView = new ListCollectionView(_viewModel.StarterModels);
+        collectionView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(StarterModelRow.SizeTier)));
+        StarterModelGrid.ItemsSource = collectionView;
     }
 
     private void ModelStatusGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
