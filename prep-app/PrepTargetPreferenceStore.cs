@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using FreeAiSsd.Shared.Models;
 
 namespace FreeAiSsd.PrepApp;
 
@@ -74,6 +75,6 @@ public sealed class PrepTargetPreferenceStore
         public int SchemaVersion { get; init; } = 1;
 
         [JsonPropertyName("prepTargets")]
-        public string PrepTargetsValue { get; init; } = nameof(FreeAiSsd.PrepApp.PrepTargets.Windows);
+        public string PrepTargetsValue { get; init; } = nameof(PrepTargets.Windows);
     }
 }

@@ -74,6 +74,7 @@ public class PrepViewModel : BaseViewModel
         VerifyCommand = new AsyncRelayCommand(VerifyAsync, () => CanMutateDrive);
         RemoveCommand = new AsyncRelayCommand(RemoveAsync, () => CanMutateDrive);
         CancelOperationCommand = new RelayCommand(CancelOperation, () => _isModelOperationRunning);
+        FormatPrepareCommand = new AsyncRelayCommand(FormatPrepareAsync, () => CanMutateDrive && HasDriveSelected);
         FinalizeCommand = new AsyncRelayCommand(FinalizeAsync, () => CanMutateDrive && HasDriveSelected);
         CheckPrereqUpdatesCommand = new AsyncRelayCommand(CheckPrereqUpdatesAsync, () => CanMutateDrive && HasDriveSelected);
         CheckReadinessCommand = new AsyncRelayCommand(CheckReadinessAsync, () => CanMutateDrive && HasDriveSelected);
@@ -157,10 +158,16 @@ public class PrepViewModel : BaseViewModel
         set => SetProperty(ref _ollamaUrl, value);
     }
 
+    public Action? OnPrepTargetsChanged { get; set; }
+
     public bool PrepareWindows
     {
         get => _prepareWindows;
-        set => SetProperty(ref _prepareWindows, value);
+        set
+        {
+            if (SetProperty(ref _prepareWindows, value))
+                OnPrepTargetsChanged?.Invoke();
+        }
     }
 
     public bool PrepareMac
@@ -169,7 +176,8 @@ public class PrepViewModel : BaseViewModel
         set
         {
             if (!_isMacPrepAvailable) value = false;
-            SetProperty(ref _prepareMac, value);
+            if (SetProperty(ref _prepareMac, value))
+                OnPrepTargetsChanged?.Invoke();
         }
     }
 
@@ -230,6 +238,7 @@ public class PrepViewModel : BaseViewModel
     public AsyncRelayCommand VerifyCommand { get; }
     public AsyncRelayCommand RemoveCommand { get; }
     public RelayCommand CancelOperationCommand { get; }
+    public AsyncRelayCommand FormatPrepareCommand { get; }
     public AsyncRelayCommand FinalizeCommand { get; }
     public AsyncRelayCommand CheckPrereqUpdatesCommand { get; }
     public AsyncRelayCommand CheckReadinessCommand { get; }
@@ -668,6 +677,57 @@ public class PrepViewModel : BaseViewModel
         AppendLog("Cancellation requested for current model operation.");
     }
 
+    private async Task FormatPrepareAsync()
+    {
+        if (_selectedDrive is null)
+        {
+            AppendLog("Select a target drive first.");
+            return;
+        }
+        if (!EnsureWritable("Format & Prepare Drive")) return;
+
+        if (_selectedDrive.IsFixed)
+        {
+            if (!_dialogService.ConfirmFixedDrive(_selectedDrive.RootPath))
+            {
+                AppendLog("Format cancelled by user.");
+                return;
+            }
+        }
+
+        if (!_dialogService.ConfirmErase(_selectedDrive.RootPath,
+            _driveService.GetFreeDiskSpaceGb(_selectedDrive.RootPath)?.ToString() ?? "unknown"))
+        {
+            AppendLog("Format cancelled by user.");
+            return;
+        }
+
+        try
+        {
+            StatusText = "Preparing drive structure...";
+            var root = _selectedDrive.RootPath;
+            SsdLayout.EnsureStructure(root);
+
+            var configPath = GetConfigPath(root);
+            var config = new PortableConfig
+            {
+                PreparedAtUtc = DateTime.UtcNow,
+                OllamaPort = 11434,
+                PreferredCompute = "cpu"
+            };
+            await _modelService.SaveConfigAsync(configPath, config);
+
+            StatusText = "Drive prepared";
+            AppendLog($"Drive structure created on {root}.");
+            await RefreshModelStatusesAsync();
+        }
+        catch (Exception ex)
+        {
+            StatusText = "Prepare failed";
+            AppendLog($"Drive preparation failed: {ex.Message}");
+        }
+    }
+
     private async Task FinalizeAsync()
     {
         if (_isModelOperationRunning)
@@ -924,6 +984,7 @@ public class PrepViewModel : BaseViewModel
         VerifyCommand.RaiseCanExecuteChanged();
         RemoveCommand.RaiseCanExecuteChanged();
         CancelOperationCommand.RaiseCanExecuteChanged();
+        FormatPrepareCommand.RaiseCanExecuteChanged();
         FinalizeCommand.RaiseCanExecuteChanged();
         CheckPrereqUpdatesCommand.RaiseCanExecuteChanged();
         CheckReadinessCommand.RaiseCanExecuteChanged();

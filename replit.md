@@ -102,11 +102,30 @@ Prepare a portable SSD with Ollama + LLMs once, then run them offline on Windows
 - Service interfaces in shared/ (net8.0) for cross-platform testability
 - PrepViewModel in shared/ so it can be unit tested on Linux without WPF
 - IDialogService abstracts all MessageBox/dialog interactions
-- Service implementations go in prep-app/ (net8.0-windows) - future task
+- Service implementations in prep-app/Services/ (net8.0-windows) delegate to existing utility classes
 - Moq 4.20.72 used for mocking in tests
+
+## Service Implementations (prep-app/Services/)
+| File | Purpose |
+|------|---------|
+| DriveService.cs | Wraps DriveInspector, SystemResources, PrepDriveWriteGuard for drive operations |
+| ModelService.cs | Wraps ModelOperations, PortableConfig, ModelSizingCatalog for model lifecycle |
+| OllamaPackageService.cs | Handles Ollama download, trust validation, extraction via DownloadManager + OllamaPackageTrustPolicy |
+| PrereqService.cs | Manages Windows prerequisite staging, online updates, and bundle validation |
+| ArtifactStagingService.cs | Handles Runner and macOS artifact deployment with availability checks |
+| ReadinessService.cs | Runs comprehensive SSD validation checks with model integrity verification |
+| EncryptionService.cs | Wraps SsdEncryption for config encryption operations |
+| DialogService.cs | Centralizes MessageBox and custom dialog interactions with Window owner support |
+| LogService.cs | Provides thread-safe logging to ObservableCollection and SsdLogger via Dispatcher |
+
+### MVVM Wiring
+- MainWindow.xaml uses data binding to PrepViewModel properties and commands (no event handlers except SelectionChanged for DataGrid multi-select)
+- MainWindow.xaml.cs reduced from ~1800 lines to ~95 lines: creates services, wires PrepViewModel, sets DataContext
+- PrepTargetPreferenceStore updated to use shared PrepTargets enum from FreeAiSsd.Shared.Models
 
 ## Recent Changes
 - 2026-02-19: Initial Replit setup with .NET 8, build+test workflow configured
 - 2026-02-19: Comprehensive code review completed with architecture, security, and quality findings
 - 2026-02-19: Added XML documentation comments to all source files (shared, prep-app, runner, tests)
 - 2026-02-19: MVVM refactoring Phase 1 complete: base classes, 9 service interfaces, shared DTOs, PrepViewModel, 20 unit tests
+- 2026-02-19: MVVM refactoring Phase 2 complete: 9 service implementations, MainWindow.xaml data binding, MainWindow.xaml.cs simplified to 95 lines
