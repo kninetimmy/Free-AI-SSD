@@ -26,7 +26,7 @@ public class PrepViewModel : BaseViewModel
     private bool _progressIsIndeterminate;
     private bool _isModelOperationRunning;
     private string _modelTagInput = string.Empty;
-    private string _ollamaUrl = "https://github.com/ollama/ollama/releases/download/v0.6.2/ollama-windows-amd64.zip";
+    private string _ollamaUrl = OllamaPackageTrustPolicy.DefaultWindowsPackage.Url;
     private bool _prepareWindows = true;
     private bool _prepareMac;
     private bool _isMacPrepAvailable;
