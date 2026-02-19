@@ -219,15 +219,67 @@ public sealed class SsdEncryptionTests
     }
 
     [Fact]
-    public void IsEncryptionEnabled_WhenStateFileIsCorrupt_ReturnsFalse()
+    public void CorruptStateFile_WithEncryptedArtifacts_FailsClosed()
     {
         var root = CreateTempRoot();
         try
         {
             SsdLayout.EnsureStructure(root);
             File.WriteAllText(StatePath(root), "{ this-is-not-valid-json");
+            File.WriteAllText(EncryptedPath(root), "{}");
 
-            Assert.False(SsdEncryption.IsEncryptionEnabled(root));
+            Assert.True(SsdEncryption.IsEffectivelyEncryptedForWriteGuard(root));
+        }
+        finally
+        {
+            CleanupTempRoot(root);
+        }
+    }
+
+    [Fact]
+    public void MissingStateFile_WithEncryptedArtifacts_IsEffectivelyEncrypted()
+    {
+        var root = CreateTempRoot();
+        try
+        {
+            SsdLayout.EnsureStructure(root);
+            File.WriteAllText(EncryptedPath(root), "{}");
+
+            Assert.True(SsdEncryption.IsEffectivelyEncryptedForWriteGuard(root));
+        }
+        finally
+        {
+            CleanupTempRoot(root);
+        }
+    }
+
+    [Fact]
+    public void ValidDisabledState_WithoutEncryptedArtifacts_IsNotEffectivelyEncrypted()
+    {
+        var root = CreateTempRoot();
+        try
+        {
+            SsdLayout.EnsureStructure(root);
+            File.WriteAllText(StatePath(root), "{\"enabled\":false}");
+
+            Assert.False(SsdEncryption.IsEffectivelyEncryptedForWriteGuard(root));
+        }
+        finally
+        {
+            CleanupTempRoot(root);
+        }
+    }
+
+    [Fact]
+    public void ValidEnabledState_IsEffectivelyEncrypted()
+    {
+        var root = CreateTempRoot();
+        try
+        {
+            SsdLayout.EnsureStructure(root);
+            File.WriteAllText(StatePath(root), "{\"enabled\":true}");
+
+            Assert.True(SsdEncryption.IsEffectivelyEncryptedForWriteGuard(root));
         }
         finally
         {

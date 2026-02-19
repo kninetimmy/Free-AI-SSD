@@ -35,6 +35,48 @@ public static class SsdEncryption
         }
     }
 
+    public static bool IsEffectivelyEncryptedForWriteGuard(string ssdRoot)
+    {
+        var configDir = Path.Combine(ssdRoot, SsdLayout.Config);
+        var statePath = Path.Combine(configDir, StateFileName);
+        var encryptedPath = Path.Combine(configDir, EncryptedConfigFileName);
+        var hasEncryptedArtifact = File.Exists(encryptedPath);
+
+        if (!File.Exists(statePath))
+        {
+            return hasEncryptedArtifact;
+        }
+
+        EncryptionState? state;
+        try
+        {
+            state = JsonSerializer.Deserialize<EncryptionState>(File.ReadAllText(statePath), JsonOptions());
+        }
+        catch
+        {
+            // Fail closed for unreadable metadata.
+            return true;
+        }
+
+        if (state is null)
+        {
+            return true;
+        }
+
+        if (state.Enabled)
+        {
+            return true;
+        }
+
+        // State says disabled, but encrypted artifacts still present is inconsistent and must fail closed.
+        if (hasEncryptedArtifact)
+        {
+            return true;
+        }
+
+        return false;
+    }
+
     public static async Task EnableConfigEncryptionAsync(string ssdRoot, string plainConfigPath, string password, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(password))

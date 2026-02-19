@@ -5,6 +5,9 @@ public static class PrepDriveWriteGuard
     public const string ReadOnlyReason =
         "Encrypted drive detected. PrepApp currently supports read-only access for encrypted SSDs.";
 
+    public static bool IsWriteBlocked(string ssdRoot) =>
+        SsdEncryption.IsEffectivelyEncryptedForWriteGuard(ssdRoot);
+
     public static bool IsWriteBlocked(bool isEncryptedDrive) => isEncryptedDrive;
 
     public static string BuildBlockedOperationMessage(string operationName)
