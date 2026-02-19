@@ -1,0 +1,15 @@
+bin/
+obj/
+*.user
+*.suo
+*.sln.docstates
+.vs/
+TestResults/
+*.DotSettings.user
+packages/
+*.nupkg
+project.lock.json
+.idea/
+*.swp
+*~
+.DS_Store

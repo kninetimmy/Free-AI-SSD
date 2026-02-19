@@ -1,0 +1,29 @@
+modules = ["dotnet-7.0", "swift-5.8", "dotnet-8.0"]
+[agent]
+expertMode = true
+
+[nix]
+channel = "stable-25_05"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Build and Test"
+
+[[workflows.workflow]]
+name = "Build and Test"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd /home/runner/workspace && dotnet build shared/FreeAiSsd.Shared.csproj && dotnet build tests/FreeAiSsd.Tests.csproj && dotnet test tests/FreeAiSsd.Tests.csproj --verbosity normal"
+
+[workflows.workflow.metadata]
+outputType = "console"
