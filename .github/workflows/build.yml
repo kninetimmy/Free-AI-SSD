@@ -44,7 +44,7 @@ jobs:
         shell: pwsh
         run: dotnet publish prep-app/FreeAiSsd.PrepApp.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=false -o out/prepapp-publish
       - name: Download macOS ollama runtime for staging
-        if: github.event_name == 'workflow_dispatch' && inputs.include_macos == true
+        if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
         shell: pwsh
         run: |
           $macDir = "out/mac/tools/ollama"
@@ -84,7 +84,7 @@ jobs:
             LICENSE
 
   mac-runner-build:
-    if: github.event_name == 'workflow_dispatch' && inputs.include_macos == true
+    if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -150,7 +150,7 @@ jobs:
           name: windows-build-output
           path: in/windows
       - uses: actions/download-artifact@v4
-        if: github.event_name == 'workflow_dispatch' && inputs.include_macos == true
+        if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
         with:
           name: mac-runner-artifact
           path: in/mac
@@ -192,7 +192,7 @@ jobs:
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           Compress-Archive -Path out_win/* -DestinationPath dist/Free-AI-SSD-win.zip -Force
       - name: Create beta ZIP
-        if: github.event_name == 'workflow_dispatch' && inputs.include_macos == true
+        if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
         shell: pwsh
         run: Compress-Archive -Path out_beta/* -DestinationPath dist/Free-AI-SSD-beta-crossplatform.zip -Force
       - uses: actions/upload-artifact@v4
@@ -200,10 +200,21 @@ jobs:
           name: Free-AI-SSD-win
           path: dist/Free-AI-SSD-win.zip
       - uses: actions/upload-artifact@v4
-        if: github.event_name == 'workflow_dispatch' && inputs.include_macos == true
+        if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
         with:
           name: Free-AI-SSD-beta-crossplatform
           path: dist/Free-AI-SSD-beta-crossplatform.zip
+      - name: Validate release payload
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/Free-AI-SSD-win.zip")) {
+            throw "Missing required release asset: dist/Free-AI-SSD-win.zip"
+          }
+
+          if ('${{ fromJSON(github.event.inputs.include_macos || 'false') }}' -eq 'true' -and -not (Test-Path "dist/Free-AI-SSD-beta-crossplatform.zip")) {
+            throw "Missing required beta release asset: dist/Free-AI-SSD-beta-crossplatform.zip"
+          }
       - name: Create Release
         if: github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
@@ -211,9 +222,13 @@ jobs:
           tag_name: v${{ inputs.version }}
           name: v${{ inputs.version }}
           files: dist/Free-AI-SSD-win.zip
+          overwrite_files: true
+          fail_on_unmatched_files: true
       - name: Upload beta ZIP to release
-        if: github.event_name == 'workflow_dispatch' && inputs.include_macos == true
+        if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ inputs.version }}
           files: dist/Free-AI-SSD-beta-crossplatform.zip
+          overwrite_files: true
+          fail_on_unmatched_files: true
