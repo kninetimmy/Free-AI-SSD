@@ -4,25 +4,47 @@ using System.Runtime.Versioning;
 
 namespace FreeAiSsd.Shared;
 
+/// <summary>
+/// Information about a single GPU detected on the system, including
+/// vendor classification and discrete/integrated heuristics.
+/// </summary>
 public sealed record GpuInfo(
     string Name,
     string Vendor,
     string? DriverVersion,
+    /// <summary>True if the GPU appears to be a dedicated/discrete GPU (NVIDIA, AMD).</summary>
     bool IsDiscreteLikely,
+    /// <summary>True if the GPU appears to be integrated (Intel UHD/Iris, AMD APU).</summary>
     bool IsIntegratedLikely);
 
+/// <summary>
+/// Snapshot of the system's hardware compatibility profile, including CPU architecture,
+/// OS version, and detected GPUs. Used to display compatibility info in the Runner UI
+/// and to inform the user about potential model performance issues.
+/// </summary>
 public sealed record SystemCompatibilitySnapshot(
     string CpuArchitecture,
     string OsVersion,
     IReadOnlyList<GpuInfo> Gpus)
 {
+    /// <summary>
+    /// Returns a human-readable summary of the best available GPU,
+    /// or "Unknown GPU" if none were detected.
+    /// </summary>
     public string BestGpuSummary => Gpus.FirstOrDefault() is { } gpu
         ? $"{gpu.Name} ({gpu.Vendor})"
         : "Unknown GPU";
 }
 
+/// <summary>
+/// Detects system hardware capabilities (CPU, OS, GPUs) for compatibility reporting.
+/// Uses WMI queries on Windows; returns "Unknown" placeholders on other platforms.
+/// </summary>
 public static class SystemCompatibilityDetector
 {
+    /// <summary>
+    /// Captures a snapshot of the current system's hardware profile.
+    /// </summary>
     public static SystemCompatibilitySnapshot Detect()
     {
         var gpus = DetectGpus();
@@ -32,6 +54,10 @@ public static class SystemCompatibilityDetector
             gpus);
     }
 
+    /// <summary>
+    /// Detects GPUs on the system. On Windows, uses WMI queries against
+    /// Win32_VideoController. On other platforms, returns an "Unknown GPU" placeholder.
+    /// </summary>
     public static IReadOnlyList<GpuInfo> DetectGpus()
     {
         if (!OperatingSystem.IsWindows())
@@ -42,6 +68,12 @@ public static class SystemCompatibilityDetector
         return DetectGpusWindows();
     }
 
+    /// <summary>
+    /// Windows-specific GPU detection using WMI. Queries Win32_VideoController
+    /// for each GPU's name, driver version, adapter compatibility, and PNP device ID.
+    /// Infers vendor (NVIDIA/AMD/Intel) and discrete vs integrated classification
+    /// from PCI vendor IDs and name heuristics.
+    /// </summary>
     [SupportedOSPlatform("windows")]
     private static IReadOnlyList<GpuInfo> DetectGpusWindows()
     {
@@ -70,12 +102,16 @@ public static class SystemCompatibilityDetector
         }
         catch
         {
-            // fall through to Unknown GPU
+            // WMI query failure → fall through to Unknown GPU.
         }
 
         return new[] { new GpuInfo("Unknown GPU", "Unknown", null, false, false) };
     }
 
+    /// <summary>
+    /// Infers the GPU vendor from PCI vendor IDs and name keywords.
+    /// PCI vendor IDs: NVIDIA=10DE, AMD=1002/1022, Intel=8086.
+    /// </summary>
     private static string InferVendor(string adapterCompatibility, string pnpDeviceId, string name)
     {
         var source = string.Join(' ', adapterCompatibility, pnpDeviceId, name).ToUpperInvariant();
@@ -85,6 +121,10 @@ public static class SystemCompatibilityDetector
         return "Unknown";
     }
 
+    /// <summary>
+    /// Heuristic to detect integrated GPUs based on name keywords.
+    /// Intel UHD/Iris, AMD APUs, and anything labeled "INTEGRATED" are classified as integrated.
+    /// </summary>
     private static bool LooksIntegrated(string name, string pnpDeviceId)
     {
         var text = (name + " " + pnpDeviceId).ToUpperInvariant();
@@ -95,6 +135,9 @@ public static class SystemCompatibilityDetector
             || text.Contains("APU");
     }
 
+    /// <summary>
+    /// Safely reads a WMI property value as a trimmed string, returning null if unavailable.
+    /// </summary>
     [SupportedOSPlatform("windows")]
     private static string? ReadProperty(ManagementObject obj, string propertyName)
     {

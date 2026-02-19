@@ -5,6 +5,12 @@ using System.Text.Json.Serialization;
 
 namespace FreeAiSsd.PrepApp;
 
+/// <summary>
+/// Persists the user's prep target selection (Windows, macOS, or both)
+/// to the local application data folder. This ensures the user's platform
+/// preference is remembered between PrepApp sessions.
+/// Stored at: %LOCALAPPDATA%/FreeAiSsd/prepapp-settings.json
+/// </summary>
 public sealed class PrepTargetPreferenceStore
 {
     private readonly string _settingsPath;
@@ -16,6 +22,10 @@ public sealed class PrepTargetPreferenceStore
         _settingsPath = Path.Combine(settingsRoot, "prepapp-settings.json");
     }
 
+    /// <summary>
+    /// Loads the persisted prep target selection. Returns Windows as the default
+    /// if the settings file is missing, corrupt, or has an unknown schema version.
+    /// </summary>
     public PrepTargets Load()
     {
         if (!File.Exists(_settingsPath))
@@ -41,6 +51,10 @@ public sealed class PrepTargetPreferenceStore
         }
     }
 
+    /// <summary>
+    /// Saves the prep target selection to disk. Normalizes "None" to "Windows"
+    /// to ensure at least one platform is always selected.
+    /// </summary>
     public void Save(PrepTargets targets)
     {
         var safeTargets = targets == PrepTargets.None ? PrepTargets.Windows : targets;
@@ -53,6 +67,7 @@ public sealed class PrepTargetPreferenceStore
         File.WriteAllText(_settingsPath, json);
     }
 
+    /// <summary>Internal JSON model for the settings file with schema versioning.</summary>
     private sealed class PrepAppSettings
     {
         [JsonPropertyName("schemaVersion")]

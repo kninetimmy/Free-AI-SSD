@@ -4,8 +4,21 @@ using FreeAiSsd.Shared;
 
 namespace FreeAiSsd.Tests;
 
+/// <summary>
+/// Tests for the SSD encryption subsystem (AES-256-GCM + PBKDF2-SHA256).
+/// Covers the full encrypt-decrypt cycle, error handling for every failure mode
+/// (wrong password, missing files, corrupt metadata, tampered ciphertext,
+/// invalid parameters), and the "fail closed" write-guard security model.
+///
+/// Each test creates an isolated temp directory and cleans up in finally blocks.
+/// </summary>
 public sealed class SsdEncryptionTests
 {
+    /// <summary>
+    /// End-to-end test: encrypts a config with a password, then decrypts it.
+    /// Verifies the plaintext file is deleted, encrypted artifacts exist,
+    /// and the decrypted config matches the original values.
+    /// </summary>
     [Fact]
     public async Task EnableConfigEncryption_EncryptsPlainConfig_AndUnlocksWithPassword()
     {
@@ -43,6 +56,10 @@ public sealed class SsdEncryptionTests
         }
     }
 
+    /// <summary>
+    /// Verifies that an incorrect password is rejected with a clear error message.
+    /// GCM authentication failure manifests as "Incorrect password."
+    /// </summary>
     [Fact]
     public async Task TryUnlockPortableConfig_WithWrongPassword_ReturnsFalse()
     {
@@ -65,6 +82,9 @@ public sealed class SsdEncryptionTests
         }
     }
 
+    /// <summary>
+    /// Verifies the error message when no encryption metadata files exist on disk.
+    /// </summary>
     [Fact]
     public void TryUnlockPortableConfig_WhenMetadataFilesAreMissing_ReturnsMissingError()
     {
@@ -85,6 +105,9 @@ public sealed class SsdEncryptionTests
         }
     }
 
+    /// <summary>
+    /// Verifies error handling when the state JSON file contains invalid JSON.
+    /// </summary>
     [Fact]
     public void TryUnlockPortableConfig_WhenMetadataJsonIsUnreadable_ReturnsUnreadableError()
     {
@@ -107,6 +130,9 @@ public sealed class SsdEncryptionTests
         }
     }
 
+    /// <summary>
+    /// Verifies error handling when the state file deserializes to null (e.g., "null" literal).
+    /// </summary>
     [Fact]
     public void TryUnlockPortableConfig_WhenStateMetadataIsInvalid_ReturnsInvalidMetadataError()
     {
@@ -129,6 +155,9 @@ public sealed class SsdEncryptionTests
         }
     }
 
+    /// <summary>
+    /// Verifies that missing/empty salt is detected as a parameter validation error.
+    /// </summary>
     [Fact]
     public async Task TryUnlockPortableConfig_WhenSaltIsMissing_ReturnsParametersMissingError()
     {
@@ -150,6 +179,9 @@ public sealed class SsdEncryptionTests
         }
     }
 
+    /// <summary>
+    /// Verifies that zero/invalid iteration count is detected as a parameter error.
+    /// </summary>
     [Fact]
     public async Task TryUnlockPortableConfig_WhenIterationsAreInvalid_ReturnsParametersMissingError()
     {
@@ -171,6 +203,10 @@ public sealed class SsdEncryptionTests
         }
     }
 
+    /// <summary>
+    /// Verifies that malformed Base64 in fields (not valid Base64) produces a
+    /// generic decryption failure rather than an unhandled exception.
+    /// </summary>
     [Fact]
     public async Task TryUnlockPortableConfig_WhenBase64FieldsAreMalformed_ReturnsDecryptFailure()
     {
@@ -192,6 +228,11 @@ public sealed class SsdEncryptionTests
         }
     }
 
+    /// <summary>
+    /// Verifies that tampered ciphertext (bit-flipped) is detected by GCM
+    /// authentication and reported as "Incorrect password." (same as wrong password,
+    /// since GCM cannot distinguish between the two cases).
+    /// </summary>
     [Fact]
     public async Task TryUnlockPortableConfig_WhenEncryptedPayloadIsTampered_ReturnsIncorrectPassword()
     {
@@ -218,6 +259,10 @@ public sealed class SsdEncryptionTests
         }
     }
 
+    /// <summary>
+    /// "Fail closed" test: corrupt state file + encrypted artifacts → treated as encrypted.
+    /// This prevents accidental writes to a drive whose encryption state is unclear.
+    /// </summary>
     [Fact]
     public void CorruptStateFile_WithEncryptedArtifacts_FailsClosed()
     {
@@ -236,6 +281,9 @@ public sealed class SsdEncryptionTests
         }
     }
 
+    /// <summary>
+    /// Missing state file + encrypted artifact present → treat as encrypted (fail closed).
+    /// </summary>
     [Fact]
     public void MissingStateFile_WithEncryptedArtifacts_IsEffectivelyEncrypted()
     {
@@ -253,6 +301,10 @@ public sealed class SsdEncryptionTests
         }
     }
 
+    /// <summary>
+    /// State explicitly disabled + no encrypted artifacts → not encrypted.
+    /// This is the normal unencrypted drive state.
+    /// </summary>
     [Fact]
     public void ValidDisabledState_WithoutEncryptedArtifacts_IsNotEffectivelyEncrypted()
     {
@@ -270,6 +322,9 @@ public sealed class SsdEncryptionTests
         }
     }
 
+    /// <summary>
+    /// State explicitly enabled → always treated as encrypted regardless of artifacts.
+    /// </summary>
     [Fact]
     public void ValidEnabledState_IsEffectivelyEncrypted()
     {
@@ -287,6 +342,7 @@ public sealed class SsdEncryptionTests
         }
     }
 
+    /// <summary>Helper: creates an encrypted config from defaults for mutation tests.</summary>
     private static async Task SeedEncryptedConfigAsync(string root, string password)
     {
         SsdLayout.EnsureStructure(root);
@@ -295,6 +351,10 @@ public sealed class SsdEncryptionTests
         await SsdEncryption.EnableConfigEncryptionAsync(root, configPath, password);
     }
 
+    /// <summary>
+    /// Helper: deserializes the encrypted config JSON, applies a mutation lambda,
+    /// and writes it back. Used to simulate tampered or corrupt payloads.
+    /// </summary>
     private static void MutateEncryptedConfigJson(string root, Action<JsonObject> mutate)
     {
         var encryptedPath = EncryptedPath(root);

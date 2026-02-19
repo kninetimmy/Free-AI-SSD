@@ -8,18 +8,47 @@ using FreeAiSsd.Shared;
 
 namespace FreeAiSsd.Runner;
 
+/// <summary>
+/// Main window code-behind for the Runner app — the end-user tool that runs
+/// on the destination machine (offline PC). Manages the Ollama lifecycle:
+///
+/// - SSD root auto-detection (navigates up from windows/runner or runner directory)
+/// - Encrypted drive unlock via AES-256-GCM password dialog
+/// - Dependency checking and offline prerequisite installation (VC++, .NET)
+/// - Ollama process launch with SSD-relative model/config paths
+/// - Simple chat interface: sends prompts to Ollama's /api/generate endpoint
+/// - Hardware compatibility display (GPU, CPU, OS, dependency status)
+/// - Model sizing warnings on first run (dismissible per-machine)
+/// - Admin elevation for prerequisite installers that require it
+///
+/// Architecture note: Like PrepApp, this file mixes UI state and business logic.
+/// A service layer would improve testability.
+/// </summary>
 public partial class MainWindow : System.Windows.Window
 {
+    /// <summary>HTTP client for Ollama API requests (generate, etc.).</summary>
     private readonly HttpClient _http = new();
+    /// <summary>Loaded portable config (null if encrypted and not yet unlocked).</summary>
     private PortableConfig? _config;
+    /// <summary>Detected SSD root directory (parent of windows/runner).</summary>
     private string _ssdRoot = string.Empty;
+    /// <summary>The running Ollama server process (null when stopped).</summary>
     private Process? _ollama;
+    /// <summary>File logger writing to the SSD's logs directory.</summary>
     private SsdLogger? _logger;
+    /// <summary>The port Ollama is currently serving on (null when stopped).</summary>
     private int? _currentPort;
+    /// <summary>Result of the last dependency check (VC++, .NET runtime presence).</summary>
     private DependencyCheckResult _lastDependencyCheck = new(true, Array.Empty<MissingDependency>());
+    /// <summary>True if the SSD has encryption enabled.</summary>
     private bool _isEncryptedDrive;
+    /// <summary>True after the user successfully enters the encryption password.</summary>
     private bool _isUnlocked;
 
+    /// <summary>
+    /// Initializes the Runner: loads config (or enters encrypted mode),
+    /// shows model sizing warnings, detects hardware, and checks dependencies.
+    /// </summary>
     public MainWindow()
     {
         InitializeComponent();
@@ -34,6 +63,11 @@ public partial class MainWindow : System.Windows.Window
         await EnsureDependenciesReadyAsync(forcePrompt: CommandLineHas("--postinstall"), userTriggered: false);
     }
 
+    /// <summary>
+    /// Auto-detects the SSD root by navigating up from the Runner's executable directory.
+    /// If the drive is encrypted, enters locked mode (config is null until unlock).
+    /// Otherwise loads the portable config and populates the model combo box.
+    /// </summary>
     private void LoadConfig()
     {
         _ssdRoot = AppContext.BaseDirectory;
@@ -94,6 +128,11 @@ public partial class MainWindow : System.Windows.Window
         UnlockDriveButton.IsEnabled = _isEncryptedDrive && !_isUnlocked;
     }
 
+    /// <summary>
+    /// Prompts the user for their encryption password and attempts to decrypt
+    /// the portable config using AES-256-GCM. On success, loads the config
+    /// and enables all Runner functionality. On failure, shows the error.
+    /// </summary>
     private bool TryUnlockEncryptedDrive()
     {
         if (!_isEncryptedDrive)
@@ -131,6 +170,13 @@ public partial class MainWindow : System.Windows.Window
         return true;
     }
 
+    /// <summary>
+    /// Starts the Ollama server process. Validates trust attestation, checks
+    /// dependencies, finds a free port (starting from config's preferred port),
+    /// and launches ollama serve with SSD-relative environment variables.
+    /// OLLAMA_MODELS points to the SSD's models directory.
+    /// OLLAMA_HOST binds to 127.0.0.1 (localhost only, not network-exposed).
+    /// </summary>
     private async void Start_Click(object sender, System.Windows.RoutedEventArgs e)
     {
         if (_isEncryptedDrive && !TryUnlockEncryptedDrive())
@@ -217,6 +263,11 @@ public partial class MainWindow : System.Windows.Window
         }
     }
 
+    /// <summary>
+    /// Sends a prompt to the running Ollama instance via its /api/generate endpoint.
+    /// Uses the selected model from the combo box and displays the response text.
+    /// stream=false for simplicity (waits for complete response).
+    /// </summary>
     private async void Send_Click(object sender, System.Windows.RoutedEventArgs e)
     {
         if (_config is null || ModelCombo.SelectedItem is not string model)
@@ -281,6 +332,11 @@ public partial class MainWindow : System.Windows.Window
         });
     }
 
+    /// <summary>
+    /// Shows a one-time warning dialog if installed models exceed the machine's
+    /// hardware capabilities (RAM, VRAM). The user can dismiss permanently
+    /// by selecting "Don't show again", which persists to runner-first-run.json.
+    /// </summary>
     private async Task ShowModelSizingWarningsOnStartupAsync()
     {
         if (_config is null)
@@ -353,6 +409,13 @@ public partial class MainWindow : System.Windows.Window
         }
     }
 
+    /// <summary>
+    /// Checks for required system dependencies (VC++ runtime, .NET runtime) and
+    /// offers to install them from the SSD's bundled prerequisite installers.
+    /// If admin privileges are needed, offers to relaunch with elevation.
+    /// Validates installer integrity (SHA-256) before execution.
+    /// On first run: shows install dialog; on subsequent runs: only shows if forced.
+    /// </summary>
     private async Task<bool> EnsureDependenciesReadyAsync(bool forcePrompt, bool userTriggered)
     {
         _lastDependencyCheck = DependencyChecker.Check(_ssdRoot);
@@ -580,6 +643,10 @@ public partial class MainWindow : System.Windows.Window
         return true;
     }
 
+    /// <summary>
+    /// Finds a free port starting from the preferred port, scanning up to 20 ports.
+    /// Used to avoid conflicts if the default Ollama port (11434) is already in use.
+    /// </summary>
     private static int ResolvePort(int preferred)
     {
         for (var port = preferred; port < preferred + 20; port++)

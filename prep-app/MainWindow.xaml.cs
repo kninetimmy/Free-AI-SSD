@@ -9,6 +9,10 @@ using FreeAiSsd.Shared;
 
 namespace FreeAiSsd.PrepApp;
 
+/// <summary>
+/// Bitfield flags indicating which platforms the SSD should be prepared for.
+/// Supports single or combined selection (Windows, macOS, or both).
+/// </summary>
 [Flags]
 public enum PrepTargets
 {
@@ -17,21 +21,55 @@ public enum PrepTargets
     Mac = 2
 }
 
+/// <summary>
+/// Main window code-behind for the PrepApp — the SSD preparation tool.
+/// This monolithic class manages the entire preparation workflow:
+///
+/// - Drive selection and formatting (NTFS via PowerShell)
+/// - Model management: add, pull (download via Ollama), verify (SHA-256), remove
+/// - Starter model catalog UI with hardware sizing warnings
+/// - Prerequisite staging: bundles VC++ and .NET runtime installers
+/// - Ollama package download with trust policy validation
+/// - macOS artifact staging (Runner.app + Ollama universal binary)
+/// - SSD readiness checks (files, models, config integrity)
+/// - SSD finalization with optional AES-256-GCM encryption
+/// - Encryption write-guard: prevents PrepApp writes to already-encrypted drives
+///
+/// Architecture note: This file contains ~1800 lines mixing UI state, I/O,
+/// downloads, and business logic. A future refactoring to MVVM with a service
+/// layer would improve testability and maintainability.
+/// </summary>
 public partial class MainWindow : System.Windows.Window
 {
+    /// <summary>Handles resumable file downloads for Ollama packages and prerequisites.</summary>
     private readonly DownloadManager _downloadManager = new();
+    /// <summary>Manages Ollama CLI interactions for model pull/verify/delete operations.</summary>
     private readonly ModelOperations _modelOperations = new();
+    /// <summary>Cancellation source for the current model operation (pull/verify/delete).</summary>
     private CancellationTokenSource? _modelOperationCts;
+    /// <summary>Guard flag preventing concurrent model operations.</summary>
     private bool _isModelOperationRunning;
+    /// <summary>Cached system RAM in GB for model sizing warnings.</summary>
     private int? _systemRamGb;
+    /// <summary>Cached GPU VRAM in GB for model sizing warnings.</summary>
     private int? _gpuVramGb;
+    /// <summary>Persists the user's Windows/macOS platform selection between sessions.</summary>
     private readonly PrepTargetPreferenceStore _prepTargetPreferenceStore = new();
+    /// <summary>Cached result of macOS artifact availability check.</summary>
     private MacArtifactAvailabilityResult _macArtifactAvailability = MacArtifactAvailability.Evaluate(AppContext.BaseDirectory);
+    /// <summary>Prevents re-entrant persistence when programmatically setting checkboxes.</summary>
     private bool _suppressPrepTargetPersistence;
+    /// <summary>Ensures the macOS fallback dialog is shown at most once per session.</summary>
     private bool _macFallbackDialogShown;
+    /// <summary>Backing data for the starter model catalog DataGrid.</summary>
     private readonly List<StarterModelRow> _starterModelRows = new();
+    /// <summary>True if the selected drive has encryption enabled (blocks PrepApp writes).</summary>
     private bool _isSelectedDriveEncrypted;
 
+    /// <summary>
+    /// Initializes the PrepApp window: loads drives, starter model catalog,
+    /// system hardware info, and checks macOS artifact availability.
+    /// </summary>
     public MainWindow()
     {
         InitializeComponent();
@@ -49,6 +87,10 @@ public partial class MainWindow : System.Windows.Window
 
     private void ShowFixedDrivesChanged(object sender, System.Windows.RoutedEventArgs e) => LoadDrives();
 
+    /// <summary>
+    /// Refreshes the drive combo box with candidate drives (removable + optionally fixed).
+    /// Also refreshes encryption state, warnings, and model statuses for the newly selected drive.
+    /// </summary>
     private void LoadDrives()
     {
         var includeFixed = ShowFixedDrivesCheckBox?.IsChecked == true;
@@ -162,6 +204,10 @@ public partial class MainWindow : System.Windows.Window
         _prepTargetPreferenceStore.Save(GetSelectedPrepTargets());
     }
 
+    /// <summary>
+    /// Adds a manually-entered model tag to the SSD config (does not download it yet).
+    /// The user must subsequently click Pull/Install to download the model.
+    /// </summary>
     private async void AddModel_Click(object sender, System.Windows.RoutedEventArgs e)
     {
         var tag = (ModelTagText.Text ?? string.Empty).Trim();
@@ -192,6 +238,11 @@ public partial class MainWindow : System.Windows.Window
         AppendLog($"Added model '{tag}' to config.");
     }
 
+    /// <summary>
+    /// Loads the starter model catalog from disk or embedded fallback,
+    /// populates the DataGrid grouped by size tier (Small/Medium/Large),
+    /// and refreshes hardware sizing warnings for each model.
+    /// </summary>
     private void LoadStarterCatalog()
     {
         var loadResult = StarterModelCatalogLoader.Load(AppContext.BaseDirectory);
@@ -428,6 +479,12 @@ public partial class MainWindow : System.Windows.Window
         await PullModelsForSelectedDriveAsync(selected);
     }
 
+    /// <summary>
+    /// Downloads one or more models from the Ollama registry to the SSD.
+    /// Ensures Ollama is available (downloading if needed), then pulls each model
+    /// sequentially with streaming progress updates. Updates model status in config
+    /// after each successful pull, and handles cancellation gracefully.
+    /// </summary>
     private async Task PullModelsForSelectedDriveAsync(IReadOnlyList<string> models)
     {
         if (_isModelOperationRunning)
@@ -679,6 +736,11 @@ public partial class MainWindow : System.Windows.Window
         }
     }
 
+    /// <summary>
+    /// Formats a removable drive as NTFS with a user-specified label, then creates
+    /// the SSD directory structure. Requires Administrator privileges and explicit
+    /// ERASE confirmation from the user. Only allowed for removable drives.
+    /// </summary>
     private async void FormatPrepare_Click(object sender, System.Windows.RoutedEventArgs e)
     {
         if (DriveCombo.SelectedItem is not DriveTarget drive)
@@ -753,6 +815,20 @@ public partial class MainWindow : System.Windows.Window
         AppendLog("Cancellation requested for current model operation.");
     }
 
+    /// <summary>
+    /// Finalizes the SSD: stages all artifacts (Ollama, Runner, prerequisites, macOS),
+    /// runs readiness checks, and optionally enables AES-256-GCM config encryption.
+    /// This is the final step before handing the SSD to an end user.
+    ///
+    /// Finalization steps:
+    /// 1. Ensure directory structure exists.
+    /// 2. Save config with preparation timestamp.
+    /// 3. Verify at least one model is installed.
+    /// 4. Stage Windows artifacts (Ollama, prereqs, Runner) if Windows target selected.
+    /// 5. Stage macOS artifacts (Runner.app, Ollama binary) if macOS target selected.
+    /// 6. Run readiness checks (all must pass to proceed).
+    /// 7. Optionally encrypt the config with user's password.
+    /// </summary>
     private async void Finalize_Click(object sender, System.Windows.RoutedEventArgs e)
     {
         if (_isModelOperationRunning)
@@ -933,6 +1009,12 @@ public partial class MainWindow : System.Windows.Window
         return secondConfirm == System.Windows.MessageBoxResult.Yes;
     }
 
+    /// <summary>
+    /// Ensures the Ollama binary is available on the SSD. If already present and
+    /// trust-attested, returns the path. Otherwise downloads the ZIP from the
+    /// trusted URL, validates its SHA-256 digest, extracts it, and writes a
+    /// trust attestation file for future runs.
+    /// </summary>
     private async Task<string> EnsureOllamaReadyAsync(string root, SsdLogger logger, CancellationToken ct)
     {
         SsdLayout.EnsureStructure(root);
@@ -1050,6 +1132,11 @@ public partial class MainWindow : System.Windows.Window
     }
 
 
+    /// <summary>
+    /// Copies bundled prerequisite installers (VC++ runtime, .NET runtime) to the SSD,
+    /// writes a manifest with SHA-256 hashes, then optionally downloads updated versions
+    /// from official URLs. If bundled files are missing or corrupt, offers to re-download.
+    /// </summary>
     private async Task StagePrerequisitesAsync(string root, SsdLogger logger, CancellationToken ct)
     {
         var ssdPrereqDir = Path.Combine(root, SsdLayout.Prereqs);
@@ -1433,6 +1520,12 @@ public partial class MainWindow : System.Windows.Window
             checks.All(c => c.Passed) ? System.Windows.MessageBoxImage.Information : System.Windows.MessageBoxImage.Warning);
     }
 
+    /// <summary>
+    /// Runs comprehensive readiness checks on the SSD before finalization.
+    /// Validates: Runner executables, config integrity, Ollama binaries,
+    /// models directory, prerequisite bundle health, and model integrity
+    /// (SHA-256 verification of all installed model blobs).
+    /// </summary>
     private async Task<List<ReadinessItem>> RunReadinessChecksAsync(string root, SsdLogger logger)
     {
         var checks = new List<ReadinessItem>();
@@ -1524,6 +1617,12 @@ public partial class MainWindow : System.Windows.Window
         return checks;
     }
 
+    /// <summary>
+    /// Rebuilds the model status DataGrid by merging configured models (from config)
+    /// with discovered models on disk. Configured models show their install status;
+    /// on-disk-only models (orphans) are shown separately for the user to adopt.
+    /// Includes hardware sizing warnings for each model.
+    /// </summary>
     private void RefreshModelStatusGrid(IEnumerable<ModelConfigEntry> configModels, IReadOnlyCollection<string> discoveredOnDisk)
     {
         var rows = new List<ModelGridRow>();
@@ -1597,6 +1696,10 @@ public partial class MainWindow : System.Windows.Window
         return warnings;
     }
 
+    /// <summary>
+    /// Generates hardware sizing warnings for a model based on the system's RAM,
+    /// VRAM, and available disk space compared to the model's requirements.
+    /// </summary>
     private List<string> GetSizingWarnings(string modelTag, int? freeDiskGb)
     {
         var sizing = ModelSizingCatalog.Suggest(modelTag);
@@ -1734,6 +1837,11 @@ public partial class MainWindow : System.Windows.Window
         }
     }
 
+    /// <summary>
+    /// Updates the enabled/disabled state of all model action buttons based on
+    /// current state: whether a drive is selected, model operation is running,
+    /// drive is encrypted (read-only), and what type of model rows are selected.
+    /// </summary>
     private void UpdateModelActionButtons()
     {
         RefreshSelectedDriveEncryptionState();
@@ -1809,6 +1917,10 @@ public partial class MainWindow : System.Windows.Window
         return output;
     }
 
+    /// <summary>
+    /// Result of a single readiness check: a named check with pass/fail status and result detail.
+    /// Warn is treated as a pass with additional info (e.g., macOS Runner missing on Windows-only prep).
+    /// </summary>
     private sealed record ReadinessItem(string Check, bool Passed, string Result)
     {
         public static ReadinessItem Pass(string check) => new(check, true, "OK");
@@ -1816,8 +1928,16 @@ public partial class MainWindow : System.Windows.Window
         public static ReadinessItem Warn(string check, string reason) => new(check, true, reason);
     }
 
+    /// <summary>
+    /// View model for a row in the model status DataGrid, showing install state,
+    /// SHA preview, sizing warnings, and whether the model is config-tracked or on-disk-only.
+    /// </summary>
     private sealed record ModelGridRow(string Name, string Status, string Source, string SizingWarning, string SizeDisplay, string ShaPreview, string LastVerifiedDisplay, bool IsOnDiskOnly);
 
+    /// <summary>
+    /// View model for a row in the starter model catalog DataGrid, with
+    /// selection state and hardware sizing warning display.
+    /// </summary>
     private sealed class StarterModelRow(
         string tag,
         string @params,

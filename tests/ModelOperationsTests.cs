@@ -2,8 +2,18 @@ using FreeAiSsd.PrepApp;
 
 namespace FreeAiSsd.Tests;
 
+/// <summary>
+/// Tests for ModelOperations — the OCI manifest parser and model blob resolver.
+/// Covers the layer selection priority logic (media type → largest size → last layer),
+/// model blob resolution from the Ollama manifest directory structure, and
+/// argument safety for the Ollama CLI.
+/// </summary>
 public sealed class ModelOperationsTests
 {
+    /// <summary>
+    /// Priority 1: When a layer has "model" in its media type, it should be
+    /// selected over other layers regardless of size.
+    /// </summary>
     [Fact]
     public void TrySelectModelLayerDigest_PrefersModelMediaTypeLayer()
     {
@@ -25,6 +35,10 @@ public sealed class ModelOperationsTests
         Assert.Equal("sha256:cccccccc", digest);
     }
 
+    /// <summary>
+    /// Priority 2: When no layer has a "model" media type, fall back to the
+    /// largest layer by size (the model weights are always the biggest blob).
+    /// </summary>
     [Fact]
     public void TrySelectModelLayerDigest_FallsBackToLargestLayer()
     {
@@ -45,6 +59,10 @@ public sealed class ModelOperationsTests
         Assert.Equal("sha256:cccccccc", digest);
     }
 
+    /// <summary>
+    /// Priority 3: When sizes are not available, fall back to the last layer
+    /// in the array (a reasonable heuristic for older manifest formats).
+    /// </summary>
     [Fact]
     public void TrySelectModelLayerDigest_UsesLastLayerWhenSizesMissing()
     {
@@ -64,6 +82,11 @@ public sealed class ModelOperationsTests
         Assert.Equal("sha256:cccccccc", digest);
     }
 
+    /// <summary>
+    /// Integration test: creates an on-disk manifest + blobs directory structure
+    /// and verifies that FindModelBlobForModel resolves the correct model blob
+    /// (not the config blob) based on the manifest's layer media types.
+    /// </summary>
     [Fact]
     public void FindModelBlobForModel_PicksLayerDigestNotConfigDigest()
     {
@@ -104,6 +127,11 @@ public sealed class ModelOperationsTests
         }
     }
 
+    /// <summary>
+    /// Verifies that BuildOllamaArgs keeps model tags as a single argument element
+    /// (using ArgumentList, not string concatenation) to prevent shell injection
+    /// with specially-crafted model names.
+    /// </summary>
     [Theory]
     [InlineData("llama3:8b")]
     [InlineData("weird tag:latest")]
