@@ -71,6 +71,11 @@ public sealed class PortableConfig
     /// injecting irrelevant content into the LLM prompt. Default is 0.3.
     /// </summary>
     public double MinimumSimilarityThreshold { get; set; } = 0.3;
+    /// <summary>
+    /// Maximum number of chunk embeddings to request concurrently during document ingestion.
+    /// Higher values may improve throughput but increase load on the local Ollama server.
+    /// </summary>
+    public int MaxEmbeddingConcurrency { get; set; } = 4;
 
     /// <summary>Standard relative path for the config file within the SSD structure.</summary>
     [JsonIgnore]
