@@ -7,6 +7,6 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
     <PackageReference Include="System.Management" Version="8.0.0" />
-    <PackageReference Include="UglyToad.PdfPig" Version="0.1.10" />
+    <PackageReference Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
   </ItemGroup>
 </Project>
