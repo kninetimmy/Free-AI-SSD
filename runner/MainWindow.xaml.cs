@@ -4,7 +4,10 @@ using System.Net.Http;
 using System.Net.Http.Json;
 using System.Security.Principal;
 using System.Text.Json;
+using Microsoft.Win32;
 using FreeAiSsd.Shared;
+using FreeAiSsd.Shared.Documents;
+using Forms = System.Windows.Forms;
 
 namespace FreeAiSsd.Runner;
 
@@ -44,6 +47,9 @@ public partial class MainWindow : System.Windows.Window
     private bool _isEncryptedDrive;
     /// <summary>True after the user successfully enters the encryption password.</summary>
     private bool _isUnlocked;
+    private DocumentLibraryManager? _libraryManager;
+    private DocumentIngestor? _documentIngestor;
+    private DocumentLibraryManifest? _activeLibrary;
 
     /// <summary>
     /// Initializes the Runner: loads config (or enters encrypted mode),
@@ -83,6 +89,8 @@ public partial class MainWindow : System.Windows.Window
         }
 
         _logger = new SsdLogger(_ssdRoot, "runner");
+        _libraryManager = new DocumentLibraryManager(_ssdRoot);
+        _documentIngestor = new DocumentIngestor(_libraryManager, new EmbeddingClient(_http));
         if (SsdEncryption.IsEncryptionEnabled(_ssdRoot))
         {
             _isEncryptedDrive = true;
@@ -91,6 +99,7 @@ public partial class MainWindow : System.Windows.Window
             UpdateEncryptionUiState();
             StatusText.Text = "Encrypted drive locked";
             AppendLog("Encrypted drive detected. Click 'Unlock Drive' to continue.");
+            RefreshLibraryUi();
             return;
         }
 
@@ -108,6 +117,7 @@ public partial class MainWindow : System.Windows.Window
 
         _config = PortableConfig.Load(configPath);
         PopulateModelCombo();
+        RefreshLibraryUi();
         StatusText.Text = "Ready (not running)";
         AppendLog($"Loaded config from {configPath}");
     }
@@ -164,6 +174,7 @@ public partial class MainWindow : System.Windows.Window
         _isUnlocked = true;
         UpdateEncryptionUiState();
         PopulateModelCombo();
+        RefreshLibraryUi();
         StatusText.Text = "Unlocked and ready";
         AppendLog("SSD unlocked successfully.");
         _ = SaveEncryptionUnlockStateAsync();
@@ -280,10 +291,35 @@ public partial class MainWindow : System.Windows.Window
             return;
         }
 
+        var promptToSend = PromptText.Text;
+        SourcesList.ItemsSource = null;
+
+        if (!string.IsNullOrWhiteSpace(_config.ActiveDocumentLibraryId) && _libraryManager is not null)
+        {
+            try
+            {
+                var manifest = _libraryManager.LoadManifest(_config.ActiveDocumentLibraryId);
+                var index = new VectorIndex(_libraryManager.GetIndexPath(manifest.Id));
+                var embedder = new EmbeddingClient(_http);
+                var queryEmbedding = await embedder.EmbedAsync(host, _config.EmbeddingModelName, PromptText.Text);
+                var results = index.Search(manifest.Id, queryEmbedding, _config.RetrievalTopK);
+                var rag = RagPromptBuilder.Build(PromptText.Text, results, maxContextChars: 4500);
+                if (rag.UsedContext)
+                {
+                    promptToSend = rag.Prompt;
+                    SourcesList.ItemsSource = rag.Sources;
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"RAG retrieval skipped: {ex.Message}");
+            }
+        }
+
         var request = new
         {
             model,
-            prompt = PromptText.Text,
+            prompt = promptToSend,
             stream = false
         };
 
@@ -655,6 +691,273 @@ public partial class MainWindow : System.Windows.Window
         }
 
         throw new InvalidOperationException("No free ports in range.");
+    }
+
+    private void RefreshLibraryUi()
+    {
+        if (_libraryManager is null || _config is null)
+        {
+            LibraryCombo.ItemsSource = new[] { "None" };
+            LibraryCombo.SelectedIndex = 0;
+            return;
+        }
+
+        var registry = _libraryManager.LoadRegistry();
+        var options = new List<string> { "None" };
+        options.AddRange(registry.Libraries.Select(l => $"{l.Name} ({l.Id})"));
+        LibraryCombo.ItemsSource = options;
+
+        if (!string.IsNullOrWhiteSpace(_config.ActiveDocumentLibraryId))
+        {
+            var matchIndex = registry.Libraries.FindIndex(x => x.Id == _config.ActiveDocumentLibraryId);
+            LibraryCombo.SelectedIndex = matchIndex >= 0 ? matchIndex + 1 : 0;
+            if (matchIndex >= 0)
+            {
+                _activeLibrary = _libraryManager.LoadManifest(_config.ActiveDocumentLibraryId!);
+            }
+        }
+        else
+        {
+            LibraryCombo.SelectedIndex = 0;
+            _activeLibrary = null;
+        }
+
+        LibraryFilesList.ItemsSource = _activeLibrary?.Files ?? new List<DocumentFileEntry>();
+        IndexingStatusText.Text = _activeLibrary?.LastIndexedUtc is null
+            ? "No indexing run yet."
+            : $"Last indexed: {_activeLibrary.LastIndexedUtc:u}";
+    }
+
+    private async Task SaveConfigAsync()
+    {
+        if (_config is null)
+        {
+            return;
+        }
+
+        var configPath = Path.Combine(_ssdRoot, "config", "portable-config.json");
+        await _config.SaveAsync(configPath);
+    }
+
+    private string? GetSelectedLibraryId()
+    {
+        if (_libraryManager is null || LibraryCombo.SelectedIndex <= 0)
+        {
+            return null;
+        }
+
+        var registry = _libraryManager.LoadRegistry();
+        var idx = LibraryCombo.SelectedIndex - 1;
+        return idx >= 0 && idx < registry.Libraries.Count ? registry.Libraries[idx].Id : null;
+    }
+
+    private async Task<bool> EnsureActiveLibraryAsync()
+    {
+        var selectedId = GetSelectedLibraryId();
+        if (_config is null || _libraryManager is null)
+        {
+            _activeLibrary = null;
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(selectedId))
+        {
+            _config.ActiveDocumentLibraryId = null;
+            var regNone = _libraryManager.LoadRegistry();
+            regNone.ActiveLibraryId = null;
+            await _libraryManager.SaveRegistryAsync(regNone);
+            await SaveConfigAsync();
+            _activeLibrary = null;
+            LibraryFilesList.ItemsSource = new List<DocumentFileEntry>();
+            return false;
+        }
+
+        _config.ActiveDocumentLibraryId = selectedId;
+        var reg = _libraryManager.LoadRegistry();
+        reg.ActiveLibraryId = selectedId;
+        await _libraryManager.SaveRegistryAsync(reg);
+        await SaveConfigAsync();
+        _activeLibrary = _libraryManager.LoadManifest(selectedId);
+        LibraryFilesList.ItemsSource = _activeLibrary.Files;
+        return true;
+    }
+
+    private void LibraryCombo_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        _ = EnsureActiveLibraryAsync();
+    }
+
+    private async void CreateLibrary_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_libraryManager is null || _config is null)
+        {
+            return;
+        }
+
+        var name = string.IsNullOrWhiteSpace(NewLibraryNameText.Text) ? "Library" : NewLibraryNameText.Text.Trim();
+        var manifest = await _libraryManager.CreateLibraryAsync(name);
+        _config.ActiveDocumentLibraryId = manifest.Id;
+        await SaveConfigAsync();
+        RefreshLibraryUi();
+        AppendLog($"Created library: {manifest.Name}");
+    }
+
+    private async void AddFiles_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (!await EnsureActiveLibraryAsync() || _activeLibrary is null || _documentIngestor is null || _config is null)
+        {
+            AppendLog("Select a document library first.");
+            return;
+        }
+
+        if (!TryGetCurrentHost(out var host))
+        {
+            return;
+        }
+
+        var dlg = new OpenFileDialog
+        {
+            Multiselect = true,
+            Filter = "Supported|*.pdf;*.txt;*.md;*.json;*.csv|All files|*.*"
+        };
+
+        if (dlg.ShowDialog() != true)
+        {
+            return;
+        }
+
+        try
+        {
+            IndexingStatusText.Text = "Indexing...";
+            await _documentIngestor.IngestFilesAsync(_activeLibrary, dlg.FileNames, host, _config, p =>
+            {
+                Dispatcher.Invoke(() => IndexingStatusText.Text = $"Indexing {p.CompletedFiles}/{p.TotalFiles}: {p.CurrentFile}");
+            });
+            RefreshLibraryUi();
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Indexing failed: {ex.Message}");
+            IndexingStatusText.Text = "Indexing failed. Missing embedding model?";
+        }
+    }
+
+    private async void AddFolder_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (!await EnsureActiveLibraryAsync() || _activeLibrary is null || _libraryManager is null)
+        {
+            AppendLog("Select a document library first.");
+            return;
+        }
+
+        using var dialog = new Forms.FolderBrowserDialog();
+        if (dialog.ShowDialog() != Forms.DialogResult.OK || string.IsNullOrWhiteSpace(dialog.SelectedPath))
+        {
+            return;
+        }
+
+        if (!_activeLibrary.WatchedFolders.Contains(dialog.SelectedPath, StringComparer.OrdinalIgnoreCase))
+        {
+            _activeLibrary.WatchedFolders.Add(dialog.SelectedPath);
+            await _libraryManager.SaveManifestAsync(_activeLibrary);
+            IndexingStatusText.Text = $"Added sweep folder: {dialog.SelectedPath}";
+        }
+    }
+
+    private async void SweepFolders_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (!await EnsureActiveLibraryAsync() || _activeLibrary is null || _documentIngestor is null || _config is null)
+        {
+            AppendLog("Select a document library first.");
+            return;
+        }
+
+        if (!TryGetCurrentHost(out var host))
+        {
+            return;
+        }
+
+        try
+        {
+            await _documentIngestor.SweepFoldersAsync(_activeLibrary, host, _config, p =>
+            {
+                Dispatcher.Invoke(() => IndexingStatusText.Text = $"Sweep {p.CompletedFiles}/{p.TotalFiles}: {p.CurrentFile}");
+            });
+            RefreshLibraryUi();
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Sweep failed: {ex.Message}");
+        }
+    }
+
+    private async void RebuildIndex_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (!await EnsureActiveLibraryAsync() || _activeLibrary is null || _documentIngestor is null || _config is null)
+        {
+            AppendLog("Select a document library first.");
+            return;
+        }
+
+        if (!TryGetCurrentHost(out var host))
+        {
+            return;
+        }
+
+        try
+        {
+            await _documentIngestor.RebuildIndexAsync(_activeLibrary, host, _config, p =>
+            {
+                Dispatcher.Invoke(() => IndexingStatusText.Text = $"Rebuild {p.CompletedFiles}/{p.TotalFiles}: {p.CurrentFile}");
+            });
+            RefreshLibraryUi();
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Rebuild failed: {ex.Message}");
+        }
+    }
+
+    private async void PullEmbeddingModel_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_config is null)
+        {
+            return;
+        }
+
+        if (!TryGetCurrentHost(out var host))
+        {
+            AppendLog("Start Ollama before pulling embedding model.");
+            return;
+        }
+
+        try
+        {
+            var request = new { name = _config.EmbeddingModelName, stream = false };
+            using var response = await _http.PostAsJsonAsync($"http://{host}/api/pull", request);
+            response.EnsureSuccessStatusCode();
+            IndexingStatusText.Text = $"Embedding model ready: {_config.EmbeddingModelName}";
+            AppendLog($"Pulled embedding model: {_config.EmbeddingModelName}");
+        }
+        catch (Exception ex)
+        {
+            IndexingStatusText.Text = "Unable to pull embedding model while offline. Connect temporarily and retry.";
+            AppendLog($"Embedding model pull failed: {ex.Message}");
+        }
+    }
+
+    private async void RemoveFile_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (!await EnsureActiveLibraryAsync() || _activeLibrary is null || _documentIngestor is null)
+        {
+            return;
+        }
+
+        if (LibraryFilesList.SelectedItem is DocumentFileEntry file)
+        {
+            await _documentIngestor.RemoveFileAsync(_activeLibrary, file.StoredRelativePath);
+            RefreshLibraryUi();
+        }
     }
 
     private void AppendLog(string line)
