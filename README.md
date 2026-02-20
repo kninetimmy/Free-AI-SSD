@@ -93,13 +93,27 @@ Runner includes a **Reference Documents** panel for local document-grounded chat
   - `[manual.pdf p.12]`
   - `[notes.txt]`
 - The **Sources** list in Runner shows the distinct citations actually used in the injected context.
-- If no active library is selected, or retrieval yields no usable chunks, chat falls back to plain prompt behavior.
+- If no active library is selected, chat falls back to plain prompt behavior. If a library is searched but no chunks meet the similarity threshold, the prompt notes "No relevant documents found" so the model knows to say it doesn't know rather than hallucinate.
 
 ### Current limitations
 - PDF extraction quality depends on embedded text layer quality.
 - Scanned/image-only PDFs may extract poorly without OCR.
 - DOCX is not supported in current file parser.
-- Retrieval uses SQLite + cosine scan and is intended for personal/small-medium libraries.
+- Retrieval uses SQLite with SIMD-optimized cosine search and is optimized for personal/small-medium libraries (up to ~10,000 chunks; a warning is logged if exceeded).
+
+---
+
+## Recent Improvements
+
+**Cosine similarity threshold** — RAG retrieval now discards chunks below a configurable minimum cosine similarity score (default 0.3), preventing low-relevance content from polluting the LLM context. Configurable via `minimumSimilarityThreshold` in `config/portable-config.json`.
+
+**Binary BLOB embedding storage** — Embeddings are stored as raw binary BLOBs in SQLite instead of JSON text, reducing index file size by ~60% and eliminating serialization overhead on every query. Existing indexes are migrated automatically on first open.
+
+**Parallel embedding ingestion** — Document ingestion embeds chunks concurrently under a bounded concurrency cap (default 4), replacing the previous sequential per-chunk loop. Large libraries index significantly faster. Configurable via `maxEmbeddingConcurrency` in `config/portable-config.json`.
+
+**SIMD-optimized vector search** — Embeddings are pre-normalized at write time so search reduces to a dot product. The dot product itself is SIMD-accelerated via `System.Numerics.Vector<float>` (no new native dependencies — built into .NET 8), and top-K selection uses an O(N log K) priority queue instead of a full sort.
+
+**Runner service layer** — `MainWindow.xaml.cs` has been refactored from a 983-line monolith into a thin UI shell. Business logic now lives in four injectable, interface-backed services: `OllamaLifecycleService`, `ModelManagementService`, `DocumentOperationsService`, and `ChatService`. Each service has no UI references and can be unit-tested independently.
 
 ---
 
@@ -164,6 +178,15 @@ dotnet test FreeAiSsd.sln -c Release
 ```powershell
 dotnet run --project prep-app
 ```
+
+### Runner architecture
+Runner's business logic is split into four services under `runner/Services/`:
+- `OllamaLifecycleService` — process start/stop, port resolution, trust validation
+- `ModelManagementService` — installed model listing, sizing warnings, embedding model pull
+- `DocumentOperationsService` — library CRUD, file ingestion, folder sweep, index rebuild
+- `ChatService` — RAG-augmented prompt sending via Ollama `/api/generate`
+
+Each implements an interface (`IOllamaLifecycleService`, etc.) for unit testing without a UI host.
 
 </details>
 
