@@ -1,63 +1,79 @@
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
-using System.Net.Http.Json;
 using System.Security.Principal;
-using System.Text.Json;
-using Microsoft.Win32;
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Documents;
+using FreeAiSsd.Runner.Services;
 using Forms = System.Windows.Forms;
 
 namespace FreeAiSsd.Runner;
 
 /// <summary>
-/// Main window code-behind for the Runner app — the end-user tool that runs
-/// on the destination machine (offline PC). Manages the Ollama lifecycle:
+/// Thin UI shell for the Runner app. Delegates business logic to:
+/// <see cref="IOllamaLifecycleService"/>, <see cref="IModelManagementService"/>,
+/// <see cref="IDocumentOperationsService"/>, <see cref="IChatService"/>.
 ///
-/// - SSD root auto-detection (navigates up from windows/runner or runner directory)
-/// - Encrypted drive unlock via AES-256-GCM password dialog
-/// - Dependency checking and offline prerequisite installation (VC++, .NET)
-/// - Ollama process launch with SSD-relative model/config paths
-/// - Simple chat interface: sends prompts to Ollama's /api/generate endpoint
-/// - Hardware compatibility display (GPU, CPU, OS, dependency status)
-/// - Model sizing warnings on first run (dismissible per-machine)
-/// - Admin elevation for prerequisite installers that require it
+/// This class is responsible for:
+/// - Wiring up services and subscribing to their events
+/// - Handling UI updates (status text, combo boxes, list boxes)
+/// - Showing dialogs (encryption unlock, dependency install, file pickers)
+/// - Delegating button clicks to the appropriate service
 ///
-/// Architecture note: Like PrepApp, this file mixes UI state and business logic.
-/// A service layer would improve testability.
+/// Dependency checking remains here because it orchestrates multiple UI dialogs
+/// and already delegates non-UI work to shared services (DependencyChecker,
+/// PrereqInstallValidator).
 /// </summary>
 public partial class MainWindow : System.Windows.Window
 {
-    /// <summary>HTTP client for Ollama API requests (generate, etc.).</summary>
-    private readonly HttpClient _http = new();
-    /// <summary>Loaded portable config (null if encrypted and not yet unlocked).</summary>
+    private readonly IOllamaLifecycleService _ollamaService;
+    private readonly IModelManagementService _modelService;
+    private readonly IDocumentOperationsService _docService;
+    private readonly IChatService _chatService;
+
     private PortableConfig? _config;
-    /// <summary>Detected SSD root directory (parent of windows/runner).</summary>
     private string _ssdRoot = string.Empty;
-    /// <summary>The running Ollama server process (null when stopped).</summary>
-    private Process? _ollama;
-    /// <summary>File logger writing to the SSD's logs directory.</summary>
     private SsdLogger? _logger;
-    /// <summary>The port Ollama is currently serving on (null when stopped).</summary>
-    private int? _currentPort;
-    /// <summary>Result of the last dependency check (VC++, .NET runtime presence).</summary>
     private DependencyCheckResult _lastDependencyCheck = new(true, Array.Empty<MissingDependency>());
-    /// <summary>True if the SSD has encryption enabled.</summary>
     private bool _isEncryptedDrive;
-    /// <summary>True after the user successfully enters the encryption password.</summary>
     private bool _isUnlocked;
-    private DocumentLibraryManager? _libraryManager;
-    private DocumentIngestor? _documentIngestor;
     private DocumentLibraryManifest? _activeLibrary;
 
-    /// <summary>
-    /// Initializes the Runner: loads config (or enters encrypted mode),
-    /// shows model sizing warnings, detects hardware, and checks dependencies.
-    /// </summary>
     public MainWindow()
     {
         InitializeComponent();
+
+        // Detect SSD root
+        _ssdRoot = AppContext.BaseDirectory;
+        var baseTrimmed = _ssdRoot.TrimEnd(Path.DirectorySeparatorChar);
+        if (baseTrimmed.EndsWith($"windows{Path.DirectorySeparatorChar}runner", StringComparison.OrdinalIgnoreCase))
+        {
+            _ssdRoot = Directory.GetParent(Directory.GetParent(baseTrimmed)!.FullName)!.FullName;
+        }
+        else if (baseTrimmed.EndsWith("runner", StringComparison.OrdinalIgnoreCase))
+        {
+            _ssdRoot = Directory.GetParent(baseTrimmed)!.FullName;
+        }
+
+        // Create shared dependencies
+        _logger = new SsdLogger(_ssdRoot, "runner");
+        var http = new HttpClient();
+        var libraryManager = new DocumentLibraryManager(_ssdRoot);
+        var documentIngestor = new DocumentIngestor(libraryManager, new EmbeddingClient(http));
+
+        // Create services
+        _ollamaService = new OllamaLifecycleService(_logger);
+        _modelService = new ModelManagementService(http);
+        _docService = new DocumentOperationsService(libraryManager, documentIngestor);
+        _chatService = new ChatService(http, libraryManager, _logger);
+
+        // Wire service events to UI
+        _ollamaService.LogMessage += msg => AppendLog(msg);
+        _ollamaService.ProcessExited += () => Dispatcher.Invoke(() => StatusText.Text = "Stopped");
+        _modelService.LogMessage += msg => AppendLog(msg);
+        _docService.LogMessage += msg => AppendLog(msg);
+        _chatService.LogMessage += msg => AppendLog(msg);
+
         LoadConfig();
         _ = ShowModelSizingWarningsOnStartupAsync();
         _ = InitializeCompatibilityAsync();
@@ -70,27 +86,11 @@ public partial class MainWindow : System.Windows.Window
     }
 
     /// <summary>
-    /// Auto-detects the SSD root by navigating up from the Runner's executable directory.
-    /// If the drive is encrypted, enters locked mode (config is null until unlock).
-    /// Otherwise loads the portable config and populates the model combo box.
+    /// Checks for encryption, loads portable config, and populates the model combo.
+    /// SSD root detection happens in the constructor.
     /// </summary>
     private void LoadConfig()
     {
-        _ssdRoot = AppContext.BaseDirectory;
-        var baseTrimmed = _ssdRoot.TrimEnd(Path.DirectorySeparatorChar);
-        if (baseTrimmed.EndsWith($"windows{Path.DirectorySeparatorChar}runner", StringComparison.OrdinalIgnoreCase))
-        {
-            _ssdRoot = Directory.GetParent(Directory.GetParent(baseTrimmed)!.FullName)!.FullName;
-        }
-        else if (baseTrimmed.EndsWith("runner", StringComparison.OrdinalIgnoreCase))
-        {
-            // Backward compatibility with old layout (<SSD>/runner).
-            _ssdRoot = Directory.GetParent(baseTrimmed)!.FullName;
-        }
-
-        _logger = new SsdLogger(_ssdRoot, "runner");
-        _libraryManager = new DocumentLibraryManager(_ssdRoot);
-        _documentIngestor = new DocumentIngestor(_libraryManager, new EmbeddingClient(_http));
         if (SsdEncryption.IsEncryptionEnabled(_ssdRoot))
         {
             _isEncryptedDrive = true;
@@ -124,10 +124,9 @@ public partial class MainWindow : System.Windows.Window
 
     private void PopulateModelCombo()
     {
-        var installedModels = _config?.Models
-            .Where(m => m.Status == ModelInstallStatus.Installed)
-            .Select(m => m.Name)
-            .ToList() ?? new List<string>();
+        var installedModels = _config is not null
+            ? _modelService.GetInstalledModelNames(_config)
+            : new List<string>();
         ModelCombo.ItemsSource = installedModels;
         ModelCombo.SelectedIndex = installedModels.Count > 0 ? 0 : -1;
     }
@@ -138,22 +137,10 @@ public partial class MainWindow : System.Windows.Window
         UnlockDriveButton.IsEnabled = _isEncryptedDrive && !_isUnlocked;
     }
 
-    /// <summary>
-    /// Prompts the user for their encryption password and attempts to decrypt
-    /// the portable config using AES-256-GCM. On success, loads the config
-    /// and enables all Runner functionality. On failure, shows the error.
-    /// </summary>
     private bool TryUnlockEncryptedDrive()
     {
-        if (!_isEncryptedDrive)
-        {
-            return true;
-        }
-
-        if (_isUnlocked && _config is not null)
-        {
-            return true;
-        }
+        if (!_isEncryptedDrive) return true;
+        if (_isUnlocked && _config is not null) return true;
 
         var dialog = new UnlockDriveDialog { Owner = this };
         if (dialog.ShowDialog() != true)
@@ -181,180 +168,60 @@ public partial class MainWindow : System.Windows.Window
         return true;
     }
 
-    /// <summary>
-    /// Starts the Ollama server process. Validates trust attestation, checks
-    /// dependencies, finds a free port (starting from config's preferred port),
-    /// and launches ollama serve with SSD-relative environment variables.
-    /// OLLAMA_MODELS points to the SSD's models directory.
-    /// OLLAMA_HOST binds to 127.0.0.1 (localhost only, not network-exposed).
-    /// </summary>
     private async void Start_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        if (_isEncryptedDrive && !TryUnlockEncryptedDrive())
-        {
-            return;
-        }
+        if (_isEncryptedDrive && !TryUnlockEncryptedDrive()) return;
+        if (_config is null || _ollamaService.IsRunning) return;
 
-        if (_config is null || _ollama is { HasExited: false }) return;
-
-        var trustGate = OllamaPackageTrustPolicy.ValidateExecutionAttestation(_ssdRoot, OllamaPackageTrustPolicy.DefaultWindowsPackage.Url);
-        if (!trustGate.IsTrusted)
+        var trust = _ollamaService.ValidateTrust(_ssdRoot);
+        if (!trust.IsTrusted)
         {
             StatusText.Text = "Blocked: untrusted Ollama package";
-            AppendLog($"Start blocked: {trustGate.Message}");
+            AppendLog($"Start blocked: {trust.Message}");
             return;
         }
 
-        if (!await EnsureDependenciesReadyAsync(forcePrompt: false, userTriggered: true))
+        if (!await EnsureDependenciesReadyAsync(forcePrompt: false, userTriggered: true)) return;
+
+        var result = _ollamaService.Start(_config, _ssdRoot);
+        if (!result.Success)
         {
+            StatusText.Text = result.ErrorMessage ?? "Start failed";
+            AppendLog(result.ErrorMessage ?? "Start failed");
             return;
         }
 
-        var ollamaExe = Path.Combine(_ssdRoot, _config.OllamaRelativePath);
-        if (!File.Exists(ollamaExe))
-        {
-            AppendLog("ollama.exe missing in staged tools folder.");
-            return;
-        }
-
-        try
-        {
-            _currentPort = ResolvePort(_config.OllamaPort);
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = "Unable to find a free port";
-            AppendLog($"Start failed: {ex.Message}");
-            return;
-        }
-
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = ollamaExe,
-            Arguments = "serve",
-            WorkingDirectory = Path.GetDirectoryName(ollamaExe)!,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
-
-        startInfo.Environment["OLLAMA_MODELS"] = Path.Combine(_ssdRoot, SsdLayout.Models);
-        startInfo.Environment["OLLAMA_HOST"] = $"127.0.0.1:{_currentPort.Value}";
-        startInfo.Environment["OLLAMA_ORIGINS"] = "http://127.0.0.1,http://localhost";
-
-        _ollama = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-        _ollama.OutputDataReceived += (_, args) => { if (!string.IsNullOrWhiteSpace(args.Data)) AppendLog(args.Data); };
-        _ollama.ErrorDataReceived += (_, args) => { if (!string.IsNullOrWhiteSpace(args.Data)) AppendLog(args.Data); };
-        _ollama.Exited += (_, _) =>
-        {
-            AppendLog("Ollama exited.");
-            Dispatcher.Invoke(() => StatusText.Text = "Stopped");
-            _currentPort = null;
-        };
-
-        _ollama.Start();
-        _ollama.BeginOutputReadLine();
-        _ollama.BeginErrorReadLine();
-        StatusText.Text = $"Running on 127.0.0.1:{_currentPort.Value}";
-        _logger?.Info($"Started ollama on port {_currentPort.Value}");
+        StatusText.Text = $"Running on {_ollamaService.CurrentHost}";
         await Task.Delay(1000);
     }
 
     private void Stop_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        if (_ollama is { HasExited: false })
+        if (_ollamaService.IsRunning)
         {
-            _ollama.Kill(entireProcessTree: true);
-            _ollama.Dispose();
-            _ollama = null;
-            _currentPort = null;
+            _ollamaService.Stop();
             StatusText.Text = "Stopped";
-            _logger?.Info("Stopped ollama");
         }
     }
 
-    /// <summary>
-    /// Sends a prompt to the running Ollama instance via its /api/generate endpoint.
-    /// Uses the selected model from the combo box and displays the response text.
-    /// stream=false for simplicity (waits for complete response).
-    /// </summary>
     private async void Send_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        if (_config is null || ModelCombo.SelectedItem is not string model)
-        {
-            return;
-        }
+        if (_config is null || ModelCombo.SelectedItem is not string model) return;
+        if (!TryGetCurrentHost(out var host)) return;
 
-        if (!TryGetCurrentHost(out var host))
-        {
-            return;
-        }
-
-        var promptToSend = PromptText.Text;
         SourcesList.ItemsSource = null;
-
-        if (!string.IsNullOrWhiteSpace(_config.ActiveDocumentLibraryId) && _libraryManager is not null)
+        var response = await _chatService.SendPromptAsync(model, PromptText.Text, host, _config);
+        ResponseText.Text = response.ResponseText;
+        if (response.Sources is not null)
         {
-            try
-            {
-                var manifest = _libraryManager.LoadManifest(_config.ActiveDocumentLibraryId);
-                var index = new VectorIndex(_libraryManager.GetIndexPath(manifest.Id));
-                var embedder = new EmbeddingClient(_http);
-                var queryEmbedding = await embedder.EmbedAsync(host, _config.EmbeddingModelName, PromptText.Text);
-                var results = index.Search(manifest.Id, queryEmbedding, _config.RetrievalTopK, _config.MinimumSimilarityThreshold, _logger);
-                var rag = RagPromptBuilder.Build(PromptText.Text, results, maxContextChars: 4500, librarySearched: true);
-                if (rag.UsedContext)
-                {
-                    promptToSend = rag.Prompt;
-                    SourcesList.ItemsSource = rag.Sources;
-                }
-                else if (results.Count == 0)
-                {
-                    promptToSend = rag.Prompt;
-                    AppendLog("No documents met the similarity threshold.");
-                }
-            }
-            catch (Exception ex)
-            {
-                AppendLog($"RAG retrieval skipped: {ex.Message}");
-            }
-        }
-
-        var request = new
-        {
-            model,
-            prompt = promptToSend,
-            stream = false
-        };
-
-        try
-        {
-            using var response = await _http.PostAsJsonAsync($"http://{host}/api/generate", request);
-            response.EnsureSuccessStatusCode();
-
-            var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            var text = doc.RootElement.GetProperty("response").GetString() ?? string.Empty;
-            ResponseText.Text = text;
-        }
-        catch (Exception ex)
-        {
-            AppendLog($"Generate failed: {ex.Message}");
+            SourcesList.ItemsSource = response.Sources;
         }
     }
 
     private void OpenBrowser_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        if (!TryGetCurrentHost(out var host))
-        {
-            return;
-        }
-
-        Process.Start(new ProcessStartInfo
-        {
-            FileName = $"http://{host}",
-            UseShellExecute = true
-        });
+        if (!TryGetCurrentHost(out var host)) return;
+        Process.Start(new ProcessStartInfo { FileName = $"http://{host}", UseShellExecute = true });
     }
 
     private async void RerunDependencyCheck_Click(object sender, System.Windows.RoutedEventArgs e)
@@ -366,68 +233,20 @@ public partial class MainWindow : System.Windows.Window
     {
         var folder = Path.Combine(_ssdRoot, SsdLayout.Prereqs);
         Directory.CreateDirectory(folder);
-        Process.Start(new ProcessStartInfo
-        {
-            FileName = folder,
-            UseShellExecute = true
-        });
+        Process.Start(new ProcessStartInfo { FileName = folder, UseShellExecute = true });
     }
 
     /// <summary>
     /// Shows a one-time warning dialog if installed models exceed the machine's
-    /// hardware capabilities (RAM, VRAM). The user can dismiss permanently
-    /// by selecting "Don't show again", which persists to runner-first-run.json.
+    /// hardware capabilities. Delegates sizing computation to IModelManagementService.
     /// </summary>
     private async Task ShowModelSizingWarningsOnStartupAsync()
     {
-        if (_config is null)
-        {
-            return;
-        }
+        if (_config is null) return;
+        if (_modelService.IsSizingWarningDismissed(_ssdRoot)) return;
 
-        var statePath = Path.Combine(_ssdRoot, SsdLayout.Config, "runner-first-run.json");
-        var state = RunnerFirstRunState.Load(statePath);
-        if (state.SizingWarningDismissed)
-        {
-            return;
-        }
-
-        var ramGb = SystemResources.GetTotalSystemRamGb();
-        var vramGb = SystemResources.GetGpuVramGb();
-        var warnings = new List<string>();
-
-        foreach (var model in _config.Models.Where(m => m.Status == ModelInstallStatus.Installed))
-        {
-            var sizing = ModelSizingCatalog.Suggest(model.Name);
-            var reasons = new List<string>();
-
-            if (ramGb.HasValue && ramGb.Value < sizing.RecommendedSystemRamGb)
-            {
-                reasons.Add($"RAM {ramGb.Value} GB < recommended {sizing.RecommendedSystemRamGb} GB");
-            }
-
-            if (sizing.RecommendedVramGb.HasValue)
-            {
-                if (!vramGb.HasValue)
-                {
-                    reasons.Add($"VRAM unknown; recommends {sizing.RecommendedVramGb.Value} GB (may run on CPU)");
-                }
-                else if (vramGb.Value < sizing.RecommendedVramGb.Value)
-                {
-                    reasons.Add($"VRAM {vramGb.Value} GB < recommended {sizing.RecommendedVramGb.Value} GB (may run on CPU)");
-                }
-            }
-
-            if (reasons.Count > 0)
-            {
-                warnings.Add($"{model.Name}: {string.Join("; ", reasons)}");
-            }
-        }
-
-        if (warnings.Count == 0)
-        {
-            return;
-        }
+        var warnings = _modelService.GetModelSizingWarnings(_config);
+        if (warnings.Count == 0) return;
 
         var message = "This PC may struggle with the following models:"
             + Environment.NewLine + Environment.NewLine
@@ -444,18 +263,14 @@ public partial class MainWindow : System.Windows.Window
 
         if (result == System.Windows.MessageBoxResult.No)
         {
-            state.SizingWarningDismissed = true;
-            state.LastCheckedUtc = DateTime.UtcNow;
-            await state.SaveAsync(statePath);
+            await _modelService.DismissSizingWarningAsync(_ssdRoot);
         }
     }
 
     /// <summary>
-    /// Checks for required system dependencies (VC++ runtime, .NET runtime) and
-    /// offers to install them from the SSD's bundled prerequisite installers.
-    /// If admin privileges are needed, offers to relaunch with elevation.
-    /// Validates installer integrity (SHA-256) before execution.
-    /// On first run: shows install dialog; on subsequent runs: only shows if forced.
+    /// Checks for required system dependencies and offers to install them.
+    /// This remains in the UI layer because it orchestrates multiple dialogs
+    /// and admin elevation. Non-UI work delegates to shared services.
     /// </summary>
     private async Task<bool> EnsureDependenciesReadyAsync(bool forcePrompt, bool userTriggered)
     {
@@ -672,7 +487,7 @@ public partial class MainWindow : System.Windows.Window
     private bool TryGetCurrentHost(out string host)
     {
         host = string.Empty;
-        if (_currentPort is null || _ollama is null || _ollama.HasExited)
+        if (!_ollamaService.IsRunning || _ollamaService.CurrentHost is null)
         {
             var message = "Ollama is not running. Click Start Ollama first.";
             StatusText.Text = message;
@@ -680,52 +495,23 @@ public partial class MainWindow : System.Windows.Window
             return false;
         }
 
-        host = $"127.0.0.1:{_currentPort.Value}";
+        host = _ollamaService.CurrentHost;
         return true;
-    }
-
-    /// <summary>
-    /// Finds a free port starting from the preferred port, scanning up to 20 ports.
-    /// Used to avoid conflicts if the default Ollama port (11434) is already in use.
-    /// </summary>
-    private static int ResolvePort(int preferred)
-    {
-        for (var port = preferred; port < preferred + 20; port++)
-        {
-            if (FreeAiSsd.Shared.NetUtils.IsPortFree(port)) return port;
-        }
-
-        throw new InvalidOperationException("No free ports in range.");
     }
 
     private void RefreshLibraryUi()
     {
-        if (_libraryManager is null || _config is null)
+        if (_config is null)
         {
             LibraryCombo.ItemsSource = new[] { "None" };
             LibraryCombo.SelectedIndex = 0;
             return;
         }
 
-        var registry = _libraryManager.LoadRegistry();
-        var options = new List<string> { "None" };
-        options.AddRange(registry.Libraries.Select(l => $"{l.Name} ({l.Id})"));
-        LibraryCombo.ItemsSource = options;
-
-        if (!string.IsNullOrWhiteSpace(_config.ActiveDocumentLibraryId))
-        {
-            var matchIndex = registry.Libraries.FindIndex(x => x.Id == _config.ActiveDocumentLibraryId);
-            LibraryCombo.SelectedIndex = matchIndex >= 0 ? matchIndex + 1 : 0;
-            if (matchIndex >= 0)
-            {
-                _activeLibrary = _libraryManager.LoadManifest(_config.ActiveDocumentLibraryId!);
-            }
-        }
-        else
-        {
-            LibraryCombo.SelectedIndex = 0;
-            _activeLibrary = null;
-        }
+        var info = _docService.GetLibraryDisplayInfo(_config);
+        LibraryCombo.ItemsSource = info.Options;
+        LibraryCombo.SelectedIndex = info.SelectedIndex;
+        _activeLibrary = info.ActiveLibrary;
 
         LibraryFilesList.ItemsSource = _activeLibrary?.Files ?? new List<DocumentFileEntry>();
         IndexingStatusText.Text = _activeLibrary?.LastIndexedUtc is null
@@ -733,58 +519,18 @@ public partial class MainWindow : System.Windows.Window
             : $"Last indexed: {_activeLibrary.LastIndexedUtc:u}";
     }
 
-    private async Task SaveConfigAsync()
-    {
-        if (_config is null)
-        {
-            return;
-        }
-
-        var configPath = Path.Combine(_ssdRoot, "config", "portable-config.json");
-        await _config.SaveAsync(configPath);
-    }
-
-    private string? GetSelectedLibraryId()
-    {
-        if (_libraryManager is null || LibraryCombo.SelectedIndex <= 0)
-        {
-            return null;
-        }
-
-        var registry = _libraryManager.LoadRegistry();
-        var idx = LibraryCombo.SelectedIndex - 1;
-        return idx >= 0 && idx < registry.Libraries.Count ? registry.Libraries[idx].Id : null;
-    }
-
     private async Task<bool> EnsureActiveLibraryAsync()
     {
-        var selectedId = GetSelectedLibraryId();
-        if (_config is null || _libraryManager is null)
+        var selectedId = _docService.GetLibraryIdByIndex(LibraryCombo.SelectedIndex);
+        if (_config is null)
         {
             _activeLibrary = null;
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(selectedId))
-        {
-            _config.ActiveDocumentLibraryId = null;
-            var regNone = _libraryManager.LoadRegistry();
-            regNone.ActiveLibraryId = null;
-            await _libraryManager.SaveRegistryAsync(regNone);
-            await SaveConfigAsync();
-            _activeLibrary = null;
-            LibraryFilesList.ItemsSource = new List<DocumentFileEntry>();
-            return false;
-        }
-
-        _config.ActiveDocumentLibraryId = selectedId;
-        var reg = _libraryManager.LoadRegistry();
-        reg.ActiveLibraryId = selectedId;
-        await _libraryManager.SaveRegistryAsync(reg);
-        await SaveConfigAsync();
-        _activeLibrary = _libraryManager.LoadManifest(selectedId);
-        LibraryFilesList.ItemsSource = _activeLibrary.Files;
-        return true;
+        _activeLibrary = await _docService.SetActiveLibraryAsync(_config, _ssdRoot, selectedId);
+        LibraryFilesList.ItemsSource = _activeLibrary?.Files ?? new List<DocumentFileEntry>();
+        return _activeLibrary is not null;
     }
 
     private void LibraryCombo_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
@@ -794,47 +540,34 @@ public partial class MainWindow : System.Windows.Window
 
     private async void CreateLibrary_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        if (_libraryManager is null || _config is null)
-        {
-            return;
-        }
+        if (_config is null) return;
 
         var name = string.IsNullOrWhiteSpace(NewLibraryNameText.Text) ? "Library" : NewLibraryNameText.Text.Trim();
-        var manifest = await _libraryManager.CreateLibraryAsync(name);
-        _config.ActiveDocumentLibraryId = manifest.Id;
-        await SaveConfigAsync();
+        await _docService.CreateLibraryAsync(_config, _ssdRoot, name);
         RefreshLibraryUi();
-        AppendLog($"Created library: {manifest.Name}");
     }
 
     private async void AddFiles_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        if (!await EnsureActiveLibraryAsync() || _activeLibrary is null || _documentIngestor is null || _config is null)
+        if (!await EnsureActiveLibraryAsync() || _activeLibrary is null || _config is null)
         {
             AppendLog("Select a document library first.");
             return;
         }
 
-        if (!TryGetCurrentHost(out var host))
-        {
-            return;
-        }
+        if (!TryGetCurrentHost(out var host)) return;
 
         var dlg = new Microsoft.Win32.OpenFileDialog
         {
             Multiselect = true,
             Filter = "Supported|*.pdf;*.txt;*.md;*.json;*.csv|All files|*.*"
         };
-
-        if (dlg.ShowDialog() != true)
-        {
-            return;
-        }
+        if (dlg.ShowDialog() != true) return;
 
         try
         {
             IndexingStatusText.Text = "Indexing...";
-            await _documentIngestor.IngestFilesAsync(_activeLibrary, dlg.FileNames, host, _config, p =>
+            await _docService.IngestFilesAsync(_activeLibrary, dlg.FileNames, host, _config, p =>
             {
                 Dispatcher.Invoke(() => IndexingStatusText.Text = $"Indexing {p.CompletedFiles}/{p.TotalFiles}: {p.CurrentFile}");
             });
@@ -849,42 +582,35 @@ public partial class MainWindow : System.Windows.Window
 
     private async void AddFolder_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        if (!await EnsureActiveLibraryAsync() || _activeLibrary is null || _libraryManager is null)
+        if (!await EnsureActiveLibraryAsync() || _activeLibrary is null)
         {
             AppendLog("Select a document library first.");
             return;
         }
 
         using var dialog = new Forms.FolderBrowserDialog();
-        if (dialog.ShowDialog() != Forms.DialogResult.OK || string.IsNullOrWhiteSpace(dialog.SelectedPath))
-        {
-            return;
-        }
+        if (dialog.ShowDialog() != Forms.DialogResult.OK || string.IsNullOrWhiteSpace(dialog.SelectedPath)) return;
 
-        if (!_activeLibrary.WatchedFolders.Contains(dialog.SelectedPath, StringComparer.OrdinalIgnoreCase))
+        var added = await _docService.AddWatchedFolderAsync(_activeLibrary, dialog.SelectedPath);
+        if (added)
         {
-            _activeLibrary.WatchedFolders.Add(dialog.SelectedPath);
-            await _libraryManager.SaveManifestAsync(_activeLibrary);
             IndexingStatusText.Text = $"Added sweep folder: {dialog.SelectedPath}";
         }
     }
 
     private async void SweepFolders_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        if (!await EnsureActiveLibraryAsync() || _activeLibrary is null || _documentIngestor is null || _config is null)
+        if (!await EnsureActiveLibraryAsync() || _activeLibrary is null || _config is null)
         {
             AppendLog("Select a document library first.");
             return;
         }
 
-        if (!TryGetCurrentHost(out var host))
-        {
-            return;
-        }
+        if (!TryGetCurrentHost(out var host)) return;
 
         try
         {
-            await _documentIngestor.SweepFoldersAsync(_activeLibrary, host, _config, p =>
+            await _docService.SweepFoldersAsync(_activeLibrary, host, _config, p =>
             {
                 Dispatcher.Invoke(() => IndexingStatusText.Text = $"Sweep {p.CompletedFiles}/{p.TotalFiles}: {p.CurrentFile}");
             });
@@ -898,20 +624,17 @@ public partial class MainWindow : System.Windows.Window
 
     private async void RebuildIndex_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        if (!await EnsureActiveLibraryAsync() || _activeLibrary is null || _documentIngestor is null || _config is null)
+        if (!await EnsureActiveLibraryAsync() || _activeLibrary is null || _config is null)
         {
             AppendLog("Select a document library first.");
             return;
         }
 
-        if (!TryGetCurrentHost(out var host))
-        {
-            return;
-        }
+        if (!TryGetCurrentHost(out var host)) return;
 
         try
         {
-            await _documentIngestor.RebuildIndexAsync(_activeLibrary, host, _config, p =>
+            await _docService.RebuildIndexAsync(_activeLibrary, host, _config, p =>
             {
                 Dispatcher.Invoke(() => IndexingStatusText.Text = $"Rebuild {p.CompletedFiles}/{p.TotalFiles}: {p.CurrentFile}");
             });
@@ -925,10 +648,7 @@ public partial class MainWindow : System.Windows.Window
 
     private async void PullEmbeddingModel_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        if (_config is null)
-        {
-            return;
-        }
+        if (_config is null) return;
 
         if (!TryGetCurrentHost(out var host))
         {
@@ -936,31 +656,19 @@ public partial class MainWindow : System.Windows.Window
             return;
         }
 
-        try
-        {
-            var request = new { name = _config.EmbeddingModelName, stream = false };
-            using var response = await _http.PostAsJsonAsync($"http://{host}/api/pull", request);
-            response.EnsureSuccessStatusCode();
-            IndexingStatusText.Text = $"Embedding model ready: {_config.EmbeddingModelName}";
-            AppendLog($"Pulled embedding model: {_config.EmbeddingModelName}");
-        }
-        catch (Exception ex)
-        {
-            IndexingStatusText.Text = "Unable to pull embedding model while offline. Connect temporarily and retry.";
-            AppendLog($"Embedding model pull failed: {ex.Message}");
-        }
+        var success = await _modelService.PullEmbeddingModelAsync(host, _config.EmbeddingModelName);
+        IndexingStatusText.Text = success
+            ? $"Embedding model ready: {_config.EmbeddingModelName}"
+            : "Unable to pull embedding model while offline. Connect temporarily and retry.";
     }
 
     private async void RemoveFile_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        if (!await EnsureActiveLibraryAsync() || _activeLibrary is null || _documentIngestor is null)
-        {
-            return;
-        }
+        if (!await EnsureActiveLibraryAsync() || _activeLibrary is null) return;
 
         if (LibraryFilesList.SelectedItem is DocumentFileEntry file)
         {
-            await _documentIngestor.RemoveFileAsync(_activeLibrary, file.StoredRelativePath);
+            await _docService.RemoveFileAsync(_activeLibrary, file.StoredRelativePath);
             RefreshLibraryUi();
         }
     }
