@@ -815,7 +815,7 @@ public partial class MainWindow : System.Windows.Window
             return;
         }
 
-        var dlg = new OpenFileDialog
+        var d1g = new Microsoft.Win32.OpenFileDialog
         {
             Multiselect = true,
             Filter = "Supported|*.pdf;*.txt;*.md;*.json;*.csv|All files|*.*"
