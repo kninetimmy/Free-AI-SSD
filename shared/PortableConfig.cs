@@ -65,6 +65,12 @@ public sealed class PortableConfig
     public int ChunkOverlap { get; set; } = 200;
     /// <summary>Embedding model name served by local Ollama.</summary>
     public string EmbeddingModelName { get; set; } = "nomic-embed-text";
+    /// <summary>
+    /// Minimum cosine similarity score (0.0–1.0) a retrieved chunk must reach to be
+    /// included in the RAG context. Chunks below this threshold are discarded to avoid
+    /// injecting irrelevant content into the LLM prompt. Default is 0.3.
+    /// </summary>
+    public double MinimumSimilarityThreshold { get; set; } = 0.3;
 
     /// <summary>Standard relative path for the config file within the SSD structure.</summary>
     [JsonIgnore]

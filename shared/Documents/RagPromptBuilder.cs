@@ -2,10 +2,21 @@ namespace FreeAiSsd.Shared.Documents;
 
 public static class RagPromptBuilder
 {
-    public static RagPromptBuildResult Build(string userPrompt, IReadOnlyList<RetrievalResult> retrieval, int maxContextChars = 5000)
+    /// <summary>
+    /// Builds the augmented prompt from retrieval results. When <paramref name="librarySearched"/>
+    /// is true and no results are provided, a "No relevant documents found" note is included
+    /// so the LLM knows the library was consulted but yielded nothing.
+    /// </summary>
+    public static RagPromptBuildResult Build(string userPrompt, IReadOnlyList<RetrievalResult> retrieval, int maxContextChars = 5000, bool librarySearched = false)
     {
         if (retrieval.Count == 0)
         {
+            if (librarySearched)
+            {
+                var noResultPrompt = "No relevant documents found in the library.\n\nUser question:\n" + userPrompt;
+                return new RagPromptBuildResult { Prompt = noResultPrompt, UsedContext = false };
+            }
+
             return new RagPromptBuildResult { Prompt = userPrompt, UsedContext = false };
         }
 

@@ -302,12 +302,17 @@ public partial class MainWindow : System.Windows.Window
                 var index = new VectorIndex(_libraryManager.GetIndexPath(manifest.Id));
                 var embedder = new EmbeddingClient(_http);
                 var queryEmbedding = await embedder.EmbedAsync(host, _config.EmbeddingModelName, PromptText.Text);
-                var results = index.Search(manifest.Id, queryEmbedding, _config.RetrievalTopK);
-                var rag = RagPromptBuilder.Build(PromptText.Text, results, maxContextChars: 4500);
+                var results = index.Search(manifest.Id, queryEmbedding, _config.RetrievalTopK, _config.MinimumSimilarityThreshold, _logger);
+                var rag = RagPromptBuilder.Build(PromptText.Text, results, maxContextChars: 4500, librarySearched: true);
                 if (rag.UsedContext)
                 {
                     promptToSend = rag.Prompt;
                     SourcesList.ItemsSource = rag.Sources;
+                }
+                else if (results.Count == 0)
+                {
+                    promptToSend = rag.Prompt;
+                    AppendLog("No documents met the similarity threshold.");
                 }
             }
             catch (Exception ex)

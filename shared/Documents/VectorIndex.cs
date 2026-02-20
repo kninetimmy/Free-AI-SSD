@@ -83,7 +83,23 @@ VALUES ($libraryId,$source,$stored,$page,$idx,$text,$len,$sha,$emb)";
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// Searches for the most similar chunks without applying a similarity threshold.
+    /// Preserved for backward compatibility — callers that don't need threshold filtering
+    /// can continue using this overload unchanged.
+    /// </summary>
     public List<RetrievalResult> Search(string libraryId, float[] queryEmbedding, int topK)
+    {
+        return Search(libraryId, queryEmbedding, topK, minimumSimilarity: 0, logger: null);
+    }
+
+    /// <summary>
+    /// Searches for the most similar chunks, filtering out any result whose cosine
+    /// similarity score falls below <paramref name="minimumSimilarity"/>. Results are
+    /// filtered first, then the top <paramref name="topK"/> are returned from what remains.
+    /// Returns an empty list when no chunks meet the threshold.
+    /// </summary>
+    public List<RetrievalResult> Search(string libraryId, float[] queryEmbedding, int topK, double minimumSimilarity, SsdLogger? logger)
     {
         using var conn = new SqliteConnection($"Data Source={_dbPath}");
         conn.Open();
@@ -114,7 +130,26 @@ VALUES ($libraryId,$source,$stored,$page,$idx,$text,$len,$sha,$emb)";
             });
         }
 
-        return all.OrderByDescending(x => x.Score).Take(Math.Max(1, topK)).ToList();
+        var sorted = all.OrderByDescending(x => x.Score).ToList();
+        var aboveThreshold = sorted.Where(x => x.Score >= minimumSimilarity).ToList();
+        var filtered = aboveThreshold.Take(Math.Max(1, topK)).ToList();
+
+        // When a threshold is active, return empty if nothing qualifies
+        if (minimumSimilarity > 0 && aboveThreshold.Count == 0)
+        {
+            logger?.Debug($"VectorIndex: {all.Count} chunks found, 0 above threshold ({minimumSimilarity:F2}). Top score: {(sorted.Count > 0 ? sorted[0].Score : 0):F2}");
+            return new List<RetrievalResult>();
+        }
+
+        if (minimumSimilarity > 0)
+        {
+            var discarded = all.Count - aboveThreshold.Count;
+            var topScore = filtered.Count > 0 ? filtered[0].Score : 0;
+            var lowestIncluded = filtered.Count > 0 ? filtered[^1].Score : 0;
+            logger?.Debug($"VectorIndex: {all.Count} chunks found, {aboveThreshold.Count} above threshold ({minimumSimilarity:F2}). Top score: {topScore:F2}, lowest included: {lowestIncluded:F2}");
+        }
+
+        return filtered;
     }
 
     public static double CosineSimilarity(float[] a, float[] b)

@@ -21,6 +21,9 @@ public sealed class SsdLogger
         _logFilePath = Path.Combine(ssdRoot, SsdLayout.Logs, $"{name}-{DateTime.UtcNow:yyyyMMdd}.log");
     }
 
+    /// <summary>Writes a DEBUG-level log entry with the current UTC timestamp.</summary>
+    public void Debug(string message) => Write("DEBUG", message);
+
     /// <summary>Writes an INFO-level log entry with the current UTC timestamp.</summary>
     public void Info(string message) => Write("INFO", message);
 
