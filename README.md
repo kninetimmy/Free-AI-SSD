@@ -1,144 +1,177 @@
 # Free-AI-SSD
 
-Prepare a portable SSD with Ollama + LLMs once, then run them offline on Windows and/or macOS.
+Prepare a portable SSD once (online), then run local AI fully from that SSD (offline) on target machines.
 
-## 🚀 Quick Start (No CLI Required)
+Free-AI-SSD ships two desktop apps:
+- **PrepApp** (run on an online machine once): prepares drive structure, stages Ollama + prerequisites, and pulls selected models.
+- **Runner** (run later on target machine): starts SSD-hosted Ollama locally and provides chat + Reference Documents (offline RAG).
 
-1. Download `Free-AI-SSD-win.zip` (recommended stable) from GitHub Releases.
-2. Extract it anywhere on your Windows machine.
-3. Run `FreeAiSsd.PrepApp.exe`.
-4. Select your external SSD.
-5. Use **Model Manager** to add/select model tags (freeform tags are supported).
-6. Pull your selected models.
-7. Run **Check SSD Readiness** until every check is green.
-8. Click **Finalize SSD**.
-9. In Drive Preparation select target OS. In **stable** (`Free-AI-SSD-win.zip`) builds, only Windows prep is available. In **beta cross-platform** builds, Windows, macOS, or Both are available.
-10. On target machine:
-   - Windows: run `<SSD>\windows\runner\FreeAiSsd.Runner.exe`
-   - macOS: open `<SSD>/mac/Runner.app`
+---
 
-Internet is required only while preparing the SSD in PrepApp (download/pull phase). After finalization, Runner is designed to work offline from the SSD.
+## What this project does
 
-## Downloads
+Free-AI-SSD is a practical workflow for carrying a self-contained AI environment:
 
-### Official Releases
+1. **Online prep phase (PrepApp)**
+   - Select SSD
+   - Pull Ollama/models
+   - Stage offline dependencies
+   - Finalize SSD
+2. **Offline run phase (Runner)**
+   - Start Ollama from SSD paths
+   - Chat locally on `127.0.0.1`
+   - Optionally use **Reference Documents** libraries stored on SSD
 
-- Official downloads are published on GitHub **Releases**.
-- **Windows Stable ZIP (recommended):** `Free-AI-SSD-win.zip` (Windows-only prep; mac options are hidden/disabled).
-- **Optional beta cross-platform ZIP:** `Free-AI-SSD-beta-crossplatform.zip` (includes `mac/mac-artifacts.manifest.json` + mac payloads; enables mac prep).
-  - Unsigned for now and may trigger Gatekeeper warnings.
-- Maintainers create releases manually from **Actions → Build and Package → Run workflow**.
-  - `include_macos=false` → produces only `Free-AI-SSD-win.zip`.
-  - `include_macos=true` → produces both `Free-AI-SSD-win.zip` and `Free-AI-SSD-beta-crossplatform.zip`.
-- Enter a version such as `0.3.0`; the workflow creates tag/release `vX.Y.Z` (for example `v0.3.0`).
+After prep/finalize, normal inference and RAG usage are designed to run without internet.
 
-### Dev Builds
+---
 
-- Every CI build also publishes GitHub Actions artifacts.
-- These artifacts are intended for testing/validation, not stable distribution.
+## Download and install
 
-## Current Features
+### Stable release (recommended)
+- Download **`Free-AI-SSD-win.zip`** from GitHub Releases.
+- Extract anywhere on Windows.
+- Run `FreeAiSsd.PrepApp.exe`.
 
-### PrepApp (GUI)
+### Optional beta cross-platform bundle
+- **`Free-AI-SSD-beta-crossplatform.zip`** includes mac artifacts and enables mac target prep options.
+- mac build is currently unsigned/not notarized (expect Gatekeeper prompts).
 
-- Drive selection with safety warnings (for example, filesystem checks).
-- Model Manager:
-  - Add custom model tags (freeform).
-  - Status tracking includes `ConfiguredNotDownloaded`, `OnDiskOnly`, and `Ready` delineation in the grid.
-  - SHA256 + size tracking for installed models.
-  - Verify model integrity against stored hashes.
-- SSD Readiness checklist with re-verification support.
-- Atomic config writes for `config/portable-config.json`.
+### CI artifacts
+- GitHub Actions artifacts are available for validation/testing.
+- Prefer Releases for normal end-user use.
 
-### Runner (GUI)
+---
 
-- Starts/stops Ollama directly from SSD.
-- Uses SSD-stored models and config.
-- Sends prompt → local Ollama API → response.
-- Writes logs to SSD.
+## Quick Start (Windows stable)
 
-- Remove/Delete options: remove from config only, or delete from disk via `ollama rm` using SSD model path.
-- Orphaned (on-disk-only) models can be added to config from the grid.
-- Drive Preparation section can format removable drives as NTFS with a custom label (default `Portable AI`) and then prepare SSD folders.
-- Formatting requires running PrepApp as Administrator and explicit `ERASE` confirmation.
+1. Open `FreeAiSsd.PrepApp.exe`.
+2. Select target external SSD.
+3. Add/select models in **Model Manager**.
+4. Pull models.
+5. Run **Check SSD Readiness** until checks are acceptable.
+6. Click **Finalize SSD**.
+7. Move SSD to destination machine.
+8. Run Runner from SSD:
+   - Windows: `<SSD>\windows\runner\FreeAiSsd.Runner.exe`
+   - macOS (beta flow): `<SSD>/mac/Runner.app`
 
-## SSD Layout & Integrity
+---
 
-PrepApp creates and uses this SSD layout (single volume, exFAT recommended for cross-platform):
+## Offline usage model
 
-- `config/`
-- `models/`
-- `logs/`
-- `windows/runner/`
-- `windows/tools/ollama/`
-- `windows/tools/prereqs/`
-- `mac/Runner.app`
-- `mac/tools/ollama/`
-- `cache/`
+### Internet required
+- During PrepApp download/pull/staging operations.
 
-Integrity behavior:
+### Internet not required (expected)
+- Runner start/stop.
+- Chat requests against local Ollama host.
+- Reference Documents indexing/retrieval using local files + local Ollama embed/generate APIs.
 
-- Ollama archive download supports SHA256 verification.
-- For each model, SHA256, size, and last-verified timestamp are stored in config.
-- **Check SSD Readiness** can re-verify installed models and update verification status.
+### Important exception
+- If the embedding model is not already present on SSD, **Pull embedding model** may require temporary internet access (via local Ollama pull).
 
-## Offline Use
+---
 
-After PrepApp setup is complete:
+## Reference Documents (Offline RAG)
 
-1. Connect the SSD to a Windows or macOS machine.
-2. Windows: run `<SSD>\windows\runner\FreeAiSsd.Runner.exe`.
-3. macOS: open `<SSD>/mac/Runner.app`.
-4. Runner starts Ollama from SSD paths and serves locally.
+Runner includes a **Reference Documents** panel for local document-grounded chat.
 
-No internet is required for normal offline inference after assets are prepared.
+### Supported file types
+- `.pdf`, `.txt`, `.md`, `.json`, `.csv`
+
+### Typical workflow
+1. Start Ollama in Runner.
+2. In **Reference Documents**, create a library (or select existing).
+3. Add files directly (**Add files**), or attach folders (**Add folder**) to watch.
+4. Run **Sweep folders now** to ingest new/changed files in watched folders.
+5. Run **Rebuild index** when you want a full re-index from tracked files.
+6. Ask a question in chat with the library selected.
+
+### How citations/sources work
+- Retrieved chunks are injected into the prompt with inline citations such as:
+  - `[manual.pdf p.12]`
+  - `[notes.txt]`
+- The **Sources** list in Runner shows the distinct citations actually used in the injected context.
+- If no active library is selected, or retrieval yields no usable chunks, chat falls back to plain prompt behavior.
+
+### Current limitations
+- PDF extraction quality depends on embedded text layer quality.
+- Scanned/image-only PDFs may extract poorly without OCR.
+- DOCX is not supported in current file parser.
+- Retrieval uses SQLite + cosine scan and is intended for personal/small-medium libraries.
+
+---
+
+## SSD layout overview (high level)
+
+Free-AI-SSD prepares a layout similar to:
+
+- `config/` — portable config + runtime state
+- `models/` — Ollama model store
+- `logs/` — app logs
+- `docs/libraries/` — Reference Documents library files/manifests/index DB
+- `windows/runner/` — Runner app payload
+- `windows/tools/ollama/` — staged Ollama runtime
+- `windows/tools/prereqs/` — offline prerequisite installers + manifest
+- `mac/` — beta mac payloads/tools (when included)
+- `cache/` — prep-time download cache
+
+---
+
+## Troubleshooting
+
+### Runner won’t start / dependency warnings
+- Use Runner’s **Re-run dependency check**.
+- Ensure SSD includes `windows/tools/prereqs` and manifest.
+- If prereq bundle is missing or invalid, reconnect SSD to online PrepApp machine and run **Update Prereqs**.
+
+### Missing embedding model while offline
+- RAG indexing/retrieval can fail if embedding model is not installed.
+- Start Ollama and click **Pull embedding model**.
+- If fully offline, connect temporarily to internet, pull once, then return offline.
+
+### PDF citations/pages seem wrong or sparse
+- Confirm source PDF has machine-readable text.
+- For scans/image PDFs, run OCR externally before importing.
+
+### .NET/runtime prerequisites on target machine
+- Runner can install staged prerequisites offline (Windows) when bundle is valid.
+- If install is blocked, refresh prereqs from PrepApp online and retry.
+
+---
 
 <details>
-<summary><b>Developer / Build from Source (CLI)</b></summary>
+<summary><b>Developer (build from source)</b></summary>
 
 ### Prerequisites
-
 - Windows
 - .NET 8 SDK
 
-### Build
-
+### Build + test
 ```powershell
-dotnet build FreeAiSsd.sln
+dotnet restore FreeAiSsd.sln
+dotnet build FreeAiSsd.sln -c Release
+dotnet test FreeAiSsd.sln -c Release
 ```
 
-### Stage runner payload
-
+### Stage runner payload into PrepApp output
 ```powershell
-./build.ps1
+./build.ps1 -Configuration Release -Runtime win-x64
 ```
 
 ### Run PrepApp from source
-
 ```powershell
 dotnet run --project prep-app
 ```
 
-Notes:
-
-- Intended for contributors only.
-- End users should download the ZIP from Releases instead.
-
 </details>
 
+---
 
-Offline prerequisites
-- Release ZIP includes offline installers under tools/prereqs with prereqs-manifest.json. PrepApp verifies the bundle during finalize and warns if files or hashes drift.
-- On first run, Runner checks compatibility (GPU/CPU/OS) and dependency presence.
-- If a required dependency is missing, Runner can install it offline from SSD media after validating allow-listed IDs, expected filenames, SHA256 hashes, and Microsoft signatures (when available).
+## macOS signing/notarization (CI)
 
-- If prerequisite validation fails in Runner, run PrepApp on an online machine and click **Update Prereqs**, then re-run Runner.
-
-
-## macOS signing/notarization
-
-CI expects the following repository secrets for Developer ID signing + notarization:
-
+The workflow supports optional signing/notarization via repository secrets:
 - `MACOS_CERT_P12_BASE64`
 - `MACOS_CERT_PASSWORD`
 - `APPLE_TEAM_ID`
@@ -146,24 +179,4 @@ CI expects the following repository secrets for Developer ID signing + notarizat
 - `APPLE_APP_SPECIFIC_PASSWORD`
 - `MACOS_SIGN_IDENTITY` (optional if derived)
 
-## Reference Documents (Offline RAG)
-
-Runner now supports local **Reference Documents** libraries that stay on the SSD:
-
-- Create/select a library from **Reference Documents**.
-- Add files (`.pdf`, `.txt`, `.md`, `.json`, `.csv`) or attach folders for manual sweep.
-- Use **Sweep folders now** to import newly added/changed files from those folders.
-- Use **Rebuild index** to regenerate embeddings/chunks for the selected library.
-
-During chat, if a library is active, runner retrieves top matching chunks and injects them into the prompt with citations (example: `[manual.pdf p.12]`, `[notes.txt]`). The right-hand **Sources** list shows what was used.
-
-### Privacy / offline behavior
-
-- Indexing, retrieval, and chat requests run against local files + local Ollama (`localhost`).
-- No web calls are required after setup, except optional model pull when the embedding model is missing.
-
-### Known limits
-
-- PDF extraction quality depends on source PDF text layer quality.
-- DOCX is not included in this MVP.
-- Retrieval is SQLite + cosine scan (fast enough for small/medium personal libraries, not tuned for massive corpora).
+Signing is currently disabled by default in CI (`MAC_SIGNING_ENABLED=false`).
