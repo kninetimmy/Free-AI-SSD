@@ -52,27 +52,82 @@ public sealed class DocumentIngestor
             File.Copy(sourcePath, storedAbsPath, overwrite: true);
 
             var parsed = DocumentParser.Parse(storedAbsPath);
-            var chunks = new List<DocumentChunk>();
-            var chunkIndex = 0;
+
+            // Flatten all text chunks with their segment metadata, preserving document order.
+            var textItems = new List<(string Text, int? Page)>();
             foreach (var segment in parsed.Segments)
             {
                 var texts = DocumentChunker.ChunkText(segment.Text, config.ChunkSize, config.ChunkOverlap);
                 foreach (var text in texts)
+                    textItems.Add((text, segment.Page));
+            }
+
+            var totalChunks = textItems.Count;
+            var embeddedChunks = 0;
+            var failedChunkCount = 0;
+            var results = new DocumentChunk?[totalChunks];
+
+            var maxConcurrency = Math.Max(1, config.MaxEmbeddingConcurrency);
+            using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+
+            var tasks = textItems.Select(async (item, i) =>
+            {
+                await semaphore.WaitAsync(cancellationToken);
+                try
                 {
-                    var embedding = await _embeddingClient.EmbedAsync(host, config.EmbeddingModelName, text, cancellationToken);
-                    chunks.Add(new DocumentChunk
+                    var embedding = await _embeddingClient.EmbedAsync(host, config.EmbeddingModelName, item.Text, cancellationToken);
+                    results[i] = new DocumentChunk
                     {
                         LibraryId = manifest.Id,
                         SourceFileName = fileName,
                         StoredRelativePath = storedRelativePath,
-                        Page = segment.Page,
-                        ChunkIndex = chunkIndex++,
-                        Text = text,
-                        TextLength = text.Length,
+                        Page = item.Page,
+                        ChunkIndex = i,
+                        Text = item.Text,
+                        TextLength = item.Text.Length,
                         Sha256 = sha,
                         Embedding = embedding
+                    };
+                    var completed = Interlocked.Increment(ref embeddedChunks);
+                    progress?.Invoke(new IndexingProgress
+                    {
+                        TotalFiles = total,
+                        CompletedFiles = done - 1,
+                        CurrentFile = fileName,
+                        EmbeddedChunks = completed,
+                        TotalChunks = totalChunks
                     });
                 }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception)
+                {
+                    Interlocked.Increment(ref failedChunkCount);
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
+
+            await Task.WhenAll(tasks);
+
+            // Collect successfully embedded chunks in original document order.
+            var chunks = results.Where(r => r is not null).Select(r => r!).ToList();
+
+            if (failedChunkCount > 0)
+            {
+                progress?.Invoke(new IndexingProgress
+                {
+                    TotalFiles = total,
+                    CompletedFiles = done - 1,
+                    CurrentFile = fileName,
+                    EmbeddedChunks = embeddedChunks,
+                    TotalChunks = totalChunks,
+                    FailedChunks = failedChunkCount
+                });
             }
 
             vectorIndex.UpsertFileChunks(manifest.Id, storedRelativePath, chunks);

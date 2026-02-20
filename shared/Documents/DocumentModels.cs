@@ -74,6 +74,12 @@ public sealed class IndexingProgress
     public int TotalFiles { get; set; }
     public int CompletedFiles { get; set; }
     public string CurrentFile { get; set; } = string.Empty;
+    /// <summary>Chunks successfully embedded so far for the current file.</summary>
+    public int EmbeddedChunks { get; set; }
+    /// <summary>Total chunks to embed for the current file.</summary>
+    public int TotalChunks { get; set; }
+    /// <summary>Chunks that failed to embed for the current file (non-zero only on error).</summary>
+    public int FailedChunks { get; set; }
 }
 
 public sealed class RagPromptBuildResult
