@@ -27,6 +27,9 @@ public sealed class SsdLogger
     /// <summary>Writes an INFO-level log entry with the current UTC timestamp.</summary>
     public void Info(string message) => Write("INFO", message);
 
+    /// <summary>Writes a WARN-level log entry with the current UTC timestamp.</summary>
+    public void Warn(string message) => Write("WARN", message);
+
     /// <summary>Writes an ERROR-level log entry with the current UTC timestamp.</summary>
     public void Error(string message) => Write("ERROR", message);
 
