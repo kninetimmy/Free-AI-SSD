@@ -86,16 +86,18 @@ public class VectorIndexRetrievalTests
         Directory.CreateDirectory(root);
         var index = new VectorIndex(root);
 
+        // alpha: cosine(query, [1,0,0]) = 1.0  (perfect match)
+        // beta:  cosine(query, [0.5,0.5,0]) ≈ 0.71 (moderate match, above threshold)
+        // gamma: cosine(query, [0,0,1]) = 0.0  (orthogonal, below threshold)
         index.UpsertFileChunks("lib1", "files/a.txt", new List<DocumentChunk>
         {
             new() { LibraryId = "lib1", SourceFileName = "a.txt", StoredRelativePath = "files/a.txt", ChunkIndex = 0, Text = "alpha", TextLength = 5, Sha256 = "x", Embedding = new float[]{1,0,0} },
-            new() { LibraryId = "lib1", SourceFileName = "a.txt", StoredRelativePath = "files/a.txt", ChunkIndex = 1, Text = "beta", TextLength = 4, Sha256 = "x", Embedding = new float[]{0.9f,0.4f,0} },
-            new() { LibraryId = "lib1", SourceFileName = "a.txt", StoredRelativePath = "files/a.txt", ChunkIndex = 2, Text = "gamma", TextLength = 5, Sha256 = "x", Embedding = new float[]{0,1,0} },
+            new() { LibraryId = "lib1", SourceFileName = "a.txt", StoredRelativePath = "files/a.txt", ChunkIndex = 1, Text = "beta", TextLength = 4, Sha256 = "x", Embedding = new float[]{0.5f,0.5f,0} },
+            new() { LibraryId = "lib1", SourceFileName = "a.txt", StoredRelativePath = "files/a.txt", ChunkIndex = 2, Text = "gamma", TextLength = 5, Sha256 = "x", Embedding = new float[]{0,0,1} },
         });
 
-        // Query closely matches alpha and beta; gamma is less relevant but still above 0.1 threshold
-        // topK=1 should return only the best match from those above threshold
-        var result = index.Search("lib1", new float[] { 0.95f, 0.3f, 0f }, 1, minimumSimilarity: 0.1, logger: null);
+        // topK=1 with threshold 0.1: gamma filtered out, then top 1 from {alpha, beta} → alpha
+        var result = index.Search("lib1", new float[] { 1f, 0f, 0f }, 1, minimumSimilarity: 0.1, logger: null);
         Assert.Single(result);
         Assert.Equal("alpha", result[0].Chunk.Text);
     }
