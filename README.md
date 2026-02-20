@@ -117,6 +117,37 @@ Runner includes a **Reference Documents** panel for local document-grounded chat
 
 ---
 
+## Roadmap
+
+Here's where the project is headed. None of this exists yet.
+
+### Voice Assistant / In-Game Copilot
+- Speech-to-text via Whisper running locally and offline
+- Text-to-speech so the AI can talk back
+- Designed to run on a spare PC on the local network — ask questions hands-free while in VR
+- Push-to-talk via HOTAS button binding, keyed like a radio
+- Set a copilot personality via system prompt — RIO, wingman, instructor, whatever fits
+
+### Flight Sim Bindings Import
+- Import HOTAS/controller bindings from DCS (lua files), with IL-2, War Thunder, and MSFS planned
+- Converts raw binding files into something the AI can actually read and reference
+- When you ask "how do I uncage my AIM-9" it answers with your specific button on your hardware
+- Auto-detects the DCS saved games folder — pick your aircraft, it handles the rest
+- Merges bindings from multiple devices (stick, throttle, rudder) into a single per-aircraft file
+
+### Setup Profiles
+- Mode selection at setup: **general use** or **flight sim mode**
+- Flight sim mode pulls in extra dependencies (Whisper, TTS) and enables the bindings importer
+- Keeps the base install lightweight for people who just want a simple offline AI
+- Extensible for other profiles down the road (ham radio, field reference, etc.)
+
+### Network Mode
+- Run the AI on one machine, query it from another on the same local network
+- Main use case: model on a spare PC while gaming on your main rig
+- Simple local API endpoint — no cloud, no internet required
+
+---
+
 ## SSD layout overview (high level)
 
 Free-AI-SSD prepares a layout similar to:
