@@ -55,6 +55,17 @@ public sealed class PortableConfig
     /// <summary>Encryption algorithm identifier (e.g., "AES-256-GCM") when encrypted.</summary>
     public string? EncryptionScheme { get; set; }
 
+    /// <summary>Active reference document library ID (or null for disabled RAG).</summary>
+    public string? ActiveDocumentLibraryId { get; set; }
+    /// <summary>Number of chunks to retrieve per query.</summary>
+    public int RetrievalTopK { get; set; } = 5;
+    /// <summary>Chunk size (characters) used during indexing.</summary>
+    public int ChunkSize { get; set; } = 1200;
+    /// <summary>Chunk overlap (characters) used during indexing.</summary>
+    public int ChunkOverlap { get; set; } = 200;
+    /// <summary>Embedding model name served by local Ollama.</summary>
+    public string EmbeddingModelName { get; set; } = "nomic-embed-text";
+
     /// <summary>Standard relative path for the config file within the SSD structure.</summary>
     [JsonIgnore]
     public string ConfigRelativePath => @"config\\portable-config.json";

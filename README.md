@@ -145,3 +145,25 @@ CI expects the following repository secrets for Developer ID signing + notarizat
 - `APPLE_ID`
 - `APPLE_APP_SPECIFIC_PASSWORD`
 - `MACOS_SIGN_IDENTITY` (optional if derived)
+
+## Reference Documents (Offline RAG)
+
+Runner now supports local **Reference Documents** libraries that stay on the SSD:
+
+- Create/select a library from **Reference Documents**.
+- Add files (`.pdf`, `.txt`, `.md`, `.json`, `.csv`) or attach folders for manual sweep.
+- Use **Sweep folders now** to import newly added/changed files from those folders.
+- Use **Rebuild index** to regenerate embeddings/chunks for the selected library.
+
+During chat, if a library is active, runner retrieves top matching chunks and injects them into the prompt with citations (example: `[manual.pdf p.12]`, `[notes.txt]`). The right-hand **Sources** list shows what was used.
+
+### Privacy / offline behavior
+
+- Indexing, retrieval, and chat requests run against local files + local Ollama (`localhost`).
+- No web calls are required after setup, except optional model pull when the embedding model is missing.
+
+### Known limits
+
+- PDF extraction quality depends on source PDF text layer quality.
+- DOCX is not included in this MVP.
+- Retrieval is SQLite + cosine scan (fast enough for small/medium personal libraries, not tuned for massive corpora).
