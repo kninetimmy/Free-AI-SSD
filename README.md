@@ -26,6 +26,42 @@ After prep/finalize, normal inference and RAG usage are designed to run without 
 
 ---
 
+## Roadmap
+
+Here's where the project is headed. None of this exists yet.
+
+### Voice Assistant / In-Game Copilot
+The main use case is flight sims in VR: you're in DCS with a headset on, hands on stick and throttle, and you want to ask your AI copilot something without alt-tabbing, breaking immersion, or reaching for a keyboard. The plan is speech-to-text via Whisper (running locally, no cloud) with text-to-speech so it can answer back. Push-to-talk binds to a HOTAS button so you key it like a radio call. You'd also be able to give the copilot a personality via system prompt — RIO, wingman, instructor, whatever fits the aircraft.
+
+- Speech-to-text via Whisper running locally and offline
+- Text-to-speech so the AI can talk back
+- Push-to-talk via HOTAS button binding, keyed like a radio
+- Set a copilot personality via system prompt — RIO, wingman, instructor, whatever fits
+
+### Flight Sim Bindings Import
+Right now if you want to ask "how do I uncage my AIM-9" you're alt-tabbing, pulling up a Chuck's guide on a second monitor, or just guessing. The bindings importer would let the AI answer that with your actual button on your actual hardware, not a generic layout. It reads your DCS lua binding files directly, merges inputs across your stick, throttle, and rudder pedals, and produces a clean per-aircraft reference the AI can look up against.
+
+- Import HOTAS/controller bindings from DCS (lua files), with IL-2, War Thunder, and MSFS planned
+- Auto-detects the DCS saved games folder — pick your aircraft, it handles the rest
+- Merges bindings from multiple devices (stick, throttle, rudder) into a single per-aircraft file
+
+### Setup Profiles
+Not everyone using this is a sim pilot. The idea is to keep the base install simple — if you just want an offline AI with document support, you get that without pulling in Whisper, TTS, and sim-specific tooling. If you want the full flight sim setup, you pick that at install time and it handles the extra dependencies automatically.
+
+- Mode selection at setup: **general use** or **flight sim mode**
+- Flight sim mode pulls in extra dependencies (Whisper, TTS) and enables the bindings importer
+- Keeps the base install lightweight for people who don't need the sim stuff
+- Extensible for other profiles down the road (ham radio, field reference, etc.)
+
+### Network Mode
+The two-PC setup: gaming rig runs the sim, spare PC runs the AI model, they talk over your home network. This keeps the AI load off your gaming PC and lets you run a larger model than you'd want competing with a sim for VRAM. Runner would expose a simple local API endpoint — no cloud, no internet, just your home LAN.
+
+- Run the AI on one machine, query it from another on the same local network
+- Gaming PC stays focused on the sim; spare PC handles the model
+- Simple local API endpoint — no cloud, no internet required
+
+---
+
 ## Download and install
 
 ### Stable release (recommended)
@@ -114,37 +150,6 @@ Runner includes a **Reference Documents** panel for local document-grounded chat
 **SIMD-optimized vector search** — Embeddings are pre-normalized at write time so search reduces to a dot product. The dot product itself is SIMD-accelerated via `System.Numerics.Vector<float>` (no new native dependencies — built into .NET 8), and top-K selection uses an O(N log K) priority queue instead of a full sort.
 
 **Runner service layer** — `MainWindow.xaml.cs` has been refactored from a 983-line monolith into a thin UI shell. Business logic now lives in four injectable, interface-backed services: `OllamaLifecycleService`, `ModelManagementService`, `DocumentOperationsService`, and `ChatService`. Each service has no UI references and can be unit-tested independently.
-
----
-
-## Roadmap
-
-Here's where the project is headed. None of this exists yet.
-
-### Voice Assistant / In-Game Copilot
-- Speech-to-text via Whisper running locally and offline
-- Text-to-speech so the AI can talk back
-- Designed to run on a spare PC on the local network — ask questions hands-free while in VR
-- Push-to-talk via HOTAS button binding, keyed like a radio
-- Set a copilot personality via system prompt — RIO, wingman, instructor, whatever fits
-
-### Flight Sim Bindings Import
-- Import HOTAS/controller bindings from DCS (lua files), with IL-2, War Thunder, and MSFS planned
-- Converts raw binding files into something the AI can actually read and reference
-- When you ask "how do I uncage my AIM-9" it answers with your specific button on your hardware
-- Auto-detects the DCS saved games folder — pick your aircraft, it handles the rest
-- Merges bindings from multiple devices (stick, throttle, rudder) into a single per-aircraft file
-
-### Setup Profiles
-- Mode selection at setup: **general use** or **flight sim mode**
-- Flight sim mode pulls in extra dependencies (Whisper, TTS) and enables the bindings importer
-- Keeps the base install lightweight for people who just want a simple offline AI
-- Extensible for other profiles down the road (ham radio, field reference, etc.)
-
-### Network Mode
-- Run the AI on one machine, query it from another on the same local network
-- Main use case: model on a spare PC while gaming on your main rig
-- Simple local API endpoint — no cloud, no internet required
 
 ---
 
