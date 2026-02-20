@@ -40,6 +40,9 @@ public static class SsdLayout
     public const string Config = "config";
     public const string Logs = "logs";
     public const string Cache = "cache";
+    public const string Docs = "docs";
+    public const string DocLibraries = "docs/libraries";
+    public const string DocLibrariesRegistry = "docs/libraries.json";
 
     /// <summary>Backward-compatible aliases for Windows paths (used by older code).</summary>
     public const string Tools = WindowsTools;
@@ -68,7 +71,9 @@ public static class SsdLayout
                      Blobs,
                      Config,
                      Logs,
-                     Cache
+                     Cache,
+                     Docs,
+                     DocLibraries
                  })
         {
             Directory.CreateDirectory(Path.Combine(root, relative));
