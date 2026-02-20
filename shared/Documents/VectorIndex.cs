@@ -7,19 +7,37 @@ public sealed class VectorIndex
 {
     private readonly string _dbPath;
 
-    public VectorIndex(string indexFolderPath)
+    public VectorIndex(string indexFolderPath, SsdLogger? logger = null)
     {
         Directory.CreateDirectory(indexFolderPath);
         _dbPath = Path.Combine(indexFolderPath, "vectors.db");
-        EnsureSchema();
+        EnsureSchema(logger);
     }
 
-    private void EnsureSchema()
+    private void EnsureSchema(SsdLogger? logger)
     {
         using var conn = new SqliteConnection($"Data Source={_dbPath}");
         conn.Open();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"
+
+        // Detect whether the table already exists and uses the old TEXT schema.
+        var tableExists = false;
+        var hasOldSchema = false;
+        using (var pragma = conn.CreateCommand())
+        {
+            pragma.CommandText = "PRAGMA table_info(chunks)";
+            using var reader = pragma.ExecuteReader();
+            while (reader.Read())
+            {
+                tableExists = true;
+                if (reader.GetString(1) == "embedding_json")
+                    hasOldSchema = true;
+            }
+        }
+
+        if (!tableExists)
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
 CREATE TABLE IF NOT EXISTS chunks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     library_id TEXT NOT NULL,
@@ -30,12 +48,138 @@ CREATE TABLE IF NOT EXISTS chunks (
     text TEXT NOT NULL,
     text_length INTEGER NOT NULL,
     sha256 TEXT NOT NULL,
-    embedding_json TEXT NOT NULL
+    embedding BLOB NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_library ON chunks(library_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_sha ON chunks(sha256);
 ";
-        cmd.ExecuteNonQuery();
+            cmd.ExecuteNonQuery();
+            return;
+        }
+
+        if (hasOldSchema)
+        {
+            MigrateTextToBlob(conn, logger);
+        }
+    }
+
+    /// <summary>
+    /// Migrates an existing database from JSON TEXT embeddings to binary BLOB storage.
+    /// The migration is atomic: either all rows are converted or none are (transaction rollback).
+    /// Safe to re-run — a leftover temp table from a previous crashed attempt is cleaned up first.
+    /// </summary>
+    private static void MigrateTextToBlob(SqliteConnection conn, SsdLogger? logger)
+    {
+        // Clean up any leftover temp table from a previously interrupted migration.
+        using (var drop = conn.CreateCommand())
+        {
+            drop.CommandText = "DROP TABLE IF EXISTS chunks_new";
+            drop.ExecuteNonQuery();
+        }
+
+        // Read all existing rows into memory so the reader is closed before we do DDL/DML.
+        var rows = new List<(int Id, string LibraryId, string Source, string Stored,
+            object? Page, int Idx, string Text, int Len, string Sha, string Json)>();
+        using (var select = conn.CreateCommand())
+        {
+            select.CommandText = "SELECT id,library_id,source_file_name,stored_relative_path,page,chunk_index,text,text_length,sha256,embedding_json FROM chunks";
+            using var reader = select.ExecuteReader();
+            while (reader.Read())
+            {
+                rows.Add((
+                    reader.GetInt32(0),
+                    reader.GetString(1),
+                    reader.GetString(2),
+                    reader.GetString(3),
+                    reader.IsDBNull(4) ? null : (object)reader.GetInt32(4),
+                    reader.GetInt32(5),
+                    reader.GetString(6),
+                    reader.GetInt32(7),
+                    reader.GetString(8),
+                    reader.GetString(9)
+                ));
+            }
+        }
+
+        var total = rows.Count;
+        logger?.Info($"Migrating embeddings to binary format: 0/{total}...");
+
+        // Perform the entire migration inside a single transaction so it's atomic.
+        using var tx = conn.BeginTransaction();
+
+        using (var create = conn.CreateCommand())
+        {
+            create.Transaction = tx;
+            create.CommandText = @"
+CREATE TABLE chunks_new (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    library_id TEXT NOT NULL,
+    source_file_name TEXT NOT NULL,
+    stored_relative_path TEXT NOT NULL,
+    page INTEGER NULL,
+    chunk_index INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    text_length INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    embedding BLOB NOT NULL
+)";
+            create.ExecuteNonQuery();
+        }
+
+        var migrated = 0;
+        foreach (var row in rows)
+        {
+            var floats = JsonSerializer.Deserialize<float[]>(row.Json) ?? Array.Empty<float>();
+            var blob = EmbeddingSerializer.ToBlob(floats);
+
+            using var ins = conn.CreateCommand();
+            ins.Transaction = tx;
+            ins.CommandText = @"INSERT INTO chunks_new (id,library_id,source_file_name,stored_relative_path,page,chunk_index,text,text_length,sha256,embedding)
+VALUES ($id,$libraryId,$source,$stored,$page,$idx,$text,$len,$sha,$emb)";
+            ins.Parameters.AddWithValue("$id", row.Id);
+            ins.Parameters.AddWithValue("$libraryId", row.LibraryId);
+            ins.Parameters.AddWithValue("$source", row.Source);
+            ins.Parameters.AddWithValue("$stored", row.Stored);
+            ins.Parameters.AddWithValue("$page", row.Page ?? DBNull.Value);
+            ins.Parameters.AddWithValue("$idx", row.Idx);
+            ins.Parameters.AddWithValue("$text", row.Text);
+            ins.Parameters.AddWithValue("$len", row.Len);
+            ins.Parameters.AddWithValue("$sha", row.Sha);
+            ins.Parameters.AddWithValue("$emb", blob);
+            ins.ExecuteNonQuery();
+
+            migrated++;
+            if (migrated % 100 == 0 || migrated == total)
+                logger?.Info($"Migrating embeddings to binary format: {migrated}/{total}...");
+        }
+
+        using (var dropOld = conn.CreateCommand())
+        {
+            dropOld.Transaction = tx;
+            dropOld.CommandText = "DROP TABLE chunks";
+            dropOld.ExecuteNonQuery();
+        }
+
+        using (var rename = conn.CreateCommand())
+        {
+            rename.Transaction = tx;
+            rename.CommandText = "ALTER TABLE chunks_new RENAME TO chunks";
+            rename.ExecuteNonQuery();
+        }
+
+        // Recreate indexes on the renamed table.
+        using (var idx = conn.CreateCommand())
+        {
+            idx.Transaction = tx;
+            idx.CommandText = @"
+CREATE INDEX IF NOT EXISTS idx_chunks_library ON chunks(library_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_sha ON chunks(sha256);
+";
+            idx.ExecuteNonQuery();
+        }
+
+        tx.Commit();
+        logger?.Info("Embedding migration to binary format complete.");
     }
 
     public void UpsertFileChunks(string libraryId, string storedRelativePath, IReadOnlyList<DocumentChunk> chunks)
@@ -55,7 +199,7 @@ CREATE INDEX IF NOT EXISTS idx_chunks_sha ON chunks(sha256);
         {
             var ins = conn.CreateCommand();
             ins.Transaction = tx;
-            ins.CommandText = @"INSERT INTO chunks (library_id, source_file_name, stored_relative_path, page, chunk_index, text, text_length, sha256, embedding_json)
+            ins.CommandText = @"INSERT INTO chunks (library_id, source_file_name, stored_relative_path, page, chunk_index, text, text_length, sha256, embedding)
 VALUES ($libraryId,$source,$stored,$page,$idx,$text,$len,$sha,$emb)";
             ins.Parameters.AddWithValue("$libraryId", c.LibraryId);
             ins.Parameters.AddWithValue("$source", c.SourceFileName);
@@ -65,7 +209,7 @@ VALUES ($libraryId,$source,$stored,$page,$idx,$text,$len,$sha,$emb)";
             ins.Parameters.AddWithValue("$text", c.Text);
             ins.Parameters.AddWithValue("$len", c.TextLength);
             ins.Parameters.AddWithValue("$sha", c.Sha256);
-            ins.Parameters.AddWithValue("$emb", JsonSerializer.Serialize(c.Embedding));
+            ins.Parameters.AddWithValue("$emb", EmbeddingSerializer.ToBlob(c.Embedding));
             ins.ExecuteNonQuery();
         }
 
@@ -104,14 +248,15 @@ VALUES ($libraryId,$source,$stored,$page,$idx,$text,$len,$sha,$emb)";
         using var conn = new SqliteConnection($"Data Source={_dbPath}");
         conn.Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT source_file_name,stored_relative_path,page,chunk_index,text,text_length,sha256,embedding_json FROM chunks WHERE library_id=$libraryId";
+        cmd.CommandText = "SELECT source_file_name,stored_relative_path,page,chunk_index,text,text_length,sha256,embedding FROM chunks WHERE library_id=$libraryId";
         cmd.Parameters.AddWithValue("$libraryId", libraryId);
 
         var all = new List<RetrievalResult>();
         using var reader = cmd.ExecuteReader();
         while (reader.Read())
         {
-            var emb = JsonSerializer.Deserialize<float[]>(reader.GetString(7)) ?? Array.Empty<float>();
+            var blob = (byte[])reader[7];
+            var emb = EmbeddingSerializer.FromBlob(blob);
             var score = CosineSimilarity(queryEmbedding, emb);
             all.Add(new RetrievalResult
             {
