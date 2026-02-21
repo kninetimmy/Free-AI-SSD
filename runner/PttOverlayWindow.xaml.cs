@@ -26,7 +26,7 @@ public partial class PttOverlayWindow : Window
     private static readonly SolidColorBrush GreenBrush = new(Color.FromRgb(0x40, 0xC0, 0x60));
 
     private bool _isDragging;
-    private Point _dragStart;
+    private System.Windows.Point _dragStart;
 
     /// <summary>Raised when the user drags the window to a new position.</summary>
     public event Action<double, double>? PositionChanged;
@@ -103,7 +103,7 @@ public partial class PttOverlayWindow : Window
         }
     }
 
-    private void Border_MouseMove(object sender, MouseEventArgs e)
+    private void Border_MouseMove(object sender, System.Windows.Input.MouseEventArgs e)
     {
         if (!_isDragging) return;
 
