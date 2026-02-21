@@ -1,144 +1,35 @@
 # Free-AI-SSD
 
-**Turn any portable SSD into a hardened, fully offline AI workstation.**
+**Plug in a drive. Ask your AI anything. No internet required.**
 
-Prepare a drive once on an internet-connected machine. Plug it into any Windows or macOS machine and run local AI models with no internet connection required.
+Imagine you're in VR, flying the F-18, and you can't remember the sequence to uncage an AIM-9. You reach for your HOTAS, key the mic, and ask your AI copilot. It answers with the exact buttons on *your* stick — not some generic keybind chart, but your actual X-56 layout — sourced from the aircraft manual sitting on the drive. No internet. No cloud. No subscription. Just a portable SSD with a local AI that actually knows your stuff.
 
----
-
-## What This Project Does
-
-Free-AI-SSD is a two-phase workflow for carrying a self-contained AI environment on a portable drive:
-
-**Phase 1 — Prepare (online, once)**
-- Run **PrepApp** on a machine with internet access
-- Select your target SSD
-- Download Ollama, select and pull LLM models, and stage offline prerequisites
-- Finalize the drive
-
-**Phase 2 — Run (offline, anywhere)**
-- Plug the SSD into any target machine
-- Run **Runner** directly from the SSD
-- Start Ollama and chat locally at `127.0.0.1`
-- Optionally reference personal documents (PDFs, text files, etc.) for grounded answers
-
-No cloud. No subscription. No internet required after preparation.
+That's what this project does. You prepare a drive once on a machine with internet access — download the AI models, load in your documents — then take that drive anywhere. Plug it into any Windows or macOS machine and you have a fully self-contained AI assistant that runs 100% offline. It can reference your own PDFs, manuals, and notes when it answers, so you get grounded responses instead of hallucinated guesses.
 
 ---
 
-## Example Use Cases
+## Who This Is For
 
-- **Portable AI for field or air-gapped environments** — carry a full AI assistant into locations with no network access
-- **Offline document reference** — load manuals, guides, personal PDFs, or technical references and ask questions against them
-- **Secure lab or restricted-network deployment** — run local inference in environments where internet access is prohibited or tightly controlled
-- **Personal portable AI across multiple machines** — same drive, same models, same configuration on any compatible machine
-- **Flight sim copilot reference** *(planned)* — query aircraft manuals and HOTAS bindings via voice in DCS or similar sims, using Whisper running locally
+### The DCS pilot who just bought a new module
+You dropped $80 on the F-14 and the manual is 900 pages. You don't need to read all of it. Load the PDF onto the drive, plug it in, and just ask: *"How do I do a case III recovery?"* or *"What's the TWS auto scan pattern?"* The AI pulls the relevant section from the actual manual and gives you an answer with citations. Study on your couch, quiz yourself before a sortie, or have it running on a second monitor while you fly.
 
----
+### The VR flight sim player who can't see their keyboard
+You're in VR in DCS or IL-2, mid-engagement, and need to deploy countermeasures but you've blanked on the keybind. You can't take your headset off to Google it. Once voice assistant support lands *(coming soon — see roadmap)*, you'll key a push-to-talk on your HOTAS and ask like you're talking to your RIO. For now, the chat interface on a second screen or tablet gets the job done.
 
-## Key Differentiators
+### The ham radio operator in the field
+You're camping, or deployed for emergency comms, and you need to reference a section of your radio manual or the band plan for a frequency allocation. No cell signal, no internet. Load your manuals and reference docs onto the drive beforehand, and you have an offline AI assistant that can pull answers from your own library.
 
-| Feature | Detail |
-|---|---|
-| **Hardened package trust** | Ollama downloads are validated against an allowlist of known-good URLs and verified with SHA-256 digest checks before execution |
-| **Encrypted configuration** | Portable config is protected with AES-256-GCM (PBKDF2-SHA256, 210,000 iterations) |
-| **Fail-closed write guard** | PrepApp blocks all writes to encrypted drives if encryption state is ambiguous — no partial writes |
-| **Cross-platform shared core** | Shared library (`FreeAiSsd.Shared`) targets `net8.0` and builds on all platforms; GUI apps target Windows or macOS separately |
-| **Staged offline dependencies** | Prerequisites (VC++, .NET runtimes) are bundled and SHA-256 validated so the target machine can be set up without internet |
-| **Path traversal prevention** | `PathGuards` enforces sibling boundary checks with platform-aware case sensitivity |
+### The person who just wants a private, portable AI
+Maybe you don't trust cloud AI with your data. Maybe your workplace restricts internet access. Maybe you travel and want the same AI setup on every machine you sit down at. Prepare the drive once, and it works the same everywhere — your models, your documents, your config, no account needed.
+
+### The field researcher or off-grid prepper
+Load in first aid guides, plant identification references, survival manuals, equipment specs — whatever you need access to when there's no connectivity. The AI indexes it all and can answer questions against your library, offline, from a drive that fits in your pocket.
 
 ---
 
-## High-Level Architecture
+## Roadmap — Where This Is Going
 
-Free-AI-SSD ships two desktop applications backed by a shared cross-platform library:
-
-- **PrepApp** (Windows, WPF) — the preparation tool. Runs on an online machine to configure the SSD: selects drive, downloads and stages Ollama, pulls models, bundles prerequisites, and finalizes the layout.
-- **Runner** (Windows WPF / macOS Swift) — the end-user tool. Runs directly from the SSD on the target machine. Starts Ollama, provides a chat interface, and optionally loads Reference Document libraries for grounded local retrieval.
-- **Shared library** (`FreeAiSsd.Shared`, `net8.0`) — portable core logic used by both apps: encryption, trust policy, path guards, configuration, dependency checking, download management, and MVVM infrastructure.
-
-The Runner's business logic is split into four injectable services (no UI dependencies) to allow unit testing without a WPF host:
-
-- `OllamaLifecycleService` — process start/stop, port resolution, trust validation
-- `ModelManagementService` — installed model listing, sizing warnings, embedding model pull
-- `DocumentOperationsService` — library CRUD, file ingestion, folder sweep, index rebuild
-- `ChatService` — RAG-augmented prompt construction and Ollama `/api/generate` calls
-
----
-
-## Download and Install
-
-### Stable release (recommended)
-- Download **`Free-AI-SSD-win.zip`** from GitHub Releases.
-- Extract anywhere on Windows.
-- Run `FreeAiSsd.PrepApp.exe`.
-
-### Optional beta cross-platform bundle
-- **`Free-AI-SSD-beta-crossplatform.zip`** includes macOS artifacts and enables macOS target prep options.
-- macOS build is currently unsigned/not notarized — expect Gatekeeper prompts.
-
-### CI artifacts
-- GitHub Actions artifacts are available for validation and testing.
-- Prefer Releases for normal end-user use.
-
----
-
-## Quick Start (Windows)
-
-1. Open `FreeAiSsd.PrepApp.exe`.
-2. Select your target external SSD.
-3. Add or select models in **Model Manager**.
-4. Pull models.
-5. Run **Check SSD Readiness** until checks are acceptable.
-6. Click **Finalize SSD**.
-7. Move the SSD to the destination machine.
-8. Run Runner from the SSD:
-   - Windows: `<SSD>\windows\runner\FreeAiSsd.Runner.exe`
-   - macOS (beta): `<SSD>/mac/Runner.app`
-
----
-
-## Offline Usage Model
-
-| Operation | Internet Required? |
-|---|---|
-| PrepApp download / pull / staging | Yes |
-| Runner start / stop | No |
-| Chat (local Ollama) | No |
-| Reference Documents indexing and retrieval | No |
-| Pull embedding model (if not already on SSD) | Temporarily yes |
-
----
-
-## Reference Documents (Offline RAG)
-
-Runner includes a **Reference Documents** panel for document-grounded chat without internet access.
-
-**Supported file types:** `.pdf`, `.txt`, `.md`, `.json`, `.csv`
-
-**Typical workflow:**
-1. Start Ollama in Runner.
-2. In **Reference Documents**, create or select a library.
-3. Add files directly (**Add files**) or attach watched folders (**Add folder**).
-4. Run **Sweep folders now** to ingest new or changed files.
-5. Run **Rebuild index** for a full re-index.
-6. Ask a question in chat with the library selected.
-
-**How citations work:**
-- Retrieved chunks are injected into the prompt with inline citations such as `[manual.pdf p.12]` or `[notes.txt]`.
-- The **Sources** list shows the distinct citations used in context.
-- If no chunks meet the similarity threshold, the prompt notes "No relevant documents found" so the model responds honestly rather than guessing.
-
-**Current limitations:**
-- PDF extraction depends on embedded text layer quality. Scanned/image-only PDFs may extract poorly without prior OCR.
-- DOCX is not currently supported.
-- Retrieval uses SQLite with SIMD-optimized cosine search, optimized for personal and small-to-medium libraries (up to ~10,000 chunks; a warning is logged if exceeded).
-
----
-
-## Roadmap
-
-None of the following exists yet.
+None of the following exists yet — this is what's actively planned.
 
 ### Voice Assistant / In-Game Copilot
 Speech-to-text via Whisper running locally with text-to-speech response. Push-to-talk bound to a HOTAS button, keyed like a radio call. Initial target is flight sims in VR (DCS). Copilot personality configurable via system prompt.
@@ -163,7 +54,92 @@ Run the AI on one machine, query it from another on the same local network. Runn
 
 ---
 
-## Troubleshooting
+## Getting Started
+
+### What You'll Need
+
+- A portable SSD (or any external drive with enough space for your AI models — most need at least 4–8 GB)
+- A Windows machine with internet access for the one-time setup
+- That's it
+
+### Download and Install
+
+#### Stable release (recommended)
+- Download **`Free-AI-SSD-win.zip`** from GitHub Releases.
+- Extract anywhere on Windows.
+- Run `FreeAiSsd.PrepApp.exe`.
+
+#### Optional beta cross-platform bundle
+- **`Free-AI-SSD-beta-crossplatform.zip`** includes macOS artifacts and enables macOS target prep options.
+- macOS build is currently unsigned/not notarized — expect Gatekeeper prompts.
+
+#### CI artifacts
+- GitHub Actions artifacts are available for validation and testing.
+- Prefer Releases for normal end-user use.
+
+### Quick Start (Windows)
+
+1. Open `FreeAiSsd.PrepApp.exe`.
+2. Select your target external SSD.
+3. Add or select models in **Model Manager**.
+4. Pull models.
+5. Run **Check SSD Readiness** until checks are acceptable.
+6. Click **Finalize SSD**.
+7. Move the SSD to the destination machine.
+8. Run Runner from the SSD:
+   - Windows: `<SSD>\windows\runner\FreeAiSsd.Runner.exe`
+   - macOS (beta): `<SSD>/mac/Runner.app`
+
+### How It Works (The Short Version)
+
+There are two phases:
+
+**Phase 1 — Prepare (online, once)**
+- Run **PrepApp** on a machine with internet access
+- Select your target SSD
+- Download the AI engine, pick your models, and stage everything for offline use
+- Finalize the drive
+
+**Phase 2 — Run (offline, anywhere)**
+- Plug the SSD into any target machine
+- Run **Runner** directly from the SSD
+- Chat locally — optionally load in your own documents (PDFs, text files, etc.) so the AI can reference them when answering
+
+### Offline Usage
+
+| Operation | Internet Required? |
+|---|---|
+| PrepApp download / pull / staging | Yes |
+| Runner start / stop | No |
+| Chat (local AI) | No |
+| Reference Documents indexing and retrieval | No |
+| Pull embedding model (if not already on SSD) | Temporarily yes |
+
+### Using Reference Documents
+
+Runner includes a **Reference Documents** panel for document-grounded chat without internet access. This is what lets the AI actually reference your manuals and files instead of making things up.
+
+**Supported file types:** `.pdf`, `.txt`, `.md`, `.json`, `.csv`
+
+**Typical workflow:**
+1. Start the AI engine in Runner.
+2. In **Reference Documents**, create or select a library.
+3. Add files directly (**Add files**) or attach watched folders (**Add folder**).
+4. Run **Sweep folders now** to ingest new or changed files.
+5. Run **Rebuild index** for a full re-index.
+6. Ask a question in chat with the library selected.
+
+**How citations work:**
+- Retrieved chunks are injected into the prompt with inline citations such as `[manual.pdf p.12]` or `[notes.txt]`.
+- The **Sources** list shows the distinct citations used in context.
+- If no chunks meet the similarity threshold, the prompt notes "No relevant documents found" so the model responds honestly rather than guessing.
+
+**Current limitations:**
+- PDF extraction depends on embedded text layer quality. Scanned/image-only PDFs may extract poorly without prior OCR.
+- DOCX is not currently supported.
+- Retrieval is optimized for personal and small-to-medium libraries (up to ~10,000 chunks; a warning is logged if exceeded).
+
+### Troubleshooting
 
 **Runner won't start / dependency warnings**
 - Use Runner's **Re-run dependency check**.
@@ -171,8 +147,8 @@ Run the AI on one machine, query it from another on the same local network. Runn
 - If the prereq bundle is missing or invalid, reconnect to an online machine and run **Update Prereqs** in PrepApp.
 
 **Missing embedding model while offline**
-- RAG indexing can fail if the embedding model is not on the SSD.
-- Start Ollama and click **Pull embedding model**.
+- Document indexing can fail if the embedding model is not on the SSD.
+- Start the AI engine and click **Pull embedding model**.
 - If fully offline, connect temporarily to download the model, then return offline.
 
 **PDF citations seem wrong or sparse**
@@ -184,6 +160,57 @@ Run the AI on one machine, query it from another on the same local network. Runn
 - If install is blocked, refresh prerequisites from PrepApp while online and retry.
 
 ---
+
+## Recent Improvements
+
+- **2026-02-19**: Initial Replit setup with .NET 8; build and test workflow configured
+- **2026-02-19**: Comprehensive code review completed (architecture, security, code quality)
+- **2026-02-19**: XML documentation comments added to all source files (shared, prep-app, runner, tests)
+- **2026-02-19**: MVVM refactoring Phase 1 complete — base classes, 9 service interfaces, shared DTOs, `PrepViewModel`, 20 unit tests
+- **2026-02-19**: MVVM refactoring Phase 2 complete — 9 service implementations, `MainWindow.xaml` data binding, `MainWindow.xaml.cs` simplified to ~95 lines
+
+**RAG / performance improvements:**
+- **Cosine similarity threshold** — RAG retrieval discards chunks below a configurable minimum cosine similarity score (default 0.3). Configurable via `minimumSimilarityThreshold` in `config/portable-config.json`.
+- **Binary BLOB embedding storage** — Embeddings stored as raw binary BLOBs in SQLite instead of JSON text, reducing index size by ~60% and eliminating serialization overhead on every query. Existing indexes are migrated automatically on first open.
+- **Parallel embedding ingestion** — Document ingestion embeds chunks concurrently under a bounded concurrency cap (default 4). Configurable via `maxEmbeddingConcurrency` in `config/portable-config.json`.
+- **SIMD-optimized vector search** — Embeddings pre-normalized at write time so search reduces to a dot product. Dot product is SIMD-accelerated via `System.Numerics.Vector<float>` (built into .NET 8, no additional native dependencies). Top-K selection uses an O(N log K) priority queue instead of a full sort.
+- **Runner service layer** — `MainWindow.xaml.cs` refactored from a 983-line monolith into a thin UI shell. Business logic now lives in four injectable, interface-backed services: `OllamaLifecycleService`, `ModelManagementService`, `DocumentOperationsService`, and `ChatService`.
+
+---
+
+## Technical Details
+
+<details>
+<summary>High-Level Architecture</summary>
+
+Free-AI-SSD ships two desktop applications backed by a shared cross-platform library:
+
+- **PrepApp** (Windows, WPF) — the preparation tool. Runs on an online machine to configure the SSD: selects drive, downloads and stages Ollama, pulls models, bundles prerequisites, and finalizes the layout.
+- **Runner** (Windows WPF / macOS Swift) — the end-user tool. Runs directly from the SSD on the target machine. Starts Ollama, provides a chat interface, and optionally loads Reference Document libraries for grounded local retrieval.
+- **Shared library** (`FreeAiSsd.Shared`, `net8.0`) — portable core logic used by both apps: encryption, trust policy, path guards, configuration, dependency checking, download management, and MVVM infrastructure.
+
+The Runner's business logic is split into four injectable services (no UI dependencies) to allow unit testing without a WPF host:
+
+- `OllamaLifecycleService` — process start/stop, port resolution, trust validation
+- `ModelManagementService` — installed model listing, sizing warnings, embedding model pull
+- `DocumentOperationsService` — library CRUD, file ingestion, folder sweep, index rebuild
+- `ChatService` — RAG-augmented prompt construction and Ollama `/api/generate` calls
+
+</details>
+
+<details>
+<summary>Key Differentiators</summary>
+
+| Feature | Detail |
+|---|---|
+| **Hardened package trust** | Ollama downloads are validated against an allowlist of known-good URLs and verified with SHA-256 digest checks before execution |
+| **Encrypted configuration** | Portable config is protected with AES-256-GCM (PBKDF2-SHA256, 210,000 iterations) |
+| **Fail-closed write guard** | PrepApp blocks all writes to encrypted drives if encryption state is ambiguous — no partial writes |
+| **Cross-platform shared core** | Shared library (`FreeAiSsd.Shared`) targets `net8.0` and builds on all platforms; GUI apps target Windows or macOS separately |
+| **Staged offline dependencies** | Prerequisites (VC++, .NET runtimes) are bundled and SHA-256 validated so the target machine can be set up without internet |
+| **Path traversal prevention** | `PathGuards` enforces sibling boundary checks with platform-aware case sensitivity |
+
+</details>
 
 <details>
 <summary>SSD Directory Layout</summary>
@@ -204,10 +231,8 @@ cache/               — prep-time download cache
 
 </details>
 
----
-
 <details>
-<summary>Technical Architecture Details</summary>
+<summary>Project Structure and Shared Library Components</summary>
 
 ### Project Structure
 
@@ -279,8 +304,6 @@ cache/               — prep-time download cache
 
 </details>
 
----
-
 <details>
 <summary>Build System and Development Workflow</summary>
 
@@ -321,8 +344,6 @@ dotnet run --project prep-app
 
 </details>
 
----
-
 <details>
 <summary>Security Assessment</summary>
 
@@ -342,8 +363,6 @@ dotnet run --project prep-app
 - Silent exception swallowing in `SystemResources.cs`, `PrereqManifest.Load()`, and `RunnerFirstRunState.Load()` masks failures and complicates diagnostics. Caught exceptions should be logged before returning defaults.
 
 </details>
-
----
 
 <details>
 <summary>Test Coverage</summary>
@@ -369,8 +388,6 @@ High-risk workflows (downloads, encryption enable/disable, dependency installati
 
 </details>
 
----
-
 <details>
 <summary>Code Review Findings (2026-02-19)</summary>
 
@@ -390,28 +407,6 @@ High-risk workflows (downloads, encryption enable/disable, dependency installati
 4. **Service abstractions (Runner)**: Runner services have been extracted; further interface coverage can be added as needed
 
 </details>
-
----
-
-<details>
-<summary>Recent Changes</summary>
-
-- **2026-02-19**: Initial Replit setup with .NET 8; build and test workflow configured
-- **2026-02-19**: Comprehensive code review completed (architecture, security, code quality)
-- **2026-02-19**: XML documentation comments added to all source files (shared, prep-app, runner, tests)
-- **2026-02-19**: MVVM refactoring Phase 1 complete — base classes, 9 service interfaces, shared DTOs, `PrepViewModel`, 20 unit tests
-- **2026-02-19**: MVVM refactoring Phase 2 complete — 9 service implementations, `MainWindow.xaml` data binding, `MainWindow.xaml.cs` simplified to ~95 lines
-
-**RAG / performance improvements:**
-- **Cosine similarity threshold** — RAG retrieval discards chunks below a configurable minimum cosine similarity score (default 0.3). Configurable via `minimumSimilarityThreshold` in `config/portable-config.json`.
-- **Binary BLOB embedding storage** — Embeddings stored as raw binary BLOBs in SQLite instead of JSON text, reducing index size by ~60% and eliminating serialization overhead on every query. Existing indexes are migrated automatically on first open.
-- **Parallel embedding ingestion** — Document ingestion embeds chunks concurrently under a bounded concurrency cap (default 4). Configurable via `maxEmbeddingConcurrency` in `config/portable-config.json`.
-- **SIMD-optimized vector search** — Embeddings pre-normalized at write time so search reduces to a dot product. Dot product is SIMD-accelerated via `System.Numerics.Vector<float>` (built into .NET 8, no additional native dependencies). Top-K selection uses an O(N log K) priority queue instead of a full sort.
-- **Runner service layer** — `MainWindow.xaml.cs` refactored from a 983-line monolith into a thin UI shell. Business logic now lives in four injectable, interface-backed services: `OllamaLifecycleService`, `ModelManagementService`, `DocumentOperationsService`, and `ChatService`.
-
-</details>
-
----
 
 <details>
 <summary>macOS Signing and Notarization (CI)</summary>
