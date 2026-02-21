@@ -771,39 +771,39 @@ public class DcsBindingParserTests : IDisposable
 
     #region Fixture helpers
 
-    private static string BuildSingleButtonDiff(string name, string key) => $"""
-        local diff = {{
-        ["axisDiffs"] = {{
-        }}, -- end of ["axisDiffs"]
-        ["keyDiffs"] = {{
-        ["kTEST001"] = {{
-        ["name"] = "{name}",
-        ["added"] = {{
-        [1] = {{
-        ["key"] = "{key}",
-        }}, -- end of [1]
-        }}, -- end of ["added"]
-        }}, -- end of ["kTEST001"]
-        }}, -- end of ["keyDiffs"]
-        }} -- end of diff
+    private static string BuildSingleButtonDiff(string name, string key) => $$"""
+        local diff = {
+        ["axisDiffs"] = {
+        }, -- end of ["axisDiffs"]
+        ["keyDiffs"] = {
+        ["kTEST001"] = {
+        ["name"] = "{{name}}",
+        ["added"] = {
+        [1] = {
+        ["key"] = "{{key}}",
+        }, -- end of [1]
+        }, -- end of ["added"]
+        }, -- end of ["kTEST001"]
+        }, -- end of ["keyDiffs"]
+        } -- end of diff
         return diff
         """;
 
-    private static string BuildSingleAxisDiff(string name, string key) => $"""
-        local diff = {{
-        ["axisDiffs"] = {{
-        ["dTEST001"] = {{
-        ["name"] = "{name}",
-        ["added"] = {{
-        [1] = {{
-        ["key"] = "{key}",
-        }}, -- end of [1]
-        }}, -- end of ["added"]
-        }}, -- end of ["dTEST001"]
-        }}, -- end of ["axisDiffs"]
-        ["keyDiffs"] = {{
-        }}, -- end of ["keyDiffs"]
-        }} -- end of diff
+    private static string BuildSingleAxisDiff(string name, string key) => $$"""
+        local diff = {
+        ["axisDiffs"] = {
+        ["dTEST001"] = {
+        ["name"] = "{{name}}",
+        ["added"] = {
+        [1] = {
+        ["key"] = "{{key}}",
+        }, -- end of [1]
+        }, -- end of ["added"]
+        }, -- end of ["dTEST001"]
+        }, -- end of ["axisDiffs"]
+        ["keyDiffs"] = {
+        }, -- end of ["keyDiffs"]
+        } -- end of diff
         return diff
         """;
 
