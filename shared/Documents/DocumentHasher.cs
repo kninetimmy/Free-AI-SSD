@@ -1,14 +1,9 @@
-using System.Security.Cryptography;
+using FreeAiSsd.Shared.Helpers;
 
 namespace FreeAiSsd.Shared.Documents;
 
 public static class DocumentHasher
 {
-    public static string ComputeSha256(string filePath)
-    {
-        using var sha = SHA256.Create();
-        using var stream = File.OpenRead(filePath);
-        var hash = sha.ComputeHash(stream);
-        return Convert.ToHexString(hash).ToLowerInvariant();
-    }
+    public static string ComputeSha256(string filePath) =>
+        CryptoUtils.ComputeSha256Hex(filePath);
 }

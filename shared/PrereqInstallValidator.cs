@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using System.Security.Cryptography;
+using FreeAiSsd.Shared.Helpers;
 
 namespace FreeAiSsd.Shared;
 
@@ -190,12 +190,8 @@ public static class PrereqInstallValidator
     /// <summary>
     /// Computes the SHA-256 hash of a file, returning a lowercase hex string.
     /// </summary>
-    private static string ComputeSha256(string path)
-    {
-        using var stream = File.OpenRead(path);
-        using var sha = SHA256.Create();
-        return Convert.ToHexString(sha.ComputeHash(stream)).ToLowerInvariant();
-    }
+    private static string ComputeSha256(string path) =>
+        CryptoUtils.ComputeSha256Hex(path);
 
     /// <summary>
     /// Validates the Authenticode digital signature of installer executables.
