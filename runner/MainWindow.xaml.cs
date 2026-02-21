@@ -31,6 +31,7 @@ public partial class MainWindow : System.Windows.Window
     private readonly IModelManagementService _modelService;
     private readonly IDocumentOperationsService _docService;
     private readonly IChatService _chatService;
+    private readonly IDcsBindingsImportService _dcsImportService;
 
     private PortableConfig? _config;
     private string _ssdRoot = string.Empty;
@@ -40,6 +41,12 @@ public partial class MainWindow : System.Windows.Window
     private bool _isUnlocked;
     private DocumentLibraryManifest? _activeLibrary;
     private CancellationTokenSource? _streamingCts;
+
+    // Bindings import wizard state
+    private DcsInstallation? _dcsInstallation;
+    private IReadOnlyList<DcsAircraftInfo> _scannedAircraft = Array.Empty<DcsAircraftInfo>();
+    private List<DcsAircraftImportItem> _aircraftItems = new();
+    private CancellationTokenSource? _importCts;
 
     public MainWindow()
     {
@@ -68,6 +75,7 @@ public partial class MainWindow : System.Windows.Window
         _modelService = new ModelManagementService(http);
         _docService = new DocumentOperationsService(libraryManager, documentIngestor);
         _chatService = new ChatService(http, libraryManager, _logger);
+        _dcsImportService = new DcsBindingsImportService(libraryManager);
 
         // Wire service events to UI
         _ollamaService.LogMessage += msg => AppendLog(msg);
@@ -75,6 +83,7 @@ public partial class MainWindow : System.Windows.Window
         _modelService.LogMessage += msg => AppendLog(msg);
         _docService.LogMessage += msg => AppendLog(msg);
         _chatService.LogMessage += msg => AppendLog(msg);
+        _dcsImportService.LogMessage += msg => AppendLog(msg);
 
         LoadConfig();
         _ = ShowModelSizingWarningsOnStartupAsync();
@@ -782,5 +791,241 @@ public partial class MainWindow : System.Windows.Window
     private void UnlockDrive_Click(object sender, System.Windows.RoutedEventArgs e)
     {
         TryUnlockEncryptedDrive();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Bindings Import wizard
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Step 0 → 1: User chose DCS. Detect folder and show detection result.</summary>
+    private void BindingsDcsGame_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        _dcsInstallation = _dcsImportService.DetectDcsInstallation();
+
+        if (_dcsInstallation is not null)
+        {
+            var variantLabel = _dcsInstallation.Variant == DcsSavedGamesVariant.DCSOpenBeta
+                ? "Open Beta"
+                : "Stable";
+            DcsFolderStatusText.Text =
+                $"✔ Found DCS {variantLabel}\n{_dcsInstallation.SavedGamesPath}";
+            DcsFolderStatusText.Foreground = System.Windows.Media.Brushes.DarkGreen;
+            BindingsStep1NextButton.IsEnabled = true;
+        }
+        else
+        {
+            DcsFolderStatusText.Text =
+                "DCS saved games folder not found in the standard location.\n" +
+                "Use 'Browse manually' to select it.";
+            DcsFolderStatusText.Foreground = System.Windows.Media.Brushes.DarkRed;
+            BindingsStep1NextButton.IsEnabled = false;
+        }
+
+        ShowBindingsStep(1);
+    }
+
+    /// <summary>Step 1: Let the user pick the DCS folder manually.</summary>
+    private void BindingsBrowseFolder_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        using var dialog = new Forms.FolderBrowserDialog
+        {
+            Description = "Select your DCS saved games folder (e.g. Saved Games\\DCS)"
+        };
+        if (dialog.ShowDialog() != Forms.DialogResult.OK || string.IsNullOrWhiteSpace(dialog.SelectedPath))
+            return;
+
+        try
+        {
+            _dcsInstallation = _dcsImportService.WithManualPath(dialog.SelectedPath);
+            DcsFolderStatusText.Text = $"✔ Using: {dialog.SelectedPath}";
+            DcsFolderStatusText.Foreground = System.Windows.Media.Brushes.DarkGreen;
+            BindingsStep1NextButton.IsEnabled = true;
+        }
+        catch (ArgumentException ex)
+        {
+            AppendLog($"Invalid folder: {ex.Message}");
+        }
+    }
+
+    /// <summary>Step 1 → 2: Scan for aircraft.</summary>
+    private void BindingsStep1Next_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_dcsInstallation is null) return;
+
+        _scannedAircraft = _dcsImportService.ScanAircraft(_dcsInstallation);
+
+        if (_scannedAircraft.Count == 0)
+        {
+            AppendLog("No aircraft binding folders found in the selected DCS path.");
+            DcsFolderStatusText.Text +=
+                "\n\nNo aircraft found. Check that Config/Input exists in this folder.";
+            DcsFolderStatusText.Foreground = System.Windows.Media.Brushes.DarkRed;
+            return;
+        }
+
+        // Determine which are already imported (only if a library is active)
+        IReadOnlySet<string> alreadyImported = new HashSet<string>();
+        if (_activeLibrary is not null)
+            alreadyImported = _dcsImportService.GetAlreadyImportedFolderNames(
+                _scannedAircraft, _ssdRoot, _activeLibrary.Id);
+
+        _aircraftItems = _scannedAircraft.Select(a => new DcsAircraftImportItem
+        {
+            Aircraft = a,
+            IsSelected = a.HasBindings,
+            AlreadyImported = alreadyImported.Contains(a.FolderName),
+        }).ToList();
+
+        AircraftList.ItemsSource = _aircraftItems;
+
+        var withBindings = _scannedAircraft.Count(a => a.HasBindings);
+        AircraftScanSummaryText.Text =
+            $"{_scannedAircraft.Count} aircraft found, {withBindings} with custom bindings.";
+
+        ShowBindingsStep(2);
+    }
+
+    /// <summary>Step 1 ← Back to step 0.</summary>
+    private void BindingsStep1Back_Click(object sender, System.Windows.RoutedEventArgs e) =>
+        ShowBindingsStep(0);
+
+    /// <summary>Step 2: Select All aircraft that have bindings.</summary>
+    private void BindingsSelectAll_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        foreach (var item in _aircraftItems.Where(i => i.CanImport))
+            item.IsSelected = true;
+        AircraftList.Items.Refresh();
+    }
+
+    /// <summary>Step 2: Deselect all aircraft.</summary>
+    private void BindingsDeselectAll_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        foreach (var item in _aircraftItems)
+            item.IsSelected = false;
+        AircraftList.Items.Refresh();
+    }
+
+    /// <summary>Step 2 ← Back to step 1.</summary>
+    private void BindingsStep2Back_Click(object sender, System.Windows.RoutedEventArgs e) =>
+        ShowBindingsStep(1);
+
+    /// <summary>Step 2 → 3: Run the import.</summary>
+    private async void BindingsImport_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        var selected = _aircraftItems.Where(i => i.IsSelected).Select(i => i.Aircraft).ToList();
+        if (selected.Count == 0)
+        {
+            AppendLog("No aircraft selected. Check at least one aircraft to import.");
+            return;
+        }
+
+        if (_activeLibrary is null)
+        {
+            AppendLog("No document library selected. Create or select a library in the Reference Documents section first.");
+            System.Windows.MessageBox.Show(
+                "Please create or select a document library before importing bindings.",
+                "No library selected",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Information);
+            return;
+        }
+
+        await RunImportAsync(selected);
+    }
+
+    /// <summary>Step 3: Re-run import with the same selection (overwrites existing files).</summary>
+    private async void BindingsImportAgain_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        var selected = _aircraftItems.Where(i => i.IsSelected).Select(i => i.Aircraft).ToList();
+        if (selected.Count == 0) return;
+        if (_activeLibrary is null) return;
+
+        await RunImportAsync(selected);
+    }
+
+    /// <summary>Step 3: Start over from step 0.</summary>
+    private void BindingsStartOver_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        _importCts?.Cancel();
+        _dcsInstallation = null;
+        _scannedAircraft = Array.Empty<DcsAircraftInfo>();
+        _aircraftItems = new();
+        AircraftList.ItemsSource = null;
+        ShowBindingsStep(0);
+    }
+
+    private async Task RunImportAsync(List<DcsAircraftInfo> selected)
+    {
+        _importCts?.Cancel();
+        _importCts = new CancellationTokenSource();
+        var ct = _importCts.Token;
+
+        ShowBindingsStep(3);
+        BindingsResultText.Text = string.Empty;
+        BindingsErrorText.Visibility = System.Windows.Visibility.Collapsed;
+        BindingsProgressText.Text = $"Importing {selected.Count} aircraft…";
+        BindingsImportButton.IsEnabled = false;
+
+        DcsBatchSummary summary;
+        try
+        {
+            summary = await _dcsImportService.ImportBindingsAsync(
+                selected,
+                _ssdRoot,
+                _activeLibrary!.Id,
+                friendlyName => Dispatcher.Invoke(() =>
+                    BindingsProgressText.Text = $"Processing: {friendlyName}…"),
+                ct);
+        }
+        catch (OperationCanceledException)
+        {
+            BindingsProgressText.Text = "Import cancelled.";
+            BindingsImportButton.IsEnabled = true;
+            return;
+        }
+        catch (Exception ex)
+        {
+            BindingsProgressText.Text = "Import failed.";
+            BindingsResultText.Text = string.Empty;
+            BindingsErrorText.Text = $"Error: {ex.Message}";
+            BindingsErrorText.Visibility = System.Windows.Visibility.Visible;
+            BindingsImportButton.IsEnabled = true;
+            AppendLog($"Bindings import error: {ex.Message}");
+            return;
+        }
+
+        BindingsProgressText.Text = string.Empty;
+        BindingsResultText.Text = summary.Failed == 0
+            ? $"Imported {summary.Succeeded}/{selected.Count} aircraft successfully."
+            : $"Imported {summary.Succeeded}/{selected.Count} aircraft. {summary.Failed} failed.";
+
+        if (summary.Failed > 0)
+        {
+            var failedNames = summary.Results
+                .Where(r => !r.Success)
+                .Select(r => $"  • {r.AircraftFriendlyName}: {r.FailureReason}");
+            BindingsErrorText.Text = string.Join("\n", failedNames);
+            BindingsErrorText.Visibility = System.Windows.Visibility.Visible;
+        }
+
+        BindingsImportButton.IsEnabled = true;
+        RefreshLibraryUi();
+    }
+
+    /// <summary>Shows one wizard step panel and collapses the others.</summary>
+    private void ShowBindingsStep(int step)
+    {
+        BindingsStep0.Visibility = step == 0
+            ? System.Windows.Visibility.Visible
+            : System.Windows.Visibility.Collapsed;
+        BindingsStep1.Visibility = step == 1
+            ? System.Windows.Visibility.Visible
+            : System.Windows.Visibility.Collapsed;
+        BindingsStep2.Visibility = step == 2
+            ? System.Windows.Visibility.Visible
+            : System.Windows.Visibility.Collapsed;
+        BindingsStep3.Visibility = step == 3
+            ? System.Windows.Visibility.Visible
+            : System.Windows.Visibility.Collapsed;
     }
 }
