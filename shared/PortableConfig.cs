@@ -4,6 +4,18 @@ using System.Text.Json.Serialization;
 namespace FreeAiSsd.Shared;
 
 /// <summary>
+/// Whisper model sizes available for speech-to-text.
+/// Larger models are more accurate but require more RAM and are slower.
+/// </summary>
+public enum WhisperModelSize
+{
+    Tiny,
+    Base,
+    Small,
+    Medium
+}
+
+/// <summary>
 /// Tracks the installation lifecycle of a model on the portable SSD.
 /// </summary>
 public enum ModelInstallStatus
@@ -87,6 +99,19 @@ public sealed class PortableConfig
     /// Falls back to non-streaming if streaming fails. Default: true.
     /// </summary>
     public bool UseStreamingChat { get; set; } = true;
+
+    /// <summary>Whisper model size for speech-to-text (tiny, base, small, medium).</summary>
+    public WhisperModelSize WhisperModelSize { get; set; } = WhisperModelSize.Base;
+    /// <summary>
+    /// Device name of the preferred microphone for voice input.
+    /// Null means use the system default recording device.
+    /// </summary>
+    public string? SelectedMicrophoneDevice { get; set; }
+    /// <summary>
+    /// When true, transcribed voice input is sent to the LLM automatically.
+    /// When false, the text is placed in the prompt field for the user to review first.
+    /// </summary>
+    public bool AutoSendVoiceInput { get; set; } = true;
 
     /// <summary>Standard relative path for the config file within the SSD structure.</summary>
     [JsonIgnore]

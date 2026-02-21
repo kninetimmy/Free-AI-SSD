@@ -43,6 +43,7 @@ public static class SsdLayout
     public const string Docs = "docs";
     public const string DocLibraries = "docs/libraries";
     public const string DocLibrariesRegistry = "docs/libraries.json";
+    public const string WhisperModels = "models/whisper";
 
     /// <summary>Backward-compatible aliases for Windows paths (used by older code).</summary>
     public const string Tools = WindowsTools;
@@ -69,6 +70,7 @@ public static class SsdLayout
                      MacOllama,
                      Models,
                      Blobs,
+                     WhisperModels,
                      Config,
                      Logs,
                      Cache,

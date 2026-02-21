@@ -12,6 +12,11 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="Whisper.net" Version="1.7.4" />
+    <PackageReference Include="Whisper.net.Runtime" Version="1.7.4" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\shared\FreeAiSsd.Shared.csproj" />
   </ItemGroup>
 </Project>
