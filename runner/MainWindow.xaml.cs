@@ -32,6 +32,8 @@ public partial class MainWindow : System.Windows.Window
     private readonly IDocumentOperationsService _docService;
     private readonly IChatService _chatService;
     private readonly IDcsBindingsImportService _dcsImportService;
+    private readonly ISpeechToTextService _sttService;
+    private readonly IAudioCaptureService _audioCaptureService;
 
     private PortableConfig? _config;
     private string _ssdRoot = string.Empty;
@@ -41,6 +43,7 @@ public partial class MainWindow : System.Windows.Window
     private bool _isUnlocked;
     private DocumentLibraryManifest? _activeLibrary;
     private CancellationTokenSource? _streamingCts;
+    private bool _isVoiceRecording;
 
     // Bindings import wizard state
     private DcsInstallation? _dcsInstallation;
@@ -76,6 +79,8 @@ public partial class MainWindow : System.Windows.Window
         _docService = new DocumentOperationsService(libraryManager, documentIngestor);
         _chatService = new ChatService(http, libraryManager, _logger);
         _dcsImportService = new DcsBindingsImportService(libraryManager);
+        _sttService = new WhisperSpeechToTextService();
+        _audioCaptureService = new AudioCaptureService();
 
         // Wire service events to UI
         _ollamaService.LogMessage += msg => AppendLog(msg);
@@ -84,6 +89,8 @@ public partial class MainWindow : System.Windows.Window
         _docService.LogMessage += msg => AppendLog(msg);
         _chatService.LogMessage += msg => AppendLog(msg);
         _dcsImportService.LogMessage += msg => AppendLog(msg);
+        _sttService.LogMessage += msg => AppendLog(msg);
+        _audioCaptureService.LogMessage += msg => AppendLog(msg);
 
         LoadConfig();
         _ = ShowModelSizingWarningsOnStartupAsync();
@@ -775,6 +782,132 @@ public partial class MainWindow : System.Windows.Window
         {
             await _docService.RemoveFileAsync(_activeLibrary, file.StoredRelativePath);
             RefreshLibraryUi();
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Voice input (Speech-to-Text)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private async void Voice_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_config is null) return;
+
+        if (_isVoiceRecording)
+        {
+            await StopVoiceRecordingAsync();
+        }
+        else
+        {
+            await StartVoiceRecordingAsync();
+        }
+    }
+
+    private async Task StartVoiceRecordingAsync()
+    {
+        if (_config is null) return;
+
+        // Ensure the Whisper model is loaded
+        if (!_sttService.IsModelLoaded)
+        {
+            SetVoiceStatus("Loading Whisper model...");
+            try
+            {
+                await _sttService.InitializeAsync(_ssdRoot, _config);
+            }
+            catch (Exception ex)
+            {
+                SetVoiceStatus(null);
+                AppendLog($"Voice input unavailable: {ex.Message}");
+                return;
+            }
+        }
+
+        try
+        {
+            _audioCaptureService.StartRecording(_config.SelectedMicrophoneDevice);
+            _isVoiceRecording = true;
+            VoiceButton.Content = "⏹ Stop";
+            SetVoiceStatus("Listening...");
+        }
+        catch (Exception ex)
+        {
+            SetVoiceStatus(null);
+            AppendLog($"Microphone error: {ex.Message}");
+        }
+    }
+
+    private async Task StopVoiceRecordingAsync()
+    {
+        _isVoiceRecording = false;
+        VoiceButton.Content = "🎤 Voice";
+        VoiceButton.IsEnabled = false;
+        SetVoiceStatus("Transcribing...");
+
+        byte[] audioData;
+        try
+        {
+            audioData = _audioCaptureService.StopRecording();
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Failed to stop recording: {ex.Message}");
+            VoiceButton.IsEnabled = true;
+            SetVoiceStatus(null);
+            return;
+        }
+
+        if (audioData.Length == 0)
+        {
+            AppendLog("No audio captured.");
+            VoiceButton.IsEnabled = true;
+            SetVoiceStatus(null);
+            return;
+        }
+
+        try
+        {
+            var text = await _sttService.TranscribeAudioAsync(audioData);
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                AppendLog("No speech detected in recording.");
+                VoiceButton.IsEnabled = true;
+                SetVoiceStatus("Ready");
+                return;
+            }
+
+            PromptText.Text = text;
+
+            if (_config!.AutoSendVoiceInput)
+            {
+                SetVoiceStatus("Sending...");
+                Send_Click(this, new System.Windows.RoutedEventArgs());
+            }
+
+            SetVoiceStatus("Ready");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Transcription failed: {ex.Message}");
+            SetVoiceStatus(null);
+        }
+        finally
+        {
+            VoiceButton.IsEnabled = true;
+        }
+    }
+
+    private void SetVoiceStatus(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            VoiceStatusText.Visibility = System.Windows.Visibility.Collapsed;
+        }
+        else
+        {
+            VoiceStatusText.Text = $"🎤 {text}";
+            VoiceStatusText.Visibility = System.Windows.Visibility.Visible;
         }
     }
 
