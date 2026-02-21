@@ -1,5 +1,6 @@
 using System.Net.Http;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Documents;
@@ -23,6 +24,109 @@ public sealed class ChatService : IChatService
 
     public async Task<ChatResponse> SendPromptAsync(
         string model, string userPrompt, string host, PortableConfig config)
+    {
+        var (promptToSend, sources, usedContext) = await PrepareRagContextAsync(userPrompt, host, config);
+
+        var request = new
+        {
+            model,
+            prompt = promptToSend,
+            stream = false
+        };
+
+        try
+        {
+            using var response = await _http.PostAsJsonAsync($"http://{host}/api/generate", request);
+            response.EnsureSuccessStatusCode();
+
+            var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var text = doc.RootElement.GetProperty("response").GetString() ?? string.Empty;
+            return new ChatResponse(text, sources, usedContext);
+        }
+        catch (Exception ex)
+        {
+            LogMessage?.Invoke($"Generate failed: {ex.Message}");
+            return new ChatResponse(string.Empty, null, false);
+        }
+    }
+
+    public async Task<ChatResponse> SendPromptStreamingAsync(
+        string model, string userPrompt, string host, PortableConfig config,
+        Action<string> onToken, CancellationToken cancellationToken = default)
+    {
+        var (promptToSend, sources, usedContext) = await PrepareRagContextAsync(userPrompt, host, config);
+
+        var request = new
+        {
+            model,
+            prompt = promptToSend,
+            stream = true
+        };
+
+        var assembled = new StringBuilder();
+
+        try
+        {
+            var json = JsonSerializer.Serialize(request);
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, $"http://{host}/api/generate")
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            };
+
+            using var response = await _http.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+
+            while (!reader.EndOfStream)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var line = await reader.ReadLineAsync(cancellationToken);
+                if (string.IsNullOrEmpty(line)) continue;
+
+                try
+                {
+                    using var doc = JsonDocument.Parse(line);
+                    if (doc.RootElement.TryGetProperty("response", out var tokenElement))
+                    {
+                        var token = tokenElement.GetString() ?? string.Empty;
+                        if (token.Length > 0)
+                        {
+                            assembled.Append(token);
+                            onToken(token);
+                        }
+                    }
+                }
+                catch (JsonException)
+                {
+                    // Skip malformed chunks
+                }
+            }
+
+            return new ChatResponse(assembled.ToString(), sources, usedContext);
+        }
+        catch (OperationCanceledException)
+        {
+            LogMessage?.Invoke("Generation cancelled by user.");
+            return new ChatResponse(assembled.ToString(), sources, usedContext);
+        }
+        catch (Exception ex)
+        {
+            LogMessage?.Invoke($"Streaming failed: {ex.Message}");
+            // Return whatever was received so far
+            var partial = assembled.ToString();
+            if (partial.Length > 0)
+            {
+                onToken($"\n\n[Error: {ex.Message}]");
+            }
+            return new ChatResponse(partial, sources, usedContext);
+        }
+    }
+
+    private async Task<(string Prompt, List<string>? Sources, bool UsedContext)> PrepareRagContextAsync(
+        string userPrompt, string host, PortableConfig config)
     {
         var promptToSend = userPrompt;
         List<string>? sources = null;
@@ -58,26 +162,6 @@ public sealed class ChatService : IChatService
             }
         }
 
-        var request = new
-        {
-            model,
-            prompt = promptToSend,
-            stream = false
-        };
-
-        try
-        {
-            using var response = await _http.PostAsJsonAsync($"http://{host}/api/generate", request);
-            response.EnsureSuccessStatusCode();
-
-            var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-            var text = doc.RootElement.GetProperty("response").GetString() ?? string.Empty;
-            return new ChatResponse(text, sources, usedContext);
-        }
-        catch (Exception ex)
-        {
-            LogMessage?.Invoke($"Generate failed: {ex.Message}");
-            return new ChatResponse(string.Empty, null, false);
-        }
+        return (promptToSend, sources, usedContext);
     }
 }
