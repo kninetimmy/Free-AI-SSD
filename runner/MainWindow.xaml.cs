@@ -34,6 +34,7 @@ public partial class MainWindow : System.Windows.Window
     private readonly IDcsBindingsImportService _dcsImportService;
     private readonly ISpeechToTextService _sttService;
     private readonly IAudioCaptureService _audioCaptureService;
+    private ITextToSpeechService? _ttsService;
 
     private PortableConfig? _config;
     private string _ssdRoot = string.Empty;
@@ -43,6 +44,7 @@ public partial class MainWindow : System.Windows.Window
     private bool _isUnlocked;
     private DocumentLibraryManifest? _activeLibrary;
     private CancellationTokenSource? _streamingCts;
+    private StreamingTtsSpeaker? _ttsSpeaker;
     private bool _isVoiceRecording;
 
     // Bindings import wizard state
@@ -154,6 +156,7 @@ public partial class MainWindow : System.Windows.Window
         _config = PortableConfig.Load(configPath);
         PopulateModelCombo();
         RefreshLibraryUi();
+        InitializeTts();
         StatusText.Text = "Ready (not running)";
         AppendLog($"Loaded config from {configPath}");
     }
@@ -198,6 +201,7 @@ public partial class MainWindow : System.Windows.Window
         UpdateEncryptionUiState();
         PopulateModelCombo();
         RefreshLibraryUi();
+        InitializeTts();
         StatusText.Text = "Unlocked and ready";
         AppendLog("SSD unlocked successfully.");
         _ = SaveEncryptionUnlockStateAsync();
@@ -245,6 +249,9 @@ public partial class MainWindow : System.Windows.Window
         if (_config is null || ModelCombo.SelectedItem is not string model) return;
         if (!TryGetCurrentHost(out var host)) return;
 
+        // Interrupt any ongoing TTS from the previous response
+        StopTts();
+
         SourcesList.ItemsSource = null;
 
         if (_config.UseStreamingChat)
@@ -262,6 +269,9 @@ public partial class MainWindow : System.Windows.Window
                 {
                     SourcesList.ItemsSource = response.Sources;
                 }
+
+                // Speak the complete response
+                SpeakResponseAsync(response.ResponseText);
             }
             finally
             {
@@ -281,12 +291,22 @@ public partial class MainWindow : System.Windows.Window
         StreamingIndicator.Visibility = System.Windows.Visibility.Visible;
         ResponseText.Text = string.Empty;
 
+        // Start a sentence-buffered TTS speaker for this streaming response
+        var ttsSpeaker = BeginStreamingTts();
+
         try
         {
             var response = await _chatService.SendPromptStreamingAsync(
                 model, PromptText.Text, host, _config!,
-                token => Dispatcher.Invoke(() => ResponseText.AppendText(token)),
+                token =>
+                {
+                    Dispatcher.Invoke(() => ResponseText.AppendText(token));
+                    ttsSpeaker?.FeedToken(token);
+                },
                 ct);
+
+            // Signal end of stream so any buffered trailing text is spoken
+            ttsSpeaker?.Finish();
 
             // Store the final assembled text (handles cancellation partial text)
             ResponseText.Text = response.ResponseText;
@@ -297,6 +317,7 @@ public partial class MainWindow : System.Windows.Window
         }
         catch (Exception ex)
         {
+            ttsSpeaker?.Cancel();
             AppendLog($"Streaming error: {ex.Message}");
             // Fall back to non-streaming
             if (string.IsNullOrEmpty(ResponseText.Text))
@@ -310,6 +331,8 @@ public partial class MainWindow : System.Windows.Window
                     {
                         SourcesList.ItemsSource = fallback.Sources;
                     }
+
+                    SpeakResponseAsync(fallback.ResponseText);
                 }
                 catch (Exception fallbackEx)
                 {
@@ -328,6 +351,7 @@ public partial class MainWindow : System.Windows.Window
     private void Stop_Generation_Click(object sender, System.Windows.RoutedEventArgs e)
     {
         _streamingCts?.Cancel();
+        StopTts();
     }
 
     private void OpenBrowser_Click(object sender, System.Windows.RoutedEventArgs e)
@@ -786,12 +810,111 @@ public partial class MainWindow : System.Windows.Window
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Text-to-Speech output
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Creates and configures the TTS service based on the current config.
+    /// Called once after config is loaded (or re-loaded after unlock).
+    /// </summary>
+    private void InitializeTts()
+    {
+        _ttsService?.Dispose();
+        _ttsService = null;
+
+        if (_config is null) return;
+
+        try
+        {
+            if (string.Equals(_config.TtsEngine, "piper", StringComparison.OrdinalIgnoreCase))
+            {
+                var piper = new PiperTextToSpeechService(_ssdRoot);
+                piper.OutputDeviceName = _config.TtsOutputDevice;
+                _ttsService = piper;
+            }
+            else
+            {
+                var system = new SystemTextToSpeechService();
+                system.OutputDeviceName = _config.TtsOutputDevice;
+                _ttsService = system;
+            }
+
+            _ttsService.LogMessage += msg => AppendLog(msg);
+            _ttsService.SetRate(_config.TtsRate);
+            _ttsService.SetVolume(_config.TtsVolume);
+
+            if (!string.IsNullOrWhiteSpace(_config.TtsVoiceName))
+            {
+                _ttsService.SetVoice(_config.TtsVoiceName);
+            }
+
+            if (_config.TtsEnabled)
+            {
+                AppendLog($"TTS enabled (engine: {_config.TtsEngine})");
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Failed to initialize TTS: {ex.Message}");
+            _ttsService = null;
+        }
+    }
+
+    /// <summary>
+    /// Starts a <see cref="StreamingTtsSpeaker"/> for sentence-by-sentence speech
+    /// during a streaming LLM response. Returns null if TTS is disabled.
+    /// </summary>
+    private StreamingTtsSpeaker? BeginStreamingTts()
+    {
+        _ttsSpeaker?.Cancel();
+        _ttsSpeaker?.Dispose();
+        _ttsSpeaker = null;
+
+        if (_ttsService is null || _config is not { TtsEnabled: true })
+            return null;
+
+        _ttsSpeaker = new StreamingTtsSpeaker(_ttsService);
+        return _ttsSpeaker;
+    }
+
+    /// <summary>
+    /// Speaks a complete (non-streaming) response asynchronously if TTS is enabled.
+    /// Fire-and-forget — errors are logged.
+    /// </summary>
+    private void SpeakResponseAsync(string responseText)
+    {
+        if (_ttsService is null || _config is not { TtsEnabled: true }) return;
+        if (string.IsNullOrWhiteSpace(responseText)) return;
+
+        _ = _ttsService.SpeakAsync(responseText);
+    }
+
+    /// <summary>
+    /// Immediately interrupts any TTS that is currently speaking.
+    /// Called when the user starts a new query or clicks stop.
+    /// </summary>
+    private void StopTts()
+    {
+        _ttsSpeaker?.Cancel();
+        _ttsSpeaker?.Dispose();
+        _ttsSpeaker = null;
+
+        _ttsService?.Stop();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Voice input (Speech-to-Text)
     // ─────────────────────────────────────────────────────────────────────────
 
     private async void Voice_Click(object sender, System.Windows.RoutedEventArgs e)
     {
         if (_config is null) return;
+
+        // Interrupt TTS when user starts speaking — they're beginning a new interaction
+        if (!_isVoiceRecording)
+        {
+            StopTts();
+        }
 
         if (_isVoiceRecording)
         {

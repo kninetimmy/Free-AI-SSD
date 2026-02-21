@@ -100,6 +100,26 @@ public sealed class PortableConfig
     /// </summary>
     public bool UseStreamingChat { get; set; } = true;
 
+    // ── Text-to-Speech ────────────────────────────────────────────────────
+
+    /// <summary>Whether text-to-speech of AI responses is enabled.</summary>
+    public bool TtsEnabled { get; set; }
+    /// <summary>TTS engine to use: "system" (Windows SAPI) or "piper".</summary>
+    public string TtsEngine { get; set; } = "system";
+    /// <summary>Voice name for the selected TTS engine (null = engine default).</summary>
+    public string? TtsVoiceName { get; set; }
+    /// <summary>Speech rate. Range: -10 (slowest) to 10 (fastest). Default: 0.</summary>
+    public int TtsRate { get; set; }
+    /// <summary>Speech volume. Range: 0 (silent) to 100 (loudest). Default: 100.</summary>
+    public int TtsVolume { get; set; } = 100;
+    /// <summary>
+    /// Audio output device name for TTS playback. Null means use the system default
+    /// output device. Useful when the user wants AI voice on a specific device (e.g., VR headset).
+    /// </summary>
+    public string? TtsOutputDevice { get; set; }
+
+    // ── Speech-to-Text ───────────────────────────────────────────────────
+
     /// <summary>Whisper model size for speech-to-text (tiny, base, small, medium).</summary>
     public WhisperModelSize WhisperModelSize { get; set; } = WhisperModelSize.Base;
     /// <summary>
