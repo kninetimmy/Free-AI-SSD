@@ -4,11 +4,13 @@ public sealed class DocumentIngestor
 {
     private readonly DocumentLibraryManager _libraryManager;
     private readonly EmbeddingClient _embeddingClient;
+    private readonly SsdLogger? _logger;
 
-    public DocumentIngestor(DocumentLibraryManager libraryManager, EmbeddingClient embeddingClient)
+    public DocumentIngestor(DocumentLibraryManager libraryManager, EmbeddingClient embeddingClient, SsdLogger? logger = null)
     {
         _libraryManager = libraryManager;
         _embeddingClient = embeddingClient;
+        _logger = logger;
     }
 
     public async Task IngestFilesAsync(
@@ -25,6 +27,7 @@ public sealed class DocumentIngestor
         var candidates = sourcePaths.Where(DocumentParser.IsSupported).Distinct().ToList();
         var total = candidates.Count;
         var done = 0;
+        var maxSizeBytes = (long)config.MaxDocumentSizeMB * 1024 * 1024;
 
         foreach (var sourcePath in candidates)
         {
@@ -34,6 +37,22 @@ public sealed class DocumentIngestor
 
             if (!File.Exists(sourcePath))
             {
+                continue;
+            }
+
+            // --- Security: Symlink / reparse-point detection ---
+            var fileAttributes = File.GetAttributes(sourcePath);
+            if ((fileAttributes & FileAttributes.ReparsePoint) != 0)
+            {
+                _logger?.Warn($"Rejected symlink/reparse point: {sourcePath}");
+                continue;
+            }
+
+            // --- Security: File size limit ---
+            var fileSize = new FileInfo(sourcePath).Length;
+            if (fileSize > maxSizeBytes)
+            {
+                _logger?.Warn($"Rejected oversized file ({fileSize / (1024.0 * 1024.0):F1} MB exceeds {config.MaxDocumentSizeMB} MB limit): {sourcePath}");
                 continue;
             }
 
@@ -51,7 +70,22 @@ public sealed class DocumentIngestor
             Directory.CreateDirectory(Path.GetDirectoryName(storedAbsPath)!);
             File.Copy(sourcePath, storedAbsPath, overwrite: true);
 
-            var parsed = DocumentParser.Parse(storedAbsPath);
+            // --- Security: Magic-byte / extension validation ---
+            ParsedDocument parsed;
+            try
+            {
+                parsed = DocumentParser.Parse(storedAbsPath);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger?.Warn($"Rejected file failing content validation: {sourcePath} — {ex.Message}");
+                // Clean up the stored copy that was already written.
+                if (File.Exists(storedAbsPath))
+                {
+                    File.Delete(storedAbsPath);
+                }
+                continue;
+            }
 
             // Flatten all text chunks with their segment metadata, preserving document order.
             var textItems = new List<(string Text, int? Page)>();
@@ -157,8 +191,25 @@ public sealed class DocumentIngestor
         var files = new List<string>();
         foreach (var folder in manifest.WatchedFolders.Where(Directory.Exists))
         {
-            files.AddRange(Directory.EnumerateFiles(folder, "*.*", SearchOption.AllDirectories)
-                .Where(DocumentParser.IsSupported));
+            var allowedRoot = Path.GetFullPath(folder);
+            foreach (var file in Directory.EnumerateFiles(folder, "*.*", SearchOption.AllDirectories))
+            {
+                if (!DocumentParser.IsSupported(file))
+                    continue;
+
+                // --- Security: Path traversal guard for watched folders ---
+                try
+                {
+                    PathGuards.EnsureUnderRoot(allowedRoot, file);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    _logger?.Warn($"Path traversal blocked in watched folder '{folder}': {file} — {ex.Message}");
+                    continue;
+                }
+
+                files.Add(file);
+            }
         }
 
         await IngestFilesAsync(manifest, files, host, config, progress, rebuildIndex: false, cancellationToken);

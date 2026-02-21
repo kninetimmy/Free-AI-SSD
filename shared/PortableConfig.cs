@@ -76,6 +76,11 @@ public sealed class PortableConfig
     /// Higher values may improve throughput but increase load on the local Ollama server.
     /// </summary>
     public int MaxEmbeddingConcurrency { get; set; } = 4;
+    /// <summary>
+    /// Maximum allowed document file size in megabytes for RAG ingestion.
+    /// Files exceeding this limit are rejected before copying or parsing.
+    /// </summary>
+    public int MaxDocumentSizeMB { get; set; } = 50;
 
     /// <summary>Standard relative path for the config file within the SSD structure.</summary>
     [JsonIgnore]
