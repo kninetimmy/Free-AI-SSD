@@ -5,7 +5,7 @@ namespace FreeAiSsd.Runner.Services;
 public sealed class AudioCaptureService : IAudioCaptureService
 {
     /// <summary>Whisper expects 16kHz, 16-bit, mono PCM.</summary>
-    private static readonly WaveFormat TargetFormat = new(sampleRate: 16000, bitsPerSample: 16, channels: 1);
+    private static readonly WaveFormat TargetFormat = new(sampleRate: 16000, bits: 16, channels: 1);
 
     private WaveInEvent? _waveIn;
     private MemoryStream? _buffer;
