@@ -59,7 +59,7 @@ public partial class MainWindow : System.Windows.Window
         _logger = new SsdLogger(_ssdRoot, "runner");
         var http = new HttpClient();
         var libraryManager = new DocumentLibraryManager(_ssdRoot);
-        var documentIngestor = new DocumentIngestor(libraryManager, new EmbeddingClient(http));
+        var documentIngestor = new DocumentIngestor(libraryManager, new EmbeddingClient(http), _logger);
 
         // Create services
         _ollamaService = new OllamaLifecycleService(_logger);
