@@ -1,9 +1,10 @@
 <Window x:Class="FreeAiSsd.Runner.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Free AI SSD Runner" Height="820" Width="1100">
+        Title="Free AI SSD Runner" Height="1020" Width="1100">
     <Grid Margin="16">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -74,7 +75,86 @@
             </StackPanel>
         </Border>
 
-        <TextBox Grid.Row="4" x:Name="ResponseText" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextWrapping="Wrap"/>
-        <TextBox Grid.Row="5" x:Name="LogText" Height="140" Margin="0,8,0,0" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextWrapping="Wrap"/>
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!-- Import Controller Bindings (multi-step wizard)             -->
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <Border Grid.Row="4" BorderBrush="#DDD" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,8">
+            <StackPanel>
+                <TextBlock Text="Import Controller Bindings" FontWeight="Bold"/>
+
+                <!-- Step 0: Game selection ─────────────────────────── -->
+                <StackPanel x:Name="BindingsStep0" Margin="0,8,0,0">
+                    <TextBlock Text="Select your game:" Foreground="#555" Margin="0,0,0,6"/>
+                    <WrapPanel>
+                        <Button Content="DCS World" Padding="12,6" Margin="0,0,8,0" Click="BindingsDcsGame_Click"/>
+                        <Button Content="IL-2 — Coming Soon" Padding="12,6" Margin="0,0,8,0" IsEnabled="False" Foreground="#999"/>
+                        <Button Content="War Thunder — Coming Soon" Padding="12,6" IsEnabled="False" Foreground="#999"/>
+                    </WrapPanel>
+                </StackPanel>
+
+                <!-- Step 1: Folder detection ───────────────────────── -->
+                <StackPanel x:Name="BindingsStep1" Visibility="Collapsed" Margin="0,8,0,0">
+                    <TextBlock x:Name="DcsFolderStatusText" TextWrapping="Wrap" Margin="0,0,0,8"/>
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Browse manually" Padding="10,5" Margin="0,0,8,0" Click="BindingsBrowseFolder_Click"/>
+                        <Button x:Name="BindingsStep1NextButton" Content="Scan for aircraft" Padding="10,5" Margin="0,0,8,0" Click="BindingsStep1Next_Click"/>
+                        <Button Content="← Back" Padding="10,5" Foreground="#555" Click="BindingsStep1Back_Click"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- Step 2: Aircraft selection ─────────────────────── -->
+                <StackPanel x:Name="BindingsStep2" Visibility="Collapsed" Margin="0,8,0,0">
+                    <TextBlock x:Name="AircraftScanSummaryText" Foreground="#555" Margin="0,0,0,6"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <Button Content="Select All" Padding="8,4" Margin="0,0,8,0" Click="BindingsSelectAll_Click"/>
+                        <Button Content="Deselect All" Padding="8,4" Click="BindingsDeselectAll_Click"/>
+                    </StackPanel>
+                    <ListView x:Name="AircraftList" Height="130" SelectionMode="Single" BorderThickness="1" BorderBrush="#DDD">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                <Setter Property="Padding" Value="4,2"/>
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                              IsEnabled="{Binding CanImport}"
+                                              VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding DisplayLabel}"
+                                               VerticalAlignment="Center" Margin="6,0,0,0"/>
+                                    <TextBlock Text=" (already imported)" VerticalAlignment="Center"
+                                               Foreground="#E07000" FontStyle="Italic"
+                                               Visibility="{Binding AlreadyImportedVisibility}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                        <Button x:Name="BindingsImportButton" Content="Import selected" Padding="10,5" Margin="0,0,8,0" Click="BindingsImport_Click"/>
+                        <Button Content="← Back" Padding="10,5" Foreground="#555" Click="BindingsStep2Back_Click"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- Step 3: Progress / results ─────────────────────── -->
+                <StackPanel x:Name="BindingsStep3" Visibility="Collapsed" Margin="0,8,0,0">
+                    <TextBlock x:Name="BindingsProgressText" Foreground="#0078D4" Margin="0,0,0,6" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="BindingsResultText" FontWeight="Bold" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                    <TextBlock x:Name="BindingsErrorText" Foreground="#C00" TextWrapping="Wrap" Margin="0,0,0,6"
+                               Visibility="Collapsed"/>
+                    <TextBlock Text="These files are now in your document library. Rebuild the index to make them searchable."
+                               TextWrapping="Wrap" Foreground="#555" Margin="0,4,0,8"/>
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="Import again (overwrite)" Padding="10,5" Margin="0,0,8,0" Click="BindingsImportAgain_Click"/>
+                        <Button Content="Start over" Padding="10,5" Foreground="#555" Click="BindingsStartOver_Click"/>
+                    </StackPanel>
+                </StackPanel>
+
+            </StackPanel>
+        </Border>
+
+        <TextBox Grid.Row="5" x:Name="ResponseText" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextWrapping="Wrap"/>
+        <TextBox Grid.Row="6" x:Name="LogText" Height="140" Margin="0,8,0,0" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextWrapping="Wrap"/>
     </Grid>
 </Window>
