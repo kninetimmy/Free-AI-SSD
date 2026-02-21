@@ -20,10 +20,10 @@ namespace FreeAiSsd.Runner;
 /// </summary>
 public partial class PttOverlayWindow : Window
 {
-    private static readonly SolidColorBrush GrayBrush = new(Color.FromRgb(0x88, 0x88, 0x88));
-    private static readonly SolidColorBrush RedBrush = new(Color.FromRgb(0xE0, 0x40, 0x40));
-    private static readonly SolidColorBrush YellowBrush = new(Color.FromRgb(0xE0, 0xC0, 0x30));
-    private static readonly SolidColorBrush GreenBrush = new(Color.FromRgb(0x40, 0xC0, 0x60));
+    private static readonly SolidColorBrush GrayBrush = new(System.Windows.Media.Color.FromRgb(0x88, 0x88, 0x88));
+    private static readonly SolidColorBrush RedBrush = new(System.Windows.Media.Color.FromRgb(0xE0, 0x40, 0x40));
+    private static readonly SolidColorBrush YellowBrush = new(System.Windows.Media.Color.FromRgb(0xE0, 0xC0, 0x30));
+    private static readonly SolidColorBrush GreenBrush = new(System.Windows.Media.Color.FromRgb(0x40, 0xC0, 0x60));
 
     private bool _isDragging;
     private System.Windows.Point _dragStart;
