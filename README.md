@@ -14,7 +14,7 @@ That's what this project does. You prepare a drive once on a machine with intern
 You dropped $80 on the F-14 and the manual is 900 pages. You don't need to read all of it. Load the PDF onto the drive, plug it in, and just ask: *"How do I do a case III recovery?"* or *"What's the TWS auto scan pattern?"* The AI pulls the relevant section from the actual manual and gives you an answer with citations. Study on your couch, quiz yourself before a sortie, or have it running on a second monitor while you fly.
 
 ### The VR flight sim player who can't see their keyboard
-You're in VR in DCS or IL-2, mid-engagement, and need to deploy countermeasures but you've blanked on the keybind. You can't take your headset off to Google it. Once voice assistant support lands *(coming soon — see roadmap)*, you'll key a push-to-talk on your HOTAS and ask like you're talking to your RIO. For now, the chat interface on a second screen or tablet gets the job done.
+You're in VR in DCS or IL-2, mid-engagement, and need to deploy countermeasures but you've blanked on the keybind. You can't take your headset off to Google it. With the voice pipeline now built in, you speak your question and the AI answers back by voice — no headset off, no hands off the stick. Import your HOTAS bindings first and it'll answer with your actual button layout, not a generic chart.
 
 ### The ham radio operator in the field
 You're camping, or deployed for emergency comms, and you need to reference a section of your radio manual or the band plan for a frequency allocation. No cell signal, no internet. Load your manuals and reference docs onto the drive beforehand, and you have an offline AI assistant that can pull answers from your own library.
@@ -27,30 +27,19 @@ Load in first aid guides, plant identification references, survival manuals, equ
 
 ---
 
-## Roadmap — Where This Is Going
+## Roadmap — What's Still Coming
 
-None of the following exists yet — this is what's actively planned.
+### IL-2 and War Thunder Bindings Parser (Phase 2)
+Bindings import currently supports DCS World only. IL-2 Sturmovik and War Thunder parsers are planned for Phase 2, pending example binding files.
 
-### Voice Assistant / In-Game Copilot
-Speech-to-text via Whisper running locally with text-to-speech response. Push-to-talk bound to a HOTAS button, keyed like a radio call. Initial target is flight sims in VR (DCS). Copilot personality configurable via system prompt.
+### HOTAS Push-to-Talk Trigger (Phase 4)
+A keybind on a HOTAS button that starts and stops voice recording without touching the keyboard. Intended for VR use where hands-free activation matters.
 
-- Local Whisper for speech-to-text; no cloud
-- Text-to-speech reply
-- HOTAS push-to-talk binding
-- Configurable personality (RIO, wingman, instructor, etc.)
-
-### Flight Sim Bindings Import
-Reads DCS lua binding files, merges inputs across multiple devices (stick, throttle, rudder pedals), and produces a per-aircraft reference the AI can look up against. Answers "how do I uncage my AIM-9" with your actual hardware layout.
-
-- Import bindings from DCS lua files (IL-2, War Thunder, MSFS planned)
-- Auto-detects DCS saved games folder
-- Merges multi-device bindings into a single per-aircraft reference
-
-### Setup Profiles
-Mode selection at install time: **general use** or **flight sim mode**. Flight sim mode pulls Whisper, TTS, and the bindings importer. Base install stays lightweight for users who do not need sim tooling. Extensible for other profiles (ham radio, field reference, etc.).
-
-### Network Mode
+### Network Mode (Phase 5)
 Run the AI on one machine, query it from another on the same local network. Runner exposes a local API endpoint — no cloud, no internet.
+
+### Setup Profiles (Phase 6)
+Mode selection at install time: **general use** or **flight sim mode**. Flight sim mode pulls Whisper, TTS, and the bindings importer. Base install stays lightweight for users who do not need sim tooling.
 
 ---
 
@@ -114,6 +103,9 @@ There are two phases:
 | Chat (local AI) | No |
 | Reference Documents indexing and retrieval | No |
 | Pull embedding model (if not already on SSD) | Temporarily yes |
+| DCS Bindings Import | No |
+| Voice input (Whisper transcription) | No (model download is once, online) |
+| Text-to-speech (System / Piper) | No |
 
 ### Using Reference Documents
 
@@ -139,6 +131,66 @@ Runner includes a **Reference Documents** panel for document-grounded chat witho
 - DOCX is not currently supported.
 - Retrieval is optimized for personal and small-to-medium libraries (up to ~10,000 chunks; a warning is logged if exceeded).
 
+### DCS Bindings Import
+
+Runner can read your DCS World controller bindings and load them into the document library so the AI knows your exact HOTAS layout. When you ask "how do I uncage my AIM-9?" it can answer with the button on *your* stick, not a generic keybind table.
+
+**How to import:**
+1. Open **Bindings Import** in Runner (requires an active document library).
+2. Runner auto-detects your `Saved Games\DCS` folder. If detection fails, browse to it manually.
+3. Click **Scan** — Runner lists every aircraft that has binding files.
+4. Select the aircraft you want and click **Import**.
+5. Runner reads each device's `diff.lua` file (stick, throttle, rudder pedals), merges them into one per-aircraft reference document, and writes it directly into your library.
+6. Run **Rebuild index** in Reference Documents or wait for the next sweep to ingest the new files.
+
+After import, you can ask things like: *"What button fires the gun on my F/A-18C?"* and the AI will pull from your own binding file.
+
+**Supported:**
+- DCS World stable and Open Beta (auto-detected)
+- Any aircraft that has binding files in `Config/Input`
+- Multi-device merging — stick, throttle, and rudder pedals all merged into one file per aircraft
+
+**Not yet supported:** IL-2 Sturmovik and War Thunder (Phase 2 — see roadmap).
+
+### Voice Input and Response
+
+Runner includes a voice pipeline so you can speak your questions and hear the answers — entirely offline, no cloud.
+
+**Speaking to the AI:**
+1. Click the microphone button (or configure a keybind) to start recording.
+2. Speak your question.
+3. Click the button again to stop — Whisper transcribes the audio locally and either sends it automatically or places the text in the prompt field for review, depending on your `autoSendVoiceInput` setting.
+
+**AI voice response:**
+- Enable TTS in settings. When enabled, each AI response is spoken aloud after it finishes generating.
+- Two engines available: **System** (Windows SAPI, built-in, no download required) and **Piper** (optional neural TTS — download `piper.exe` and a voice model into `windows/tools/piper/`).
+- You can target a specific audio output device (e.g., route AI voice to your headset while system audio goes elsewhere).
+
+**Whisper model sizes** — stored at `models/whisper/` on the SSD:
+
+| Size | File | Approx. disk | Notes |
+|---|---|---|---|
+| Tiny | `ggml-tiny.bin` | ~75 MB | Fastest; lower accuracy |
+| Base | `ggml-base.bin` | ~142 MB | Default; good for most use |
+| Small | `ggml-small.bin` | ~466 MB | Better accuracy |
+| Medium | `ggml-medium.bin` | ~1.5 GB | Best accuracy; requires more RAM |
+
+The first time voice is used, Runner downloads the selected model automatically (internet required for that one step). After that it runs fully offline.
+
+**Voice configuration** (in `config/portable-config.json`):
+
+| Property | Default | Description |
+|---|---|---|
+| `whisperModelSize` | `Base` | Whisper model: `Tiny`, `Base`, `Small`, or `Medium` |
+| `selectedMicrophoneDevice` | `null` | Microphone device name; `null` = system default |
+| `autoSendVoiceInput` | `true` | When true, transcribed text is sent immediately; when false, it is placed in the prompt field for review |
+| `ttsEnabled` | `false` | Enable text-to-speech for AI responses |
+| `ttsEngine` | `system` | `system` (Windows SAPI) or `piper` (neural TTS) |
+| `ttsVoiceName` | `null` | Voice name for the selected engine; `null` = engine default |
+| `ttsRate` | `0` | Speech rate: `-10` (slowest) to `10` (fastest) |
+| `ttsVolume` | `100` | Volume: `0` (silent) to `100` (max) |
+| `ttsOutputDevice` | `null` | Audio output device name for TTS; `null` = system default |
+
 ### Troubleshooting
 
 **Runner won't start / dependency warnings**
@@ -163,6 +215,8 @@ Runner includes a **Reference Documents** panel for document-grounded chat witho
 
 ## Recent Improvements
 
+- **2026-02-21**: **DCS Bindings Import** — reads DCS `diff.lua` binding files, auto-detects saved games folder, merges multi-device HOTAS inputs, and writes per-aircraft reference documents directly into the document library for RAG
+- **2026-02-21**: **Voice pipeline** — offline speech-to-text via Whisper.cpp (Tiny/Base/Small/Medium); text-to-speech via Windows SAPI (built-in) or optional Piper neural TTS; configurable mic, voice, rate, volume, and output device
 - **2026-02-19**: Initial Replit setup with .NET 8; build and test workflow configured
 - **2026-02-19**: Comprehensive code review completed (architecture, security, code quality)
 - **2026-02-19**: XML documentation comments added to all source files (shared, prep-app, runner, tests)
@@ -189,12 +243,17 @@ Free-AI-SSD ships two desktop applications backed by a shared cross-platform lib
 - **Runner** (Windows WPF / macOS Swift) — the end-user tool. Runs directly from the SSD on the target machine. Starts Ollama, provides a chat interface, and optionally loads Reference Document libraries for grounded local retrieval.
 - **Shared library** (`FreeAiSsd.Shared`, `net8.0`) — portable core logic used by both apps: encryption, trust policy, path guards, configuration, dependency checking, download management, and MVVM infrastructure.
 
-The Runner's business logic is split into four injectable services (no UI dependencies) to allow unit testing without a WPF host:
+The Runner's business logic is split into injectable services (no UI dependencies) to allow unit testing without a WPF host:
 
 - `OllamaLifecycleService` — process start/stop, port resolution, trust validation
 - `ModelManagementService` — installed model listing, sizing warnings, embedding model pull
 - `DocumentOperationsService` — library CRUD, file ingestion, folder sweep, index rebuild
 - `ChatService` — RAG-augmented prompt construction and Ollama `/api/generate` calls
+- `DcsBindingsImportService` — DCS installation detection, aircraft scanning, batch binding import
+- `WhisperSpeechToTextService` — Whisper.cpp transcription via `Whisper.net`; model download management via `WhisperModelManager`
+- `SystemTextToSpeechService` — Windows SAPI TTS with optional NAudio device targeting
+- `PiperTextToSpeechService` — Piper neural TTS (optional); spawns `piper.exe`, streams raw PCM through NAudio
+- `AudioCaptureService` — microphone capture at 16 kHz/16-bit mono (Whisper's required format)
 
 </details>
 
@@ -220,10 +279,12 @@ Free-AI-SSD prepares a layout similar to:
 ```
 config/              — portable config + runtime state
 models/              — Ollama model store
+models/whisper/      — Whisper speech-to-text model files (ggml-*.bin)
 logs/                — app logs
 docs/libraries/      — Reference Documents library files, manifests, index DB
 windows/runner/      — Runner app payload
 windows/tools/ollama/    — staged Ollama runtime
+windows/tools/piper/     — optional Piper TTS binary and voice models (user-installed)
 windows/tools/prereqs/   — offline prerequisite installers + manifest
 mac/                 — beta macOS payloads and tools (when included)
 cache/               — prep-time download cache
@@ -269,6 +330,12 @@ cache/               — prep-time download cache
 | `SsdLogger.cs` | File-based logger writing to the SSD's logs directory |
 | `SystemCompatibility.cs` | Detects GPU, CPU architecture, OS version for compatibility display |
 | `SystemResources.cs` | WMI-based RAM and VRAM detection |
+| `Documents/DcsBindingParser.cs` | Parses DCS `diff.lua` binding files into structured data and formats them as plain text for RAG |
+| `Documents/DcsAircraftScanner.cs` | Scans `Config/Input` for aircraft folders and device `diff.lua` files |
+| `Documents/DcsBatchProcessor.cs` | Batch-processes selected aircraft: merges devices, formats output, writes `.txt` files to the library |
+| `Documents/DcsSavedGamesLocator.cs` | Auto-detects `Saved Games\DCS` and `Saved Games\DCS.openbeta`; supports manual path override |
+| `Documents/DcsBindingModels.cs` | Data models: `DcsDeviceBindings`, `DcsAircraftBindings`, `DcsAxisBinding`, `DcsButtonBinding`, `DcsAxisFilter` |
+| `Documents/DcsScannerModels.cs` | Data models: `DcsInstallation`, `DcsAircraftInfo`, `DcsDeviceInfo`, `DcsBatchSummary`, `DcsBatchItemResult` |
 
 ### MVVM Infrastructure (`shared/Mvvm/`, `shared/Services/`, `shared/ViewModels/`)
 
@@ -367,24 +434,34 @@ dotnet run --project prep-app
 <details>
 <summary>Test Coverage</summary>
 
-62 tests total. 61 pass on Linux; 1 Windows-specific path test (`IsPathUnderRoot_WindowsBoundaryIsRespected`) is expected to fail on Linux.
+212 tests total across 17 test files. 1 Windows-specific path test (`IsPathUnderRoot_WindowsBoundaryIsRespected`) is expected to fail on Linux.
 
 | Area | Tests | Status |
 |---|---|---|
-| `SsdEncryption` | 12 | Covered |
-| `PrepViewModel` | 20 | Covered |
+| `DcsBindingParser` | 44 | Covered |
+| `DcsAircraftScanner` | 33 | Covered |
+| `VectorIndexRetrieval` | 17 | Covered |
+| `SsdEncryption` | 15 | Covered |
+| `DocumentParser` | 14 | Covered |
+| `DocumentIngestionSecurity` | 13 | Covered |
+| `DocumentChunker` | 10 | Covered |
 | `OllamaPackageTrustPolicy` | 9 | Covered |
+| `RagPromptBuilder` | 7 | Covered |
 | `PrepDriveWriteGuard` | 7 | Covered |
+| `PrepViewModel` | 20 | Covered |
+| `CitationBuilder` | 8 | Covered |
+| `RagPipelineIntegration` | 5 | Covered |
 | `ModelOperations` | 5 | Covered |
 | `PathGuards` | 3 | Covered |
 | `PrereqInstallValidator` | 1 | Covered |
+| `DocumentHashDedup` | 1 | Covered |
 | `DownloadManager` | 0 | Not covered |
 | `DriveInspector` | 0 | Not covered |
 | `SsdLayout` | 0 | Not covered |
 | `SystemCompatibility` | 0 | Not covered |
 | `PortableConfig` | 0 | Not covered |
 
-High-risk workflows (downloads, encryption enable/disable, dependency installation, Runner start/stop) are not yet covered due to prior tight UI coupling. The service layer refactoring enables these to be tested without a WPF host.
+High-risk workflows (downloads, dependency installation, Runner start/stop) are not yet covered. The service layer refactoring enables these to be tested without a WPF host.
 
 </details>
 
