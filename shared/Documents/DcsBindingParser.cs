@@ -86,7 +86,7 @@ public static class DcsBindingParser
         }),
         ("Navigation / Sensors", new[]
         {
-            "designator", "undesignate", "nws", "radar", "sensor", "hmd",
+            "designator", "undesignate", "radar", "sensor", "hmd",
             "tdc", "waypoint", "nav ", "ils", "tacan", "hud", "iff",
             "helmet", "flir", "eo", "laser", "lasing", "pave", "targeting pod",
         }),
@@ -779,6 +779,14 @@ public static class DcsBindingParser
     private static string InferAxisCategory(string name)
     {
         var lower = name.ToLowerInvariant();
+
+        // Check Navigation/Sensors before Flight Controls: "controller" contains the
+        // substring "roll", so designator/TDC axes must be matched first.
+        if (lower.Contains("designator") || lower.Contains("tdc") || lower.Contains("sensor"))
+        {
+            return "Navigation / Sensors";
+        }
+
         if (lower.Contains("pitch") || lower.Contains("roll") || lower.Contains("rudder") ||
             lower.Contains("trim") || lower.Contains("collective") || lower.Contains("cyclic"))
         {
@@ -788,11 +796,6 @@ public static class DcsBindingParser
         if (lower.Contains("throttle") || lower.Contains("thrust"))
         {
             return "Throttle";
-        }
-
-        if (lower.Contains("designator") || lower.Contains("tdc") || lower.Contains("sensor"))
-        {
-            return "Navigation / Sensors";
         }
 
         return string.Empty;
