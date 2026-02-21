@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using System.Security.Cryptography;
+using FreeAiSsd.Shared.Helpers;
 
 namespace FreeAiSsd.Shared;
 
@@ -185,12 +185,8 @@ public static class OllamaPackageTrustPolicy
     /// <summary>
     /// Computes the SHA-256 hash of a file and returns it as a lowercase hex string.
     /// </summary>
-    public static string ComputeSha256Hex(string path)
-    {
-        using var stream = File.OpenRead(path);
-        var hash = SHA256.HashData(stream);
-        return Convert.ToHexString(hash).ToLowerInvariant();
-    }
+    public static string ComputeSha256Hex(string path) =>
+        CryptoUtils.ComputeSha256Hex(path);
 
     /// <summary>
     /// Returns the full path where the trust attestation JSON file should be stored on the SSD.

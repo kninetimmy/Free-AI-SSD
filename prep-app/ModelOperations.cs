@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.IO;
-using System.Security.Cryptography;
 using System.Text.Json;
+using FreeAiSsd.Shared.Helpers;
 
 namespace FreeAiSsd.PrepApp;
 
@@ -300,13 +300,8 @@ public sealed class ModelOperations
     /// Asynchronously computes the SHA-256 hash of a model blob file.
     /// Returns the hash as a lowercase hex string.
     /// </summary>
-    private static async Task<string> ComputeSha256Async(string modelPath, CancellationToken ct)
-    {
-        await using var stream = File.OpenRead(modelPath);
-        using var sha = SHA256.Create();
-        var hash = await sha.ComputeHashAsync(stream, ct);
-        return Convert.ToHexString(hash).ToLowerInvariant();
-    }
+    private static Task<string> ComputeSha256Async(string modelPath, CancellationToken ct) =>
+        CryptoUtils.ComputeSha256HexAsync(modelPath, ct);
 
     /// <summary>
     /// Runs an external process with streaming stdout/stderr output.

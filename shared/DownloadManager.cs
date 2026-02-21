@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+using FreeAiSsd.Shared.Helpers;
 
 namespace FreeAiSsd.Shared;
 
@@ -115,12 +115,8 @@ public sealed class DownloadManager
     }
 
     /// <summary>
-    /// Computes the SHA-256 hash of a file and returns it as an uppercase hex string.
+    /// Computes the SHA-256 hash of a file and returns it as a lowercase hex string.
     /// </summary>
-    public static string ComputeSha256(string filePath)
-    {
-        using var stream = File.OpenRead(filePath);
-        var hash = SHA256.HashData(stream);
-        return Convert.ToHexString(hash);
-    }
+    public static string ComputeSha256(string filePath) =>
+        CryptoUtils.ComputeSha256Hex(filePath);
 }
