@@ -88,17 +88,35 @@ public partial class MainWindow : System.Windows.Window
     /// <summary>
     /// Checks for encryption, loads portable config, and populates the model combo.
     /// SSD root detection happens in the constructor.
+    /// Uses the "fail closed" write-guard check so that a corrupt or missing
+    /// encryption state file still triggers the unlock prompt rather than
+    /// silently falling through to "Config not found".
     /// </summary>
     private void LoadConfig()
     {
-        if (SsdEncryption.IsEncryptionEnabled(_ssdRoot))
+        var isExplicitlyEncrypted = SsdEncryption.IsEncryptionEnabled(_ssdRoot);
+        var isEffectivelyEncrypted = SsdEncryption.IsEffectivelyEncryptedForWriteGuard(_ssdRoot);
+        _logger?.Info($"Encryption state check: explicitly={isExplicitlyEncrypted}, effectively={isEffectivelyEncrypted}");
+
+        if (isEffectivelyEncrypted)
         {
             _isEncryptedDrive = true;
             _isUnlocked = false;
             _config = null;
             UpdateEncryptionUiState();
-            StatusText.Text = "Encrypted drive locked";
-            AppendLog("Encrypted drive detected. Click 'Unlock Drive' to continue.");
+
+            if (isExplicitlyEncrypted)
+            {
+                StatusText.Text = "Encrypted drive locked";
+                AppendLog("Encrypted drive detected. Click 'Unlock Drive' to continue.");
+            }
+            else
+            {
+                StatusText.Text = "Encryption state unclear — unlock required";
+                AppendLog("Encryption state could not be read. Please unlock your SSD or reset encryption settings.");
+                _logger?.Warn("Encryption state file is missing or corrupt but drive appears encrypted (fail-closed). Prompting for unlock.");
+            }
+
             RefreshLibraryUi();
             return;
         }

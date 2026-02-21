@@ -323,6 +323,51 @@ public sealed class SsdEncryptionTests
     }
 
     /// <summary>
+    /// Corrupt state file WITHOUT encrypted artifacts → still fail closed.
+    /// This is the scenario that previously caused the Runner to show "Config not found"
+    /// instead of prompting for unlock.
+    /// </summary>
+    [Fact]
+    public void CorruptStateFile_WithoutEncryptedArtifacts_FailsClosed()
+    {
+        var root = CreateTempRoot();
+        try
+        {
+            SsdLayout.EnsureStructure(root);
+            File.WriteAllText(StatePath(root), "{ this-is-not-valid-json");
+
+            Assert.True(SsdEncryption.IsEffectivelyEncryptedForWriteGuard(root));
+            Assert.False(SsdEncryption.IsEncryptionEnabled(root));
+        }
+        finally
+        {
+            CleanupTempRoot(root);
+        }
+    }
+
+    /// <summary>
+    /// Null-deserializing state file (e.g., file contains "null") without encrypted
+    /// artifacts → fail closed.
+    /// </summary>
+    [Fact]
+    public void NullStateFile_WithoutEncryptedArtifacts_FailsClosed()
+    {
+        var root = CreateTempRoot();
+        try
+        {
+            SsdLayout.EnsureStructure(root);
+            File.WriteAllText(StatePath(root), "null");
+
+            Assert.True(SsdEncryption.IsEffectivelyEncryptedForWriteGuard(root));
+            Assert.False(SsdEncryption.IsEncryptionEnabled(root));
+        }
+        finally
+        {
+            CleanupTempRoot(root);
+        }
+    }
+
+    /// <summary>
     /// State explicitly enabled → always treated as encrypted regardless of artifacts.
     /// </summary>
     [Fact]
