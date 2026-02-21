@@ -133,6 +133,25 @@ public sealed class PortableConfig
     /// </summary>
     public bool AutoSendVoiceInput { get; set; } = true;
 
+    // ── Push-to-Talk (HOTAS) ────────────────────────────────────────────
+
+    /// <summary>Whether push-to-talk via HOTAS joystick button is enabled.</summary>
+    public bool PttEnabled { get; set; }
+    /// <summary>DirectInput device name for the PTT button (e.g., "X-56 Rhino Throttle").</summary>
+    public string? PttDeviceName { get; set; }
+    /// <summary>Zero-based button index on the joystick device.</summary>
+    public int PttButtonIndex { get; set; }
+    /// <summary>PTT mode: "push_to_talk" (hold to record) or "toggle" (press to start/stop).</summary>
+    public string PttMode { get; set; } = "push_to_talk";
+    /// <summary>Play a short beep when PTT is activated/deactivated.</summary>
+    public bool PttActivationSoundEnabled { get; set; } = true;
+    /// <summary>Show the always-on-top PTT status overlay. Disable for VR.</summary>
+    public bool PttOverlayEnabled { get; set; } = true;
+    /// <summary>Horizontal position of the PTT overlay window.</summary>
+    public double PttOverlayX { get; set; } = 20;
+    /// <summary>Vertical position of the PTT overlay window.</summary>
+    public double PttOverlayY { get; set; } = 20;
+
     /// <summary>Standard relative path for the config file within the SSD structure.</summary>
     [JsonIgnore]
     public string ConfigRelativePath => @"config\\portable-config.json";
