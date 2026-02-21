@@ -47,6 +47,13 @@ public partial class MainWindow : System.Windows.Window
     private StreamingTtsSpeaker? _ttsSpeaker;
     private bool _isVoiceRecording;
 
+    // Push-to-Talk (HOTAS) state
+    private readonly IHotasInputService _hotasService;
+    private readonly PttVoicePipelineService _pttPipeline;
+    private PttOverlayWindow? _pttOverlay;
+    private bool _pttToggleActive; // for toggle mode: tracks whether currently recording
+    private bool _pttDetecting;    // true while "press any button" detection is active
+
     // Bindings import wizard state
     private DcsInstallation? _dcsInstallation;
     private IReadOnlyList<DcsAircraftInfo> _scannedAircraft = Array.Empty<DcsAircraftInfo>();
@@ -83,6 +90,8 @@ public partial class MainWindow : System.Windows.Window
         _dcsImportService = new DcsBindingsImportService(libraryManager);
         _sttService = new WhisperSpeechToTextService();
         _audioCaptureService = new AudioCaptureService();
+        _hotasService = new HotasInputService();
+        _pttPipeline = new PttVoicePipelineService(_audioCaptureService, _sttService, _chatService);
 
         // Wire service events to UI
         _ollamaService.LogMessage += msg => AppendLog(msg);
@@ -93,6 +102,31 @@ public partial class MainWindow : System.Windows.Window
         _dcsImportService.LogMessage += msg => AppendLog(msg);
         _sttService.LogMessage += msg => AppendLog(msg);
         _audioCaptureService.LogMessage += msg => AppendLog(msg);
+        _hotasService.LogMessage += msg => AppendLog(msg);
+        _pttPipeline.LogMessage += msg => AppendLog(msg);
+
+        // PTT pipeline events: update overlay and main UI
+        _pttPipeline.StateChanged += state => Dispatcher.Invoke(() =>
+        {
+            _pttOverlay?.UpdateState(state);
+            PttStatusText.Text = state switch
+            {
+                PttState.Idle => "Ready",
+                PttState.Listening => "Listening...",
+                PttState.Thinking => "Transcribing / querying AI...",
+                PttState.Speaking => "Speaking response...",
+                _ => ""
+            };
+        });
+        _pttPipeline.TranscriptionReady += text => Dispatcher.Invoke(() => PromptText.Text = text);
+        _pttPipeline.ResponseTokenReceived += token => Dispatcher.Invoke(() => ResponseText.AppendText(token));
+        _pttPipeline.ResponseComplete += text => Dispatcher.Invoke(() => ResponseText.Text = text);
+
+        // HOTAS button events: drive the PTT pipeline
+        _hotasService.PttButtonPressed += () => Dispatcher.Invoke(() => OnPttButtonPressed());
+        _hotasService.PttButtonReleased += () => Dispatcher.Invoke(() => OnPttButtonReleased());
+
+        Closed += (_, _) => CleanupPtt();
 
         LoadConfig();
         _ = ShowModelSizingWarningsOnStartupAsync();
@@ -157,6 +191,7 @@ public partial class MainWindow : System.Windows.Window
         PopulateModelCombo();
         RefreshLibraryUi();
         InitializeTts();
+        InitializePtt();
         StatusText.Text = "Ready (not running)";
         AppendLog($"Loaded config from {configPath}");
     }
@@ -202,6 +237,7 @@ public partial class MainWindow : System.Windows.Window
         PopulateModelCombo();
         RefreshLibraryUi();
         InitializeTts();
+        InitializePtt();
         StatusText.Text = "Unlocked and ready";
         AppendLog("SSD unlocked successfully.");
         _ = SaveEncryptionUnlockStateAsync();
@@ -1283,5 +1319,292 @@ public partial class MainWindow : System.Windows.Window
         BindingsStep3.Visibility = step == 3
             ? System.Windows.Visibility.Visible
             : System.Windows.Visibility.Collapsed;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Push-to-Talk (HOTAS Voice Input)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Configures the PTT pipeline and HOTAS input service based on the current config.
+    /// Also populates the PTT config UI controls and starts the overlay if enabled.
+    /// Called after config load or unlock.
+    /// </summary>
+    private void InitializePtt()
+    {
+        if (_config is null) return;
+
+        // Configure the pipeline with current services
+        _pttPipeline.Configure(
+            _ttsService,
+            _config,
+            _ssdRoot,
+            getModel: () => ModelCombo.SelectedItem as string ?? "",
+            getHost: () => _ollamaService.CurrentHost);
+
+        // Populate UI from config
+        PttEnabledCheck.IsChecked = _config.PttEnabled;
+        PttSoundCheck.IsChecked = _config.PttActivationSoundEnabled;
+        PttOverlayCheck.IsChecked = _config.PttOverlayEnabled;
+        PttModeHold.IsChecked = _config.PttMode != "toggle";
+        PttModeToggle.IsChecked = _config.PttMode == "toggle";
+
+        if (_config.PttButtonIndex >= 0 && _config.PttDeviceName is not null)
+        {
+            PttButtonLabel.Text = $"Button {_config.PttButtonIndex} on {_config.PttDeviceName}";
+        }
+
+        RefreshPttDeviceList();
+
+        // Start HOTAS polling if PTT is enabled and configured
+        if (_config.PttEnabled && _config.PttDeviceName is not null)
+        {
+            StartPtt();
+        }
+
+        PttStatusText.Text = _config.PttEnabled ? "Ready" : "Disabled";
+    }
+
+    private void StartPtt()
+    {
+        if (_config is null) return;
+
+        _hotasService.Stop();
+
+        if (_config.PttDeviceName is not null)
+        {
+            _hotasService.Start(_config.PttDeviceName, _config.PttButtonIndex);
+        }
+
+        // Show overlay if enabled
+        if (_config.PttOverlayEnabled)
+        {
+            ShowPttOverlay();
+        }
+    }
+
+    private void StopPtt()
+    {
+        _hotasService.Stop();
+        _pttPipeline.Cancel();
+        _pttToggleActive = false;
+        HidePttOverlay();
+    }
+
+    private void CleanupPtt()
+    {
+        _hotasService.Stop();
+        _pttPipeline.Cancel();
+        _hotasService.Dispose();
+        _pttPipeline.Dispose();
+        HidePttOverlay();
+    }
+
+    private void ShowPttOverlay()
+    {
+        if (_pttOverlay is not null) return;
+
+        _pttOverlay = new PttOverlayWindow();
+        _pttOverlay.SetPosition(_config?.PttOverlayX ?? 20, _config?.PttOverlayY ?? 20);
+        _pttOverlay.PositionChanged += (x, y) =>
+        {
+            if (_config is null) return;
+            _config.PttOverlayX = x;
+            _config.PttOverlayY = y;
+            SaveConfigAsync();
+        };
+        _pttOverlay.UpdateState(_pttPipeline.CurrentState);
+        _pttOverlay.Show();
+    }
+
+    private void HidePttOverlay()
+    {
+        _pttOverlay?.Close();
+        _pttOverlay = null;
+    }
+
+    /// <summary>
+    /// Called on the UI thread when the configured HOTAS PTT button is pressed.
+    /// </summary>
+    private void OnPttButtonPressed()
+    {
+        if (_config is null || !_config.PttEnabled) return;
+
+        if (_config.PttMode == "toggle")
+        {
+            // Toggle mode: press toggles recording on/off
+            if (_pttToggleActive)
+            {
+                _pttToggleActive = false;
+                _ = _pttPipeline.StopListeningAndProcessAsync();
+            }
+            else
+            {
+                _pttToggleActive = true;
+                ResponseText.Text = string.Empty;
+                _ = _pttPipeline.StartListeningAsync();
+            }
+        }
+        else
+        {
+            // Push-to-talk mode: press starts recording
+            ResponseText.Text = string.Empty;
+            _ = _pttPipeline.StartListeningAsync();
+        }
+    }
+
+    /// <summary>
+    /// Called on the UI thread when the configured HOTAS PTT button is released.
+    /// </summary>
+    private void OnPttButtonReleased()
+    {
+        if (_config is null || !_config.PttEnabled) return;
+
+        // Only relevant in push-to-talk mode (toggle is handled entirely in OnPttButtonPressed)
+        if (_config.PttMode != "toggle")
+        {
+            _ = _pttPipeline.StopListeningAndProcessAsync();
+        }
+    }
+
+    // ── PTT Config UI Event Handlers ────────────────────────────────────────
+
+    private void PttEnabled_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_config is null) return;
+        _config.PttEnabled = PttEnabledCheck.IsChecked == true;
+
+        if (_config.PttEnabled && _config.PttDeviceName is not null)
+        {
+            StartPtt();
+            PttStatusText.Text = "Ready";
+        }
+        else
+        {
+            StopPtt();
+            PttStatusText.Text = _config.PttEnabled ? "Configure a button to start" : "Disabled";
+        }
+
+        SaveConfigAsync();
+    }
+
+    private void PttSound_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_config is null) return;
+        _config.PttActivationSoundEnabled = PttSoundCheck.IsChecked == true;
+        SaveConfigAsync();
+    }
+
+    private void PttOverlay_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_config is null) return;
+        _config.PttOverlayEnabled = PttOverlayCheck.IsChecked == true;
+
+        if (_config.PttOverlayEnabled && _config.PttEnabled)
+            ShowPttOverlay();
+        else
+            HidePttOverlay();
+
+        SaveConfigAsync();
+    }
+
+    private void PttDeviceCombo_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        // Selection is applied when the user clicks "Detect button"
+    }
+
+    private void PttRefreshDevices_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        RefreshPttDeviceList();
+    }
+
+    private void RefreshPttDeviceList()
+    {
+        var devices = _hotasService.GetConnectedDevices();
+        PttDeviceCombo.ItemsSource = devices.Select(d => $"{d.DeviceName} ({d.ButtonCount} buttons)").ToList();
+
+        // Select the configured device if present
+        if (_config?.PttDeviceName is not null)
+        {
+            for (int i = 0; i < devices.Count; i++)
+            {
+                if (string.Equals(devices[i].DeviceName, _config.PttDeviceName, StringComparison.OrdinalIgnoreCase))
+                {
+                    PttDeviceCombo.SelectedIndex = i;
+                    break;
+                }
+            }
+        }
+    }
+
+    private void PttDetectButton_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_pttDetecting)
+        {
+            // Cancel detection
+            _hotasService.EndButtonDetection();
+            _pttDetecting = false;
+            PttDetectButton.Content = "Detect button";
+            PttButtonLabel.Text = _config?.PttDeviceName is not null
+                ? $"Button {_config.PttButtonIndex} on {_config.PttDeviceName}"
+                : "(none)";
+            return;
+        }
+
+        _pttDetecting = true;
+        PttDetectButton.Content = "Cancel";
+        PttButtonLabel.Text = "Press any HOTAS button...";
+
+        _hotasService.BeginButtonDetection((deviceName, buttonIndex) =>
+        {
+            Dispatcher.Invoke(() =>
+            {
+                if (!_pttDetecting) return;
+
+                _hotasService.EndButtonDetection();
+                _pttDetecting = false;
+                PttDetectButton.Content = "Detect button";
+                PttButtonLabel.Text = $"Button {buttonIndex} on {deviceName}";
+
+                if (_config is not null)
+                {
+                    _config.PttDeviceName = deviceName;
+                    _config.PttButtonIndex = buttonIndex;
+                    SaveConfigAsync();
+
+                    // Restart HOTAS input with the new button if PTT is enabled
+                    if (_config.PttEnabled)
+                    {
+                        StartPtt();
+                        PttStatusText.Text = "Ready";
+                    }
+                }
+
+                AppendLog($"PTT button assigned: Button {buttonIndex} on {deviceName}");
+            });
+        });
+    }
+
+    private void PttTestBeep_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        PttSounds.PlayAsync(PttSounds.GetActivationBeep(), _config?.TtsOutputDevice);
+    }
+
+    private void PttMode_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_config is null) return;
+        _config.PttMode = PttModeToggle.IsChecked == true ? "toggle" : "push_to_talk";
+        _pttToggleActive = false;
+        SaveConfigAsync();
+    }
+
+    /// <summary>
+    /// Fire-and-forget config save. Used by PTT config changes to persist immediately.
+    /// </summary>
+    private void SaveConfigAsync()
+    {
+        if (_config is null) return;
+        var configPath = Path.Combine(_ssdRoot, "config", "portable-config.json");
+        _ = _config.SaveAsync(configPath);
     }
 }

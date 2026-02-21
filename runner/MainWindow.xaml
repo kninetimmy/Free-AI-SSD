@@ -9,6 +9,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -156,7 +157,57 @@
             </StackPanel>
         </Border>
 
-        <TextBox Grid.Row="5" x:Name="ResponseText" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextWrapping="Wrap"/>
-        <TextBox Grid.Row="6" x:Name="LogText" Height="140" Margin="0,8,0,0" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextWrapping="Wrap"/>
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!-- Push-to-Talk (HOTAS Voice Input)                         -->
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <Border Grid.Row="5" BorderBrush="#DDD" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,8">
+            <StackPanel>
+                <TextBlock Text="Push-to-Talk (HOTAS Voice Input)" FontWeight="Bold"/>
+                <TextBlock Text="Assign a joystick button to trigger voice queries while flying."
+                           Foreground="#555" TextWrapping="Wrap" Margin="0,4,0,8"/>
+
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                    <CheckBox x:Name="PttEnabledCheck" Content="Enable Push-to-Talk"
+                              VerticalAlignment="Center" Click="PttEnabled_Click"/>
+                    <CheckBox x:Name="PttSoundCheck" Content="Activation sounds"
+                              Margin="16,0,0,0" VerticalAlignment="Center"
+                              IsChecked="True" Click="PttSound_Click"/>
+                    <CheckBox x:Name="PttOverlayCheck" Content="Show overlay"
+                              Margin="16,0,0,0" VerticalAlignment="Center"
+                              IsChecked="True" Click="PttOverlay_Click"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                    <TextBlock Text="Device:" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="PttDeviceCombo" Width="250" Margin="8,0,0,0"
+                              SelectionChanged="PttDeviceCombo_SelectionChanged"/>
+                    <Button Content="Refresh" Padding="8,4" Margin="8,0,0,0" Click="PttRefreshDevices_Click"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                    <TextBlock Text="Button:" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="PttButtonLabel" Text="(none)" Margin="8,0,0,0"
+                               VerticalAlignment="Center" Foreground="#0078D4" MinWidth="60"/>
+                    <Button x:Name="PttDetectButton" Content="Detect button" Padding="8,4"
+                            Margin="8,0,0,0" Click="PttDetectButton_Click"/>
+                    <Button Content="Test beep" Padding="8,4" Margin="8,0,0,0" Click="PttTestBeep_Click"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <TextBlock Text="Mode:" VerticalAlignment="Center"/>
+                    <RadioButton x:Name="PttModeHold" Content="Hold to talk"
+                                 Margin="8,0,0,0" VerticalAlignment="Center"
+                                 IsChecked="True" Click="PttMode_Click"/>
+                    <RadioButton x:Name="PttModeToggle" Content="Toggle (press to start/stop)"
+                                 Margin="12,0,0,0" VerticalAlignment="Center"
+                                 Click="PttMode_Click"/>
+                </StackPanel>
+
+                <TextBlock x:Name="PttStatusText" Margin="0,6,0,0" Foreground="#444"/>
+            </StackPanel>
+        </Border>
+
+        <TextBox Grid.Row="6" x:Name="ResponseText" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextWrapping="Wrap"/>
+        <TextBox Grid.Row="7" x:Name="LogText" Height="140" Margin="0,8,0,0" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextWrapping="Wrap"/>
     </Grid>
 </Window>
