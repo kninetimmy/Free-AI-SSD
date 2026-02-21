@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Security.Principal;
+using System.Threading;
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Documents;
 using FreeAiSsd.Runner.Services;
@@ -38,6 +39,7 @@ public partial class MainWindow : System.Windows.Window
     private bool _isEncryptedDrive;
     private bool _isUnlocked;
     private DocumentLibraryManifest? _activeLibrary;
+    private CancellationTokenSource? _streamingCts;
 
     public MainWindow()
     {
@@ -228,12 +230,88 @@ public partial class MainWindow : System.Windows.Window
         if (!TryGetCurrentHost(out var host)) return;
 
         SourcesList.ItemsSource = null;
-        var response = await _chatService.SendPromptAsync(model, PromptText.Text, host, _config);
-        ResponseText.Text = response.ResponseText;
-        if (response.Sources is not null)
+
+        if (_config.UseStreamingChat)
         {
-            SourcesList.ItemsSource = response.Sources;
+            await SendStreamingAsync(model, host);
         }
+        else
+        {
+            SendButton.IsEnabled = false;
+            try
+            {
+                var response = await _chatService.SendPromptAsync(model, PromptText.Text, host, _config);
+                ResponseText.Text = response.ResponseText;
+                if (response.Sources is not null)
+                {
+                    SourcesList.ItemsSource = response.Sources;
+                }
+            }
+            finally
+            {
+                SendButton.IsEnabled = true;
+            }
+        }
+    }
+
+    private async Task SendStreamingAsync(string model, string host)
+    {
+        _streamingCts?.Cancel();
+        _streamingCts = new CancellationTokenSource();
+        var ct = _streamingCts.Token;
+
+        SendButton.IsEnabled = false;
+        StopButton.Visibility = System.Windows.Visibility.Visible;
+        StreamingIndicator.Visibility = System.Windows.Visibility.Visible;
+        ResponseText.Text = string.Empty;
+
+        try
+        {
+            var response = await _chatService.SendPromptStreamingAsync(
+                model, PromptText.Text, host, _config!,
+                token => Dispatcher.Invoke(() => ResponseText.AppendText(token)),
+                ct);
+
+            // Store the final assembled text (handles cancellation partial text)
+            ResponseText.Text = response.ResponseText;
+            if (response.Sources is not null)
+            {
+                SourcesList.ItemsSource = response.Sources;
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Streaming error: {ex.Message}");
+            // Fall back to non-streaming
+            if (string.IsNullOrEmpty(ResponseText.Text))
+            {
+                AppendLog("Falling back to non-streaming mode.");
+                try
+                {
+                    var fallback = await _chatService.SendPromptAsync(model, PromptText.Text, host, _config!);
+                    ResponseText.Text = fallback.ResponseText;
+                    if (fallback.Sources is not null)
+                    {
+                        SourcesList.ItemsSource = fallback.Sources;
+                    }
+                }
+                catch (Exception fallbackEx)
+                {
+                    AppendLog($"Fallback also failed: {fallbackEx.Message}");
+                }
+            }
+        }
+        finally
+        {
+            SendButton.IsEnabled = true;
+            StopButton.Visibility = System.Windows.Visibility.Collapsed;
+            StreamingIndicator.Visibility = System.Windows.Visibility.Collapsed;
+        }
+    }
+
+    private void Stop_Generation_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        _streamingCts?.Cancel();
     }
 
     private void OpenBrowser_Click(object sender, System.Windows.RoutedEventArgs e)

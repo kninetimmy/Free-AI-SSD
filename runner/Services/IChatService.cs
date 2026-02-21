@@ -7,6 +7,12 @@ namespace FreeAiSsd.Runner.Services;
 /// </summary>
 public record ChatResponse(string ResponseText, List<string>? Sources, bool UsedRagContext);
 
+/// <summary>
+/// Metadata returned at the start of a streaming response, before tokens arrive.
+/// Contains RAG sources so the UI can display citations immediately.
+/// </summary>
+public record StreamingChatContext(List<string>? Sources, bool UsedRagContext);
+
 public interface IChatService
 {
     event Action<string>? LogMessage;
@@ -16,4 +22,13 @@ public interface IChatService
     /// performs RAG retrieval to augment the prompt with relevant context.
     /// </summary>
     Task<ChatResponse> SendPromptAsync(string model, string userPrompt, string host, PortableConfig config);
+
+    /// <summary>
+    /// Sends a prompt and streams the response token-by-token.
+    /// <paramref name="onToken"/> is called with each incremental text fragment.
+    /// Returns the final assembled response and RAG metadata.
+    /// </summary>
+    Task<ChatResponse> SendPromptStreamingAsync(
+        string model, string userPrompt, string host, PortableConfig config,
+        Action<string> onToken, CancellationToken cancellationToken = default);
 }

@@ -39,8 +39,10 @@
         <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,8">
             <TextBlock Text="Model:" VerticalAlignment="Center"/>
             <ComboBox x:Name="ModelCombo" Width="220" Margin="8,0,0,0"/>
-            <TextBox x:Name="PromptText" Width="540" Margin="8,0,0,0" Text="Say hello from portable SSD."/>
-            <Button Content="Send" Margin="8,0,0,0" Click="Send_Click"/>
+            <TextBox x:Name="PromptText" Width="480" Margin="8,0,0,0" Text="Say hello from portable SSD."/>
+            <Button x:Name="SendButton" Content="Send" Margin="8,0,0,0" Click="Send_Click"/>
+            <Button x:Name="StopButton" Content="Stop" Margin="4,0,0,0" Click="Stop_Generation_Click" Visibility="Collapsed" Foreground="#C00"/>
+            <TextBlock x:Name="StreamingIndicator" Text="● Generating..." Margin="8,0,0,0" VerticalAlignment="Center" Foreground="#0078D4" Visibility="Collapsed"/>
         </StackPanel>
 
         <Border Grid.Row="3" BorderBrush="#DDD" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,0,0,8">

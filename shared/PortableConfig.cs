@@ -82,6 +82,12 @@ public sealed class PortableConfig
     /// </summary>
     public int MaxDocumentSizeMB { get; set; } = 50;
 
+    /// <summary>
+    /// When true, chat responses are streamed token-by-token from Ollama.
+    /// Falls back to non-streaming if streaming fails. Default: true.
+    /// </summary>
+    public bool UseStreamingChat { get; set; } = true;
+
     /// <summary>Standard relative path for the config file within the SSD structure.</summary>
     [JsonIgnore]
     public string ConfigRelativePath => @"config\\portable-config.json";
