@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Documents;
+using Microsoft.Data.Sqlite;
 
 namespace FreeAiSsd.Tests;
 
@@ -22,6 +23,10 @@ public class RagPipelineIntegrationTests : IDisposable
 
     public void Dispose()
     {
+        // SQLite's connection pool keeps the .db file locked on Windows even after
+        // individual connections are disposed. Clear all pooled connections before
+        // attempting to delete the temp directory.
+        SqliteConnection.ClearAllPools();
         if (Directory.Exists(_tempRoot))
         {
             Directory.Delete(_tempRoot, recursive: true);
