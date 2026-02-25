@@ -111,17 +111,6 @@ public partial class MainWindow : Window
         StarterModelGrid.ItemsSource = collectionView;
     }
 
-    private void ModelStatusGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (sender is DataGrid grid)
-        {
-            _viewModel.SelectedModelRows = grid.SelectedItems
-                .OfType<ModelGridRow>()
-                .ToList()
-                .AsReadOnly();
-        }
-    }
-
     private void LogLines_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         if (e.Action == NotifyCollectionChangedAction.Add && LogListBox.Items.Count > 0)
