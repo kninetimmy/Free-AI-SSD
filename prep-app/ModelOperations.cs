@@ -355,6 +355,8 @@ public sealed class ModelOperations
         });
 
         // Consume stdout and stderr concurrently to prevent buffer deadlocks.
+        // Consume uses ReadLineAsync (not the blocking EndOfStream property),
+        // so both tasks yield immediately and resume on the caller's sync context.
         var outputTask = Consume(process.StandardOutput, onOutput, ct);
         var errorTask = Consume(process.StandardError, onOutput, ct);
 
@@ -366,16 +368,24 @@ public sealed class ModelOperations
     /// <summary>
     /// Reads lines from a stream reader asynchronously, invoking the callback
     /// for each non-empty line until EOF.
+    /// Uses ReadLineAsync (returns null at EOF) instead of the EndOfStream property,
+    /// which is synchronous and blocks the calling thread when no data is available.
     /// </summary>
     private static async Task Consume(StreamReader reader, Action<string> onOutput, CancellationToken ct)
     {
-        while (!reader.EndOfStream)
+        try
         {
-            var line = await reader.ReadLineAsync(ct);
-            if (!string.IsNullOrWhiteSpace(line))
+            while (await reader.ReadLineAsync(ct) is { } line)
             {
-                onOutput(line);
+                if (!string.IsNullOrWhiteSpace(line))
+                {
+                    onOutput(line);
+                }
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // Process killed or cancellation requested; stop reading.
         }
     }
 }
