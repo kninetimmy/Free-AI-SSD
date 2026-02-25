@@ -1,5 +1,53 @@
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Threading;
+
 namespace FreeAiSsd.PrepApp;
 
-public partial class App : System.Windows.Application
+public partial class App : Application
 {
+    protected override void OnStartup(StartupEventArgs e)
+    {
+        base.OnStartup(e);
+
+        // Catch unhandled exceptions on the UI thread so the app shows the error
+        // instead of silently force-closing.
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
+
+        // Catch unhandled exceptions from background threads / AppDomain.
+        AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
+
+        // Prevent unobserved Task exceptions (fire-and-forget tasks) from crashing
+        // the process.  Log them but keep the app alive.
+        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+    }
+
+    private static void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        MessageBox.Show(
+            $"An unexpected error occurred:\n\n{e.Exception}",
+            "PrepApp Error",
+            MessageBoxButton.OK,
+            MessageBoxImage.Error);
+
+        e.Handled = true; // Keep the app alive so the user can see the error.
+    }
+
+    private static void OnDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        if (e.ExceptionObject is Exception ex)
+        {
+            MessageBox.Show(
+                $"A fatal error occurred:\n\n{ex}",
+                "PrepApp Fatal Error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+    }
+
+    private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        // Mark the exception as observed so the runtime doesn't tear down the process.
+        e.SetObserved();
+    }
 }
