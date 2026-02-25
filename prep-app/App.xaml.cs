@@ -17,8 +17,8 @@ public partial class App : Application
         // Catch unhandled exceptions from background threads / AppDomain.
         AppDomain.CurrentDomain.UnhandledException += OnDomainUnhandledException;
 
-        // Prevent unobserved Task exceptions (fire-and-forget tasks) from crashing
-        // the process.  Log them but keep the app alive.
+        // Catch unobserved Task exceptions (fire-and-forget tasks) so they don't
+        // silently swallow errors or tear down the process.
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
     }
 
@@ -37,17 +37,32 @@ public partial class App : Application
     {
         if (e.ExceptionObject is Exception ex)
         {
-            MessageBox.Show(
-                $"A fatal error occurred:\n\n{ex}",
-                "PrepApp Fatal Error",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            // This handler fires on a background thread, so marshal to the UI
+            // thread to safely show the dialog.
+            Application.Current?.Dispatcher?.Invoke(() =>
+            {
+                MessageBox.Show(
+                    $"A fatal error occurred:\n\n{ex}",
+                    "PrepApp Fatal Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            });
         }
     }
 
     private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
     {
-        // Mark the exception as observed so the runtime doesn't tear down the process.
-        e.SetObserved();
+        e.SetObserved(); // Prevent the runtime from tearing down the process.
+
+        // This handler fires on a background thread, so marshal to the UI
+        // thread to safely show the dialog.
+        Application.Current?.Dispatcher?.Invoke(() =>
+        {
+            MessageBox.Show(
+                $"A background task failed:\n\n{e.Exception?.Flatten().InnerException ?? e.Exception}",
+                "PrepApp Background Error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        });
     }
 }
