@@ -46,6 +46,12 @@ public sealed class OllamaPackageService : IOllamaPackageService
         return ResolveOllamaExe(ollamaDir) ?? throw new FileNotFoundException($"Unable to locate ollama.exe under {ollamaDir}");
     }
 
+    public async Task<IOllamaServerHandle> StartTemporaryServerAsync(
+        string ollamaExe, string modelsRoot, Action<string> onLog, CancellationToken ct)
+    {
+        return await OllamaServerHandle.StartAsync(ollamaExe, modelsRoot, onLog, ct);
+    }
+
     public string? ResolveOllamaExe(string ollamaDir)
     {
         if (!Directory.Exists(ollamaDir)) return null;

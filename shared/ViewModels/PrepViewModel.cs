@@ -69,10 +69,10 @@ public class PrepViewModel : BaseViewModel
         AddStarterModelsCommand = new AsyncRelayCommand(AddStarterModelsAsync, () => CanMutateDrive && HasDriveSelected);
         ClearStarterSelectionCommand = new RelayCommand(ClearStarterSelection);
         AddOrphanToConfigCommand = new AsyncRelayCommand(AddOrphanToConfigAsync, () => CanMutateDrive && HasDriveSelected);
-        PullInstallCommand = new AsyncRelayCommand(PullInstallAsync, () => CanMutateDrive);
-        PullSelectedCommand = new AsyncRelayCommand(PullSelectedAsync, () => CanMutateDrive);
-        VerifyCommand = new AsyncRelayCommand(VerifyAsync, () => CanMutateDrive);
-        RemoveCommand = new AsyncRelayCommand(RemoveAsync, () => CanMutateDrive);
+        PullInstallCommand = new AsyncRelayCommand(PullInstallAsync, () => CanMutateDrive && HasDriveSelected);
+        PullSelectedCommand = new AsyncRelayCommand(PullSelectedAsync, () => CanMutateDrive && HasDriveSelected);
+        VerifyCommand = new AsyncRelayCommand(VerifyAsync, () => CanMutateDrive && HasDriveSelected);
+        RemoveCommand = new AsyncRelayCommand(RemoveAsync, () => CanMutateDrive && HasDriveSelected);
         CancelOperationCommand = new RelayCommand(CancelOperation, () => _isModelOperationRunning);
         FormatPrepareCommand = new AsyncRelayCommand(FormatPrepareAsync, () => CanMutateDrive && HasDriveSelected);
         FinalizeCommand = new AsyncRelayCommand(FinalizeAsync, () => CanMutateDrive && HasDriveSelected);
@@ -300,7 +300,12 @@ public class PrepViewModel : BaseViewModel
 
     private bool EnsureWritable(string operationName)
     {
-        if (_selectedDrive is null) return false;
+        if (_selectedDrive is null)
+        {
+            StatusText = "Select a target drive first";
+            AppendLog($"{operationName} blocked: no drive selected.");
+            return false;
+        }
         if (!_driveService.EnsureWritable(_selectedDrive.RootPath, operationName, out var blockedMessage))
         {
             StatusText = "Encrypted drive selected (read-only in PrepApp)";
@@ -424,7 +429,8 @@ public class PrepViewModel : BaseViewModel
         var selected = SelectedModelRows.Where(r => !r.IsOnDiskOnly).Select(r => r.Name).Take(1).ToList();
         if (selected.Count == 0)
         {
-            AppendLog("Select a model row to pull/install.");
+            StatusText = "No model selected — click a row in the model grid first";
+            AppendLog("Select a model row in the model grid to pull/install.");
             return;
         }
 
@@ -443,7 +449,8 @@ public class PrepViewModel : BaseViewModel
             .ToList();
         if (selected.Count == 0)
         {
-            AppendLog("Select one or more configured model rows for pull.");
+            StatusText = "No models selected — click one or more rows in the model grid first";
+            AppendLog("Select one or more configured model rows in the model grid for pull.");
             return;
         }
 
@@ -487,6 +494,7 @@ public class PrepViewModel : BaseViewModel
         SetModelOperationState(true, "Pulling...");
         ProgressIsIndeterminate = true;
 
+        IOllamaServerHandle? serverHandle = null;
         try
         {
             var ollamaExe = await _ollamaPackageService.EnsureOllamaReadyAsync(
@@ -500,6 +508,15 @@ public class PrepViewModel : BaseViewModel
                 _modelOperationCts.Token);
 
             var modelsRoot = Path.Combine(root, SsdLayout.Models);
+
+            // Start a controlled temporary server so that `ollama pull` doesn't
+            // auto-start an uncontrolled background server (which can open tray
+            // icons, persist after the app exits, and cause crashes).
+            ProgressIsIndeterminate = true;
+            StatusText = "Starting temporary Ollama server...";
+            serverHandle = await _ollamaPackageService.StartTemporaryServerAsync(
+                ollamaExe, modelsRoot, AppendLog, _modelOperationCts.Token);
+
             foreach (var model in models)
             {
                 _modelOperationCts.Token.ThrowIfCancellationRequested();
@@ -510,7 +527,7 @@ public class PrepViewModel : BaseViewModel
                 try
                 {
                     var result = await _modelService.PullModelAsync(
-                        ollamaExe, modelsRoot, model, AppendLog, _modelOperationCts.Token);
+                        ollamaExe, modelsRoot, model, AppendLog, _modelOperationCts.Token, serverHandle.Host);
 
                     await _modelService.UpdateModelStatusAsync(configPath, model, ModelInstallStatus.Installed, result.Sha256, result.SizeBytes, DateTime.UtcNow);
                     AppendLog($"Installed {model} ({FormatSize(result.SizeBytes)}). Sha256 {result.Sha256[..8]}...");
@@ -535,6 +552,7 @@ public class PrepViewModel : BaseViewModel
         }
         finally
         {
+            serverHandle?.Dispose();
             ProgressIsIndeterminate = false;
             SetModelOperationState(false, StatusText);
             _modelOperationCts?.Dispose();
@@ -640,14 +658,19 @@ public class PrepViewModel : BaseViewModel
         }
 
         SetModelOperationState(true, $"Deleting {selectedRow.Name} from disk...");
+        IOllamaServerHandle? serverHandle = null;
         try
         {
             var ollamaExe = await _ollamaPackageService.EnsureOllamaReadyAsync(
                 _selectedDrive.RootPath, _ollamaUrl, AppendLog, null, CancellationToken.None);
             var modelsRoot = Path.Combine(_selectedDrive.RootPath, SsdLayout.Models);
-            AppendLog($"Deleting {selectedRow.Name} from disk with ollama rm...");
 
-            await _modelService.DeleteModelAsync(ollamaExe, modelsRoot, selectedRow.Name, AppendLog, CancellationToken.None);
+            // Start a controlled temporary server for the delete operation.
+            serverHandle = await _ollamaPackageService.StartTemporaryServerAsync(
+                ollamaExe, modelsRoot, AppendLog, CancellationToken.None);
+
+            AppendLog($"Deleting {selectedRow.Name} from disk with ollama rm...");
+            await _modelService.DeleteModelAsync(ollamaExe, modelsRoot, selectedRow.Name, AppendLog, CancellationToken.None, serverHandle.Host);
 
             if (model is not null)
             {
@@ -666,6 +689,7 @@ public class PrepViewModel : BaseViewModel
         }
         finally
         {
+            serverHandle?.Dispose();
             SetModelOperationState(false);
             await RefreshModelStatusesAsync();
         }
@@ -909,6 +933,27 @@ public class PrepViewModel : BaseViewModel
 
         var configPath = GetConfigPath(_selectedDrive.RootPath);
         var config = await _modelService.LoadConfigAsync(configPath);
+
+        // Recover stale "Downloading" statuses left behind by a crash or forced exit.
+        // If no model operation is currently running, any model still marked as
+        // Downloading was interrupted and should be reset to NotInstalled.
+        if (!_isModelOperationRunning)
+        {
+            var staleModels = config.Models.Where(m => m.Status == ModelInstallStatus.Downloading).ToList();
+            if (staleModels.Count > 0)
+            {
+                foreach (var stale in staleModels)
+                {
+                    stale.Status = ModelInstallStatus.NotInstalled;
+                    stale.Sha256 = null;
+                    stale.SizeBytes = null;
+                    stale.LastVerifiedUtc = null;
+                    AppendLog($"Recovered stale download status for '{stale.Name}' → NotInstalled.");
+                }
+                await _modelService.SaveConfigAsync(configPath, config);
+            }
+        }
+
         var discovered = _modelService.DiscoverModelsOnDisk(Path.Combine(_selectedDrive.RootPath, SsdLayout.Models));
         var freeDiskGb = _driveService.GetFreeDiskSpaceGb(_selectedDrive.RootPath);
 
