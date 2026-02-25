@@ -68,9 +68,11 @@ public sealed class OllamaServerHandle : IOllamaServerHandle
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         process.Start();
 
-        // Drain stdout/stderr in the background to prevent buffer deadlocks.
-        _ = DrainAsync(process.StandardOutput);
-        _ = DrainAsync(process.StandardError);
+        // Drain stdout/stderr on background threads to prevent buffer deadlocks.
+        // Must use Task.Run because DrainAsync starts synchronously and we must
+        // not block the UI thread while waiting for the first byte of output.
+        _ = Task.Run(() => DrainAsync(process.StandardOutput), ct);
+        _ = Task.Run(() => DrainAsync(process.StandardError), ct);
 
         // Wait for the server to become healthy before returning.
         await WaitForHealthyAsync(host, process, onLog, ct);
@@ -162,13 +164,17 @@ public sealed class OllamaServerHandle : IOllamaServerHandle
 
     /// <summary>
     /// Reads and discards all output from a stream to prevent buffer deadlocks.
+    /// Uses ReadLineAsync (returns null at EOF) instead of the EndOfStream property,
+    /// which is synchronous and blocks the calling thread when no data is available.
     /// </summary>
     private static async Task DrainAsync(StreamReader reader)
     {
         try
         {
-            while (!reader.EndOfStream)
-                await reader.ReadLineAsync();
+            while (await reader.ReadLineAsync() is not null)
+            {
+                // Discard output; we only drain to prevent buffer deadlocks.
+            }
         }
         catch
         {
