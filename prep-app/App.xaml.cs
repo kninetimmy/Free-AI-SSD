@@ -47,7 +47,12 @@ public partial class App : Application
 
     private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
     {
-        // Mark the exception as observed so the runtime doesn't tear down the process.
-        e.SetObserved();
+        e.SetObserved(); // Prevent the runtime from tearing down the process.
+
+        MessageBox.Show(
+            $"A background task failed:\n\n{e.Exception?.Flatten().InnerException ?? e.Exception}",
+            "PrepApp Background Error",
+            MessageBoxButton.OK,
+            MessageBoxImage.Warning);
     }
 }
