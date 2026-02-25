@@ -7,9 +7,21 @@ public sealed record ReadinessItem(string Check, bool Passed, string Result)
     public static ReadinessItem Warn(string check, string reason) => new(check, true, reason);
 }
 
-public sealed record ModelGridRow(
-    string Name, string Status, string Source, string SizingWarning,
-    string SizeDisplay, string ShaPreview, string LastVerifiedDisplay, bool IsOnDiskOnly);
+public sealed class ModelGridRow(
+    string name, string status, string source, string sizingWarning,
+    string sizeDisplay, string shaPreview, string lastVerifiedDisplay, bool isOnDiskOnly)
+{
+    /// <summary>Whether this model is checked for pull/install operations. Auto-ticked for configured models.</summary>
+    public bool IsSelected { get; set; } = !isOnDiskOnly;
+    public string Name { get; } = name;
+    public string Status { get; } = status;
+    public string Source { get; } = source;
+    public string SizingWarning { get; } = sizingWarning;
+    public string SizeDisplay { get; } = sizeDisplay;
+    public string ShaPreview { get; } = shaPreview;
+    public string LastVerifiedDisplay { get; } = lastVerifiedDisplay;
+    public bool IsOnDiskOnly { get; } = isOnDiskOnly;
+}
 
 public sealed class StarterModelRow(
     string tag, string @params, string sizeTier,

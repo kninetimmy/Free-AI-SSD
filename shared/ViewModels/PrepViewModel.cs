@@ -402,10 +402,10 @@ public class PrepViewModel : BaseViewModel
         }
         if (!EnsureWritable("Add on-disk model to config")) return;
 
-        var selectedOrphans = ModelRows.Where(r => r.IsOnDiskOnly).ToList();
+        var selectedOrphans = GetCheckedModelRows().Where(r => r.IsOnDiskOnly).ToList();
         if (selectedOrphans.Count == 0)
         {
-            AppendLog("Select one or more OnDiskOnly model rows to add to config.");
+            AppendLog("Check one or more OnDiskOnly model rows to add to config.");
             return;
         }
 
@@ -420,17 +420,18 @@ public class PrepViewModel : BaseViewModel
         await RefreshModelStatusesAsync();
     }
 
-    public IReadOnlyList<ModelGridRow> SelectedModelRows { get; set; } = Array.Empty<ModelGridRow>();
+    private IReadOnlyList<ModelGridRow> GetCheckedModelRows()
+        => ModelRows.Where(r => r.IsSelected).ToList().AsReadOnly();
 
     private async Task PullInstallAsync()
     {
         if (!EnsureWritable("Pull/install model")) return;
 
-        var selected = SelectedModelRows.Where(r => !r.IsOnDiskOnly).Select(r => r.Name).Take(1).ToList();
+        var selected = GetCheckedModelRows().Where(r => !r.IsOnDiskOnly).Select(r => r.Name).Take(1).ToList();
         if (selected.Count == 0)
         {
-            StatusText = "No model selected — click a row in the model grid first";
-            AppendLog("Select a model row in the model grid to pull/install.");
+            StatusText = "No model checked — check a model in the model grid first";
+            AppendLog("Check a model in the model grid to pull/install.");
             return;
         }
 
@@ -442,15 +443,15 @@ public class PrepViewModel : BaseViewModel
     {
         if (!EnsureWritable("Pull selected models")) return;
 
-        var selected = SelectedModelRows
+        var selected = GetCheckedModelRows()
             .Where(r => !r.IsOnDiskOnly)
             .Select(r => r.Name)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         if (selected.Count == 0)
         {
-            StatusText = "No models selected — click one or more rows in the model grid first";
-            AppendLog("Select one or more configured model rows in the model grid for pull.");
+            StatusText = "No models checked — check one or more models in the model grid first";
+            AppendLog("Check one or more configured models in the model grid for pull.");
             return;
         }
 
@@ -575,10 +576,10 @@ public class PrepViewModel : BaseViewModel
         }
         if (!EnsureWritable("Verify model")) return;
 
-        var selected = SelectedModelRows.Where(r => !r.IsOnDiskOnly).Select(r => r.Name).Take(1).ToList();
+        var selected = GetCheckedModelRows().Where(r => !r.IsOnDiskOnly).Select(r => r.Name).Take(1).ToList();
         if (selected.Count == 0)
         {
-            AppendLog("Select a configured model row to verify.");
+            AppendLog("Check a configured model row to verify.");
             return;
         }
 
@@ -622,10 +623,10 @@ public class PrepViewModel : BaseViewModel
         }
         if (!EnsureWritable("Remove/delete model")) return;
 
-        var selectedRow = SelectedModelRows.FirstOrDefault();
+        var selectedRow = GetCheckedModelRows().FirstOrDefault();
         if (selectedRow is null)
         {
-            AppendLog("Select a model row to remove.");
+            AppendLog("Check a model row to remove.");
             return;
         }
 
