@@ -6,11 +6,12 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="3*"/>
+            <RowDefinition Height="5*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="2*"/>
         </Grid.RowDefinitions>
 
+        <!-- Row 0: Drive selector -->
         <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
             <TextBlock Text="Target Drive:" VerticalAlignment="Center" Margin="0,0,8,0"/>
             <ComboBox Width="500"
@@ -24,184 +25,201 @@
                       IsChecked="{Binding ShowFixedDrives, Mode=TwoWay}"/>
         </StackPanel>
 
+        <!-- Row 1: Ollama URL -->
         <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,10">
             <TextBlock Text="Ollama Package URL:" VerticalAlignment="Center" Margin="0,0,8,0"/>
             <TextBox Width="620" Text="{Binding OllamaUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
         </StackPanel>
 
-        <GroupBox Header="Model Manager" Grid.Row="2" Margin="0,0,0,10">
-            <Grid Margin="8">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="3*"/>
-                    <RowDefinition Height="2*"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
+        <!-- Row 2: Tab control with Model Manager and Drive Setup -->
+        <TabControl Grid.Row="2" Margin="0,0,0,10">
 
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                    <TextBlock Text="Model tag" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <TextBox Width="300"
-                             Text="{Binding ModelTagInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                             IsEnabled="{Binding CanMutateDrive}"
-                             ToolTip="Examples: llama3.2:3b, qwen2.5:3b, mistral:7b"/>
-                    <Button Content="Add" Margin="8,0,0,0" Command="{Binding AddModelCommand}"/>
-                </StackPanel>
+            <!-- Tab 1: Model Manager -->
+            <TabItem Header="Model Manager">
+                <Grid Margin="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="3*"/>
+                        <RowDefinition Height="2*"/>
+                    </Grid.RowDefinitions>
 
-                <GroupBox Grid.Row="1" Header="Starter models (recommended)" Margin="0,0,0,8">
-                    <DockPanel Margin="8">
-                        <TextBlock x:Name="StarterCatalogWarningText"
-                                   DockPanel.Dock="Top"
-                                   Foreground="DarkOrange"
-                                   Margin="0,0,0,6"
-                                   TextWrapping="Wrap"
-                                   Visibility="Collapsed"/>
-                        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
-                            <Button Content="Add selected to configuration" Command="{Binding AddStarterModelsCommand}"/>
-                            <Button Content="Clear selection" Margin="8,0,0,0" Command="{Binding ClearStarterSelectionCommand}"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <TextBlock Text="Model tag" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox Width="300"
+                                 Text="{Binding ModelTagInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 IsEnabled="{Binding CanMutateDrive}"
+                                 ToolTip="Examples: llama3.2:3b, qwen2.5:3b, mistral:7b"/>
+                        <Button Content="Add" Margin="8,0,0,0" Command="{Binding AddModelCommand}"/>
+                    </StackPanel>
+
+                    <GroupBox Grid.Row="1" Header="Starter models (recommended)" Margin="0,0,0,8">
+                        <DockPanel Margin="8">
+                            <TextBlock x:Name="StarterCatalogWarningText"
+                                       DockPanel.Dock="Top"
+                                       Foreground="DarkOrange"
+                                       Margin="0,0,0,6"
+                                       TextWrapping="Wrap"
+                                       Visibility="Collapsed"/>
+                            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
+                                <Button Content="Add selected to configuration" Command="{Binding AddStarterModelsCommand}"/>
+                                <Button Content="Clear selection" Margin="8,0,0,0" Command="{Binding ClearStarterSelectionCommand}"/>
+                            </StackPanel>
+                            <DataGrid x:Name="StarterModelGrid"
+                                      AutoGenerateColumns="False"
+                                      CanUserAddRows="False"
+                                      IsReadOnly="False"
+                                      HeadersVisibility="Column"
+                                      ItemsSource="{Binding StarterModels}"
+                                      MinHeight="80">
+                                <DataGrid.GroupStyle>
+                                    <GroupStyle>
+                                        <GroupStyle.HeaderTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Name}" FontWeight="Bold" Margin="4,8,0,4"/>
+                                            </DataTemplate>
+                                        </GroupStyle.HeaderTemplate>
+                                    </GroupStyle>
+                                </DataGrid.GroupStyle>
+                                <DataGrid.Columns>
+                                    <DataGridTemplateColumn Header="Select" Width="Auto">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                          HorizontalAlignment="Center"/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="Tag" Binding="{Binding Tag}" Width="2*" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Params" Binding="{Binding Params}" Width="*" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Tier" Binding="{Binding SizeTier}" Width="*" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Best at" Binding="{Binding Description}" Width="3*" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Use cases" Binding="{Binding UseCasesDisplay}" Width="2*" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Sizing info" Binding="{Binding SizingWarning}" Width="2*" IsReadOnly="True"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </DockPanel>
+                    </GroupBox>
+
+                    <GroupBox Grid.Row="2" Header="Configured models" Margin="0,0,0,8">
+                        <DockPanel Margin="8">
+                            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
+                                <Button Content="Pull/Install" Command="{Binding PullInstallCommand}"/>
+                                <Button Content="Verify" Margin="8,0,0,0" Command="{Binding VerifyCommand}"/>
+                                <Button Content="Remove/Delete..." Margin="8,0,0,0" Command="{Binding RemoveCommand}"/>
+                                <Button Content="Add to config" Margin="8,0,0,0" Command="{Binding AddOrphanToConfigCommand}"/>
+                                <Button Content="Pull Selected" Margin="20,0,0,0" Command="{Binding PullSelectedCommand}"/>
+                                <Button Content="Cancel Current Operation" Margin="8,0,0,0" Command="{Binding CancelOperationCommand}"/>
+                            </StackPanel>
+                            <DataGrid x:Name="ModelStatusGrid"
+                                      AutoGenerateColumns="False"
+                                      IsReadOnly="False"
+                                      HeadersVisibility="Column"
+                                      CanUserAddRows="False"
+                                      MinHeight="80"
+                                      ItemsSource="{Binding ModelRows}">
+                                <DataGrid.Columns>
+                                    <DataGridTemplateColumn Header="Select" Width="Auto">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                          HorizontalAlignment="Center"/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="*" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="*" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Sizing" Binding="{Binding SizingWarning}" Width="2*" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Size" Binding="{Binding SizeDisplay}" Width="*" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Sha256" Binding="{Binding ShaPreview}" Width="*" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Last verified" Binding="{Binding LastVerifiedDisplay}" Width="*" IsReadOnly="True"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </DockPanel>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
+
+            <!-- Tab 2: Drive Setup & Finalize -->
+            <TabItem Header="Drive Setup">
+                <StackPanel Margin="8">
+                    <GroupBox Header="Drive Preparation" Margin="0,0,0,16">
+                        <StackPanel Margin="8">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <TextBlock Text="Prep targets:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <CheckBox Content="Prepare for Windows"
+                                          IsChecked="{Binding PrepareWindows, Mode=TwoWay}"
+                                          Margin="0,0,10,0"/>
+                                <CheckBox Content="Prepare for macOS"
+                                          IsChecked="{Binding PrepareMac, Mode=TwoWay}"
+                                          IsEnabled="{Binding IsMacPrepAvailable}"/>
+                            </StackPanel>
+                            <TextBlock Text="{Binding MacPrepAvailabilityMessage}"
+                                       Margin="0,0,0,8" Foreground="DarkOrange" TextWrapping="Wrap"/>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Volume label:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <TextBox Width="240" Text="{Binding VolumeLabel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                <Button Content="Format &amp; Prepare Drive" Margin="12,0,0,0" Command="{Binding FormatPrepareCommand}"/>
+                            </StackPanel>
+                            <CheckBox Margin="0,10,0,0"
+                                      Content="Require passphrase to unlock SSD at runtime (encrypt portable config)"
+                                      IsChecked="{Binding EnableEncryption, Mode=TwoWay}"
+                                      IsEnabled="{Binding CanMutateDrive}"/>
                         </StackPanel>
-                        <DataGrid x:Name="StarterModelGrid"
-                                  AutoGenerateColumns="False"
-                                  CanUserAddRows="False"
-                                  IsReadOnly="False"
-                                  HeadersVisibility="Column"
-                                  ItemsSource="{Binding StarterModels}"
-                                  MinHeight="100">
-                            <DataGrid.GroupStyle>
-                                <GroupStyle>
-                                    <GroupStyle.HeaderTemplate>
-                                        <DataTemplate>
-                                            <TextBlock Text="{Binding Name}" FontWeight="Bold" Margin="4,8,0,4"/>
-                                        </DataTemplate>
-                                    </GroupStyle.HeaderTemplate>
-                                </GroupStyle>
-                            </DataGrid.GroupStyle>
-                            <DataGrid.Columns>
-                                <DataGridTemplateColumn Header="Select" Width="Auto">
-                                    <DataGridTemplateColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                      HorizontalAlignment="Center"/>
-                                        </DataTemplate>
-                                    </DataGridTemplateColumn.CellTemplate>
-                                </DataGridTemplateColumn>
-                                <DataGridTextColumn Header="Tag" Binding="{Binding Tag}" Width="2*" IsReadOnly="True"/>
-                                <DataGridTextColumn Header="Params" Binding="{Binding Params}" Width="*" IsReadOnly="True"/>
-                                <DataGridTextColumn Header="Tier" Binding="{Binding SizeTier}" Width="*" IsReadOnly="True"/>
-                                <DataGridTextColumn Header="Best at" Binding="{Binding Description}" Width="3*" IsReadOnly="True"/>
-                                <DataGridTextColumn Header="Use cases" Binding="{Binding UseCasesDisplay}" Width="2*" IsReadOnly="True"/>
-                                <DataGridTextColumn Header="Sizing info" Binding="{Binding SizingWarning}" Width="2*" IsReadOnly="True"/>
-                            </DataGrid.Columns>
-                        </DataGrid>
-                    </DockPanel>
-                </GroupBox>
+                    </GroupBox>
 
-                <DataGrid x:Name="ModelStatusGrid"
-                          Grid.Row="2"
-                          AutoGenerateColumns="False"
-                          IsReadOnly="False"
-                          HeadersVisibility="Column"
-                          CanUserAddRows="False"
-                          MinHeight="100"
-                          ItemsSource="{Binding ModelRows}">
-                    <DataGrid.Columns>
-                        <DataGridTemplateColumn Header="Select" Width="Auto">
-                            <DataGridTemplateColumn.CellTemplate>
-                                <DataTemplate>
-                                    <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                              HorizontalAlignment="Center"/>
-                                </DataTemplate>
-                            </DataGridTemplateColumn.CellTemplate>
-                        </DataGridTemplateColumn>
-                        <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" IsReadOnly="True"/>
-                        <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="*" IsReadOnly="True"/>
-                        <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="*" IsReadOnly="True"/>
-                        <DataGridTextColumn Header="Sizing" Binding="{Binding SizingWarning}" Width="2*" IsReadOnly="True"/>
-                        <DataGridTextColumn Header="Size" Binding="{Binding SizeDisplay}" Width="*" IsReadOnly="True"/>
-                        <DataGridTextColumn Header="Sha256" Binding="{Binding ShaPreview}" Width="*" IsReadOnly="True"/>
-                        <DataGridTextColumn Header="Last verified" Binding="{Binding LastVerifiedDisplay}" Width="*" IsReadOnly="True"/>
-                    </DataGrid.Columns>
-                </DataGrid>
+                    <GroupBox Header="Finalize &amp; Readiness">
+                        <StackPanel Margin="8">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <Button Content="Finalize SSD" Padding="16,8" Command="{Binding FinalizeCommand}"/>
+                                <Button Content="Check SSD Readiness" Padding="16,8" Margin="8,0,0,0" Command="{Binding CheckReadinessCommand}"/>
+                                <Button Content="Check for prereq updates" Padding="16,8" Margin="8,0,0,0" Command="{Binding CheckPrereqUpdatesCommand}"/>
+                            </StackPanel>
+                            <TextBlock Foreground="DarkSlateBlue" Margin="0,0,0,4"
+                                       Text="{Binding PrereqStatusText}"/>
 
-                <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,8,0,0">
-                    <Button Content="Pull/Install" Command="{Binding PullInstallCommand}"/>
-                    <Button Content="Verify" Margin="8,0,0,0" Command="{Binding VerifyCommand}"/>
-                    <Button Content="Remove/Delete..." Margin="8,0,0,0" Command="{Binding RemoveCommand}"/>
-                    <Button Content="Add to config" Margin="8,0,0,0" Command="{Binding AddOrphanToConfigCommand}"/>
-                    <Button Content="Pull Selected" Margin="20,0,0,0" Command="{Binding PullSelectedCommand}"/>
-                    <Button Content="Cancel Current Operation" Margin="8,0,0,0" Command="{Binding CancelOperationCommand}"/>
+                            <DataGrid AutoGenerateColumns="False"
+                                      IsReadOnly="True"
+                                      CanUserAddRows="False"
+                                      HeadersVisibility="Column"
+                                      MinHeight="80"
+                                      MaxHeight="300"
+                                      ItemsSource="{Binding ReadinessItems}">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Check" Binding="{Binding Check}" Width="2*"/>
+                                    <DataGridTextColumn Header="Result" Binding="{Binding Result}" Width="3*"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </StackPanel>
+                    </GroupBox>
                 </StackPanel>
-            </Grid>
-        </GroupBox>
+            </TabItem>
+        </TabControl>
 
-        <GroupBox Header="Drive Preparation" Grid.Row="3" Margin="0,0,0,10">
-            <StackPanel Margin="8">
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                    <TextBlock Text="Prep targets:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <CheckBox Content="Prepare for Windows"
-                              IsChecked="{Binding PrepareWindows, Mode=TwoWay}"
-                              Margin="0,0,10,0"/>
-                    <CheckBox Content="Prepare for macOS"
-                              IsChecked="{Binding PrepareMac, Mode=TwoWay}"
-                              IsEnabled="{Binding IsMacPrepAvailable}"/>
-                </StackPanel>
-                <TextBlock Text="{Binding MacPrepAvailabilityMessage}"
-                           Margin="0,0,0,8" Foreground="DarkOrange" TextWrapping="Wrap"/>
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="Volume label:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <TextBox Width="240" Text="{Binding VolumeLabel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                    <Button Content="Format &amp; Prepare Drive" Margin="12,0,0,0" Command="{Binding FormatPrepareCommand}"/>
-                </StackPanel>
-                <CheckBox Margin="0,10,0,0"
-                          Content="Require passphrase to unlock SSD at runtime (encrypt portable config)"
-                          IsChecked="{Binding EnableEncryption, Mode=TwoWay}"
-                          IsEnabled="{Binding CanMutateDrive}"/>
-            </StackPanel>
-        </GroupBox>
-
-        <Grid Grid.Row="4">
+        <!-- Row 3: Progress bar + status (always visible) -->
+        <Grid Grid.Row="3" Margin="0,0,0,4">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
             <StackPanel Orientation="Horizontal">
-                <Button Content="Finalize SSD" Padding="16,8" Command="{Binding FinalizeCommand}"/>
-                <Button Content="Check SSD Readiness" Padding="16,8" Margin="8,0,0,0" Command="{Binding CheckReadinessCommand}"/>
-                <Button Content="Check for prereq updates" Padding="16,8" Margin="8,0,0,0" Command="{Binding CheckPrereqUpdatesCommand}"/>
-                <ProgressBar Width="250" Height="22" Margin="12,0,0,0"
+                <ProgressBar Width="250" Height="22" Margin="0,0,12,0"
                              Value="{Binding ProgressValue}"
                              IsIndeterminate="{Binding ProgressIsIndeterminate}"/>
-                <TextBlock Text="{Binding StatusText}" Margin="12,0,0,0" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center"/>
             </StackPanel>
-            <TextBlock Grid.Row="1" Foreground="DarkSlateBlue" Margin="0,8,0,8"
-                       Text="{Binding PrereqStatusText}"/>
-            <TextBlock Grid.Row="1" Foreground="DarkOrange" Margin="0,32,0,8"
-                       Text="{Binding SelectedDriveWarning}"/>
-            <Grid Grid.Row="2">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="2*"/>
-                    <RowDefinition Height="*"/>
-                </Grid.RowDefinitions>
-
-                <ListBox ItemsSource="{Binding LogLines}"
-                         x:Name="LogListBox"
-                         VerticalAlignment="Stretch"
-                         Margin="0,0,0,8"
-                         ScrollViewer.VerticalScrollBarVisibility="Auto"/>
-                <DataGrid Grid.Row="1"
-                          AutoGenerateColumns="False"
-                          IsReadOnly="True"
-                          CanUserAddRows="False"
-                          HeadersVisibility="Column"
-                          ItemsSource="{Binding ReadinessItems}">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="Check" Binding="{Binding Check}" Width="2*"/>
-                        <DataGridTextColumn Header="Result" Binding="{Binding Result}" Width="3*"/>
-                    </DataGrid.Columns>
-                </DataGrid>
-            </Grid>
+            <TextBlock Grid.Row="1" Foreground="DarkOrange" Margin="0,4,0,0"
+                       Text="{Binding SelectedDriveWarning}" TextWrapping="Wrap"/>
         </Grid>
+
+        <!-- Row 4: Log panel (always visible) -->
+        <GroupBox Grid.Row="4" Header="Log">
+            <ListBox ItemsSource="{Binding LogLines}"
+                     x:Name="LogListBox"
+                     VerticalAlignment="Stretch"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto"/>
+        </GroupBox>
     </Grid>
 
     <Window.Resources>
