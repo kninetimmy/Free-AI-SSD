@@ -37,11 +37,16 @@ public partial class App : Application
     {
         if (e.ExceptionObject is Exception ex)
         {
-            MessageBox.Show(
-                $"A fatal error occurred:\n\n{ex}",
-                "PrepApp Fatal Error",
-                MessageBoxButton.OK,
-                MessageBoxImage.Error);
+            // This handler fires on a background thread, so marshal to the UI
+            // thread to safely show the dialog.
+            Application.Current?.Dispatcher?.Invoke(() =>
+            {
+                MessageBox.Show(
+                    $"A fatal error occurred:\n\n{ex}",
+                    "PrepApp Fatal Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            });
         }
     }
 
@@ -49,10 +54,15 @@ public partial class App : Application
     {
         e.SetObserved(); // Prevent the runtime from tearing down the process.
 
-        MessageBox.Show(
-            $"A background task failed:\n\n{e.Exception?.Flatten().InnerException ?? e.Exception}",
-            "PrepApp Background Error",
-            MessageBoxButton.OK,
-            MessageBoxImage.Warning);
+        // This handler fires on a background thread, so marshal to the UI
+        // thread to safely show the dialog.
+        Application.Current?.Dispatcher?.Invoke(() =>
+        {
+            MessageBox.Show(
+                $"A background task failed:\n\n{e.Exception?.Flatten().InnerException ?? e.Exception}",
+                "PrepApp Background Error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        });
     }
 }
