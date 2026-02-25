@@ -46,9 +46,9 @@ public sealed class ModelService : IModelService
         => ModelOperations.DiscoverModelsOnDisk(modelsRoot);
 
     public async Task<ModelPullResult> PullModelAsync(string ollamaExe, string modelsRoot, string modelTag,
-        Action<string> onLog, CancellationToken ct)
+        Action<string> onLog, CancellationToken ct, string? ollamaHost = null)
     {
-        var result = await _modelOperations.PullModelAsync(ollamaExe, modelsRoot, modelTag, onLog, ct);
+        var result = await _modelOperations.PullModelAsync(ollamaExe, modelsRoot, modelTag, onLog, ct, ollamaHost);
         return new ModelPullResult(result.Sha256, result.SizeBytes);
     }
 
@@ -57,8 +57,8 @@ public sealed class ModelService : IModelService
         => await _modelOperations.VerifyModelAsync(modelsRoot, modelTag, expectedHash, onLog, ct);
 
     public async Task DeleteModelAsync(string ollamaExe, string modelsRoot, string modelTag,
-        Action<string> onLog, CancellationToken ct)
-        => await _modelOperations.DeleteModelAsync(ollamaExe, modelsRoot, modelTag, onLog, ct);
+        Action<string> onLog, CancellationToken ct, string? ollamaHost = null)
+        => await _modelOperations.DeleteModelAsync(ollamaExe, modelsRoot, modelTag, onLog, ct, ollamaHost);
 
     public List<string> GetSizingWarnings(string modelTag, int? freeDiskGb, int? systemRamGb, int? gpuVramGb)
     {

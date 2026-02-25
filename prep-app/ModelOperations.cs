@@ -24,12 +24,14 @@ public sealed class ModelOperations
     /// <param name="onLog">Callback for streaming pull progress to the UI.</param>
     /// <param name="ct">Cancellation token for aborting the download.</param>
     /// <returns>Pull result containing the SHA-256 hash and file size of the model blob.</returns>
-    public async Task<PullModelResult> PullModelAsync(string ollamaExe, string modelRoot, string modelTag, Action<string> onLog, CancellationToken ct)
+    public async Task<PullModelResult> PullModelAsync(string ollamaExe, string modelRoot, string modelTag, Action<string> onLog, CancellationToken ct, string? ollamaHost = null)
     {
         var env = new Dictionary<string, string>
         {
             ["OLLAMA_MODELS"] = modelRoot
         };
+        if (ollamaHost is not null)
+            env["OLLAMA_HOST"] = ollamaHost;
 
         var exitCode = await RunProcessStreamingAsync(ollamaExe, BuildOllamaArgs("pull", modelTag), Path.GetDirectoryName(ollamaExe)!, env, onLog, ct);
         if (exitCode != 0)
@@ -76,12 +78,14 @@ public sealed class ModelOperations
     /// <summary>
     /// Deletes a model from disk using the Ollama CLI "rm" command.
     /// </summary>
-    public async Task DeleteModelAsync(string ollamaExe, string modelRoot, string modelTag, Action<string> onLog, CancellationToken ct)
+    public async Task DeleteModelAsync(string ollamaExe, string modelRoot, string modelTag, Action<string> onLog, CancellationToken ct, string? ollamaHost = null)
     {
         var env = new Dictionary<string, string>
         {
             ["OLLAMA_MODELS"] = modelRoot
         };
+        if (ollamaHost is not null)
+            env["OLLAMA_HOST"] = ollamaHost;
 
         var exitCode = await RunProcessStreamingAsync(ollamaExe, BuildOllamaArgs("rm", modelTag), Path.GetDirectoryName(ollamaExe)!, env, onLog, ct);
         if (exitCode != 0)
