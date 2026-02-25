@@ -75,7 +75,33 @@ public sealed class OllamaServerHandle : IOllamaServerHandle
         _ = Task.Run(() => DrainAsync(process.StandardError), ct);
 
         // Wait for the server to become healthy before returning.
-        await WaitForHealthyAsync(host, process, onLog, ct);
+        // If the health check fails, kill the process immediately so it doesn't
+        // leak as an orphaned background server.
+        try
+        {
+            await WaitForHealthyAsync(host, process, onLog, ct);
+        }
+        catch
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    process.WaitForExit(3000);
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup.
+            }
+            finally
+            {
+                process.Dispose();
+            }
+
+            throw; // Re-throw the original health-check failure.
+        }
 
         onLog($"Temporary Ollama server ready on {host}.");
         return new OllamaServerHandle(process, host, onLog);
