@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Net.Http.Headers;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using FreeAiSsd.Runner.Services;
@@ -159,6 +160,54 @@ public sealed class RunnerLocalApiServiceTests
     }
 
     [Fact]
+    public async Task RemoteStt_LazyInitializes_WhenNotPreinitialized()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true, allowRemoteStt: true, allowVoiceQuery: true);
+        fixture.Stt.SetModelLoaded(false);
+        using var http = new HttpClient();
+
+        var response = await http.PostAsync($"{fixture.BaseUrl}/api/stt/transcribe", CreateWavUploadContent());
+        response.EnsureSuccessStatusCode();
+
+        Assert.Equal(1, fixture.Stt.InitializeCallCount);
+        Assert.Equal(1, fixture.Stt.TranscribeCallCount);
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task RemoteStt_Returns503_WhenInitializationFails()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true, allowRemoteStt: true, allowVoiceQuery: true);
+        fixture.Stt.SetModelLoaded(false);
+        fixture.Stt.FailInitialization = true;
+        using var http = new HttpClient();
+
+        var response = await http.PostAsync($"{fixture.BaseUrl}/api/stt/transcribe", CreateWavUploadContent());
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal(1, fixture.Stt.InitializeCallCount);
+        Assert.Equal(0, fixture.Stt.TranscribeCallCount);
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task RemoteStt_ConcurrentRequests_AreSerialized()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true, allowRemoteStt: true, allowVoiceQuery: true);
+        fixture.Stt.DelayTranscriptionMs = 150;
+        using var http = new HttpClient();
+
+        var first = http.PostAsync($"{fixture.BaseUrl}/api/stt/transcribe", CreateWavUploadContent());
+        var second = http.PostAsync($"{fixture.BaseUrl}/api/stt/transcribe", CreateWavUploadContent());
+        await Task.WhenAll(first, second);
+
+        Assert.Equal(HttpStatusCode.OK, first.Result.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, second.Result.StatusCode);
+        Assert.Equal(2, fixture.Stt.TranscribeCallCount);
+        Assert.Equal(1, fixture.Stt.MaxConcurrentTranscribe);
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
     public async Task VoiceQuery_AutoSendDisabled_ReturnsTranscriptionOnly()
     {
         var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true, allowRemoteStt: true, allowVoiceQuery: true, voiceAutoSendToChat: false);
@@ -194,6 +243,28 @@ public sealed class RunnerLocalApiServiceTests
         Assert.Equal("Bingo fuel is your return minimum.", json.GetProperty("responseText").GetString());
         Assert.True(json.GetProperty("ttsTriggeredOnHost").GetBoolean());
         Assert.Equal(1, fixture.Chat.SendPromptCallCount);
+        Assert.Equal(1, fixture.Tts.SpeakCallCount);
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task VoiceQuery_HostTts_DoesNotBlockHttpResponse()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true, allowRemoteStt: true, allowVoiceQuery: true, voiceAutoSendToChat: true);
+        fixture.Stt.TranscriptionToReturn = "check weather";
+        fixture.Chat.Response = new ChatResponse("Weather is clear.", null, false);
+        fixture.Tts.SpeakDelayMs = 700;
+        using var http = new HttpClient();
+
+        var sw = Stopwatch.StartNew();
+        var response = await http.PostAsync($"{fixture.BaseUrl}/api/voice/query", CreateWavUploadContent(model: "phi3", autoSendToChat: true, speakResponse: true));
+        sw.Stop();
+
+        response.EnsureSuccessStatusCode();
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(json.GetProperty("ttsTriggeredOnHost").GetBoolean());
+        Assert.True(sw.ElapsedMilliseconds < 500, $"Expected fast return before TTS completion, elapsed={sw.ElapsedMilliseconds}ms");
         Assert.Equal(1, fixture.Tts.SpeakCallCount);
 
         await fixture.DisposeAsync();
@@ -317,14 +388,60 @@ public sealed class RunnerLocalApiServiceTests
     private sealed class FakeSttService : ISpeechToTextService
     {
         public event Action<string>? LogMessage;
-        public bool IsModelLoaded => true;
+        private volatile bool _isModelLoaded = true;
+        private int _concurrentTranscribe;
+
+        public bool IsModelLoaded => _isModelLoaded;
         public string TranscriptionToReturn { get; set; } = "transcribed";
+        public bool FailInitialization { get; set; }
+        public int DelayTranscriptionMs { get; set; }
+        public int InitializeCallCount { get; private set; }
+        public int TranscribeCallCount { get; private set; }
+        public int MaxConcurrentTranscribe { get; private set; }
 
-        public Task InitializeAsync(string ssdRoot, PortableConfig config) => Task.CompletedTask;
+        public Task InitializeAsync(string ssdRoot, PortableConfig config)
+        {
+            InitializeCallCount++;
+            if (FailInitialization)
+            {
+                throw new InvalidOperationException("init failed");
+            }
 
-        public Task<string> TranscribeAudioAsync(byte[] audioData) => Task.FromResult(TranscriptionToReturn);
+            _isModelLoaded = true;
+            return Task.CompletedTask;
+        }
+
+        public async Task<string> TranscribeAudioAsync(byte[] audioData)
+        {
+            if (!_isModelLoaded)
+            {
+                throw new InvalidOperationException("Whisper model is not loaded. Call InitializeAsync first.");
+            }
+
+            TranscribeCallCount++;
+            var concurrent = Interlocked.Increment(ref _concurrentTranscribe);
+            if (concurrent > MaxConcurrentTranscribe)
+            {
+                MaxConcurrentTranscribe = concurrent;
+            }
+
+            try
+            {
+                if (DelayTranscriptionMs > 0)
+                {
+                    await Task.Delay(DelayTranscriptionMs);
+                }
+
+                return TranscriptionToReturn;
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _concurrentTranscribe);
+            }
+        }
 
         public Task<string> TranscribeStreamAsync(Stream audioStream) => Task.FromResult(TranscriptionToReturn);
+        public void SetModelLoaded(bool isLoaded) => _isModelLoaded = isLoaded;
 
         public void Dispose() { }
     }
@@ -333,6 +450,7 @@ public sealed class RunnerLocalApiServiceTests
     {
         public int SpeakCallCount { get; private set; }
         public int StopCallCount { get; private set; }
+        public int SpeakDelayMs { get; set; }
 
         public event Action<string>? LogMessage;
         public bool IsSpeaking => false;
@@ -345,7 +463,7 @@ public sealed class RunnerLocalApiServiceTests
         public Task SpeakAsync(string text, CancellationToken cancellationToken = default)
         {
             SpeakCallCount++;
-            return Task.CompletedTask;
+            return SpeakDelayMs > 0 ? Task.Delay(SpeakDelayMs, cancellationToken) : Task.CompletedTask;
         }
 
         public void Stop()

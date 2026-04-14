@@ -17,18 +17,23 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
     private readonly ISpeechToTextService _sttService;
     private readonly Func<ITextToSpeechService?> _ttsServiceFactory;
     private readonly SsdLogger? _logger;
+    private readonly string _ssdRoot;
+    private readonly SemaphoreSlim _sttInitGate = new(1, 1);
+    private readonly SemaphoreSlim _sttTranscribeGate = new(1, 1);
     private WebApplication? _app;
 
     public RunnerLocalApiService(
         IChatService chatService,
         ISpeechToTextService sttService,
         Func<ITextToSpeechService?> ttsServiceFactory,
-        SsdLogger? logger)
+        SsdLogger? logger,
+        string? ssdRoot = null)
     {
         _chatService = chatService;
         _sttService = sttService;
         _ttsServiceFactory = ttsServiceFactory;
         _logger = logger;
+        _ssdRoot = string.IsNullOrWhiteSpace(ssdRoot) ? AppContext.BaseDirectory : ssdRoot;
     }
 
     public event Action<string>? LogMessage;
@@ -230,8 +235,14 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
 
             try
             {
-                var transcription = await _sttService.TranscribeAudioAsync(parseResult.PcmAudio!);
+                await EnsureSttInitializedAsync(config, ct);
+                var transcription = await TranscribeAudioSerializedAsync(parseResult.PcmAudio!, ct);
                 return Results.Ok(new SttTranscribeResponse(transcription));
+            }
+            catch (SttUnavailableException ex)
+            {
+                _logger?.Error($"STT unavailable: {ex.Message}");
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             }
             catch (Exception ex)
             {
@@ -267,7 +278,8 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
 
             try
             {
-                var transcription = await _sttService.TranscribeAudioAsync(parseResult.PcmAudio!);
+                await EnsureSttInitializedAsync(config, ct);
+                var transcription = await TranscribeAudioSerializedAsync(parseResult.PcmAudio!, ct);
                 var voiceResult = await ExecuteVoiceQueryAsync(
                     transcription,
                     options,
@@ -281,6 +293,11 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             {
                 _logger?.Warn($"Rejected /api/voice/query request: {ex.Message}");
                 return Results.BadRequest(new ErrorResponse(ex.Message));
+            }
+            catch (SttUnavailableException ex)
+            {
+                _logger?.Error($"STT unavailable for /api/voice/query: {ex.Message}");
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             }
             catch (Exception ex)
             {
@@ -390,7 +407,17 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             var tts = _ttsServiceFactory();
             if (tts is not null)
             {
-                await tts.SpeakAsync(chat.ResponseText, cancellationToken);
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await tts.SpeakAsync(chat.ResponseText, cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.Error($"Host TTS failed after trigger: {ex.Message}");
+                    }
+                }, cancellationToken);
                 ttsTriggered = true;
             }
         }
@@ -517,6 +544,54 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             ".pcm" or ".raw" => "pcm16le",
             _ => string.Empty
         };
+    }
+
+    private async Task EnsureSttInitializedAsync(PortableConfig config, CancellationToken ct)
+    {
+        if (_sttService.IsModelLoaded)
+        {
+            return;
+        }
+
+        await _sttInitGate.WaitAsync(ct);
+        try
+        {
+            if (_sttService.IsModelLoaded)
+            {
+                return;
+            }
+
+            await _sttService.InitializeAsync(_ssdRoot, config);
+        }
+        catch (Exception ex)
+        {
+            throw new SttUnavailableException("Failed to initialize speech-to-text service.", ex);
+        }
+        finally
+        {
+            _sttInitGate.Release();
+        }
+    }
+
+    private async Task<string> TranscribeAudioSerializedAsync(byte[] audioData, CancellationToken ct)
+    {
+        await _sttTranscribeGate.WaitAsync(ct);
+        try
+        {
+            return await _sttService.TranscribeAudioAsync(audioData);
+        }
+        finally
+        {
+            _sttTranscribeGate.Release();
+        }
+    }
+
+    private sealed class SttUnavailableException : Exception
+    {
+        public SttUnavailableException(string message, Exception innerException)
+            : base(message, innerException)
+        {
+        }
     }
 
     private static ParsedAudioUpload TryParseWavToPcm(byte[] wavData)
