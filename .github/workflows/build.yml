@@ -1,5 +1,18 @@
 name: Build and Package
 
+# Phase-A hardening (Task 4): action pinning status.
+# Fully pinned to commit SHA:
+#   - softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+# TODO(phase-a): pin the following first-party actions to commit SHAs once verified
+# from the official repos (use `git ls-remote` or the GitHub API refs/tags/<tag> endpoint):
+#   - actions/checkout@v4
+#   - actions/setup-dotnet@v4
+#   - actions/upload-artifact@v4
+#   - actions/download-artifact@v4
+# These remain tag-pinned in this pass because their v4 tag SHAs were not
+# independently verified in this change. Bumping them without SHA pins keeps
+# the supply-chain risk consistent with prior behavior; do not weaken further.
+
 on:
   pull_request:
   push:
@@ -16,8 +29,9 @@ on:
         default: false
         type: boolean
 
-permissions:
-  contents: write
+# Phase-A hardening (Task 4): workflow inherits the restrictive read-only default.
+# Only the `package-release` job elevates to `contents: write`, and only for its
+# release-creation steps. See job-level `permissions:` below.
 
 env:
   MAC_SIGNING_ENABLED: "false"
@@ -47,29 +61,107 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
         shell: pwsh
         run: |
+          # Phase-A hardening (Task 3): verify every downloaded prereq against a
+          # hardcoded SHA-256. The workflow fails the job on mismatch or when the
+          # expected hash is empty. No more "trust whatever we downloaded" + record.
+          #
+          # TODO(phase-a): pin the exact versioned ollama-darwin.zip URL and its
+          # SHA-256. Do NOT use /releases/latest/. Required inputs, both from the
+          # official Ollama release page (https://github.com/ollama/ollama/releases):
+          #   1. The versioned asset URL for ollama-darwin.zip for a chosen pin
+          #      (e.g. https://github.com/ollama/ollama/releases/download/v0.20.7/ollama-darwin.zip).
+          #   2. The SHA-256 of that exact asset, copied from the release page's
+          #      "Assets" section or from a signed checksums file. Do not guess.
+          # Until both are provided, the step below fails the job (fail-closed).
+          $expectedSha256 = ""   # TODO(phase-a): fill in once verified; keep lowercase hex.
+          $pinnedUrl = ""        # TODO(phase-a): e.g. https://github.com/ollama/ollama/releases/download/vX.Y.Z/ollama-darwin.zip
+
+          if ([string]::IsNullOrWhiteSpace($pinnedUrl) -or [string]::IsNullOrWhiteSpace($expectedSha256)) {
+            throw "ollama-darwin.zip is not pinned. Populate `$pinnedUrl and `$expectedSha256 in .github/workflows/build.yml before running this workflow with include_macos=true."
+          }
+
           $macDir = "out/mac/tools/ollama"
           New-Item -ItemType Directory -Path $macDir -Force | Out-Null
           $archive = Join-Path $macDir "ollama-darwin.zip"
-          Invoke-WebRequest -Uri "https://github.com/ollama/ollama/releases/latest/download/ollama-darwin.zip" -OutFile $archive -UseBasicParsing
-          $hash = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-          [ordered]@{ id="ollama_macos_universal"; sourceUrl="https://github.com/ollama/ollama/releases/latest/download/ollama-darwin.zip"; archive="ollama-darwin.zip"; sha256=$hash; downloadedAtUtc=[DateTime]::UtcNow.ToString("o") } | ConvertTo-Json | Set-Content -Path (Join-Path $macDir "mac-tools-manifest.json") -Encoding UTF8
+          Invoke-WebRequest -Uri $pinnedUrl -OutFile $archive -UseBasicParsing
+          $actualSha256 = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSha256 -ne $expectedSha256.ToLowerInvariant()) {
+            throw "SHA-256 mismatch for ollama-darwin.zip. Expected: $expectedSha256 Actual: $actualSha256"
+          }
+          [ordered]@{ id="ollama_macos_universal"; sourceUrl=$pinnedUrl; archive="ollama-darwin.zip"; sha256=$expectedSha256.ToLowerInvariant(); verifiedAtUtc=[DateTime]::UtcNow.ToString("o") } | ConvertTo-Json | Set-Content -Path (Join-Path $macDir "mac-tools-manifest.json") -Encoding UTF8
 
       - name: Download offline Windows prerequisites
         shell: pwsh
         run: |
+          # Phase-A hardening (Task 3): each prereq has a hardcoded expected SHA-256.
+          # Jobs fail on mismatch or when the expected hash is empty. The manifest
+          # records only verified hashes — the observed hash is never written as-is.
+          #
+          # TODO(phase-a): pin versioned URL + SHA-256 for each prereq below.
+          # Required inputs for vcredist_x64:
+          #   - Replace https://aka.ms/vs/17/release/vc_redist.x64.exe (rolling) with
+          #     the absolute versioned URL from
+          #     https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist
+          #     (e.g. https://download.visualstudio.microsoft.com/download/pr/<guid>/<hash>/VC_redist.x64.exe).
+          #   - SHA-256 of that exact asset, copied from Microsoft's published
+          #     checksum or computed once under a trusted environment and audited.
+          # Required inputs for dotnet8_desktop_x64:
+          #   - The SHA-256 for windowsdesktop-runtime-8.0.18-win-x64.exe from
+          #     https://builds.dotnet.microsoft.com/dotnet/checksums/8.0.18-sha.txt
+          #     (the URL currently used, https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/8.0.18/windowsdesktop-runtime-8.0.18-win-x64.exe,
+          #     is already versioned and stable, so only a hash is required).
+          # Until an entry has both sourceUrl and expectedSha256 populated, the step
+          # throws.
+          $prereqs = @(
+            @{
+              id = "vcredist_x64"
+              displayName = "Microsoft Visual C++ Redistributable (x64)"
+              sourceUrl = ""  # TODO(phase-a): pin exact versioned URL (no aka.ms rolling link)
+              expectedSha256 = ""  # TODO(phase-a): lowercase hex SHA-256 of the pinned asset
+              filename = "vc_redist.x64.exe"
+              silentArgs = "/install /quiet /norestart"
+              requiresAdmin = $true
+              isOptional = $false
+            },
+            @{
+              id = "dotnet8_desktop_x64"
+              displayName = ".NET 8 Windows Desktop Runtime (x64)"
+              sourceUrl = "https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/8.0.18/windowsdesktop-runtime-8.0.18-win-x64.exe"
+              expectedSha256 = ""  # TODO(phase-a): fill in from 8.0.18-sha.txt checksum file
+              filename = "windowsdesktop-runtime-8-win-x64.exe"
+              silentArgs = "/install /quiet /norestart"
+              requiresAdmin = $true
+              isOptional = $true
+            }
+          )
+
           $prereqDir = "out/windows/tools/prereqs"
           New-Item -ItemType Directory -Path $prereqDir -Force | Out-Null
-          $prereqs = @(
-            @{ id = "vcredist_x64"; displayName = "Microsoft Visual C++ Redistributable (x64)"; sourceUrl = "https://aka.ms/vs/17/release/vc_redist.x64.exe"; filename = "vc_redist.x64.exe"; silentArgs = "/install /quiet /norestart"; requiresAdmin = $true; isOptional = $false },
-            @{ id = "dotnet8_desktop_x64"; displayName = ".NET 8 Windows Desktop Runtime (x64)"; sourceUrl = "https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/8.0.18/windowsdesktop-runtime-8.0.18-win-x64.exe"; filename = "windowsdesktop-runtime-8-win-x64.exe"; silentArgs = "/install /quiet /norestart"; requiresAdmin = $true; isOptional = $true }
-          )
           $manifestEntries = @()
           foreach ($prereq in $prereqs) {
+            if ([string]::IsNullOrWhiteSpace($prereq.sourceUrl) -or [string]::IsNullOrWhiteSpace($prereq.expectedSha256)) {
+              throw "Prereq '$($prereq.id)' is not pinned. Populate sourceUrl and expectedSha256 in .github/workflows/build.yml before running this workflow."
+            }
             $target = Join-Path $prereqDir $prereq.filename
             Invoke-WebRequest -Uri $prereq.sourceUrl -OutFile $target -UseBasicParsing
-            $hash = (Get-FileHash -Path $target -Algorithm SHA256).Hash.ToLowerInvariant()
+            $actualSha256 = (Get-FileHash -Path $target -Algorithm SHA256).Hash.ToLowerInvariant()
+            $expected = $prereq.expectedSha256.ToLowerInvariant()
+            if ($actualSha256 -ne $expected) {
+              throw "SHA-256 mismatch for $($prereq.id). Expected: $expected Actual: $actualSha256"
+            }
             $size = (Get-Item $target).Length
-            $manifestEntries += [ordered]@{ id=$prereq.id; displayName=$prereq.displayName; filename=$prereq.filename; sourceUrl=$prereq.sourceUrl; downloadedAtUtc=[DateTime]::UtcNow.ToString("o"); sha256=$hash; sizeBytes=$size; silentArgs=$prereq.silentArgs; requiresAdmin=$prereq.requiresAdmin; isOptional=$prereq.isOptional }
+            $manifestEntries += [ordered]@{
+              id = $prereq.id
+              displayName = $prereq.displayName
+              filename = $prereq.filename
+              sourceUrl = $prereq.sourceUrl
+              verifiedAtUtc = [DateTime]::UtcNow.ToString("o")
+              sha256 = $expected
+              sizeBytes = $size
+              silentArgs = $prereq.silentArgs
+              requiresAdmin = $prereq.requiresAdmin
+              isOptional = $prereq.isOptional
+            }
           }
           [ordered]@{ prerequisites = $manifestEntries } | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $prereqDir "prereqs-manifest.json") -Encoding UTF8
       - uses: actions/upload-artifact@v4
@@ -143,6 +235,11 @@ jobs:
     runs-on: windows-latest
     needs: [windows-build, mac-runner-build]
     if: always() && needs.windows-build.result == 'success' && (needs.mac-runner-build.result == 'success' || needs.mac-runner-build.result == 'skipped')
+    # Phase-A hardening (Task 4): scoped write permission ONLY on the release job.
+    # The "Create Release" / "Upload beta ZIP to release" steps below gate themselves
+    # to workflow_dispatch, so the write scope is only exercised on manual release runs.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -221,7 +318,11 @@ jobs:
           }
       - name: Create Release
         if: github.event_name == 'workflow_dispatch'
-        uses: softprops/action-gh-release@v2
+        # Phase-A hardening (Task 4): pinned to full commit SHA of the v2 tag
+        # (softprops/action-gh-release v2 → 3bb12739c298aeb8a4eeaf626c5b8d85266b0e65).
+        # When bumping, resolve the new SHA via `git ls-remote` or the GitHub API
+        # (refs/tags/<tag>) and update this comment + pin together.
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: v${{ inputs.version }}
           name: v${{ inputs.version }}
@@ -230,7 +331,8 @@ jobs:
           fail_on_unmatched_files: true
       - name: Upload beta ZIP to release
         if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
-        uses: softprops/action-gh-release@v2
+        # Phase-A hardening (Task 4): same pin as above (softprops/action-gh-release v2).
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: v${{ inputs.version }}
           files: dist/Free-AI-SSD-beta-crossplatform.zip
