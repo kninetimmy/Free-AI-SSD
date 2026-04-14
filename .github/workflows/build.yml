@@ -246,17 +246,17 @@ jobs:
           Copy-Item "in/windows/prep-app/bin/Release/net8.0-windows/runner-publish" (Join-Path $payloadRoot "runner-publish") -Recurse -Force
           Copy-Item "in/windows/out/companion-publish" (Join-Path $payloadRoot "companion") -Recurse -Force
           @"
-{
-  "schemaVersion": 1,
-  "hostAddress": "",
-  "hostPort": 41555,
-  "apiKey": "",
-  "pttBinding": "",
-  "inputDeviceName": null,
-  "outputDeviceName": null,
-  "autoReconnect": true
-}
-"@ | Set-Content -Path (Join-Path $payloadRoot "companion/companion-config.json") -Encoding UTF8
+          {
+            "schemaVersion": 1,
+            "hostAddress": "",
+            "hostPort": 41555,
+            "apiKey": "",
+            "pttBinding": "",
+            "inputDeviceName": null,
+            "outputDeviceName": null,
+            "autoReconnect": true
+          }
+          "@ | Set-Content -Path (Join-Path $payloadRoot "companion/companion-config.json") -Encoding UTF8
           Copy-Item "in/windows/out/windows" (Join-Path $payloadRoot "windows") -Recurse -Force
 
           Copy-Item (Join-Path $payloadRoot "FreeAiSsd.PrepApp.exe") (Join-Path $winRoot "FreeAiSsd.PrepApp.exe") -Force
