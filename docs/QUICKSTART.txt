@@ -1,25 +1,223 @@
-Free-AI-SSD Quickstart (Windows stable + beta cross-platform)
+================================================================================
+ Free-AI-SSD — Quickstart
+ Portable offline AI on an SSD. Prepare once online, run anywhere offline.
+================================================================================
 
-Recommended for end users: download the official release ZIP.
+--------------------------------------------------------------------------------
+ Quick Start in 5 Steps (the impatient version)
+--------------------------------------------------------------------------------
 
-1) Download a ZIP from GitHub Releases:
-   - Stable: Free-AI-SSD-win.zip (Windows-only prep)
-   - Beta: Free-AI-SSD-beta-crossplatform.zip (enables mac prep)
-2) Extract the ZIP on a Windows machine.
-3) Run FreeAiSsd.PrepApp.exe.
-4) Select your external SSD (exFAT recommended for cross-platform use).
-5) In Drive Preparation, choose targets:
-   - Stable ZIP: Windows only (mac options are disabled)
-   - Beta ZIP: Windows, macOS, or both
-6) Use Model Manager to add model tags and pull models.
-7) Run "Check SSD Readiness".
-8) Click "Finalize SSD".
+1) Plug in a portable SSD (exFAT recommended if you want Windows + macOS).
+2) On a Windows machine with internet, download the latest ZIP from
+   GitHub Releases and extract it:
+     - Stable:       Free-AI-SSD-win.zip                  (Windows target only)
+     - Beta (xplat): Free-AI-SSD-beta-crossplatform.zip   (Windows + macOS)
+3) Run FreeAiSsd.PrepApp.exe. Select your SSD. Open Model Manager, pull one
+   model (e.g. phi3 or llama3.1:8b). Click "Check SSD Readiness", then
+   "Finalize SSD".
+4) Unplug. Plug into the machine you actually want to use it on.
+     - Windows: <SSD>\windows\runner\FreeAiSsd.Runner.exe
+     - macOS:   <SSD>/mac/Runner.app    (beta bundle only; unsigned)
+5) Start the AI engine in Runner and chat. That's it — you're offline.
 
-Run on target machines:
-- Windows: <SSD>\windows\runner\FreeAiSsd.Runner.exe
-- macOS: <SSD>/mac/Runner.app
+Everything below is optional and layered on top of that baseline.
 
-Notes
-- PrepApp can stage both OS payloads from one Windows host when using the beta ZIP.
-- The prepared SSD is designed for offline runtime use on Windows/macOS.
-- If you need macOS preparation, use the beta cross-platform ZIP.
+--------------------------------------------------------------------------------
+ What You Need
+--------------------------------------------------------------------------------
+
+- A portable SSD. Budget ~5–10 GB per LLM, plus headroom for documents and
+  Whisper STT models. A 128 GB drive is comfortable; 64 GB is the practical
+  minimum.
+- A Windows machine with internet for the one-time preparation (PrepApp is
+  Windows-only — it's the prep tool, not the runtime).
+- The target machine (where you'll actually run it) needs no pre-installed
+  software. Runner carries its own prerequisites.
+- Target OS: Windows 10/11 x64, or macOS (beta, Apple Silicon and Intel).
+
+--------------------------------------------------------------------------------
+ Full Feature Setup
+--------------------------------------------------------------------------------
+
+ 1. Offline AI on a Portable SSD (the core)
+ ------------------------------------------
+ Already covered in the 5-step quick start. A few notes:
+
+ - Filesystem: exFAT is the only filesystem Windows and macOS both read/write
+   natively. If you only care about Windows, NTFS is fine.
+ - Ollama is staged onto the SSD by PrepApp and bound to loopback only
+   (127.0.0.1). No network surface by default.
+ - Models live at <SSD>/models/. Pull more any time via PrepApp's Model
+   Manager; this is the only step that requires internet.
+ - Runner auto-installs any missing Windows prerequisites (VC++ redist,
+   .NET 8 Desktop Runtime) from the staged offline bundle on first run.
+
+ 2. RAG Document Library (grounded answers from your own files)
+ --------------------------------------------------------------
+ Load PDFs, manuals, and notes so the AI answers from your documents
+ instead of guessing.
+
+ - In Runner, open the "Reference Documents" panel.
+ - Create or select a library.
+ - "Add files" to pull in specific documents, or "Add folder" to watch a
+   folder and auto-ingest new files.
+ - Click "Sweep folders now" to ingest, or "Rebuild index" to re-embed
+   everything.
+ - Supported formats: .pdf, .txt, .md, .json, .csv. DOCX is not supported.
+ - PDFs must have an embedded text layer. Scan-only PDFs need OCR first.
+ - Answers cite sources inline, e.g. [manual.pdf p.12]. If nothing in the
+   library meets the similarity threshold, the model is explicitly told
+   "no relevant documents found" rather than hallucinating.
+ - First use of RAG needs the embedding model (nomic-embed-text). Pull it
+   once online via Runner's "Pull embedding model" button.
+
+ 3. DCS Bindings Parser (HOTAS-aware answers)
+ --------------------------------------------
+ Import your DCS World controller bindings so the AI answers with the
+ buttons on *your* stick and throttle.
+
+ - In Runner, open "Bindings Import" (requires an active document library).
+ - Runner auto-detects your Saved Games\DCS and Saved Games\DCS.openbeta
+   folders. If it doesn't find them, browse manually.
+ - Click "Scan" — every aircraft with binding files in Config/Input is
+   listed.
+ - Select aircraft and click "Import". Runner reads each device's
+   diff.lua (stick, throttle, rudder pedals), merges them per-aircraft,
+   and writes a reference document into your library.
+ - Rebuild the index (or wait for the next folder sweep).
+
+ Supported: DCS World stable and Open Beta, multi-device merging.
+ Not yet supported: IL-2 Sturmovik, War Thunder.
+
+ 4. Voice Input — Whisper.cpp STT
+ --------------------------------
+ Speak your questions. Transcription is fully local via Whisper.cpp.
+
+ - Click the microphone button in Runner to start/stop recording.
+ - Transcription runs locally; text is either sent automatically or placed
+   in the prompt for review (controlled by autoSendVoiceInput in config).
+ - Whisper model sizes live at <SSD>/models/whisper/:
+       Tiny   ~75 MB    fastest, lower accuracy
+       Base  ~142 MB    default, good for most use
+       Small ~466 MB    better accuracy
+       Medium ~1.5 GB   best accuracy, more RAM
+ - First voice use downloads the selected model (one-time internet step).
+   After that, fully offline.
+
+ 5. Voice Output — TTS
+ ---------------------
+ Have the AI speak back.
+
+ - Enable TTS in settings. Two engines:
+     System — Windows SAPI; built-in, no downloads required.
+     Piper  — neural TTS; better quality. Drop piper.exe and a voice
+              model into <SSD>/windows/tools/piper/.
+ - Route TTS to a specific output device (e.g. your VR headset) so AI
+   speech and system audio can go to different places.
+ - TTS is offline regardless of engine.
+
+ 6. HOTAS Push-to-Talk (hands-free voice, for VR)
+ ------------------------------------------------
+ Bind a joystick button to start/stop voice recording. No keyboard,
+ no headset removal, no hands off the controls.
+
+ - In settings, enable PTT and pick your device (e.g. "X-56 Rhino
+   Throttle").
+ - Set the button index.
+ - Pick a mode:
+     push_to_talk — hold the button to record, release to send
+     toggle       — press once to start, press again to stop and send
+ - Optional: always-on-top status overlay (disable for VR), and an
+   activation beep.
+ - Full loop: button -> mic opens -> speak -> release -> Whisper
+   transcribes -> prompt sent -> AI responds -> TTS plays through your
+   chosen output device.
+
+ 7. (Optional) Network Mode — run on one PC, query from another
+ --------------------------------------------------------------
+ One machine runs Runner + Ollama. Other devices on the same LAN call
+ Runner's HTTP API for chat, STT upload, and host-side TTS.
+
+ - Ollama stays loopback-only. LAN clients talk to the Runner API,
+   never to Ollama directly.
+ - Default bind is 127.0.0.1; 0.0.0.0 is an explicit opt-in in
+   portable-config.json (Runner logs a warning when not loopback).
+ - API key auth required on non-health endpoints.
+ - Endpoints: /api/health, /api/models, /api/chat, /api/chat/stream,
+   /api/stt/transcribe, /api/voice/query, /api/tts/speak, /api/tts/stop.
+ - Do not expose this API to the public internet.
+
+--------------------------------------------------------------------------------
+ Use Cases
+--------------------------------------------------------------------------------
+
+ Ham Radio / Field Reference
+   You're deployed for emergency comms or camping with no cell signal.
+   Load radio manuals, band plans, and reference docs onto the SSD
+   before you leave. Plug it into whatever laptop you've got, ask by
+   voice, get cited answers. The drive fits in a pocket.
+
+ DCS / Flight Sim VR Copilot
+   You're in VR, mid-sortie. You forget how to uncage an AIM-9 on the
+   F-16C. Press the PTT button on your throttle, ask, and hear the
+   answer spoken back using *your* actual HOTAS bindings and the real
+   aircraft manual. Hands never leave the stick, headset never comes
+   off, and no cloud AI is involved.
+
+ Private Offline AI Assistant
+   You don't trust cloud AI with your data, your workplace restricts
+   internet, or you just want the same setup on every machine you sit
+   down at. Prep once, plug in anywhere.
+
+ Survival / Emergency Reference
+   First-aid guides, plant identification, equipment manuals, survival
+   references — whatever you need when you're off-grid.
+
+--------------------------------------------------------------------------------
+ Troubleshooting
+--------------------------------------------------------------------------------
+
+ Runner won't start / dependency warnings
+   Use Runner's "Re-run dependency check". If the staged prereq bundle
+   is missing or invalid, plug the SSD back into an online machine and
+   run "Update Prereqs" in PrepApp.
+
+ "Pull embedding model" required
+   The RAG pipeline needs nomic-embed-text. If the SSD doesn't have it
+   yet, Runner prompts to pull it. Online once, offline forever after.
+
+ PDF citations seem wrong or sparse
+   The PDF probably has no text layer (scanned image). Run OCR on it
+   externally, then re-ingest.
+
+ No mic input / Whisper hears nothing
+   Check selectedMicrophoneDevice in portable-config.json. Unset (null)
+   means "system default". Confirm the mic is actually selected at the
+   OS level too.
+
+ PTT button does nothing
+   Confirm the device name in pttDeviceName exactly matches what
+   DirectInput reports (Runner logs the detected devices at startup).
+   Check pttButtonIndex — it's zero-based.
+
+ TTS plays on the wrong speakers
+   Set ttsOutputDevice to the exact device name. Useful for sending AI
+   voice to your VR headset while keeping system audio on desktop
+   speakers.
+
+ macOS: Gatekeeper blocks the app
+   The beta macOS build is currently unsigned / not notarized. Allow
+   it from System Settings > Privacy & Security, or right-click ->
+   Open the first time.
+
+ Network Mode clients can't connect
+   By default Runner binds to 127.0.0.1. To accept LAN connections,
+   set networkBindAddress to 0.0.0.0 in portable-config.json and
+   restart Runner. Firewall rules on the host still apply.
+
+--------------------------------------------------------------------------------
+ More Info
+--------------------------------------------------------------------------------
+
+ Full README, configuration reference, architecture, and roadmap:
+   see README.md at the repo root.

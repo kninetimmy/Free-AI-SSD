@@ -9,28 +9,33 @@ Prepare the drive once on a machine with internet access — download the models
 - **HOTAS-aware** — import your DCS bindings; get answers using your actual stick and throttle layout
 - **Offline voice** — speak your questions, hear the answers; speech-to-text and TTS run fully locally
 
-**Quick start:** download from [Releases](../../releases), run `FreeAiSsd.PrepApp.exe`, then follow [Setup & Installation](#setup) below.
+**Quick start:** download from [Releases](../../releases), run `FreeAiSsd.PrepApp.exe`, then follow [Setup & Installation](#setup) below. There's also a quickstart text file at [`docs/QUICKSTART.txt`](docs/QUICKSTART.txt) for a condensed version.
 
 ---
 
-## Current Status (April 2026)
+## Origin story
 
-### Implemented now
-- ✅ Local offline chat (Runner + local Ollama loopback)
-- ✅ Local RAG / document library with source citations
-- ✅ Local TTS playback (System SAPI or Piper)
-- ✅ Local Whisper STT
-- ✅ Network Mode v1 LAN text API (`/api/chat`, `/api/chat/stream`, `/api/models`, `/api/health`)
-- ✅ Network Mode v2 remote voice upload:
-  - `POST /api/stt/transcribe` (LAN audio upload → host-side Whisper transcription)
-  - `POST /api/voice/query` (LAN audio upload → host-side transcription → optional chat → optional host-side TTS)
+This started as a way to take AI into the field with no cell signal — ham radio manuals, band plans, and reference docs loaded onto a pocket SSD so an LLM could answer questions about them miles from civilization. Then it turned out the same setup works really well as a voice-activated copilot in DCS: load aircraft manuals, import your HOTAS bindings, and hit a button on the throttle to ask questions mid-sortie without taking the VR headset off. Same drive. Same AI. Same offline-first idea.
 
-### Partially implemented
-- ⚠️ Network voice supports WAV now (PCM 16-bit mono 16kHz) and optional raw PCM (`pcm16le`); broader audio codec support is not implemented yet.
+---
 
-### Still planned / intentionally not supported
-- ⏳ Remote HOTAS/PTT control over LAN is not implemented.
-- 🚫 Direct Ollama LAN exposure is intentionally not supported (Runner API is the only network surface).
+## Features (current state)
+
+- ✅ **Portable offline AI** — Ollama staged on the SSD, bound to loopback only
+- ✅ **Cross-platform runtime** — Windows 10/11 (WPF Runner) and macOS (Swift Runner, beta)
+- ✅ **RAG document library** — PDF / TXT / MD / JSON / CSV, with inline source citations
+- ✅ **DCS World bindings parser** — auto-detects Saved Games, scans aircraft, merges stick/throttle/pedals into per-aircraft reference docs
+- ✅ **Voice input (Whisper.cpp)** — fully local STT; Tiny / Base / Small / Medium models
+- ✅ **Voice output (TTS)** — Windows SAPI or Piper neural TTS; per-device audio routing
+- ✅ **HOTAS Push-to-Talk** — DirectInput joystick button triggers record → transcribe → send → TTS, hands-free
+- ✅ **Network Mode** — authenticated LAN HTTP API for chat, streaming chat, STT upload, host-side TTS, and voice-query orchestration
+- ✅ **Companion tray app** — lightweight Windows client for a second PC on the LAN (no SSD required on the client)
+- ✅ **Offline prereq bundle** — .NET 8 Desktop Runtime + VC++ redist staged and SHA-verified so Runner installs cleanly on fresh targets
+
+Known gaps:
+- Network voice upload currently supports WAV (PCM 16-bit mono 16kHz) and raw `pcm16le`; other codecs not implemented.
+- Remote HOTAS/PTT control over LAN is not implemented (PTT runs on the host machine running Runner).
+- Direct Ollama LAN exposure is intentionally not supported — Runner API is the only network surface.
 
 ---
 
@@ -423,19 +428,24 @@ All settings live in `config/portable-config.json` on the SSD.
 ---
 
 <details>
-<summary>🗺️ Roadmap</summary>
+<summary>🗺️ Roadmap & Phase Status</summary>
+
+| Phase | Scope | Status |
+|---|---|---|
+| Phase 1 | DCS Bindings Parser (diff.lua → per-aircraft RAG docs) | ✅ Complete |
+| Phase 2 | Example bindings files shipped in-repo for tests / demos | ⏳ In progress |
+| Phase 3 | Voice Pipeline — Whisper.cpp STT + TTS (SAPI + Piper) | ✅ Complete |
+| Phase 4 | HOTAS Push-to-Talk (DirectInput, VR-friendly) | ✅ Complete |
+| Phase 5 | Network Mode — two-PC setup (LAN API + Companion tray) | ✅ Complete (v2) |
+| Phase 6 | Setup Profiles / Copilot Personas (general vs. flight sim) | 🗓️ Planned |
 
 ### IL-2 Sturmovik and War Thunder Bindings Parsers
 
-Bindings import currently supports DCS World only. IL-2 and War Thunder parsers are planned for a future phase, pending example binding files.
+Bindings import currently supports DCS World only. IL-2 and War Thunder parsers are planned, pending example binding files.
 
-### Network Mode (v2 complete)
+### Setup Profiles / Copilot Personas (Phase 6)
 
-Run the AI on one machine, query it from another on the same local network through Runner's authenticated LAN API. v2 adds remote voice upload for host-side Whisper transcription and optional host-side TTS response playback. Ollama remains localhost-only.
-
-### Setup Profiles
-
-Mode selection at install time: **general use** or **flight sim mode**. Flight sim mode pulls Whisper, TTS, and the bindings importer. Base install stays lightweight for users who don't need sim tooling.
+Mode selection at install time: **general use** or **flight sim mode**. Flight sim mode pulls Whisper, TTS, and the bindings importer. Base install stays lightweight for users who don't need sim tooling. Personas will ship with curated system prompts (e.g. "DCS copilot", "ham radio reference") and default model/embedding choices.
 
 </details>
 
@@ -446,11 +456,15 @@ Mode selection at install time: **general use** or **flight sim mode**. Flight s
 
 ### How It's Structured
 
-Free-AI-SSD ships two desktop applications backed by a shared cross-platform library:
+Free-AI-SSD ships several components backed by a shared cross-platform library:
 
 - **PrepApp** (Windows, WPF) — runs on an online machine to configure the SSD: picks drive, downloads and stages Ollama, pulls models, bundles prerequisites, finalizes layout
-- **Runner** (Windows WPF / macOS Swift) — runs from the SSD on the target machine; starts Ollama, provides the chat interface, manages document libraries and voice
-- **Shared library** (`FreeAiSsd.Shared`, `net8.0`) — portable core logic: encryption, trust policy, path guards, config, dependency checking, download management, MVVM infrastructure
+- **Runner** (Windows, WPF) — runs from the SSD on the target machine; starts Ollama, provides the chat interface, manages document libraries, voice pipeline, HOTAS PTT, and the LAN API host
+- **macOS Runner** (`mac-runner/`, Swift) — macOS-native equivalent of Runner for the cross-platform beta bundle; shipped at `<SSD>/mac/Runner.app`
+- **Voice Pipeline** (lives inside Runner's service layer) — `AudioCaptureService` → `WhisperSpeechToTextService` → `ChatService` → `SystemTextToSpeechService` / `PiperTextToSpeechService`, orchestrated by `PttVoicePipelineService` when HOTAS PTT is enabled
+- **Bindings Parser** (inside the shared library at `shared/Documents/`) — `DcsSavedGamesLocator` finds DCS installs, `DcsAircraftScanner` enumerates aircraft, `DcsBindingParser` parses `diff.lua`, `DcsBatchProcessor` merges devices and writes RAG documents
+- **Companion** (`companion/`, WPF tray app) — optional lightweight client for a second LAN machine; no SSD required; talks to the Runner LAN API for chat / STT upload / voice-query / host-side TTS
+- **Shared library** (`FreeAiSsd.Shared`, `net8.0`) — portable core logic: encryption, trust policy, path guards, config, dependency checking, download management, MVVM infrastructure, audio capture, HOTAS input, DCS binding models, document library, RAG pipeline
 
 ### Service Layer (Runner)
 
@@ -514,9 +528,11 @@ cache/                   — prep-time download cache
 | `shared/` | `net8.0` | Cross-platform shared library (`FreeAiSsd.Shared`) |
 | `prep-app/` | `net8.0-windows` | WPF PrepApp |
 | `runner/` | `net8.0-windows` | WPF Runner |
-| `mac-runner/` | macOS | Swift macOS Runner |
+| `companion/` | `net8.0-windows` | WPF Companion tray client (LAN second-PC use) |
+| `mac-runner/` | macOS (Swift) | Swift macOS Runner |
+| `tools/FreeAiSsd.PrereqFetch/` | `net8.0` | CI helper that pre-builds the offline prereq bundle via the shared `PrereqResolver` |
 | `tests/` | `net8.0` | xUnit test project (`FreeAiSsd.Tests`) |
-| `docs/` | — | Documentation |
+| `docs/` | — | Documentation (includes `QUICKSTART.txt`) |
 
 ### Shared Library Components
 
@@ -616,7 +632,6 @@ Signing is disabled by default in CI (`MAC_SIGNING_ENABLED=false`). Supported vi
 - **2026-04-14**: Network Mode v2 — added LAN audio upload endpoints for host-side Whisper transcription (`/api/stt/transcribe`) and voice-query orchestration (`/api/voice/query`) with optional host-side TTS trigger
 - **2026-02-21**: DCS Bindings Import — reads DCS `diff.lua` files, auto-detects saved games folder, merges multi-device HOTAS inputs, writes per-aircraft reference documents into the library for RAG
 - **2026-02-21**: Voice pipeline — offline STT via Whisper.cpp (Tiny/Base/Small/Medium); TTS via Windows SAPI or Piper neural TTS; configurable mic, voice, rate, volume, and output device
-- **2026-02-19**: Initial Replit setup with .NET 8; build and test workflow configured
 - **2026-02-19**: Comprehensive code review completed (architecture, security, code quality)
 - **2026-02-19**: XML documentation added to all source files (shared, prep-app, runner, tests)
 - **2026-02-19**: MVVM refactoring Phase 1 complete — base classes, 9 service interfaces, shared DTOs, `PrepViewModel`, 20 unit tests
