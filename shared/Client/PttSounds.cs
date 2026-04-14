@@ -36,11 +36,20 @@ internal static class PttSounds
     }
 
     /// <summary>
-    /// Plays a PCM beep asynchronously on the given output device (or default).
+    /// Plays a PCM beep asynchronously on the default output device.
     /// Returns immediately — playback happens on a background thread.
     /// </summary>
+    /// <remarks>
+    /// The <paramref name="outputDevice"/> argument is accepted for API symmetry
+    /// with <c>AudioCaptureService</c> but is currently ignored: NAudio's legacy
+    /// <c>WaveOut</c> enumeration APIs live in a Windows-only assembly that
+    /// isn't reachable from this cross-platform (<c>net8.0</c>) shared project,
+    /// and <c>WaveOutEvent</c> exposes no static device listing. Beeps play on
+    /// the system default output, which is fine for non-critical PTT feedback.
+    /// </remarks>
     public static void PlayAsync(byte[] pcmData, string? outputDevice = null)
     {
+        _ = outputDevice; // intentionally unused — see remarks
         Task.Run(() =>
         {
             try
@@ -48,18 +57,6 @@ internal static class PttSounds
                 using var ms = new System.IO.MemoryStream(pcmData);
                 using var raw = new RawSourceWaveStream(ms, new WaveFormat(SampleRate, 16, 1));
                 using var wo = new WaveOutEvent();
-
-                if (outputDevice is not null)
-                {
-                    for (int i = 0; i < WaveOut.DeviceCount; i++)
-                    {
-                        if (WaveOut.GetCapabilities(i).ProductName.Contains(outputDevice, StringComparison.OrdinalIgnoreCase))
-                        {
-                            wo.DeviceNumber = i;
-                            break;
-                        }
-                    }
-                }
 
                 wo.Init(raw);
                 wo.Play();
