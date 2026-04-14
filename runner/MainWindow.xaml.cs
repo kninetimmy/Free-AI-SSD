@@ -34,6 +34,7 @@ public partial class MainWindow : System.Windows.Window
     private readonly IDcsBindingsImportService _dcsImportService;
     private readonly ISpeechToTextService _sttService;
     private readonly IAudioCaptureService _audioCaptureService;
+    private readonly IRunnerLocalApiService _localApiService;
     private ITextToSpeechService? _ttsService;
 
     private PortableConfig? _config;
@@ -92,10 +93,15 @@ public partial class MainWindow : System.Windows.Window
         _audioCaptureService = new AudioCaptureService();
         _hotasService = new HotasInputService();
         _pttPipeline = new PttVoicePipelineService(_audioCaptureService, _sttService, _chatService);
+        _localApiService = new RunnerLocalApiService(_chatService, () => _ttsService, _logger);
 
         // Wire service events to UI
         _ollamaService.LogMessage += msg => AppendLog(msg);
-        _ollamaService.ProcessExited += () => Dispatcher.Invoke(() => StatusText.Text = "Stopped");
+        _ollamaService.ProcessExited += () => Dispatcher.Invoke(async () =>
+        {
+            await _localApiService.StopAsync();
+            StatusText.Text = "Stopped";
+        });
         _modelService.LogMessage += msg => AppendLog(msg);
         _docService.LogMessage += msg => AppendLog(msg);
         _chatService.LogMessage += msg => AppendLog(msg);
@@ -104,6 +110,7 @@ public partial class MainWindow : System.Windows.Window
         _audioCaptureService.LogMessage += msg => AppendLog(msg);
         _hotasService.LogMessage += msg => AppendLog(msg);
         _pttPipeline.LogMessage += msg => AppendLog(msg);
+        _localApiService.LogMessage += msg => AppendLog(msg);
 
         // PTT pipeline events: update overlay and main UI
         _pttPipeline.StateChanged += state => Dispatcher.Invoke(() =>
@@ -126,7 +133,11 @@ public partial class MainWindow : System.Windows.Window
         _hotasService.PttButtonPressed += () => Dispatcher.Invoke(() => OnPttButtonPressed());
         _hotasService.PttButtonReleased += () => Dispatcher.Invoke(() => OnPttButtonReleased());
 
-        Closed += (_, _) => CleanupPtt();
+        Closed += async (_, _) =>
+        {
+            CleanupPtt();
+            await _localApiService.StopAsync();
+        };
 
         LoadConfig();
         _ = ShowModelSizingWarningsOnStartupAsync();
@@ -268,6 +279,7 @@ public partial class MainWindow : System.Windows.Window
         }
 
         StatusText.Text = $"Running on {_ollamaService.CurrentHost}";
+        await StartLocalApiIfEnabledAsync();
         await Task.Delay(1000);
     }
 
@@ -275,8 +287,33 @@ public partial class MainWindow : System.Windows.Window
     {
         if (_ollamaService.IsRunning)
         {
+            _ = _localApiService.StopAsync();
             _ollamaService.Stop();
             StatusText.Text = "Stopped";
+        }
+    }
+
+    private async Task StartLocalApiIfEnabledAsync()
+    {
+        if (_config is null || _ollamaService.CurrentHost is null)
+        {
+            return;
+        }
+
+        if (!_config.NetworkModeEnabled)
+        {
+            await _localApiService.StopAsync();
+            return;
+        }
+
+        try
+        {
+            await _localApiService.StartAsync(_config, _ollamaService.CurrentHost);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Failed to start Network API: {ex.Message}");
+            _logger?.Error($"Network API start failure: {ex}");
         }
     }
 
