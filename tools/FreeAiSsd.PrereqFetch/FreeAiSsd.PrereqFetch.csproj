@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>FreeAiSsd.PrereqFetch</RootNamespace>
+    <AssemblyName>FreeAiSsd.PrereqFetch</AssemblyName>
+    <!--
+      Deliberately NOT added to FreeAiSsd.sln: this is a CI-only helper invoked
+      via `dotnet run --project tools/FreeAiSsd.PrereqFetch`. Keeping it outside
+      the sln avoids bloating the main PR/CI compile path and keeps the tool's
+      build scoped to release dispatch runs.
+    -->
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\shared\FreeAiSsd.Shared.csproj" />
+  </ItemGroup>
+</Project>

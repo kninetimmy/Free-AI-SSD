@@ -9,9 +9,16 @@ name: Build and Package
 #   - actions/setup-dotnet@v4
 #   - actions/upload-artifact@v4
 #   - actions/download-artifact@v4
+#   - actions/cache@v4
 # These remain tag-pinned in this pass because their v4 tag SHAs were not
 # independently verified in this change. Bumping them without SHA pins keeps
 # the supply-chain risk consistent with prior behavior; do not weaken further.
+#
+# Phase-A hardening (Task 3, round 3): the prereq download steps no longer carry
+# hardcoded URL + SHA-256 pins. Resolution + verification is delegated to
+# tools/FreeAiSsd.PrereqFetch, which shares PrereqResolver with PrepApp so CI
+# and the runtime updater use a single implementation. See README "Prereq trust
+# model" for the per-upstream trust basis.
 
 on:
   pull_request:
@@ -57,122 +64,70 @@ jobs:
       - name: Publish PrepApp
         shell: pwsh
         run: dotnet publish prep-app/FreeAiSsd.PrepApp.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true -o out/prepapp-publish
-      - name: Download macOS ollama runtime for staging
-        if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
-        shell: pwsh
-        run: |
-          # Phase-A hardening (Task 3): verify every downloaded prereq against a
-          # hardcoded SHA-256. The workflow fails the job on mismatch or when the
-          # expected hash is empty. No more "trust whatever we downloaded" + record.
-          #
-          # Pin details:
-          #   - Version:        Ollama v0.20.7
-          #   - Asset filename: Ollama-darwin.zip (note capital "O" in v0.20.7+)
-          #   - SHA-256 source: https://github.com/ollama/ollama/releases/download/v0.20.7/sha256sum.txt
-          #                     line "74670dafa053a48aef8c7666100cf91f2a3c84fe88cee1a8293e7a7cb3442eea  ./Ollama-darwin.zip"
-          # When bumping the pin, replace both $pinnedUrl and $expectedSha256 together
-          # using the same sha256sum.txt asset from the target release.
-          $pinnedUrl = "https://github.com/ollama/ollama/releases/download/v0.20.7/Ollama-darwin.zip"
-          $expectedSha256 = "74670dafa053a48aef8c7666100cf91f2a3c84fe88cee1a8293e7a7cb3442eea"
-
-          if ([string]::IsNullOrWhiteSpace($pinnedUrl) -or [string]::IsNullOrWhiteSpace($expectedSha256)) {
-            throw "ollama-darwin.zip is not pinned. Populate `$pinnedUrl and `$expectedSha256 in .github/workflows/build.yml before running this workflow with include_macos=true."
-          }
-
-          $macDir = "out/mac/tools/ollama"
-          New-Item -ItemType Directory -Path $macDir -Force | Out-Null
-          # Keep the on-disk filename lowercase so downstream staging code is unchanged.
-          $archive = Join-Path $macDir "ollama-darwin.zip"
-          Invoke-WebRequest -Uri $pinnedUrl -OutFile $archive -UseBasicParsing
-          $actualSha256 = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actualSha256 -ne $expectedSha256.ToLowerInvariant()) {
-            throw "SHA-256 mismatch for ollama-darwin.zip. Expected: $expectedSha256 Actual: $actualSha256"
-          }
-          [ordered]@{ id="ollama_macos_universal"; sourceUrl=$pinnedUrl; archive="ollama-darwin.zip"; sha256=$expectedSha256.ToLowerInvariant(); verifiedAtUtc=[DateTime]::UtcNow.ToString("o") } | ConvertTo-Json | Set-Content -Path (Join-Path $macDir "mac-tools-manifest.json") -Encoding UTF8
-
-      - name: Download offline Windows prerequisites
-        # Phase-A hardening (Task 3): this step is the offline-installer bundling
-        # path used by release packaging only. Scope it to workflow_dispatch so
-        # pull-request CI does not need the pinned hashes, while the actual release
-        # pipeline (also workflow_dispatch) still runs the fail-closed verification.
-        # Matches the gating on the Download macOS ollama step and the
-        # package-release job.
+      # Phase-A hardening: the previous CI path pinned hardcoded URL + SHA-256
+      # pairs per prereq. That required human maintenance every upstream bump
+      # and produced long-lived TODOs whenever a hash wasn't independently
+      # verifiable from the authoring environment. We now delegate the entire
+      # resolve + download + verify flow to tools/FreeAiSsd.PrereqFetch, which
+      # shares the PrereqResolver implementation with PrepApp so the two paths
+      # cannot drift. Trust model per upstream is documented in the shared
+      # resolver (SHA-512 for .NET, SHA-256 for Ollama, HTTPS-only aka.ms for
+      # VC++). The tool fails closed on any network/parse/hash error.
+      #
+      # actions/cache@v4 caches the downloaded installers across runs so that
+      # repeated dispatches of the same latest-stable upstream don't re-download
+      # the Microsoft / GitHub assets. Cache key is intentionally date-scoped so
+      # a new upstream release is picked up within 24h even if the key otherwise
+      # matches; the fail-closed verify still runs on every resolve.
+      - name: Compute prereq cache key (UTC date)
         if: github.event_name == 'workflow_dispatch'
+        id: prereq-cache-key
         shell: pwsh
         run: |
-          # Phase-A hardening (Task 3): each prereq has a hardcoded expected SHA-256.
-          # Jobs fail on mismatch or when the expected hash is empty. The manifest
-          # records only verified hashes — the observed hash is never written as-is.
-          #
-          # TODO(phase-a): pin versioned URL + SHA-256 for each prereq below before
-          # cutting the next release via workflow_dispatch. These remain blank after
-          # Phase A because neither Microsoft checksum endpoint nor the aka.ms
-          # redirect target were reachable from the environment used to finalize
-          # Phase A. Do not guess values — source them from:
-          #   vcredist_x64:
-          #     - Versioned URL from https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist
-          #       (the "Direct link" under the x64 entry; something like
-          #        https://download.visualstudio.microsoft.com/download/pr/<guid>/<hash>/VC_redist.x64.exe).
-          #     - SHA-256 computed once under a trusted workstation, or published
-          #       by Microsoft alongside the redistributable.
-          #   dotnet8_desktop_x64:
-          #     - SHA-256 from https://builds.dotnet.microsoft.com/dotnet/checksums/8.0.18-sha.txt
-          #       for the line whose filename is windowsdesktop-runtime-8.0.18-win-x64.exe.
-          # Until both fields are populated for an entry, the step throws for
-          # workflow_dispatch runs (fail-closed on the release path only; PR CI
-          # skips this step entirely via the `if:` above).
-          $prereqs = @(
-            @{
-              id = "vcredist_x64"
-              displayName = "Microsoft Visual C++ Redistributable (x64)"
-              sourceUrl = ""  # TODO(phase-a): pin exact versioned URL (no aka.ms rolling link)
-              expectedSha256 = ""  # TODO(phase-a): lowercase hex SHA-256 of the pinned asset
-              filename = "vc_redist.x64.exe"
-              silentArgs = "/install /quiet /norestart"
-              requiresAdmin = $true
-              isOptional = $false
-            },
-            @{
-              id = "dotnet8_desktop_x64"
-              displayName = ".NET 8 Windows Desktop Runtime (x64)"
-              sourceUrl = "https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/8.0.18/windowsdesktop-runtime-8.0.18-win-x64.exe"
-              expectedSha256 = ""  # TODO(phase-a): fill in from 8.0.18-sha.txt checksum file
-              filename = "windowsdesktop-runtime-8-win-x64.exe"
-              silentArgs = "/install /quiet /norestart"
-              requiresAdmin = $true
-              isOptional = $true
-            }
-          )
+          # Cache buckets installed installers per-UTC-day. Repeated dispatches
+          # in the same day reuse the cached binaries; the first dispatch of a
+          # new day re-resolves + re-verifies via PrereqResolver. This keeps the
+          # cache useful while still picking up new Microsoft / GitHub releases
+          # within 24h.
+          $today = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd")
+          "date=$today" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-          $prereqDir = "out/windows/tools/prereqs"
-          New-Item -ItemType Directory -Path $prereqDir -Force | Out-Null
-          $manifestEntries = @()
-          foreach ($prereq in $prereqs) {
-            if ([string]::IsNullOrWhiteSpace($prereq.sourceUrl) -or [string]::IsNullOrWhiteSpace($prereq.expectedSha256)) {
-              throw "Prereq '$($prereq.id)' is not pinned. Populate sourceUrl and expectedSha256 in .github/workflows/build.yml before running this workflow."
-            }
-            $target = Join-Path $prereqDir $prereq.filename
-            Invoke-WebRequest -Uri $prereq.sourceUrl -OutFile $target -UseBasicParsing
-            $actualSha256 = (Get-FileHash -Path $target -Algorithm SHA256).Hash.ToLowerInvariant()
-            $expected = $prereq.expectedSha256.ToLowerInvariant()
-            if ($actualSha256 -ne $expected) {
-              throw "SHA-256 mismatch for $($prereq.id). Expected: $expected Actual: $actualSha256"
-            }
-            $size = (Get-Item $target).Length
-            $manifestEntries += [ordered]@{
-              id = $prereq.id
-              displayName = $prereq.displayName
-              filename = $prereq.filename
-              sourceUrl = $prereq.sourceUrl
-              verifiedAtUtc = [DateTime]::UtcNow.ToString("o")
-              sha256 = $expected
-              sizeBytes = $size
-              silentArgs = $prereq.silentArgs
-              requiresAdmin = $prereq.requiresAdmin
-              isOptional = $prereq.isOptional
-            }
-          }
-          [ordered]@{ prerequisites = $manifestEntries } | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $prereqDir "prereqs-manifest.json") -Encoding UTF8
+      - name: Cache offline Windows prerequisites
+        if: github.event_name == 'workflow_dispatch'
+        id: cache-windows-prereqs
+        uses: actions/cache@v4
+        with:
+          path: out/windows/tools/prereqs
+          key: windows-prereqs-v2-${{ runner.os }}-${{ steps.prereq-cache-key.outputs.date }}
+          restore-keys: |
+            windows-prereqs-v2-${{ runner.os }}-
+
+      - name: Cache macOS Ollama archive
+        if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
+        id: cache-mac-ollama
+        uses: actions/cache@v4
+        with:
+          path: out/mac/tools/ollama
+          key: mac-ollama-v2-${{ runner.os }}-${{ steps.prereq-cache-key.outputs.date }}
+          restore-keys: |
+            mac-ollama-v2-${{ runner.os }}-
+
+      - name: Resolve + verify macOS Ollama (runtime discovery)
+        if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false') && steps.cache-mac-ollama.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          # Single source of truth: tools/FreeAiSsd.PrereqFetch calls the same
+          # PrereqResolver used by PrepApp. Any upstream drift surfaces here,
+          # not in a parallel PowerShell reimplementation.
+          dotnet run --project tools/FreeAiSsd.PrereqFetch/FreeAiSsd.PrereqFetch.csproj -c Release -- --kind mac-ollama --out out/mac/tools/ollama
+          if (-not $?) { throw "Ollama resolve/fetch step failed." }
+
+      - name: Resolve + verify offline Windows prerequisites (runtime discovery)
+        if: github.event_name == 'workflow_dispatch' && steps.cache-windows-prereqs.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          dotnet run --project tools/FreeAiSsd.PrereqFetch/FreeAiSsd.PrereqFetch.csproj -c Release -- --kind windows --out out/windows/tools/prereqs
+          if (-not $?) { throw "Windows prereq resolve/fetch step failed." }
       - uses: actions/upload-artifact@v4
         with:
           name: windows-build-output
@@ -243,7 +198,14 @@ jobs:
   package-release:
     runs-on: windows-latest
     needs: [windows-build, mac-runner-build]
-    if: always() && needs.windows-build.result == 'success' && (needs.mac-runner-build.result == 'success' || needs.mac-runner-build.result == 'skipped')
+    # Phase-A hardening: entire release-assembly job is gated to workflow_dispatch
+    # runs. PR and push-to-main builds stop at the windows-build / mac-runner-build
+    # jobs. This matches the gating on "Download offline Windows prerequisites" and
+    # "Download macOS ollama runtime for staging" (which produce the payloads this
+    # job copies from `in/windows/out/windows` and `in/windows/out/mac/tools`). If
+    # those upstream steps are gated to dispatch but this job is not, the job
+    # fails on PRs with "Cannot find path ... out/windows".
+    if: github.event_name == 'workflow_dispatch' && needs.windows-build.result == 'success' && (needs.mac-runner-build.result == 'success' || needs.mac-runner-build.result == 'skipped')
     # Phase-A hardening (Task 4): scoped write permission ONLY on the release job.
     # The "Create Release" / "Upload beta ZIP to release" steps below gate themselves
     # to workflow_dispatch, so the write scope is only exercised on manual release runs.
