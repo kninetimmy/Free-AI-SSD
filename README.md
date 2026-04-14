@@ -34,8 +34,9 @@ This started as a way to take AI into the field with no cell signal — ham radi
 
 Known gaps:
 - Network voice upload currently supports WAV (PCM 16-bit mono 16kHz) and raw `pcm16le`; other codecs not implemented.
-- Remote HOTAS/PTT control over LAN is not implemented (PTT runs on the host machine running Runner).
 - Direct Ollama LAN exposure is intentionally not supported — Runner API is the only network surface.
+
+Note: Remote HOTAS/PTT is supported via the Companion tray app — HOTAS PTT can run on the client machine and drive the full voice loop against Runner over LAN. TTS playback defaults to the host machine running Runner; Companion clients can opt in to local playback by passing `returnAudio=true` on `/api/voice/query`.
 
 ---
 
@@ -293,7 +294,7 @@ Network Mode lets one machine run Runner + Ollama locally, while other devices o
 - `POST /api/chat`
 - `POST /api/chat/stream` (newline-delimited JSON stream)
 - `POST /api/stt/transcribe` (multipart upload: `audio`)
-- `POST /api/voice/query` (multipart upload: `audio`, optional `model`, `autoSendToChat`, `speakResponse`)
+- `POST /api/voice/query` (multipart upload: `audio`, optional `model`, `autoSendToChat`, `speakResponse`, `returnAudio`). When `returnAudio=true` the response includes `AudioBase64` + `AudioMime` so the client can play TTS locally instead of on the host.
 - `POST /api/tts/speak`
 - `POST /api/tts/stop`
 
@@ -337,6 +338,16 @@ curl -X POST http://RUNNER_HOST:41555/api/voice/query \
   -F "model=phi3" \
   -F "autoSendToChat=true" \
   -F "speakResponse=true"
+
+# Voice query with client-side TTS playback (returnAudio)
+# Response JSON contains AudioBase64 + AudioMime ("audio/wav") for local playback.
+curl -X POST http://RUNNER_HOST:41555/api/voice/query \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -F "audio=@question.wav;type=audio/wav" \
+  -F "model=phi3" \
+  -F "autoSendToChat=true" \
+  -F "speakResponse=true" \
+  -F "returnAudio=true"
 ```
 
 **Remote voice upload formats and limits (v2):**
@@ -346,6 +357,7 @@ curl -X POST http://RUNNER_HOST:41555/api/voice/query \
 - Upload size limit is controlled by `networkMaxAudioUploadMB`
 - Invalid type / empty payload / oversize uploads return clear 4xx errors
 - `speakResponse=true` only triggers TTS when host allows network TTS; playback occurs on the host machine
+- `returnAudio=true` returns the synthesized TTS in the response as WAV PCM 16-bit mono 16kHz (`AudioMime: "audio/wav"`, `AudioBase64`). The returned payload is bounded by the same `networkMaxAudioUploadMB` cap; oversized syntheses are omitted rather than truncated.
 
 </details>
 
@@ -408,6 +420,8 @@ All settings live in `config/portable-config.json` on the SSD.
 | `pttOverlayEnabled` | `true` | Show the always-on-top PTT status overlay |
 | `pttOverlayX` / `pttOverlayY` | `20` / `20` | Overlay window position in pixels from top-left |
 
+The Companion tray app exposes the same two cues under identical key names (`pttActivationSoundEnabled`, `pttOverlayEnabled`) in `companion-config.json`, toggleable from Companion's Settings window. These control the Companion client's own local beep and overlay, independent of the host's Runner settings.
+
 ### Network Mode (Runner LAN API)
 
 | Property | Default | Description |
@@ -463,7 +477,7 @@ Free-AI-SSD ships several components backed by a shared cross-platform library:
 - **macOS Runner** (`mac-runner/`, Swift) — macOS-native equivalent of Runner for the cross-platform beta bundle; shipped at `<SSD>/mac/Runner.app`
 - **Voice Pipeline** (lives inside Runner's service layer) — `AudioCaptureService` → `WhisperSpeechToTextService` → `ChatService` → `SystemTextToSpeechService` / `PiperTextToSpeechService`, orchestrated by `PttVoicePipelineService` when HOTAS PTT is enabled
 - **Bindings Parser** (inside the shared library at `shared/Documents/`) — `DcsSavedGamesLocator` finds DCS installs, `DcsAircraftScanner` enumerates aircraft, `DcsBindingParser` parses `diff.lua`, `DcsBatchProcessor` merges devices and writes RAG documents
-- **Companion** (`companion/`, WPF tray app) — optional lightweight client for a second LAN machine; no SSD required; talks to the Runner LAN API for chat / STT upload / voice-query / host-side TTS
+- **Companion** (`companion/`, WPF tray app) — optional lightweight client for a second LAN machine; no SSD required; talks to the Runner LAN API for chat / STT upload / voice-query / host-side TTS. Supports its own HOTAS PTT loop, an activation beep, a status overlay window, and a mic-preflight check in Settings. When `returnAudio=true` is negotiated on `/api/voice/query`, Companion plays the synthesized TTS locally instead of on the Runner host.
 - **Shared library** (`FreeAiSsd.Shared`, `net8.0`) — portable core logic: encryption, trust policy, path guards, config, dependency checking, download management, MVVM infrastructure, audio capture, HOTAS input, DCS binding models, document library, RAG pipeline
 
 ### Service Layer (Runner)
@@ -629,6 +643,7 @@ Signing is disabled by default in CI (`MAC_SIGNING_ENABLED=false`). Supported vi
 
 ### Recent Changes
 
+- **2026-04-14**: Split-PC TTS return path — `/api/voice/query` accepts `returnAudio=true` and returns the synthesized WAV inline as `AudioBase64` + `AudioMime`, so the Companion client can play TTS locally instead of on the Runner host; returned audio is WAV PCM 16-bit mono 16kHz and bounded by `networkMaxAudioUploadMB`. Companion tray app gained a VR-usable PTT UX: activation beep, always-on-top `PttOverlayWindow`, and a mic preflight in the Settings window, wired to new `pttActivationSoundEnabled` / `pttOverlayEnabled` keys in `companion-config.json`.
 - **2026-04-14**: Network Mode v2 — added LAN audio upload endpoints for host-side Whisper transcription (`/api/stt/transcribe`) and voice-query orchestration (`/api/voice/query`) with optional host-side TTS trigger
 - **2026-02-21**: DCS Bindings Import — reads DCS `diff.lua` files, auto-detects saved games folder, merges multi-device HOTAS inputs, writes per-aircraft reference documents into the library for RAG
 - **2026-02-21**: Voice pipeline — offline STT via Whisper.cpp (Tiny/Base/Small/Medium); TTS via Windows SAPI or Piper neural TTS; configurable mic, voice, rate, volume, and output device
