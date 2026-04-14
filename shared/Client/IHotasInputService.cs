@@ -1,4 +1,4 @@
-namespace FreeAiSsd.Runner.Services;
+namespace FreeAiSsd.Shared.Client;
 
 /// <summary>
 /// Describes a connected joystick/HOTAS device detected via DirectInput.

@@ -1,6 +1,6 @@
 using NAudio.Wave;
 
-namespace FreeAiSsd.Runner.Services;
+namespace FreeAiSsd.Shared.Client;
 
 public sealed class AudioCaptureService : IAudioCaptureService
 {

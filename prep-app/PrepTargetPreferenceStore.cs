@@ -6,12 +6,6 @@ using FreeAiSsd.Shared.Models;
 
 namespace FreeAiSsd.PrepApp;
 
-/// <summary>
-/// Persists the user's prep target selection (Windows, macOS, or both)
-/// to the local application data folder. This ensures the user's platform
-/// preference is remembered between PrepApp sessions.
-/// Stored at: %LOCALAPPDATA%/FreeAiSsd/prepapp-settings.json
-/// </summary>
 public sealed class PrepTargetPreferenceStore
 {
     private readonly string _settingsPath;
@@ -23,58 +17,80 @@ public sealed class PrepTargetPreferenceStore
         _settingsPath = Path.Combine(settingsRoot, "prepapp-settings.json");
     }
 
-    /// <summary>
-    /// Loads the persisted prep target selection. Returns Windows as the default
-    /// if the settings file is missing, corrupt, or has an unknown schema version.
-    /// </summary>
-    public PrepTargets Load()
+    public PrepTargets Load() => LoadSettings().PrepTargets;
+
+    public PrepPreferenceSnapshot LoadSettings()
     {
         if (!File.Exists(_settingsPath))
         {
-            return PrepTargets.Windows;
+            return PrepPreferenceSnapshot.Default;
         }
 
         try
         {
             var model = JsonSerializer.Deserialize<PrepAppSettings>(File.ReadAllText(_settingsPath));
-            if (model is null || model.SchemaVersion != 1)
+            if (model is null || model.SchemaVersion != 2)
             {
-                return PrepTargets.Windows;
+                return PrepPreferenceSnapshot.Default;
             }
 
-            return Enum.TryParse<PrepTargets>(model.PrepTargetsValue, out var parsed) && parsed != PrepTargets.None
+            var targets = Enum.TryParse<PrepTargets>(model.PrepTargetsValue, out var parsed) && parsed != PrepTargets.None
                 ? parsed
                 : PrepTargets.Windows;
+
+            return new PrepPreferenceSnapshot(
+                targets,
+                model.InstallVrCompanion,
+                model.CompanionHostAddress ?? string.Empty,
+                model.CompanionHostPort <= 0 ? 41555 : model.CompanionHostPort);
         }
         catch
         {
-            return PrepTargets.Windows;
+            return PrepPreferenceSnapshot.Default;
         }
     }
 
-    /// <summary>
-    /// Saves the prep target selection to disk. Normalizes "None" to "Windows"
-    /// to ensure at least one platform is always selected.
-    /// </summary>
     public void Save(PrepTargets targets)
     {
-        var safeTargets = targets == PrepTargets.None ? PrepTargets.Windows : targets;
+        var existing = LoadSettings();
+        SaveSettings(new PrepPreferenceSnapshot(targets, existing.InstallVrCompanion, existing.CompanionHostAddress, existing.CompanionHostPort));
+    }
+
+    public void SaveSettings(PrepPreferenceSnapshot snapshot)
+    {
+        var safeTargets = snapshot.PrepTargets == PrepTargets.None ? PrepTargets.Windows : snapshot.PrepTargets;
         var model = new PrepAppSettings
         {
-            PrepTargetsValue = safeTargets.ToString()
+            PrepTargetsValue = safeTargets.ToString(),
+            InstallVrCompanion = snapshot.InstallVrCompanion,
+            CompanionHostAddress = snapshot.CompanionHostAddress,
+            CompanionHostPort = snapshot.CompanionHostPort <= 0 ? 41555 : snapshot.CompanionHostPort
         };
 
         var json = JsonSerializer.Serialize(model, new JsonSerializerOptions { WriteIndented = true });
         File.WriteAllText(_settingsPath, json);
     }
 
-    /// <summary>Internal JSON model for the settings file with schema versioning.</summary>
     private sealed class PrepAppSettings
     {
         [JsonPropertyName("schemaVersion")]
-        public int SchemaVersion { get; init; } = 1;
+        public int SchemaVersion { get; init; } = 2;
 
         [JsonPropertyName("prepTargets")]
         public string PrepTargetsValue { get; init; } = nameof(PrepTargets.Windows);
+
+        [JsonPropertyName("installVrCompanion")]
+        public bool InstallVrCompanion { get; init; }
+
+        [JsonPropertyName("companionHostAddress")]
+        public string? CompanionHostAddress { get; init; }
+
+        [JsonPropertyName("companionHostPort")]
+        public int CompanionHostPort { get; init; } = 41555;
     }
+}
+
+public readonly record struct PrepPreferenceSnapshot(PrepTargets PrepTargets, bool InstallVrCompanion, string CompanionHostAddress, int CompanionHostPort)
+{
+    public static PrepPreferenceSnapshot Default => new(PrepTargets.Windows, false, string.Empty, 41555);
 }

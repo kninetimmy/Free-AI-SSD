@@ -34,6 +34,33 @@ public sealed class ArtifactStagingService : IArtifactStagingService
         await Task.CompletedTask;
     }
 
+
+    public async Task StageCompanionAsync(string ssdRoot, Action<string> onLog)
+    {
+        var sourceCompanionDir = ResolveCompanionPublishDirectory();
+        var targetCompanionDir = Path.Combine(ssdRoot, "companion");
+        Directory.CreateDirectory(targetCompanionDir);
+
+        if (sourceCompanionDir is null)
+        {
+            var hint = "Companion publish folder not found. Ensure companion-publish is next to FreeAiSsd.PrepApp.exe (or under payload/companion-publish).";
+            onLog(hint);
+            throw new DirectoryNotFoundException(hint);
+        }
+
+        onLog($"Using companion payload from: {sourceCompanionDir}");
+        foreach (var file in Directory.EnumerateFiles(sourceCompanionDir, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceCompanionDir, file);
+            var destination = Path.Combine(targetCompanionDir, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(file, destination, overwrite: true);
+        }
+
+        onLog("Companion artifacts staged.");
+        await Task.CompletedTask;
+    }
+
     public async Task StageMacRunnerAsync(string ssdRoot, Action<string> onLog, CancellationToken ct)
     {
         var macAvailability = MacArtifactAvailability.Evaluate(AppContext.BaseDirectory);
@@ -137,6 +164,34 @@ public sealed class ArtifactStagingService : IArtifactStagingService
         return null;
     }
 
+
+    private static string? ResolveCompanionPublishDirectory()
+    {
+        foreach (var contentRoot in EnumerateBundledContentRoots())
+        {
+            foreach (var folder in new[] { "companion-publish", "companion" })
+            {
+                var candidate = Path.Combine(contentRoot, folder);
+                if (DirectoryContainsCompanion(candidate))
+                    return candidate;
+            }
+        }
+
+        var repoRoot = FindRepoRoot(AppContext.BaseDirectory);
+        if (repoRoot is null)
+            return null;
+
+        var buildConfigurations = new[] { "Release", "Debug" };
+        foreach (var configuration in buildConfigurations)
+        {
+            var candidate = Path.Combine(repoRoot, "prep-app", "bin", configuration, "net8.0-windows", "companion-publish");
+            if (DirectoryContainsCompanion(candidate))
+                return candidate;
+        }
+
+        return null;
+    }
+
     private static string? FindRepoRoot(string startDirectory)
     {
         var directory = new DirectoryInfo(startDirectory);
@@ -151,6 +206,9 @@ public sealed class ArtifactStagingService : IArtifactStagingService
 
     private static bool DirectoryContainsRunner(string path)
         => Directory.Exists(path) && File.Exists(Path.Combine(path, "FreeAiSsd.Runner.exe"));
+
+    private static bool DirectoryContainsCompanion(string path)
+        => Directory.Exists(path) && File.Exists(Path.Combine(path, "FreeAiSsd.Companion.exe"));
 
     private static string? ResolveBundledFile(string relativePath)
     {
