@@ -114,6 +114,17 @@ public sealed class PortableConfig
     public bool NetworkRequireApiKey { get; set; } = true;
     /// <summary>Allow remote clients to trigger host-side TTS playback and stop.</summary>
     public bool NetworkAllowTts { get; set; }
+    /// <summary>Allow remote clients to upload audio for host-side Whisper transcription.</summary>
+    public bool NetworkAllowRemoteStt { get; set; }
+    /// <summary>Allow remote clients to run transcribe → optional chat → optional host TTS in one request.</summary>
+    public bool NetworkAllowRemoteVoiceQuery { get; set; }
+    /// <summary>
+    /// Default behavior for LAN voice queries when request does not specify auto-send:
+    /// true sends transcription directly to chat; false returns transcription only.
+    /// </summary>
+    public bool NetworkVoiceAutoSendToChat { get; set; } = true;
+    /// <summary>Maximum audio upload size for LAN STT/voice endpoints in megabytes.</summary>
+    public int NetworkMaxAudioUploadMB { get; set; } = 10;
 
     // ── Text-to-Speech ────────────────────────────────────────────────────
 
