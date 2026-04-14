@@ -11,6 +11,8 @@ public sealed class CompanionConfig
     public string? InputDeviceName { get; set; }
     public string? OutputDeviceName { get; set; }
     public bool AutoReconnect { get; set; } = true;
+    public bool PttActivationSoundEnabled { get; set; } = true;
+    public bool PttOverlayEnabled { get; set; } = true;
     public int SchemaVersion { get; set; } = 1;
 
     public static CompanionConfig Load(string path)

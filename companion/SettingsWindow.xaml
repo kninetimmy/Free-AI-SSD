@@ -1,7 +1,7 @@
 <Window x:Class="FreeAiSsd.Companion.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Companion Settings" Height="340" Width="460" WindowStartupLocation="CenterScreen">
+        Title="Companion Settings" Height="460" Width="460" WindowStartupLocation="CenterScreen">
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="*"/>
@@ -12,9 +12,21 @@
             <TextBlock Text="Host Port" Margin="0,8,0,0"/><TextBox x:Name="HostPortText"/>
             <TextBlock Text="API Key" Margin="0,8,0,0"/><TextBox x:Name="ApiKeyText"/>
             <TextBlock Text="PTT Binding (device|button or key:F8)" Margin="0,8,0,0"/><TextBox x:Name="PttBindingText"/>
-            <TextBlock Text="Input Device (blank=default)" Margin="0,8,0,0"/><ComboBox x:Name="InputDeviceCombo" IsEditable="True"/>
+            <TextBlock Text="Input Device (blank=default)" Margin="0,8,0,0"/>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <ComboBox Grid.Column="0" x:Name="InputDeviceCombo" IsEditable="True"/>
+                <Button Grid.Column="1" Content="Test mic" Width="80" Margin="8,0,0,0" Click="TestMic_Click"/>
+            </Grid>
+            <ProgressBar x:Name="MicLevelBar" Height="10" Minimum="0" Maximum="100" Margin="0,4,0,0"/>
+            <TextBlock x:Name="MicLevelText" Text="" Margin="0,2,0,0" FontSize="11" Foreground="#888"/>
             <TextBlock Text="Output Device (blank=default)" Margin="0,8,0,0"/><TextBox x:Name="OutputDeviceText"/>
             <CheckBox x:Name="AutoReconnectCheck" Content="Auto reconnect" Margin="0,8,0,0"/>
+            <CheckBox x:Name="PttActivationSoundCheck" Content="Play PTT activation beep" Margin="0,4,0,0"/>
+            <CheckBox x:Name="PttOverlayCheck" Content="Show PTT status overlay" Margin="0,4,0,0"/>
         </StackPanel>
         <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
             <Button Content="Save" Width="90" Click="Save_Click"/>

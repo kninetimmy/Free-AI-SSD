@@ -1,0 +1,25 @@
+<Window x:Class="FreeAiSsd.Companion.PttOverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="PTT Status"
+        Width="90" Height="36"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize">
+    <Border x:Name="RootBorder"
+            Background="#CC222222"
+            CornerRadius="6"
+            Padding="8,4"
+            MouseLeftButtonDown="Border_MouseLeftButtonDown"
+            MouseLeftButtonUp="Border_MouseLeftButtonUp"
+            MouseMove="Border_MouseMove"
+            Cursor="Hand">
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <Ellipse x:Name="StatusDot" Width="10" Height="10" Fill="#888" Margin="0,0,6,0"/>
+            <TextBlock x:Name="StatusLabel" Text="Ready" Foreground="#CCC" FontSize="11" VerticalAlignment="Center"/>
+        </StackPanel>
+    </Border>
+</Window>

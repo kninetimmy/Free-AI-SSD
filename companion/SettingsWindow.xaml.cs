@@ -1,17 +1,27 @@
 using System.Net;
 using System.Windows;
+using FreeAiSsd.Shared.Client;
 using FreeAiSsd.Shared.Models;
 
 namespace FreeAiSsd.Companion;
 
 public partial class SettingsWindow : Window
 {
+    private readonly IAudioCaptureService? _audio;
+    private bool _testingMic;
+
     public CompanionConfig Config { get; private set; }
 
     public SettingsWindow(CompanionConfig current, IReadOnlyList<string> inputDevices)
+        : this(current, inputDevices, null)
+    {
+    }
+
+    public SettingsWindow(CompanionConfig current, IReadOnlyList<string> inputDevices, IAudioCaptureService? audio)
     {
         InitializeComponent();
         Config = current;
+        _audio = audio;
         HostAddressText.Text = current.HostAddress;
         HostPortText.Text = current.HostPort.ToString();
         ApiKeyText.Text = current.ApiKey;
@@ -21,6 +31,8 @@ public partial class SettingsWindow : Window
         InputDeviceCombo.Text = current.InputDeviceName ?? string.Empty;
         OutputDeviceText.Text = current.OutputDeviceName ?? string.Empty;
         AutoReconnectCheck.IsChecked = current.AutoReconnect;
+        PttActivationSoundCheck.IsChecked = current.PttActivationSoundEnabled;
+        PttOverlayCheck.IsChecked = current.PttOverlayEnabled;
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)
@@ -47,6 +59,8 @@ public partial class SettingsWindow : Window
             InputDeviceName = string.IsNullOrWhiteSpace(InputDeviceCombo.Text) ? null : InputDeviceCombo.Text.Trim(),
             OutputDeviceName = string.IsNullOrWhiteSpace(OutputDeviceText.Text) ? null : OutputDeviceText.Text.Trim(),
             AutoReconnect = AutoReconnectCheck.IsChecked ?? true,
+            PttActivationSoundEnabled = PttActivationSoundCheck.IsChecked ?? true,
+            PttOverlayEnabled = PttOverlayCheck.IsChecked ?? true,
             SchemaVersion = 1
         };
 
@@ -58,5 +72,59 @@ public partial class SettingsWindow : Window
     {
         DialogResult = false;
         Close();
+    }
+
+    private async void TestMic_Click(object sender, RoutedEventArgs e)
+    {
+        if (_testingMic) return;
+        if (_audio is null)
+        {
+            MicLevelText.Text = "Mic test unavailable (no capture service).";
+            return;
+        }
+
+        _testingMic = true;
+        MicLevelText.Text = "Recording...";
+        MicLevelBar.Value = 0;
+
+        try
+        {
+            var device = string.IsNullOrWhiteSpace(InputDeviceCombo.Text) ? null : InputDeviceCombo.Text.Trim();
+            _audio.StartRecording(device);
+            await Task.Delay(1000);
+            var pcm = _audio.StopRecording();
+
+            var (peak, peakDb) = ComputePeak(pcm);
+            MicLevelBar.Value = Math.Clamp(peak * 100.0, 0, 100);
+            MicLevelText.Text = pcm.Length == 0
+                ? "No audio captured."
+                : $"Peak: {peak * 100.0:F1}%  ({peakDb:F1} dBFS)";
+        }
+        catch (Exception ex)
+        {
+            MicLevelText.Text = $"Mic test failed: {ex.Message}";
+        }
+        finally
+        {
+            _testingMic = false;
+        }
+    }
+
+    // Assumes 16-bit signed little-endian PCM (what IAudioCaptureService returns).
+    private static (double normalizedPeak, double peakDb) ComputePeak(byte[] pcm)
+    {
+        if (pcm is null || pcm.Length < 2) return (0.0, double.NegativeInfinity);
+
+        short peak = 0;
+        for (var i = 0; i + 1 < pcm.Length; i += 2)
+        {
+            var sample = (short)(pcm[i] | (pcm[i + 1] << 8));
+            var absSample = sample == short.MinValue ? short.MaxValue : Math.Abs(sample);
+            if (absSample > peak) peak = (short)absSample;
+        }
+
+        var normalized = peak / (double)short.MaxValue;
+        var db = normalized <= 0 ? double.NegativeInfinity : 20.0 * Math.Log10(normalized);
+        return (normalized, db);
     }
 }
