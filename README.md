@@ -258,6 +258,7 @@ Network Mode lets one machine run Runner + Ollama locally, while other devices o
 - TTS actions run on the host (the machine running Runner), not on the remote client
 
 **Security model (home LAN baseline):**
+- Runner API binds to `127.0.0.1` (loopback) by default. Binding to `0.0.0.0` (all interfaces) is an explicit opt-in that you must set in `portable-config.json`; Runner logs a WARNING on startup whenever the effective bind address is not loopback.
 - Non-health endpoints can require an API key (`Authorization: Bearer <key>` or `X-API-Key`)
 - API key is a shared secret in `portable-config.json`
 - No TLS/mTLS in v1 (assume trusted LAN segment)
@@ -389,7 +390,7 @@ All settings live in `config/portable-config.json` on the SSD.
 | Property | Default | Description |
 |---|---|---|
 | `networkModeEnabled` | `false` | Enable Runner-hosted LAN API |
-| `networkBindAddress` | `"0.0.0.0"` | Bind address for Runner API host |
+| `networkBindAddress` | `"127.0.0.1"` | Bind address for Runner API host. Defaults to loopback; binding to `0.0.0.0` (all interfaces) is an explicit opt-in. |
 | `networkPort` | `41555` | TCP port for Runner API |
 | `networkApiKey` | `""` | Shared secret for API auth |
 | `networkRequireApiKey` | `true` | Require API key on all non-health endpoints |

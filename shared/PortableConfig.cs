@@ -104,8 +104,13 @@ public sealed class PortableConfig
 
     /// <summary>Enables Runner-hosted LAN API for remote clients on the local network.</summary>
     public bool NetworkModeEnabled { get; set; }
-    /// <summary>IP address the Runner API binds to (e.g., 0.0.0.0 for all interfaces).</summary>
-    public string NetworkBindAddress { get; set; } = "0.0.0.0";
+    /// <summary>
+    /// IP address the Runner API binds to. Defaults to loopback ("127.0.0.1") so a
+    /// freshly configured SSD does not accidentally expose the LAN API. Binding to
+    /// "0.0.0.0" (all interfaces) is an explicit opt-in that requires a user-confirmed
+    /// warning in the UI.
+    /// </summary>
+    public string NetworkBindAddress { get; set; } = "127.0.0.1";
     /// <summary>TCP port for the Runner LAN API.</summary>
     public int NetworkPort { get; set; } = 41555;
     /// <summary>Shared secret API key accepted via Bearer or X-API-Key header.</summary>
@@ -254,14 +259,45 @@ public sealed class PortableConfig
     }
 
     /// <summary>
+    /// Error thrown by <see cref="SaveAsync"/> when Network Mode is enabled and requires
+    /// an API key, but SSD config encryption is not effectively enabled. This prevents
+    /// silently writing a plaintext portable-config.json that contains the API key shared
+    /// secret while the Runner is configured to expose a network API.
+    /// </summary>
+    public const string NetworkModeEncryptionRequiredMessage =
+        "Network Mode is enabled with Require API Key, but SSD config encryption is not enabled. " +
+        "Enable SSD config encryption before saving, or disable Network Mode / Require API Key. " +
+        "The API key is a shared secret and must not be written to disk unencrypted.";
+
+    /// <summary>
     /// Persists the config to disk using an atomic write pattern:
     /// 1. Serialize to a temporary ".tmp" file.
     /// 2. Replace the original file atomically (or move if new).
     /// This prevents partial writes from corrupting the config.
+    ///
+    /// Fails closed when Network Mode + Require API Key are both on but the SSD config
+    /// is not effectively encrypted — throws <see cref="InvalidOperationException"/>
+    /// with <see cref="NetworkModeEncryptionRequiredMessage"/>. The SSD root is inferred
+    /// as the parent directory of the config file's directory (e.g. config/portable-config.json
+    /// ⇒ ssdRoot = ../).
     /// </summary>
     public async Task SaveAsync(string path)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+
+        // Fail-closed guard: refuse to write a plaintext config that would expose a Network
+        // Mode API key unless encryption is effectively on. We use the same write-guard
+        // probe used elsewhere (IsEffectivelyEncryptedForWriteGuard) so the behavior is
+        // consistent with PrepDriveWriteGuard's "encrypted" determination.
+        if (NetworkModeEnabled && NetworkRequireApiKey)
+        {
+            var ssdRoot = TryInferSsdRoot(path);
+            if (ssdRoot is not null && !SsdEncryption.IsEffectivelyEncryptedForWriteGuard(ssdRoot))
+            {
+                throw new InvalidOperationException(NetworkModeEncryptionRequiredMessage);
+            }
+        }
+
         var json = JsonSerializer.Serialize(this, JsonOptions());
         var tempPath = path + ".tmp";
         await File.WriteAllTextAsync(tempPath, json);
@@ -274,6 +310,36 @@ public sealed class PortableConfig
         {
             File.Move(tempPath, path);
         }
+    }
+
+    /// <summary>
+    /// Infers the SSD root from a config file path of the form "{root}/config/portable-config.json".
+    /// Returns null if the path does not follow the expected layout (e.g. a test passing a bare path).
+    /// </summary>
+    private static string? TryInferSsdRoot(string configPath)
+    {
+        var configDir = Path.GetDirectoryName(configPath);
+        if (string.IsNullOrEmpty(configDir))
+        {
+            return null;
+        }
+
+        var parent = Path.GetDirectoryName(configDir);
+        if (string.IsNullOrEmpty(parent))
+        {
+            return null;
+        }
+
+        // Only treat this as an SSD root if the immediate parent directory is named "config".
+        // Otherwise callers writing to arbitrary paths (e.g. unit tests) should not be
+        // forced through the encryption guard.
+        var configDirName = new DirectoryInfo(configDir).Name;
+        if (!string.Equals(configDirName, SsdLayout.Config, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return parent;
     }
 
     /// <summary>

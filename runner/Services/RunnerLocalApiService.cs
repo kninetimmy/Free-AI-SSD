@@ -57,6 +57,13 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         var bindAddress = NormalizeBindAddress(config.NetworkBindAddress);
         var networkPort = ValidatePort(config.NetworkPort);
 
+        if (!IsLoopbackAddress(bindAddress))
+        {
+            var warning = $"Network Mode bind address is not loopback: exposing Runner API on {bindAddress}:{networkPort}. There is no TLS. Only use on a trusted LAN.";
+            _logger?.Warn(warning);
+            LogMessage?.Invoke(warning);
+        }
+
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.UseKestrel().UseUrls($"http://{bindAddress}:{networkPort}");
 
@@ -683,13 +690,19 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
 
     private static string NormalizeBindAddress(string? configured)
     {
-        var addr = string.IsNullOrWhiteSpace(configured) ? "0.0.0.0" : configured.Trim();
+        // Default to loopback so an unset/blank value cannot silently expose the LAN API.
+        var addr = string.IsNullOrWhiteSpace(configured) ? "127.0.0.1" : configured.Trim();
         if (!IPAddress.TryParse(addr, out _))
         {
             throw new InvalidOperationException("NetworkBindAddress must be a valid IPv4 or IPv6 address.");
         }
 
         return addr;
+    }
+
+    private static bool IsLoopbackAddress(string address)
+    {
+        return IPAddress.TryParse(address, out var parsed) && IPAddress.IsLoopback(parsed);
     }
 
     private static int ValidatePort(int configuredPort)
