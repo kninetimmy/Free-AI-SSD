@@ -46,6 +46,8 @@ public sealed class CompanionConfigTests
                 PttBinding = "Throttle|2",
                 InputDeviceName = "Mic",
                 AutoReconnect = true,
+                PttActivationSoundEnabled = false,
+                PttOverlayEnabled = false,
                 SchemaVersion = 1
             };
 
@@ -54,11 +56,21 @@ public sealed class CompanionConfigTests
 
             Assert.Equal(input.HostAddress, output.HostAddress);
             Assert.Equal(input.PttBinding, output.PttBinding);
+            Assert.Equal(input.PttActivationSoundEnabled, output.PttActivationSoundEnabled);
+            Assert.Equal(input.PttOverlayEnabled, output.PttOverlayEnabled);
         }
         finally
         {
             if (File.Exists(path)) File.Delete(path);
         }
+    }
+
+    [Fact]
+    public void NewConfig_HasVrUxDefaultsEnabled()
+    {
+        var config = new CompanionConfig();
+        Assert.True(config.PttActivationSoundEnabled);
+        Assert.True(config.PttOverlayEnabled);
     }
 
     [Fact]

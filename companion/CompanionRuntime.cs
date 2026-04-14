@@ -29,6 +29,7 @@ internal sealed class CompanionRuntime : IDisposable
     private readonly string _configPath;
     private CompanionConfig _config = new();
     private KeyboardPttHotkey? _hotkey;
+    private PttOverlayWindow? _overlay;
 
     public CompanionRuntime(IAudioCaptureService audio, IHotasInputService hotas, CompanionLog log)
     {
@@ -66,6 +67,7 @@ internal sealed class CompanionRuntime : IDisposable
         }
 
         InitializeBindings();
+        ApplyOverlayVisibility();
         _ = Task.Run(HealthLoopAsync);
     }
 
@@ -136,6 +138,11 @@ internal sealed class CompanionRuntime : IDisposable
         {
             if (!_audio.IsRecording)
             {
+                if (_config.PttActivationSoundEnabled)
+                {
+                    PttSounds.PlayAsync(PttSounds.GetActivationBeep(), _config.OutputDeviceName);
+                }
+
                 SetState("Listening");
                 _audio.StartRecording(_config.InputDeviceName);
             }
@@ -155,6 +162,11 @@ internal sealed class CompanionRuntime : IDisposable
             if (!_audio.IsRecording)
             {
                 return;
+            }
+
+            if (_config.PttActivationSoundEnabled)
+            {
+                PttSounds.PlayAsync(PttSounds.GetDeactivationBeep(), _config.OutputDeviceName);
             }
 
             SetState("Thinking");
@@ -326,12 +338,13 @@ internal sealed class CompanionRuntime : IDisposable
 
     private void OpenSettings()
     {
-        var window = new SettingsWindow(_config, _audio.GetAvailableDevices());
+        var window = new SettingsWindow(_config, _audio.GetAvailableDevices(), _audio);
         if (window.ShowDialog() == true)
         {
             _config = window.Config;
             _config.Save(_configPath);
             InitializeBindings();
+            ApplyOverlayVisibility();
             _ = ProbeHealthAsync();
         }
     }
@@ -339,6 +352,107 @@ internal sealed class CompanionRuntime : IDisposable
     private void SetState(string state)
     {
         _tray.Text = $"FreeAiSsd Companion - {state}";
+
+        var overlay = _overlay;
+        if (overlay is not null)
+        {
+            var mapped = state switch
+            {
+                "Listening" => CompanionPttState.Listening,
+                "Thinking" => CompanionPttState.Thinking,
+                "Speaking" => CompanionPttState.Speaking,
+                _ => CompanionPttState.Idle,
+            };
+
+            try
+            {
+                overlay.UpdateState(mapped);
+            }
+            catch (Exception ex)
+            {
+                _log.Write($"Overlay update failed: {ex.Message}");
+            }
+        }
+    }
+
+    private void ApplyOverlayVisibility()
+    {
+        if (_config.PttOverlayEnabled)
+        {
+            ShowOverlay();
+        }
+        else
+        {
+            HideOverlay();
+        }
+    }
+
+    private void ShowOverlay()
+    {
+        if (_overlay is not null)
+        {
+            return;
+        }
+
+        // WPF window creation can throw if no interactive display is attached
+        // (tray-only mode on a headless session). Treat overlay as best-effort.
+        try
+        {
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher is null)
+            {
+                _log.Write("Overlay skipped: no WPF dispatcher available.");
+                return;
+            }
+
+            dispatcher.Invoke(() =>
+            {
+                try
+                {
+                    _overlay = new PttOverlayWindow();
+                    _overlay.Show();
+                }
+                catch (Exception ex)
+                {
+                    _overlay = null;
+                    _log.Write($"Overlay window creation failed (tray-only mode?): {ex.Message}");
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _log.Write($"Overlay dispatch failed: {ex.Message}");
+        }
+    }
+
+    private void HideOverlay()
+    {
+        var overlay = _overlay;
+        if (overlay is null)
+        {
+            return;
+        }
+
+        _overlay = null;
+
+        try
+        {
+            overlay.Dispatcher.Invoke(() =>
+            {
+                try
+                {
+                    overlay.Close();
+                }
+                catch
+                {
+                    // ignore close failures
+                }
+            });
+        }
+        catch
+        {
+            // ignore dispatch failures
+        }
     }
 
     private static JsonSerializerOptions JsonOptions() => new() { PropertyNameCaseInsensitive = true };
@@ -383,6 +497,7 @@ internal sealed class CompanionRuntime : IDisposable
         _hotas.Dispose();
         _audio.Dispose();
         _hotkey?.Dispose();
+        HideOverlay();
         _tray.Visible = false;
         _tray.Dispose();
         _http.Dispose();
