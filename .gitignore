@@ -13,3 +13,21 @@ project.lock.json
 *.swp
 *~
 .DS_Store
+
+# Phase-A hardening (Task 5): secret / credential / key material.
+# Never commit signing certs, private keys, env files, or the live portable-config.
+*.pfx
+*.p12
+*.pem
+*.key
+*.crt
+*.cer
+*.keychain
+build.keychain
+.env
+.env.*
+secrets.json
+*-secrets.*
+appsettings.*.json
+*.private.json
+portable-config.json
