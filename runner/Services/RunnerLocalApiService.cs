@@ -409,23 +409,60 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         var chat = await _chatService.SendPromptAsync(options.Model.Trim(), trimmedTranscription, ollamaHost, config);
 
         var ttsTriggered = false;
+        string? audioBase64 = null;
+        string? audioMime = null;
+
         if (options.SpeakResponse && !string.IsNullOrWhiteSpace(chat.ResponseText) && config.NetworkAllowTts)
         {
             var tts = _ttsServiceFactory();
             if (tts is not null)
             {
-                _ = Task.Run(async () =>
+                if (options.ReturnAudio)
                 {
+                    // Companion wants to play the audio locally (e.g. VR machine). Synthesize
+                    // to an in-memory WAV instead of kicking off host playback, and skip the
+                    // fire-and-forget host TTS path to avoid double audio.
                     try
                     {
-                        await tts.SpeakAsync(chat.ResponseText, cancellationToken);
+                        var wavBytes = await tts.SynthesizeToWavAsync(chat.ResponseText, cancellationToken);
+                        if (wavBytes is { Length: > 0 })
+                        {
+                            var maxBytes = (long)Math.Max(1, config.NetworkMaxAudioUploadMB) * 1024L * 1024L;
+                            if (wavBytes.LongLength > maxBytes)
+                            {
+                                _logger?.Warn($"Synthesized TTS WAV ({wavBytes.LongLength} bytes) exceeds networkMaxAudioUploadMB={config.NetworkMaxAudioUploadMB}; omitting audio from response.");
+                            }
+                            else
+                            {
+                                audioBase64 = Convert.ToBase64String(wavBytes);
+                                audioMime = "audio/wav";
+                            }
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
                     }
                     catch (Exception ex)
                     {
-                        _logger?.Error($"Host TTS failed after trigger: {ex.Message}");
+                        _logger?.Error($"TTS synthesize-to-bytes failed: {ex.Message}");
                     }
-                }, cancellationToken);
-                ttsTriggered = true;
+                }
+                else
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await tts.SpeakAsync(chat.ResponseText, cancellationToken);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.Error($"Host TTS failed after trigger: {ex.Message}");
+                        }
+                    }, cancellationToken);
+                    ttsTriggered = true;
+                }
             }
         }
 
@@ -433,7 +470,9 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             trimmedTranscription,
             chat.ResponseText,
             chat.Sources ?? new List<string>(),
-            ttsTriggered);
+            ttsTriggered,
+            audioBase64,
+            audioMime);
     }
 
     private static async Task<ParsedAudioUpload> ParseUploadedAudioAsync(
@@ -515,12 +554,14 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
 
         var autoSend = ParseOptionalBool(form["autoSendToChat"].FirstOrDefault());
         var speakResponse = ParseOptionalBool(form["speakResponse"].FirstOrDefault()) ?? false;
+        var returnAudio = ParseOptionalBool(form["returnAudio"].FirstOrDefault()) ?? false;
         var model = form["model"].FirstOrDefault()?.Trim();
 
         return new VoiceQueryOptions(
             autoSend ?? config.NetworkVoiceAutoSendToChat,
             speakResponse,
-            model);
+            model,
+            returnAudio);
     }
 
     private static string InferAudioFormat(string? contentType, string? fileName, byte[] data)
@@ -751,10 +792,16 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
     public sealed record ChatResultResponse(string ResponseText, IReadOnlyList<string> Sources, bool UsedRagContext);
     public sealed record TtsSpeakRequest(string Text);
     public sealed record SttTranscribeResponse(string Transcription);
-    public sealed record VoiceQueryResponse(string Transcription, string? ResponseText, IReadOnlyList<string> Sources, bool TtsTriggeredOnHost);
+    public sealed record VoiceQueryResponse(
+        string Transcription,
+        string? ResponseText,
+        IReadOnlyList<string> Sources,
+        bool TtsTriggeredOnHost,
+        string? AudioBase64 = null,
+        string? AudioMime = null);
     public sealed record ErrorResponse(string Error);
 
-    private sealed record VoiceQueryOptions(bool SendToChat, bool SpeakResponse, string? Model);
+    private sealed record VoiceQueryOptions(bool SendToChat, bool SpeakResponse, string? Model, bool ReturnAudio);
 
     private sealed record ParsedAudioUpload(bool Success, byte[]? PcmAudio, string? Error)
     {

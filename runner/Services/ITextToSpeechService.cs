@@ -45,4 +45,11 @@ public interface ITextToSpeechService : IDisposable
     /// Returns the names of voices available on the current engine.
     /// </summary>
     IReadOnlyList<string> GetAvailableVoices();
+
+    /// <summary>
+    /// Synthesizes the given text to an in-memory WAV (RIFF/WAVE) byte buffer without
+    /// playing the audio through any local output device. Returns null if the engine
+    /// cannot synthesize (e.g. Piper binary or voice model missing).
+    /// </summary>
+    Task<byte[]?> SynthesizeToWavAsync(string text, CancellationToken cancellationToken = default);
 }

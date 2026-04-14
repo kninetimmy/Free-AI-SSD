@@ -175,6 +175,45 @@ public sealed class SystemTextToSpeechService : ITextToSpeechService
             .ToList();
     }
 
+    public Task<byte[]?> SynthesizeToWavAsync(string text, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return Task.FromResult<byte[]?>(null);
+        }
+
+        return Task.Run<byte[]?>(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Use a separate SpeechSynthesizer so we don't disturb the playback-oriented
+            // _synth instance. Copy over the currently selected voice/rate/volume so the
+            // returned audio matches what the host would speak locally.
+            using var synth = new SpeechSynthesizer();
+            try
+            {
+                var currentVoice = _synth.Voice;
+                if (currentVoice is not null)
+                {
+                    synth.SelectVoice(currentVoice.Name);
+                }
+            }
+            catch
+            {
+                // Voice selection is best-effort; fall back to the default voice.
+            }
+
+            synth.Rate = _synth.Rate;
+            synth.Volume = _synth.Volume;
+
+            using var ms = new MemoryStream();
+            synth.SetOutputToWaveStream(ms);
+            synth.Speak(text);
+            synth.SetOutputToNull();
+            return ms.ToArray();
+        }, cancellationToken);
+    }
+
     /// <summary>
     /// Returns the names of available audio output devices (for the TtsOutputDevice config).
     /// </summary>
