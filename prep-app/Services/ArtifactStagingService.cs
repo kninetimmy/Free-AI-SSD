@@ -16,7 +16,7 @@ public sealed class ArtifactStagingService : IArtifactStagingService
 
         if (sourceRunnerDir is null)
         {
-            var hint = "Runner publish folder not found. Re-download the ZIP and ensure runner-publish is next to FreeAiSsd.PrepApp.exe, or run ./build.ps1 to stage runner artifacts for local development.";
+            var hint = "Runner publish folder not found. Re-download the ZIP and ensure runner-publish is next to FreeAiSsd.PrepApp.exe (or under payload/runner-publish), or run ./build.ps1 to stage runner artifacts for local development.";
             onLog(hint);
             throw new DirectoryNotFoundException(hint);
         }
@@ -44,7 +44,8 @@ public sealed class ArtifactStagingService : IArtifactStagingService
             throw new InvalidOperationException(message);
         }
 
-        var sourceRunnerZip = Path.Combine(AppContext.BaseDirectory, "mac", "Runner.app.zip");
+        var sourceRunnerZip = ResolveBundledFile(Path.Combine("mac", "Runner.app.zip"))
+            ?? throw new FileNotFoundException("Bundled macOS Runner.app archive was not found.");
         var macRoot = Path.Combine(ssdRoot, SsdLayout.Mac);
         Directory.CreateDirectory(macRoot);
         var targetZip = Path.Combine(macRoot, "Runner.app.zip");
@@ -69,7 +70,8 @@ public sealed class ArtifactStagingService : IArtifactStagingService
             throw new InvalidOperationException(message);
         }
 
-        var bundledArchive = Path.Combine(AppContext.BaseDirectory, "mac", "tools", "ollama", "ollama-darwin.zip");
+        var bundledArchive = ResolveBundledFile(Path.Combine("mac", "tools", "ollama", "ollama-darwin.zip"))
+            ?? throw new FileNotFoundException("Bundled macOS Ollama archive was not found.");
         var cacheArchive = Path.Combine(ssdRoot, SsdLayout.Cache, "ollama-darwin.zip");
         Directory.CreateDirectory(Path.GetDirectoryName(cacheArchive)!);
         File.Copy(bundledArchive, cacheArchive, overwrite: true);
@@ -88,8 +90,8 @@ public sealed class ArtifactStagingService : IArtifactStagingService
         var finalCliPath = Path.Combine(ollamaDir, "ollama");
         File.Copy(cliPath, finalCliPath, overwrite: true);
 
-        var sourceManifest = Path.Combine(AppContext.BaseDirectory, "mac", "tools", "ollama", "mac-tools-manifest.json");
-        if (File.Exists(sourceManifest))
+        var sourceManifest = ResolveBundledFile(Path.Combine("mac", "tools", "ollama", "mac-tools-manifest.json"));
+        if (sourceManifest is not null && File.Exists(sourceManifest))
             File.Copy(sourceManifest, Path.Combine(ollamaDir, "mac-tools-manifest.json"), overwrite: true);
 
         var manifest = JsonSerializer.Serialize(new
@@ -113,9 +115,12 @@ public sealed class ArtifactStagingService : IArtifactStagingService
 
     private static string? ResolveRunnerPublishDirectory()
     {
-        var baseDirCandidate = Path.Combine(AppContext.BaseDirectory, "runner-publish");
-        if (DirectoryContainsRunner(baseDirCandidate))
-            return baseDirCandidate;
+        foreach (var contentRoot in EnumerateBundledContentRoots())
+        {
+            var candidate = Path.Combine(contentRoot, "runner-publish");
+            if (DirectoryContainsRunner(candidate))
+                return candidate;
+        }
 
         var repoRoot = FindRepoRoot(AppContext.BaseDirectory);
         if (repoRoot is null)
@@ -146,4 +151,22 @@ public sealed class ArtifactStagingService : IArtifactStagingService
 
     private static bool DirectoryContainsRunner(string path)
         => Directory.Exists(path) && File.Exists(Path.Combine(path, "FreeAiSsd.Runner.exe"));
+
+    private static string? ResolveBundledFile(string relativePath)
+    {
+        foreach (var contentRoot in EnumerateBundledContentRoots())
+        {
+            var candidate = Path.Combine(contentRoot, relativePath);
+            if (File.Exists(candidate))
+                return candidate;
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> EnumerateBundledContentRoots()
+    {
+        yield return AppContext.BaseDirectory;
+        yield return Path.Combine(AppContext.BaseDirectory, "payload");
+    }
 }

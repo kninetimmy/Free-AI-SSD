@@ -19,7 +19,7 @@ public sealed class PrereqService : IPrereqService
         var ssdPrereqDir = Path.Combine(root, SsdLayout.Prereqs);
         Directory.CreateDirectory(ssdPrereqDir);
 
-        var bundledPrereqDir = Path.Combine(AppContext.BaseDirectory, SsdLayout.Prereqs);
+        var bundledPrereqDir = ResolveBundledPrereqDirectory();
         if (!Directory.Exists(bundledPrereqDir))
             throw new DirectoryNotFoundException($"Bundled prerequisites folder is missing: {bundledPrereqDir}");
 
@@ -144,5 +144,14 @@ public sealed class PrereqService : IPrereqService
                 existingEntry.IsOptional = updated.IsOptional;
             }
         }
+    }
+
+    private static string ResolveBundledPrereqDirectory()
+    {
+        var rootCandidate = Path.Combine(AppContext.BaseDirectory, SsdLayout.Prereqs);
+        if (Directory.Exists(rootCandidate))
+            return rootCandidate;
+
+        return Path.Combine(AppContext.BaseDirectory, "payload", SsdLayout.Prereqs);
     }
 }

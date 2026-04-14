@@ -41,11 +41,21 @@ public static class MacArtifactAvailability
     /// <returns>Availability result with problem description if unavailable.</returns>
     public static MacArtifactAvailabilityResult Evaluate(string appDirectory)
     {
-        var manifestPath = Path.Combine(appDirectory, "mac", "mac-artifacts.manifest.json");
-        if (!File.Exists(manifestPath))
+        string? contentRoot = null;
+        string? manifestPath = null;
+        foreach (var candidateRoot in EnumerateContentRoots(appDirectory))
         {
-            return MacArtifactAvailabilityResult.Unavailable(MissingManifestMessage);
+            var candidateManifest = Path.Combine(candidateRoot, ManifestRelativePath);
+            if (File.Exists(candidateManifest))
+            {
+                contentRoot = candidateRoot;
+                manifestPath = candidateManifest;
+                break;
+            }
         }
+
+        if (manifestPath is null || contentRoot is null)
+            return MacArtifactAvailabilityResult.Unavailable(MissingManifestMessage);
 
         try
         {
@@ -65,7 +75,7 @@ public static class MacArtifactAvailability
                 }
 
                 // Reject paths that escape the app directory (path traversal protection).
-                if (!TryResolveUnderAppDirectory(appDirectory, artifact.RelativePath, out var fullPath))
+                if (!TryResolveUnderContentRoot(contentRoot, artifact.RelativePath, out var fullPath))
                 {
                     return MacArtifactAvailabilityResult.Unavailable(IncompleteManifestMessage);
                 }
@@ -89,7 +99,7 @@ public static class MacArtifactAvailability
     /// Rejects absolute paths and paths that escape the app directory
     /// via ".." traversal (after full path normalization).
     /// </summary>
-    private static bool TryResolveUnderAppDirectory(string appDirectory, string relativePath, out string fullPath)
+    private static bool TryResolveUnderContentRoot(string contentRoot, string relativePath, out string fullPath)
     {
         fullPath = string.Empty;
 
@@ -98,7 +108,7 @@ public static class MacArtifactAvailability
             return false;
         }
 
-        var normalizedAppDir = Path.GetFullPath(appDirectory);
+        var normalizedAppDir = Path.GetFullPath(contentRoot);
         var normalizedAppDirWithSeparator = normalizedAppDir.EndsWith(Path.DirectorySeparatorChar)
             ? normalizedAppDir
             : normalizedAppDir + Path.DirectorySeparatorChar;
@@ -113,6 +123,12 @@ public static class MacArtifactAvailability
 
         fullPath = normalizedArtifactPath;
         return true;
+    }
+
+    private static IEnumerable<string> EnumerateContentRoots(string appDirectory)
+    {
+        yield return appDirectory;
+        yield return Path.Combine(appDirectory, "payload");
     }
 
     /// <summary>JSON schema for the macOS artifacts manifest file.</summary>
