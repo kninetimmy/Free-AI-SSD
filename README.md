@@ -13,6 +13,27 @@ Prepare the drive once on a machine with internet access — download the models
 
 ---
 
+## Current Status (April 2026)
+
+### Implemented now
+- ✅ Local offline chat (Runner + local Ollama loopback)
+- ✅ Local RAG / document library with source citations
+- ✅ Local TTS playback (System SAPI or Piper)
+- ✅ Local Whisper STT
+- ✅ Network Mode v1 LAN text API (`/api/chat`, `/api/chat/stream`, `/api/models`, `/api/health`)
+- ✅ Network Mode v2 remote voice upload:
+  - `POST /api/stt/transcribe` (LAN audio upload → host-side Whisper transcription)
+  - `POST /api/voice/query` (LAN audio upload → host-side transcription → optional chat → optional host-side TTS)
+
+### Partially implemented
+- ⚠️ Network voice supports WAV now (PCM 16-bit mono 16kHz) and optional raw PCM (`pcm16le`); broader audio codec support is not implemented yet.
+
+### Still planned / intentionally not supported
+- ⏳ Remote HOTAS/PTT control over LAN is not implemented.
+- 🚫 Direct Ollama LAN exposure is intentionally not supported (Runner API is the only network surface).
+
+---
+
 <details>
 <summary>🎮 Use Case: Flight Sim Copilot (DCS World)</summary>
 
@@ -230,11 +251,11 @@ Bind a button on your HOTAS to start and stop voice recording — no keyboard, n
 
 Network Mode lets one machine run Runner + Ollama locally, while other devices on your LAN call Runner's HTTP API.
 
-**Important architecture (v1):**
+**Important architecture (v1 + v2):**
 - Ollama still binds to loopback only (`127.0.0.1`) on the host machine
 - LAN clients talk to **Runner API**, not Ollama directly
-- Runner API proxies chat requests to local services
-- TTS actions run on the host (the machine running Runner), not the remote client
+- Runner API proxies requests to host-local services (chat, Whisper STT, TTS)
+- TTS actions run on the host (the machine running Runner), not on the remote client
 
 **Security model (home LAN baseline):**
 - Non-health endpoints can require an API key (`Authorization: Bearer <key>` or `X-API-Key`)
@@ -247,6 +268,8 @@ Network Mode lets one machine run Runner + Ollama locally, while other devices o
 - `GET /api/models`
 - `POST /api/chat`
 - `POST /api/chat/stream` (newline-delimited JSON stream)
+- `POST /api/stt/transcribe` (multipart upload: `audio`)
+- `POST /api/voice/query` (multipart upload: `audio`, optional `model`, `autoSendToChat`, `speakResponse`)
 - `POST /api/tts/speak`
 - `POST /api/tts/stop`
 
@@ -277,7 +300,28 @@ curl -X POST http://RUNNER_HOST:41555/api/tts/speak \
   -H "Authorization: Bearer YOUR_KEY" \
   -H "Content-Type: application/json" \
   -d '{"text":"Radio check complete."}'
+
+# STT transcription (WAV upload)
+curl -X POST http://RUNNER_HOST:41555/api/stt/transcribe \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -F "audio=@question.wav;type=audio/wav"
+
+# Voice query (upload -> transcribe -> chat -> optional host-side TTS)
+curl -X POST http://RUNNER_HOST:41555/api/voice/query \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -F "audio=@question.wav;type=audio/wav" \
+  -F "model=phi3" \
+  -F "autoSendToChat=true" \
+  -F "speakResponse=true"
 ```
+
+**Remote voice upload formats and limits (v2):**
+- Supported upload formats:
+  - WAV: PCM, 16-bit, mono, 16kHz
+  - Raw PCM16LE (`format=pcm16le`)
+- Upload size limit is controlled by `networkMaxAudioUploadMB`
+- Invalid type / empty payload / oversize uploads return clear 4xx errors
+- `speakResponse=true` only triggers TTS when host allows network TTS; playback occurs on the host machine
 
 </details>
 
@@ -350,6 +394,10 @@ All settings live in `config/portable-config.json` on the SSD.
 | `networkApiKey` | `""` | Shared secret for API auth |
 | `networkRequireApiKey` | `true` | Require API key on all non-health endpoints |
 | `networkAllowTts` | `false` | Allow remote callers to trigger host-side TTS |
+| `networkAllowRemoteStt` | `false` | Allow remote audio upload transcription via `/api/stt/transcribe` |
+| `networkAllowRemoteVoiceQuery` | `false` | Allow remote voice-query orchestration via `/api/voice/query` |
+| `networkVoiceAutoSendToChat` | `true` | Default for voice query: auto-send transcription to chat when request omits override |
+| `networkMaxAudioUploadMB` | `10` | Maximum upload size in MB for remote STT/voice endpoints |
 
 </details>
 
@@ -362,9 +410,9 @@ All settings live in `config/portable-config.json` on the SSD.
 
 Bindings import currently supports DCS World only. IL-2 and War Thunder parsers are planned for a future phase, pending example binding files.
 
-### Network Mode (v1 complete)
+### Network Mode (v2 complete)
 
-Run the AI on one machine, query it from another on the same local network through Runner's authenticated LAN API. Ollama remains localhost-only.
+Run the AI on one machine, query it from another on the same local network through Runner's authenticated LAN API. v2 adds remote voice upload for host-side Whisper transcription and optional host-side TTS response playback. Ollama remains localhost-only.
 
 ### Setup Profiles
 
@@ -545,6 +593,7 @@ Signing is disabled by default in CI (`MAC_SIGNING_ENABLED=false`). Supported vi
 
 ### Recent Changes
 
+- **2026-04-14**: Network Mode v2 — added LAN audio upload endpoints for host-side Whisper transcription (`/api/stt/transcribe`) and voice-query orchestration (`/api/voice/query`) with optional host-side TTS trigger
 - **2026-02-21**: DCS Bindings Import — reads DCS `diff.lua` files, auto-detects saved games folder, merges multi-device HOTAS inputs, writes per-aircraft reference documents into the library for RAG
 - **2026-02-21**: Voice pipeline — offline STT via Whisper.cpp (Tiny/Base/Small/Medium); TTS via Windows SAPI or Piper neural TTS; configurable mic, voice, rate, volume, and output device
 - **2026-02-19**: Initial Replit setup with .NET 8; build and test workflow configured
