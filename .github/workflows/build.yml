@@ -205,7 +205,16 @@ jobs:
     # job copies from `in/windows/out/windows` and `in/windows/out/mac/tools`). If
     # those upstream steps are gated to dispatch but this job is not, the job
     # fails on PRs with "Cannot find path ... out/windows".
-    if: github.event_name == 'workflow_dispatch' && needs.windows-build.result == 'success' && (needs.mac-runner-build.result == 'success' || needs.mac-runner-build.result == 'skipped')
+    #
+    # IMPORTANT: the leading `!cancelled() &&` is required, not cosmetic. Without
+    # it, GitHub Actions' default "any-need-skipped -> cascade-skip" behavior
+    # kicks in before the if: expression is evaluated, so when mac-runner-build
+    # is skipped (include_macos=false, the common case for Windows-only releases)
+    # this job was silently skipped too. `!cancelled()` overrides the cascade so
+    # the explicit `needs.mac-runner-build.result == 'skipped'` branch below can
+    # actually take effect. We intentionally use !cancelled() rather than
+    # always() so a user-cancelled workflow does NOT create a release.
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && needs.windows-build.result == 'success' && (needs.mac-runner-build.result == 'success' || needs.mac-runner-build.result == 'skipped') }}
     # Phase-A hardening (Task 4): scoped write permission ONLY on the release job.
     # The "Create Release" / "Upload beta ZIP to release" steps below gate themselves
     # to workflow_dispatch, so the write scope is only exercised on manual release runs.
