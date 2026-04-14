@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Net.Http.Headers;
-using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using FreeAiSsd.Runner.Services;
@@ -254,18 +253,19 @@ public sealed class RunnerLocalApiServiceTests
         var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true, allowRemoteStt: true, allowVoiceQuery: true, voiceAutoSendToChat: true);
         fixture.Stt.TranscriptionToReturn = "check weather";
         fixture.Chat.Response = new ChatResponse("Weather is clear.", null, false);
-        fixture.Tts.SpeakDelayMs = 700;
+        fixture.Tts.BlockSpeakUntilReleased = true;
         using var http = new HttpClient();
 
-        var sw = Stopwatch.StartNew();
         var response = await http.PostAsync($"{fixture.BaseUrl}/api/voice/query", CreateWavUploadContent(model: "phi3", autoSendToChat: true, speakResponse: true));
-        sw.Stop();
-
         response.EnsureSuccessStatusCode();
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.True(json.GetProperty("ttsTriggeredOnHost").GetBoolean());
-        Assert.True(sw.ElapsedMilliseconds < 500, $"Expected fast return before TTS completion, elapsed={sw.ElapsedMilliseconds}ms");
+        await fixture.Tts.WaitForSpeakCallAsync(TimeSpan.FromSeconds(2));
+        Assert.False(fixture.Tts.SpeakCompletedTask.IsCompleted);
         Assert.Equal(1, fixture.Tts.SpeakCallCount);
+
+        fixture.Tts.ReleaseSpeakCompletion();
+        await fixture.Tts.SpeakCompletedTask.WaitAsync(TimeSpan.FromSeconds(2));
 
         await fixture.DisposeAsync();
     }
@@ -451,6 +451,11 @@ public sealed class RunnerLocalApiServiceTests
         public int SpeakCallCount { get; private set; }
         public int StopCallCount { get; private set; }
         public int SpeakDelayMs { get; set; }
+        public bool BlockSpeakUntilReleased { get; set; }
+        public Task SpeakCompletedTask => _speakCompleted.Task;
+
+        private readonly TaskCompletionSource<bool> _allowSpeakCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _speakCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public event Action<string>? LogMessage;
         public bool IsSpeaking => false;
@@ -463,7 +468,41 @@ public sealed class RunnerLocalApiServiceTests
         public Task SpeakAsync(string text, CancellationToken cancellationToken = default)
         {
             SpeakCallCount++;
-            return SpeakDelayMs > 0 ? Task.Delay(SpeakDelayMs, cancellationToken) : Task.CompletedTask;
+            return SpeakAsyncCore(cancellationToken);
+        }
+
+        private async Task SpeakAsyncCore(CancellationToken cancellationToken)
+        {
+            if (BlockSpeakUntilReleased)
+            {
+                await _allowSpeakCompletion.Task.WaitAsync(cancellationToken);
+            }
+
+            if (SpeakDelayMs > 0)
+            {
+                await Task.Delay(SpeakDelayMs, cancellationToken);
+            }
+
+            _speakCompleted.TrySetResult(true);
+        }
+
+        public void ReleaseSpeakCompletion()
+        {
+            _allowSpeakCompletion.TrySetResult(true);
+        }
+
+        public async Task WaitForSpeakCallAsync(TimeSpan timeout)
+        {
+            var start = DateTime.UtcNow;
+            while (SpeakCallCount == 0)
+            {
+                if (DateTime.UtcNow - start > timeout)
+                {
+                    throw new TimeoutException("SpeakAsync was not invoked in time.");
+                }
+
+                await Task.Delay(10);
+            }
         }
 
         public void Stop()
