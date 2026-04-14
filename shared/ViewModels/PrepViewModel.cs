@@ -37,6 +37,9 @@ public class PrepViewModel : BaseViewModel
     private CancellationTokenSource? _modelOperationCts;
     private int? _systemRamGb;
     private int? _gpuVramGb;
+    private bool _installVrCompanion;
+    private string _companionHostAddress = string.Empty;
+    private int _companionHostPort = 41555;
 
     public PrepViewModel(
         IDriveService driveService,
@@ -209,6 +212,37 @@ public class PrepViewModel : BaseViewModel
     {
         get => _volumeLabel;
         set => SetProperty(ref _volumeLabel, value);
+    }
+
+
+    public bool InstallVrCompanion
+    {
+        get => _installVrCompanion;
+        set
+        {
+            if (SetProperty(ref _installVrCompanion, value))
+                OnPrepTargetsChanged?.Invoke();
+        }
+    }
+
+    public string CompanionHostAddress
+    {
+        get => _companionHostAddress;
+        set
+        {
+            if (SetProperty(ref _companionHostAddress, value))
+                OnPrepTargetsChanged?.Invoke();
+        }
+    }
+
+    public int CompanionHostPort
+    {
+        get => _companionHostPort;
+        set
+        {
+            if (SetProperty(ref _companionHostPort, value))
+                OnPrepTargetsChanged?.Invoke();
+        }
     }
 
     public int? SystemRamGb
@@ -823,6 +857,55 @@ public class PrepViewModel : BaseViewModel
 
                 StatusText = "Staging Windows runner payload...";
                 await _artifactStagingService.StageRunnerAsync(root, AppendLog);
+
+                if (InstallVrCompanion)
+                {
+                    if (CompanionHostPort < 1 || CompanionHostPort > 65535)
+                    {
+                        _dialogService.ShowWarning("Companion host port must be between 1 and 65535.", "Finalize blocked");
+                        StatusText = "Finalize blocked";
+                        return;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(CompanionHostAddress))
+                    {
+                        var hostType = Uri.CheckHostName(CompanionHostAddress.Trim());
+                        if (hostType == UriHostNameType.Unknown)
+                        {
+                            _dialogService.ShowWarning("Companion host must be a dotted-quad IPv4 or a resolvable hostname.", "Finalize blocked");
+                            StatusText = "Finalize blocked";
+                            return;
+                        }
+                    }
+
+                    StatusText = "Staging VR companion payload...";
+                    await _artifactStagingService.StageCompanionAsync(root, AppendLog);
+
+                    var companionDir = Path.Combine(root, "companion");
+                    var companionConfig = new CompanionConfig
+                    {
+                        HostAddress = CompanionHostAddress,
+                        HostPort = CompanionHostPort,
+                        ApiKey = config.NetworkApiKey,
+                        PttBinding = string.Empty,
+                        AutoReconnect = true,
+                        SchemaVersion = 1
+                    };
+                    companionConfig.Save(Path.Combine(companionDir, "companion-config.json"));
+
+                    var readmeLines = new[]
+                    {
+                        "Free AI SSD VR Companion Quick Setup",
+                        "1. Plug this SSD into your VR PC.",
+                        "2. Open the companion folder and run FreeAiSsd.Companion.exe.",
+                        "3. Verify HostAddress/HostPort in companion-config.json or Settings.",
+                        "4. Hold your configured PTT binding while speaking in DCS.",
+                        "5. Release PTT to send /api/voice/query to the host Runner.",
+                        "6. AI response audio plays on this VR PC output device."
+                    };
+                    await File.WriteAllLinesAsync(Path.Combine(companionDir, "README-VR.txt"), readmeLines);
+                    AppendLog("VR companion staged to SSD:/companion.");
+                }
             }
 
             if (targets.HasFlag(PrepTargets.Mac))

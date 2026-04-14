@@ -64,6 +64,9 @@ jobs:
       - name: Publish PrepApp
         shell: pwsh
         run: dotnet publish prep-app/FreeAiSsd.PrepApp.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true -o out/prepapp-publish
+      - name: Publish Companion
+        shell: pwsh
+        run: dotnet publish companion/FreeAiSsd.Companion.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true -o out/companion-publish
       # Phase-A hardening: the previous CI path pinned hardcoded URL + SHA-256
       # pairs per prereq. That required human maintenance every upstream bump
       # and produced long-lived TODOs whenever a hash wasn't independently
@@ -133,6 +136,7 @@ jobs:
           name: windows-build-output
           path: |
             out/prepapp-publish
+            out/companion-publish
             prep-app/bin/Release/net8.0-windows/runner-publish
             out/windows/tools/prereqs
             out/mac/tools/ollama
@@ -240,6 +244,19 @@ jobs:
           New-Item -ItemType Directory -Path $payloadRoot -Force | Out-Null
           Copy-Item "in/windows/out/prepapp-publish/*" $payloadRoot -Recurse -Force
           Copy-Item "in/windows/prep-app/bin/Release/net8.0-windows/runner-publish" (Join-Path $payloadRoot "runner-publish") -Recurse -Force
+          Copy-Item "in/windows/out/companion-publish" (Join-Path $payloadRoot "companion") -Recurse -Force
+          @"
+{
+  "schemaVersion": 1,
+  "hostAddress": "",
+  "hostPort": 41555,
+  "apiKey": "",
+  "pttBinding": "",
+  "inputDeviceName": null,
+  "outputDeviceName": null,
+  "autoReconnect": true
+}
+"@ | Set-Content -Path (Join-Path $payloadRoot "companion/companion-config.json") -Encoding UTF8
           Copy-Item "in/windows/out/windows" (Join-Path $payloadRoot "windows") -Recurse -Force
 
           Copy-Item (Join-Path $payloadRoot "FreeAiSsd.PrepApp.exe") (Join-Path $winRoot "FreeAiSsd.PrepApp.exe") -Force

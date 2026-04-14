@@ -58,16 +58,23 @@ public partial class MainWindow : Window
         LoadStarterCatalog();
 
         var prefStore = new PrepTargetPreferenceStore();
-        var targets = prefStore.Load();
-        _viewModel.PrepareWindows = targets.HasFlag(PrepTargets.Windows);
-        _viewModel.PrepareMac = targets.HasFlag(PrepTargets.Mac);
+        var pref = prefStore.LoadSettings();
+        _viewModel.PrepareWindows = pref.PrepTargets.HasFlag(PrepTargets.Windows);
+        _viewModel.PrepareMac = pref.PrepTargets.HasFlag(PrepTargets.Mac);
+        _viewModel.InstallVrCompanion = pref.InstallVrCompanion;
+        _viewModel.CompanionHostAddress = pref.CompanionHostAddress;
+        _viewModel.CompanionHostPort = pref.CompanionHostPort;
 
         _viewModel.OnPrepTargetsChanged = () =>
         {
             var current = PrepTargets.None;
             if (_viewModel.PrepareWindows) current |= PrepTargets.Windows;
             if (_viewModel.PrepareMac) current |= PrepTargets.Mac;
-            prefStore.Save(current);
+            prefStore.SaveSettings(new PrepPreferenceSnapshot(
+                current,
+                _viewModel.InstallVrCompanion,
+                _viewModel.CompanionHostAddress,
+                _viewModel.CompanionHostPort));
         };
     }
 

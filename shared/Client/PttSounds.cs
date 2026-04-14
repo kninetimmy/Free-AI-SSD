@@ -1,6 +1,6 @@
 using NAudio.Wave;
 
-namespace FreeAiSsd.Runner.Services;
+namespace FreeAiSsd.Shared.Client;
 
 /// <summary>
 /// Generates simple PCM beep tones for PTT activation/deactivation feedback.

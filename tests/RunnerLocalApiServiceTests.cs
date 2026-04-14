@@ -206,6 +206,42 @@ public sealed class RunnerLocalApiServiceTests
         await fixture.DisposeAsync();
     }
 
+
+    [Fact]
+    public async Task VoiceQuery_ResponseShape_ContainsCompanionContractFields()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true, allowRemoteStt: true, allowVoiceQuery: true, voiceAutoSendToChat: true);
+        fixture.Stt.TranscriptionToReturn = "checklist";
+        fixture.Chat.Response = new ChatResponse("complete", new List<string> { "ref" }, true);
+        using var http = new HttpClient();
+
+        var response = await http.PostAsync($"{fixture.BaseUrl}/api/voice/query", CreateWavUploadContent(model: "phi3", autoSendToChat: true, speakResponse: true));
+        response.EnsureSuccessStatusCode();
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.True(json.TryGetProperty("transcription", out _));
+        Assert.True(json.TryGetProperty("responseText", out _));
+        Assert.True(json.TryGetProperty("sources", out _));
+        Assert.True(json.TryGetProperty("ttsTriggeredOnHost", out _));
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task VoiceQuery_NonWhitelistedModel_ReturnsExistingErrorShape()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true, allowRemoteStt: true, allowVoiceQuery: true, voiceAutoSendToChat: true);
+        fixture.Chat.EnforceConfigModelAllowList = true;
+        using var http = new HttpClient();
+
+        var response = await http.PostAsync($"{fixture.BaseUrl}/api/voice/query", CreateWavUploadContent(model: "unknown-model", autoSendToChat: true, speakResponse: false));
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Contains("not installed in config", json.GetProperty("error").GetString(), StringComparison.OrdinalIgnoreCase);
+
+        await fixture.DisposeAsync();
+    }
+
     [Fact]
     public async Task VoiceQuery_AutoSendDisabled_ReturnsTranscriptionOnly()
     {
@@ -371,10 +407,15 @@ public sealed class RunnerLocalApiServiceTests
 
         public ChatResponse Response { get; set; } = new("ok", null, false);
         public int SendPromptCallCount { get; private set; }
+        public bool EnforceConfigModelAllowList { get; set; }
 
         public Task<ChatResponse> SendPromptAsync(string model, string userPrompt, string host, PortableConfig config)
         {
             SendPromptCallCount++;
+            if (EnforceConfigModelAllowList && !config.Models.Any(m => m.Status == ModelInstallStatus.Installed && string.Equals(m.Name, model, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException($"Model '{model}' is not installed in config.");
+            }
             return Task.FromResult(Response);
         }
 

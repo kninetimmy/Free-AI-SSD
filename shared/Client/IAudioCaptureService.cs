@@ -1,4 +1,4 @@
-namespace FreeAiSsd.Runner.Services;
+namespace FreeAiSsd.Shared.Client;
 
 /// <summary>
 /// Captures audio from a microphone device for speech-to-text processing.

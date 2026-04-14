@@ -1,6 +1,6 @@
 using SharpDX.DirectInput;
 
-namespace FreeAiSsd.Runner.Services;
+namespace FreeAiSsd.Shared.Client;
 
 /// <summary>
 /// Listens for joystick/HOTAS button presses via DirectInput.
