@@ -14,16 +14,19 @@ namespace FreeAiSsd.Runner.Services;
 public sealed class RunnerLocalApiService : IRunnerLocalApiService
 {
     private readonly IChatService _chatService;
+    private readonly ISpeechToTextService _sttService;
     private readonly Func<ITextToSpeechService?> _ttsServiceFactory;
     private readonly SsdLogger? _logger;
     private WebApplication? _app;
 
     public RunnerLocalApiService(
         IChatService chatService,
+        ISpeechToTextService sttService,
         Func<ITextToSpeechService?> ttsServiceFactory,
         SsdLogger? logger)
     {
         _chatService = chatService;
+        _sttService = sttService;
         _ttsServiceFactory = ttsServiceFactory;
         _logger = logger;
     }
@@ -211,6 +214,76 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             return Results.Ok(new { status = "stopped" });
         });
 
+        api.MapPost("/stt/transcribe", async (HttpContext context, CancellationToken ct) =>
+        {
+            if (!config.NetworkAllowRemoteStt)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var parseResult = await ParseUploadedAudioAsync(context, config, ct);
+            if (!parseResult.Success)
+            {
+                _logger?.Warn($"Rejected /api/stt/transcribe request: {parseResult.Error}");
+                return Results.BadRequest(new ErrorResponse(parseResult.Error!));
+            }
+
+            try
+            {
+                var transcription = await _sttService.TranscribeAudioAsync(parseResult.PcmAudio!);
+                return Results.Ok(new SttTranscribeResponse(transcription));
+            }
+            catch (Exception ex)
+            {
+                _logger?.Error($"STT transcription failed: {ex.Message}");
+                return Results.StatusCode(StatusCodes.Status500InternalServerError);
+            }
+        });
+
+        api.MapPost("/voice/query", async (HttpContext context, CancellationToken ct) =>
+        {
+            if (!config.NetworkAllowRemoteVoiceQuery)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var parseResult = await ParseUploadedAudioAsync(context, config, ct);
+            if (!parseResult.Success)
+            {
+                _logger?.Warn($"Rejected /api/voice/query request: {parseResult.Error}");
+                return Results.BadRequest(new ErrorResponse(parseResult.Error!));
+            }
+
+            VoiceQueryOptions options;
+            try
+            {
+                options = await ParseVoiceQueryOptionsAsync(context, config, ct);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger?.Warn($"Rejected /api/voice/query request: {ex.Message}");
+                return Results.BadRequest(new ErrorResponse(ex.Message));
+            }
+
+            try
+            {
+                var transcription = await _sttService.TranscribeAudioAsync(parseResult.PcmAudio!);
+                var voiceResult = await ExecuteVoiceQueryAsync(
+                    transcription,
+                    options,
+                    ollamaHost,
+                    config,
+                    ct);
+
+                return Results.Ok(voiceResult);
+            }
+            catch (Exception ex)
+            {
+                _logger?.Error($"Voice query failed: {ex.Message}");
+                return Results.StatusCode(StatusCodes.Status500InternalServerError);
+            }
+        });
+
         _app = app;
         CurrentBaseUrl = $"http://{bindAddress}:{networkPort}";
         await app.StartAsync(cancellationToken);
@@ -286,6 +359,234 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         return null;
     }
 
+    private async Task<VoiceQueryResponse> ExecuteVoiceQueryAsync(
+        string transcription,
+        VoiceQueryOptions options,
+        string ollamaHost,
+        PortableConfig config,
+        CancellationToken cancellationToken)
+    {
+        var trimmedTranscription = transcription.Trim();
+        if (!options.SendToChat || string.IsNullOrWhiteSpace(trimmedTranscription))
+        {
+            return new VoiceQueryResponse(trimmedTranscription, null, Array.Empty<string>(), false);
+        }
+
+        if (string.IsNullOrWhiteSpace(options.Model))
+        {
+            throw new InvalidOperationException("'model' is required when sending transcription to chat.");
+        }
+
+        var chat = await _chatService.SendPromptAsync(options.Model.Trim(), trimmedTranscription, ollamaHost, config);
+
+        var ttsTriggered = false;
+        if (options.SpeakResponse && !string.IsNullOrWhiteSpace(chat.ResponseText) && config.NetworkAllowTts)
+        {
+            var tts = _ttsServiceFactory();
+            if (tts is not null)
+            {
+                await tts.SpeakAsync(chat.ResponseText, cancellationToken);
+                ttsTriggered = true;
+            }
+        }
+
+        return new VoiceQueryResponse(
+            trimmedTranscription,
+            chat.ResponseText,
+            chat.Sources ?? new List<string>(),
+            ttsTriggered);
+    }
+
+    private static async Task<ParsedAudioUpload> ParseUploadedAudioAsync(
+        HttpContext context,
+        PortableConfig config,
+        CancellationToken ct)
+    {
+        if (!context.Request.HasFormContentType)
+        {
+            return ParsedAudioUpload.Fail("Content-Type must be multipart/form-data.");
+        }
+
+        var maxBytes = (long)Math.Max(1, config.NetworkMaxAudioUploadMB) * 1024L * 1024L;
+        if (context.Request.ContentLength is long length && length > maxBytes)
+        {
+            return ParsedAudioUpload.Fail($"Upload exceeds max size of {config.NetworkMaxAudioUploadMB} MB.");
+        }
+
+        var form = await context.Request.ReadFormAsync(ct);
+        var file = form.Files.GetFile("audio");
+        if (file is null)
+        {
+            return ParsedAudioUpload.Fail("Missing uploaded file field 'audio'.");
+        }
+
+        if (file.Length <= 0)
+        {
+            return ParsedAudioUpload.Fail("Uploaded file is empty.");
+        }
+
+        if (file.Length > maxBytes)
+        {
+            return ParsedAudioUpload.Fail($"Upload exceeds max size of {config.NetworkMaxAudioUploadMB} MB.");
+        }
+
+        await using var stream = file.OpenReadStream();
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms, ct);
+        var data = ms.ToArray();
+
+        var format = (form["format"].FirstOrDefault() ?? string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(format))
+        {
+            format = InferAudioFormat(file.ContentType, file.FileName, data);
+        }
+
+        return format switch
+        {
+            "wav" => TryParseWavToPcm(data),
+            "pcm16le" => ParsedAudioUpload.Ok(data),
+            _ => ParsedAudioUpload.Fail("Unsupported audio format. Use WAV (PCM16 mono 16kHz) or PCM16LE.")
+        };
+    }
+
+    private static async Task<VoiceQueryOptions> ParseVoiceQueryOptionsAsync(
+        HttpContext context,
+        PortableConfig config,
+        CancellationToken ct)
+    {
+        var form = await context.Request.ReadFormAsync(ct);
+
+        static bool? ParseOptionalBool(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return null;
+            }
+
+            return bool.TryParse(value, out var parsed) ? parsed : throw new InvalidOperationException("Boolean form values must be 'true' or 'false'.");
+        }
+
+        var autoSend = ParseOptionalBool(form["autoSendToChat"].FirstOrDefault());
+        var speakResponse = ParseOptionalBool(form["speakResponse"].FirstOrDefault()) ?? false;
+        var model = form["model"].FirstOrDefault()?.Trim();
+
+        return new VoiceQueryOptions(
+            autoSend ?? config.NetworkVoiceAutoSendToChat,
+            speakResponse,
+            model);
+    }
+
+    private static string InferAudioFormat(string? contentType, string? fileName, byte[] data)
+    {
+        if (LooksLikeWav(data))
+        {
+            return "wav";
+        }
+
+        if (!string.IsNullOrWhiteSpace(contentType))
+        {
+            var normalized = contentType.Trim().ToLowerInvariant();
+            if (normalized.Contains("wav"))
+            {
+                return "wav";
+            }
+
+            if (normalized is "application/octet-stream" or "audio/l16")
+            {
+                return "pcm16le";
+            }
+        }
+
+        var ext = Path.GetExtension(fileName ?? string.Empty).ToLowerInvariant();
+        return ext switch
+        {
+            ".wav" => "wav",
+            ".pcm" or ".raw" => "pcm16le",
+            _ => string.Empty
+        };
+    }
+
+    private static ParsedAudioUpload TryParseWavToPcm(byte[] wavData)
+    {
+        try
+        {
+            if (!LooksLikeWav(wavData))
+            {
+                return ParsedAudioUpload.Fail("Invalid WAV header.");
+            }
+
+            var offset = 12;
+            short audioFormat = 0;
+            short channels = 0;
+            int sampleRate = 0;
+            short bitsPerSample = 0;
+            byte[]? pcmData = null;
+
+            while (offset + 8 <= wavData.Length)
+            {
+                var chunkId = Encoding.ASCII.GetString(wavData, offset, 4);
+                var chunkSize = BitConverter.ToInt32(wavData, offset + 4);
+                offset += 8;
+
+                if (chunkSize < 0 || offset + chunkSize > wavData.Length)
+                {
+                    return ParsedAudioUpload.Fail("Corrupt WAV payload.");
+                }
+
+                if (chunkId == "fmt ")
+                {
+                    if (chunkSize < 16)
+                    {
+                        return ParsedAudioUpload.Fail("WAV fmt chunk is too small.");
+                    }
+
+                    audioFormat = BitConverter.ToInt16(wavData, offset);
+                    channels = BitConverter.ToInt16(wavData, offset + 2);
+                    sampleRate = BitConverter.ToInt32(wavData, offset + 4);
+                    bitsPerSample = BitConverter.ToInt16(wavData, offset + 14);
+                }
+                else if (chunkId == "data")
+                {
+                    pcmData = new byte[chunkSize];
+                    Buffer.BlockCopy(wavData, offset, pcmData, 0, chunkSize);
+                }
+
+                offset += chunkSize;
+                if ((chunkSize & 1) == 1 && offset < wavData.Length)
+                {
+                    offset++;
+                }
+            }
+
+            if (audioFormat != 1 || channels != 1 || sampleRate != 16000 || bitsPerSample != 16)
+            {
+                return ParsedAudioUpload.Fail("WAV must be PCM 16-bit mono at 16kHz.");
+            }
+
+            if (pcmData is null || pcmData.Length == 0)
+            {
+                return ParsedAudioUpload.Fail("WAV file contains no audio data.");
+            }
+
+            return ParsedAudioUpload.Ok(pcmData);
+        }
+        catch
+        {
+            return ParsedAudioUpload.Fail("Failed to parse WAV upload.");
+        }
+    }
+
+    private static bool LooksLikeWav(byte[] data)
+    {
+        if (data.Length < 12)
+        {
+            return false;
+        }
+
+        return data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F' &&
+               data[8] == 'W' && data[9] == 'A' && data[10] == 'V' && data[11] == 'E';
+    }
+
     private static async Task WriteErrorAsync(HttpContext context, HttpStatusCode statusCode, string message)
     {
         context.Response.StatusCode = (int)statusCode;
@@ -348,5 +649,15 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
     public sealed record ChatRequest(string Model, string Prompt);
     public sealed record ChatResultResponse(string ResponseText, IReadOnlyList<string> Sources, bool UsedRagContext);
     public sealed record TtsSpeakRequest(string Text);
+    public sealed record SttTranscribeResponse(string Transcription);
+    public sealed record VoiceQueryResponse(string Transcription, string? ResponseText, IReadOnlyList<string> Sources, bool TtsTriggeredOnHost);
     public sealed record ErrorResponse(string Error);
+
+    private sealed record VoiceQueryOptions(bool SendToChat, bool SpeakResponse, string? Model);
+
+    private sealed record ParsedAudioUpload(bool Success, byte[]? PcmAudio, string? Error)
+    {
+        public static ParsedAudioUpload Ok(byte[] pcmAudio) => new(true, pcmAudio, null);
+        public static ParsedAudioUpload Fail(string error) => new(false, null, error);
+    }
 }
