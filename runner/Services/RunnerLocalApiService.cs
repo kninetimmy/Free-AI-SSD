@@ -430,7 +430,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             return ParsedAudioUpload.Fail($"Upload exceeds max size of {config.NetworkMaxAudioUploadMB} MB.");
         }
 
-        await using var stream = file.OpenReadStream(maxAllowedSize: maxBytes);
+        await using var stream = file.OpenReadStream();
         using var ms = new MemoryStream();
         await stream.CopyToAsync(ms, ct);
         var data = ms.ToArray();
