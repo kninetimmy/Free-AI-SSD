@@ -221,16 +221,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
-            ParsedAudioUpload parseResult;
-            try
-            {
-                parseResult = await ParseUploadedAudioAsync(context, config, ct);
-            }
-            catch (InvalidDataException ex)
-            {
-                _logger?.Warn($"Rejected /api/stt/transcribe request: {ex.Message}");
-                return Results.BadRequest(new ErrorResponse(ex.Message));
-            }
+            var parseResult = await ParseUploadedAudioAsync(context, config, ct);
             if (!parseResult.Success)
             {
                 _logger?.Warn($"Rejected /api/stt/transcribe request: {parseResult.Error}");
@@ -434,7 +425,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         }
         catch (InvalidDataException ex)
         {
-            throw new InvalidDataException($"Malformed multipart form data: {ex.Message}");
+            return ParsedAudioUpload.Fail($"Malformed multipart form data: {ex.Message}");
         }
         var file = form.Files.GetFile("audio");
         if (file is null)

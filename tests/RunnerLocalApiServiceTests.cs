@@ -128,6 +128,21 @@ public sealed class RunnerLocalApiServiceTests
     }
 
     [Fact]
+    public async Task MalformedMultipartUpload_ReturnsBadRequest_ForSttAndVoiceQuery()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true, allowRemoteStt: true, allowVoiceQuery: true);
+        using var http = new HttpClient();
+
+        var sttResponse = await http.PostAsync($"{fixture.BaseUrl}/api/stt/transcribe", CreateMalformedMultipartContent());
+        Assert.Equal(HttpStatusCode.BadRequest, sttResponse.StatusCode);
+
+        var voiceResponse = await http.PostAsync($"{fixture.BaseUrl}/api/voice/query", CreateMalformedMultipartContent());
+        Assert.Equal(HttpStatusCode.BadRequest, voiceResponse.StatusCode);
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
     public async Task RemoteStt_ReturnsTranscription()
     {
         var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true, allowRemoteStt: true, allowVoiceQuery: true);
@@ -368,6 +383,13 @@ public sealed class RunnerLocalApiServiceTests
             content.Add(new StringContent(speak ? "true" : "false"), "speakResponse");
         }
 
+        return content;
+    }
+
+    private static HttpContent CreateMalformedMultipartContent()
+    {
+        var content = new StringContent("not-valid-multipart-body");
+        content.Headers.ContentType = MediaTypeHeaderValue.Parse("multipart/form-data");
         return content;
     }
 
