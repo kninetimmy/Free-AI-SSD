@@ -42,7 +42,7 @@ jobs:
         run: ./build.ps1 -Configuration Release -Runtime win-x64
       - name: Publish PrepApp
         shell: pwsh
-        run: dotnet publish prep-app/FreeAiSsd.PrepApp.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=false -o out/prepapp-publish
+        run: dotnet publish prep-app/FreeAiSsd.PrepApp.csproj -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true -o out/prepapp-publish
       - name: Download macOS ollama runtime for staging
         if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
         shell: pwsh
@@ -158,10 +158,14 @@ jobs:
         shell: pwsh
         run: |
           $winRoot = "out_win"
+          $payloadRoot = Join-Path $winRoot "payload"
           New-Item -ItemType Directory -Path $winRoot -Force | Out-Null
-          Copy-Item "in/windows/out/prepapp-publish/*" $winRoot -Recurse -Force
-          Copy-Item "in/windows/prep-app/bin/Release/net8.0-windows/runner-publish" (Join-Path $winRoot "runner-publish") -Recurse -Force
-          Copy-Item "in/windows/out/windows" (Join-Path $winRoot "windows") -Recurse -Force
+          New-Item -ItemType Directory -Path $payloadRoot -Force | Out-Null
+          Copy-Item "in/windows/out/prepapp-publish/*" $payloadRoot -Recurse -Force
+          Copy-Item "in/windows/prep-app/bin/Release/net8.0-windows/runner-publish" (Join-Path $payloadRoot "runner-publish") -Recurse -Force
+          Copy-Item "in/windows/out/windows" (Join-Path $payloadRoot "windows") -Recurse -Force
+
+          Copy-Item (Join-Path $payloadRoot "FreeAiSsd.PrepApp.exe") (Join-Path $winRoot "FreeAiSsd.PrepApp.exe") -Force
           Copy-Item "in/windows/docs/QUICKSTART.txt" (Join-Path $winRoot "QUICKSTART.txt") -Force
           Copy-Item "in/windows/LICENSE" (Join-Path $winRoot "LICENSE") -Force
 
@@ -172,9 +176,9 @@ jobs:
           if ('${{ github.event_name }}' -eq 'workflow_dispatch' -and '${{ inputs.include_macos }}' -eq 'true') {
             $betaRoot = "out_beta"
             Copy-Item $winRoot $betaRoot -Recurse -Force
-            New-Item -ItemType Directory -Path (Join-Path $betaRoot "mac") -Force | Out-Null
-            Copy-Item "in/mac/Runner.app.zip" (Join-Path $betaRoot "mac/Runner.app.zip") -Force
-            Copy-Item "in/windows/out/mac/tools" (Join-Path $betaRoot "mac/tools") -Recurse -Force
+            New-Item -ItemType Directory -Path (Join-Path $betaRoot "payload/mac") -Force | Out-Null
+            Copy-Item "in/mac/Runner.app.zip" (Join-Path $betaRoot "payload/mac/Runner.app.zip") -Force
+            Copy-Item "in/windows/out/mac/tools" (Join-Path $betaRoot "payload/mac/tools") -Recurse -Force
 
             $macManifest = [ordered]@{
               schemaVersion = 1
@@ -184,7 +188,7 @@ jobs:
                 [ordered]@{ id = "mac_ollama_manifest"; relativePath = "mac/tools/ollama/mac-tools-manifest.json" }
               )
             }
-            $macManifest | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $betaRoot "mac/mac-artifacts.manifest.json") -Encoding UTF8
+            $macManifest | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $betaRoot "payload/mac/mac-artifacts.manifest.json") -Encoding UTF8
           }
       - name: Create Windows ZIP
         shell: pwsh
