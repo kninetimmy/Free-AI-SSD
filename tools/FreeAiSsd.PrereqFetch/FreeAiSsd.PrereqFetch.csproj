@@ -8,9 +8,14 @@
     <AssemblyName>FreeAiSsd.PrereqFetch</AssemblyName>
     <!--
       Deliberately NOT added to FreeAiSsd.sln: this is a CI-only helper invoked
-      via `dotnet run --project tools/FreeAiSsd.PrereqFetch`. Keeping it outside
-      the sln avoids bloating the main PR/CI compile path and keeps the tool's
-      build scoped to release dispatch runs.
+      via `dotnet run` against this csproj from .github/workflows/build.yml.
+      Keeping it outside the sln avoids bloating the main PR/CI compile path
+      and keeps the tool's build scoped to release dispatch runs.
+
+      NOTE: XML comments cannot contain a double dash, so do not paste literal
+      CLI invocations (which include flags like double-dash project) into this
+      comment block. MSBuild will refuse to load the project file with
+      MSB4025 if the sequence appears anywhere inside a comment.
     -->
   </PropertyGroup>
   <ItemGroup>
