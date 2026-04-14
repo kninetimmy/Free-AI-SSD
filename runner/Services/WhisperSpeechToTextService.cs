@@ -8,6 +8,7 @@ public sealed class WhisperSpeechToTextService : ISpeechToTextService
 {
     private WhisperFactory? _factory;
     private WhisperProcessor? _processor;
+    private readonly SemaphoreSlim _transcriptionGate = new(1, 1);
 
     public event Action<string>? LogMessage;
     public bool IsModelLoaded => _processor is not null;
@@ -69,6 +70,7 @@ public sealed class WhisperSpeechToTextService : ISpeechToTextService
         if (_processor is null)
             throw new InvalidOperationException("Whisper model is not loaded. Call InitializeAsync first.");
 
+        await _transcriptionGate.WaitAsync();
         try
         {
             // Convert raw PCM (16kHz, 16-bit, mono) to float samples that Whisper expects.
@@ -93,6 +95,10 @@ public sealed class WhisperSpeechToTextService : ISpeechToTextService
         {
             LogMessage?.Invoke($"Transcription failed: {ex.Message}");
             return string.Empty;
+        }
+        finally
+        {
+            _transcriptionGate.Release();
         }
     }
 
@@ -148,5 +154,6 @@ public sealed class WhisperSpeechToTextService : ISpeechToTextService
         _processor = null;
         _factory?.Dispose();
         _factory = null;
+        _transcriptionGate.Dispose();
     }
 }

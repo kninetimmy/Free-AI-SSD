@@ -93,7 +93,7 @@ public partial class MainWindow : System.Windows.Window
         _audioCaptureService = new AudioCaptureService();
         _hotasService = new HotasInputService();
         _pttPipeline = new PttVoicePipelineService(_audioCaptureService, _sttService, _chatService);
-        _localApiService = new RunnerLocalApiService(_chatService, _sttService, () => _ttsService, _logger);
+        _localApiService = new RunnerLocalApiService(_chatService, _sttService, () => _ttsService, _logger, _ssdRoot);
 
         // Wire service events to UI
         _ollamaService.LogMessage += msg => AppendLog(msg);
@@ -137,6 +137,7 @@ public partial class MainWindow : System.Windows.Window
         {
             CleanupPtt();
             await _localApiService.StopAsync();
+            _sttService.Dispose();
         };
 
         LoadConfig();
