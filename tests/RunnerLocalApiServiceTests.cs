@@ -324,6 +324,77 @@ public sealed class RunnerLocalApiServiceTests
     }
 
     [Fact]
+    public async Task VoiceQuery_ReturnAudio_IncludesBase64Wav_AndSkipsHostPlayback()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true, allowRemoteStt: true, allowVoiceQuery: true, voiceAutoSendToChat: true);
+        fixture.Stt.TranscriptionToReturn = "ready for taxi";
+        fixture.Chat.Response = new ChatResponse("Cleared to taxi.", null, false);
+        using var http = new HttpClient();
+
+        var content = CreateWavUploadContent(model: "phi3", autoSendToChat: true, speakResponse: true, returnAudio: true);
+        var response = await http.PostAsync($"{fixture.BaseUrl}/api/voice/query", content);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("audio/wav", json.GetProperty("audioMime").GetString());
+        var base64 = json.GetProperty("audioBase64").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(base64));
+        var bytes = Convert.FromBase64String(base64!);
+        Assert.True(bytes.Length > 0);
+        Assert.False(json.GetProperty("ttsTriggeredOnHost").GetBoolean());
+        Assert.Equal(0, fixture.Tts.SpeakCallCount);
+        Assert.Equal(1, fixture.Tts.SynthesizeCallCount);
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task VoiceQuery_ReturnAudioFalse_PreservesHostPlayback_AndOmitsAudio()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true, allowRemoteStt: true, allowVoiceQuery: true, voiceAutoSendToChat: true);
+        fixture.Stt.TranscriptionToReturn = "status report";
+        fixture.Chat.Response = new ChatResponse("All nominal.", null, false);
+        using var http = new HttpClient();
+
+        var content = CreateWavUploadContent(model: "phi3", autoSendToChat: true, speakResponse: true, returnAudio: false);
+        var response = await http.PostAsync($"{fixture.BaseUrl}/api/voice/query", content);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(json.GetProperty("audioBase64").ValueKind is JsonValueKind.Null);
+        Assert.True(json.GetProperty("audioMime").ValueKind is JsonValueKind.Null);
+        Assert.True(json.GetProperty("ttsTriggeredOnHost").GetBoolean());
+        Assert.Equal(1, fixture.Tts.SpeakCallCount);
+        Assert.Equal(0, fixture.Tts.SynthesizeCallCount);
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task VoiceQuery_ReturnAudio_WithTtsDisabled_OmitsAudio_AndDoesNotTriggerHost()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: false, allowRemoteStt: true, allowVoiceQuery: true, voiceAutoSendToChat: true);
+        fixture.Stt.TranscriptionToReturn = "set altimeter";
+        fixture.Chat.Response = new ChatResponse("Altimeter set 29.92.", null, false);
+        using var http = new HttpClient();
+
+        var content = CreateWavUploadContent(model: "phi3", autoSendToChat: true, speakResponse: true, returnAudio: true);
+        var response = await http.PostAsync($"{fixture.BaseUrl}/api/voice/query", content);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("set altimeter", json.GetProperty("transcription").GetString());
+        Assert.Equal("Altimeter set 29.92.", json.GetProperty("responseText").GetString());
+        Assert.True(json.GetProperty("audioBase64").ValueKind is JsonValueKind.Null);
+        Assert.True(json.GetProperty("audioMime").ValueKind is JsonValueKind.Null);
+        Assert.False(json.GetProperty("ttsTriggeredOnHost").GetBoolean());
+        Assert.Equal(0, fixture.Tts.SpeakCallCount);
+        Assert.Equal(0, fixture.Tts.SynthesizeCallCount);
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
     public async Task VoiceQuery_AutoSendRequiresModel()
     {
         var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true, allowRemoteStt: true, allowVoiceQuery: true, voiceAutoSendToChat: true);
@@ -555,10 +626,30 @@ public sealed class RunnerLocalApiServiceTests
         public void SetRate(int rate) { }
         public void SetVolume(int volume) { }
         public IReadOnlyList<string> GetAvailableVoices() => Array.Empty<string>();
+
+        public int SynthesizeCallCount { get; private set; }
+        public byte[]? SynthesizedWavBytes { get; set; } = DefaultSynthesizedWav();
+        public bool ThrowOnSynthesize { get; set; }
+
+        public Task<byte[]?> SynthesizeToWavAsync(string text, CancellationToken cancellationToken = default)
+        {
+            SynthesizeCallCount++;
+            if (ThrowOnSynthesize)
+            {
+                throw new InvalidOperationException("synthesize failure");
+            }
+            return Task.FromResult(SynthesizedWavBytes);
+        }
+
+        private static byte[] DefaultSynthesizedWav()
+        {
+            return CreateTestWavBytes(new short[] { 32, -32, 64, -64 });
+        }
+
         public void Dispose() { }
     }
 
-    private static MultipartFormDataContent CreateWavUploadContent(string? model = "phi3", bool? autoSendToChat = null, bool? speakResponse = null)
+    private static MultipartFormDataContent CreateWavUploadContent(string? model = "phi3", bool? autoSendToChat = null, bool? speakResponse = null, bool? returnAudio = null)
     {
         var content = new MultipartFormDataContent();
         var wavBytes = CreateTestWavBytes(new short[] { 0, 0, 256, -256, 512, -512, 0, 0 });
@@ -579,6 +670,11 @@ public sealed class RunnerLocalApiServiceTests
         if (speakResponse is bool speak)
         {
             content.Add(new StringContent(speak ? "true" : "false"), "speakResponse");
+        }
+
+        if (returnAudio is bool ret)
+        {
+            content.Add(new StringContent(ret ? "true" : "false"), "returnAudio");
         }
 
         return content;

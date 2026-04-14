@@ -203,12 +203,18 @@ internal sealed class CompanionRuntime : IDisposable
                 throw new InvalidOperationException("voice/query returned empty JSON.");
             }
 
-            // TODO(phase-b): Runner /api/voice/query currently returns transcription/responseText/ttsTriggeredOnHost and does not include audio bytes.
-            // Intended split-PC contract is to return audioBase64/audioMime so Companion can play locally on the VR machine.
             if (!string.IsNullOrWhiteSpace(response.AudioBase64))
             {
-                SetState("Speaking");
-                PlayTts(Convert.FromBase64String(response.AudioBase64), response.AudioMime);
+                if (!string.IsNullOrWhiteSpace(response.AudioMime) &&
+                    !string.Equals(response.AudioMime, "audio/wav", StringComparison.OrdinalIgnoreCase))
+                {
+                    _log.Write($"voice/query returned unsupported audio mime '{response.AudioMime}'; skipping playback.");
+                }
+                else
+                {
+                    SetState("Speaking");
+                    PlayTts(Convert.FromBase64String(response.AudioBase64), response.AudioMime);
+                }
             }
 
             _log.Write($"Transcript: {response.Transcription}");
@@ -230,6 +236,7 @@ internal sealed class CompanionRuntime : IDisposable
         form.Add(audio, "audio", "ptt.wav");
         form.Add(new StringContent("true"), "autoSendToChat");
         form.Add(new StringContent("true"), "speakResponse");
+        form.Add(new StringContent("true"), "returnAudio");
 
         var req = new HttpRequestMessage(HttpMethod.Post, uri)
         {

@@ -139,6 +139,98 @@ public sealed class PiperTextToSpeechService : ITextToSpeechService
         _volume = Math.Clamp(volume, 0, 100);
     }
 
+    public Task<byte[]?> SynthesizeToWavAsync(string text, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return Task.FromResult<byte[]?>(null);
+        }
+
+        return Task.Run<byte[]?>(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var piperExe = GetPiperExePath();
+            if (!File.Exists(piperExe))
+            {
+                LogMessage?.Invoke($"Piper executable not found at {piperExe}. Download Piper to enable neural TTS.");
+                return null;
+            }
+
+            var modelPath = GetModelPath();
+            if (modelPath is null)
+            {
+                LogMessage?.Invoke("No Piper voice model found. Place a .onnx model in windows/tools/piper/voices/.");
+                return null;
+            }
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = piperExe,
+                Arguments = $"--model \"{modelPath}\" --output_raw",
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            using var process = Process.Start(psi);
+            if (process is null)
+            {
+                LogMessage?.Invoke("Failed to start Piper process.");
+                return null;
+            }
+
+            process.StandardInput.Write(text);
+            process.StandardInput.Close();
+
+            using var pcmStream = new MemoryStream();
+            process.StandardOutput.BaseStream.CopyTo(pcmStream);
+            process.WaitForExit(30_000);
+
+            var stderr = process.StandardError.ReadToEnd();
+            if (!string.IsNullOrWhiteSpace(stderr))
+            {
+                LogMessage?.Invoke($"Piper: {stderr.Trim()}");
+            }
+
+            var pcm = pcmStream.ToArray();
+            if (pcm.Length == 0)
+            {
+                return null;
+            }
+
+            var sampleRate = DetectSampleRate(modelPath);
+            return WrapPcmAsWav(pcm, sampleRate, channels: 1, bitsPerSample: 16);
+        }, cancellationToken);
+    }
+
+    private static byte[] WrapPcmAsWav(byte[] pcm, int sampleRate, short channels, short bitsPerSample)
+    {
+        using var ms = new MemoryStream();
+        using var writer = new BinaryWriter(ms, System.Text.Encoding.ASCII, leaveOpen: true);
+        var blockAlign = (short)(channels * bitsPerSample / 8);
+        var byteRate = sampleRate * blockAlign;
+
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("RIFF"));
+        writer.Write(36 + pcm.Length);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("WAVE"));
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("fmt "));
+        writer.Write(16);
+        writer.Write((short)1);
+        writer.Write(channels);
+        writer.Write(sampleRate);
+        writer.Write(byteRate);
+        writer.Write(blockAlign);
+        writer.Write(bitsPerSample);
+        writer.Write(System.Text.Encoding.ASCII.GetBytes("data"));
+        writer.Write(pcm.Length);
+        writer.Write(pcm);
+        writer.Flush();
+        return ms.ToArray();
+    }
+
     public IReadOnlyList<string> GetAvailableVoices()
     {
         var voicesDir = Path.Combine(_ssdRoot, "windows", "tools", "piper", "voices");
