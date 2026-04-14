@@ -221,7 +221,16 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
-            var parseResult = await ParseUploadedAudioAsync(context, config, ct);
+            ParsedAudioUpload parseResult;
+            try
+            {
+                parseResult = await ParseUploadedAudioAsync(context, config, ct);
+            }
+            catch (InvalidDataException ex)
+            {
+                _logger?.Warn($"Rejected /api/stt/transcribe request: {ex.Message}");
+                return Results.BadRequest(new ErrorResponse(ex.Message));
+            }
             if (!parseResult.Success)
             {
                 _logger?.Warn($"Rejected /api/stt/transcribe request: {parseResult.Error}");
@@ -276,6 +285,11 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
                     ct);
 
                 return Results.Ok(voiceResult);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger?.Warn($"Rejected /api/voice/query request: {ex.Message}");
+                return Results.BadRequest(new ErrorResponse(ex.Message));
             }
             catch (Exception ex)
             {
@@ -413,7 +427,15 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             return ParsedAudioUpload.Fail($"Upload exceeds max size of {config.NetworkMaxAudioUploadMB} MB.");
         }
 
-        var form = await context.Request.ReadFormAsync(ct);
+        IFormCollection form;
+        try
+        {
+            form = await context.Request.ReadFormAsync(ct);
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new InvalidDataException($"Malformed multipart form data: {ex.Message}");
+        }
         var file = form.Files.GetFile("audio");
         if (file is null)
         {
