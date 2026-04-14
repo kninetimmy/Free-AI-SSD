@@ -100,6 +100,21 @@ public sealed class PortableConfig
     /// </summary>
     public bool UseStreamingChat { get; set; } = true;
 
+    // ── Network Mode (Runner LAN API) ────────────────────────────────────
+
+    /// <summary>Enables Runner-hosted LAN API for remote clients on the local network.</summary>
+    public bool NetworkModeEnabled { get; set; }
+    /// <summary>IP address the Runner API binds to (e.g., 0.0.0.0 for all interfaces).</summary>
+    public string NetworkBindAddress { get; set; } = "0.0.0.0";
+    /// <summary>TCP port for the Runner LAN API.</summary>
+    public int NetworkPort { get; set; } = 41555;
+    /// <summary>Shared secret API key accepted via Bearer or X-API-Key header.</summary>
+    public string NetworkApiKey { get; set; } = string.Empty;
+    /// <summary>Require API key authentication for all non-health LAN API endpoints.</summary>
+    public bool NetworkRequireApiKey { get; set; } = true;
+    /// <summary>Allow remote clients to trigger host-side TTS playback and stop.</summary>
+    public bool NetworkAllowTts { get; set; }
+
     // ── Text-to-Speech ────────────────────────────────────────────────────
 
     /// <summary>Whether text-to-speech of AI responses is enabled.</summary>

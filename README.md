@@ -225,6 +225,62 @@ Bind a button on your HOTAS to start and stop voice recording — no keyboard, n
 
 </details>
 
+<details>
+<summary>🌐 Network Mode (Runner LAN API)</summary>
+
+Network Mode lets one machine run Runner + Ollama locally, while other devices on your LAN call Runner's HTTP API.
+
+**Important architecture (v1):**
+- Ollama still binds to loopback only (`127.0.0.1`) on the host machine
+- LAN clients talk to **Runner API**, not Ollama directly
+- Runner API proxies chat requests to local services
+- TTS actions run on the host (the machine running Runner), not the remote client
+
+**Security model (home LAN baseline):**
+- Non-health endpoints can require an API key (`Authorization: Bearer <key>` or `X-API-Key`)
+- API key is a shared secret in `portable-config.json`
+- No TLS/mTLS in v1 (assume trusted LAN segment)
+- Do not expose this API to the public internet
+
+**Endpoints:**
+- `GET /api/health`
+- `GET /api/models`
+- `POST /api/chat`
+- `POST /api/chat/stream` (newline-delimited JSON stream)
+- `POST /api/tts/speak`
+- `POST /api/tts/stop`
+
+**Example cURL requests:**
+
+```bash
+# health (no API key required)
+curl http://RUNNER_HOST:41555/api/health
+
+# list models
+curl -H "Authorization: Bearer YOUR_KEY" \
+  http://RUNNER_HOST:41555/api/models
+
+# non-stream chat
+curl -X POST http://RUNNER_HOST:41555/api/chat \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"phi3","prompt":"Summarize startup checklist"}'
+
+# stream chat (NDJSON)
+curl -N -X POST http://RUNNER_HOST:41555/api/chat/stream \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"phi3","prompt":"Step-by-step A-10C startup"}'
+
+# trigger host-side TTS
+curl -X POST http://RUNNER_HOST:41555/api/tts/speak \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Radio check complete."}'
+```
+
+</details>
+
 ---
 
 <details>
@@ -284,6 +340,17 @@ All settings live in `config/portable-config.json` on the SSD.
 | `pttOverlayEnabled` | `true` | Show the always-on-top PTT status overlay |
 | `pttOverlayX` / `pttOverlayY` | `20` / `20` | Overlay window position in pixels from top-left |
 
+### Network Mode (Runner LAN API)
+
+| Property | Default | Description |
+|---|---|---|
+| `networkModeEnabled` | `false` | Enable Runner-hosted LAN API |
+| `networkBindAddress` | `"0.0.0.0"` | Bind address for Runner API host |
+| `networkPort` | `41555` | TCP port for Runner API |
+| `networkApiKey` | `""` | Shared secret for API auth |
+| `networkRequireApiKey` | `true` | Require API key on all non-health endpoints |
+| `networkAllowTts` | `false` | Allow remote callers to trigger host-side TTS |
+
 </details>
 
 ---
@@ -295,9 +362,9 @@ All settings live in `config/portable-config.json` on the SSD.
 
 Bindings import currently supports DCS World only. IL-2 and War Thunder parsers are planned for a future phase, pending example binding files.
 
-### Network Mode
+### Network Mode (v1 complete)
 
-Run the AI on one machine, query it from another on the same local network. Runner would expose a local API endpoint — no cloud, no internet required.
+Run the AI on one machine, query it from another on the same local network through Runner's authenticated LAN API. Ollama remains localhost-only.
 
 ### Setup Profiles
 
