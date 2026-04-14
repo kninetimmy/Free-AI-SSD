@@ -16,6 +16,13 @@ public enum PrereqDetectionType
 /// <summary>
 /// Immutable definition of a prerequisite installer, including its download source,
 /// expected filename, silent install arguments, and whether it needs admin elevation.
+///
+/// Phase-A hardening: <see cref="SourceUrl"/> is retained as a documented default
+/// and used by seed/staging paths that do not perform runtime discovery. The
+/// actual download path in <see cref="PrepApp.Services.PrereqService"/> and in
+/// <c>tools/FreeAiSsd.PrereqFetch</c> resolves the URL through
+/// <see cref="PrereqResolver"/> instead so we always grab the latest stable
+/// upstream release with its vendor-published hash.
 /// </summary>
 public sealed record PrereqDefinition(
     string Id,

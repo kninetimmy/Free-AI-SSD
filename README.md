@@ -145,6 +145,24 @@ Load first aid guides, plant identification references, equipment specs, surviva
 - Runner can install staged prerequisites offline when the bundle is valid
 - If install is blocked, refresh prerequisites from PrepApp while online and retry
 
+### Prereq trust model
+
+Every prerequisite and bundled third-party tool is fetched, verified, and recorded at runtime via a single shared resolver (`shared/Prereqs/PrereqResolver.cs`) used by both PrepApp and the CI offline-bundle builder (`tools/FreeAiSsd.PrereqFetch`). There are no hardcoded per-version SHA pins in the workflow or the catalog — stale pins were the failure mode we were hitting most often. Instead:
+
+| Upstream | Version discovery | Integrity check | Trust basis |
+|---|---|---|---|
+| **.NET 8 Desktop Runtime (x64)** | `https://builds.dotnet.microsoft.com/dotnet/release-metadata/8.0/releases.json` → `latest-release` (rejects preview/rc builds) | SHA-512 from the same `releases.json` entry | Vendor-published hash over HTTPS to Microsoft's CDN |
+| **VC++ Redistributable (x64)** | `https://aka.ms/vs/17/release/vc_redist.x64.exe` evergreen permalink | Observed SHA-256 recorded in manifest only | HTTPS-only trust to Microsoft aka.ms (no vendor per-version hash is published at a predictable URL) |
+| **Ollama (macOS, universal)** | GitHub API `releases/latest` → picks `Ollama-darwin.zip` / `ollama-darwin.zip` asset | SHA-256 from the release's `sha256sum.txt` asset | Vendor-published hash over HTTPS to github.com |
+
+Fail-closed invariants (CI and PrepApp both enforce):
+- Any non-HTTPS URL anywhere in the chain is rejected before download begins
+- A missing or unparseable hash source aborts the bundle
+- A SHA mismatch deletes the temp download and throws — no partial installer ever reaches the prereq directory
+- Preview / RC .NET builds are refused even if Microsoft publishes them as `latest-release`
+
+The `prereqs-manifest.json` that ships on the SSD records the resolved upstream URL, the vendor hash (when one was available), the observed SHA-256, and a short `trustNote` describing which trust basis was used — so offline installs can be audited without calling back to the upstream.
+
 </details>
 
 ---
@@ -258,6 +276,7 @@ Network Mode lets one machine run Runner + Ollama locally, while other devices o
 - TTS actions run on the host (the machine running Runner), not on the remote client
 
 **Security model (home LAN baseline):**
+- Runner API binds to `127.0.0.1` (loopback) by default. Binding to `0.0.0.0` (all interfaces) is an explicit opt-in that you must set in `portable-config.json`; Runner logs a WARNING on startup whenever the effective bind address is not loopback.
 - Non-health endpoints can require an API key (`Authorization: Bearer <key>` or `X-API-Key`)
 - API key is a shared secret in `portable-config.json`
 - No TLS/mTLS in v1 (assume trusted LAN segment)
@@ -389,7 +408,7 @@ All settings live in `config/portable-config.json` on the SSD.
 | Property | Default | Description |
 |---|---|---|
 | `networkModeEnabled` | `false` | Enable Runner-hosted LAN API |
-| `networkBindAddress` | `"0.0.0.0"` | Bind address for Runner API host |
+| `networkBindAddress` | `"127.0.0.1"` | Bind address for Runner API host. Defaults to loopback; binding to `0.0.0.0` (all interfaces) is an explicit opt-in. |
 | `networkPort` | `41555` | TCP port for Runner API |
 | `networkApiKey` | `""` | Shared secret for API auth |
 | `networkRequireApiKey` | `true` | Require API key on all non-health endpoints |
@@ -513,6 +532,7 @@ cache/                   — prep-time download cache
 | `PortableConfig.cs` | JSON config serialization with atomic writes |
 | `PrepDriveWriteGuard.cs` | Blocks writes to encrypted drives (fail-closed) |
 | `PrereqInstallValidator.cs` | Validates installer integrity (SHA-256) before execution |
+| `Prereqs/PrereqResolver.cs` | Runtime discovery of the latest stable upstream prereq versions + vendor-hash verification. Shared by PrepApp and CI (see "Prereq trust model"). |
 | `ProcessRunner.cs` | Safe process spawning via `ArgumentList`, not string concatenation |
 | `SsdEncryption.cs` | AES-256-GCM config encryption |
 | `SsdLayout.cs` | Canonical directory structure constants and creation |

@@ -1638,11 +1638,46 @@ public partial class MainWindow : System.Windows.Window
 
     /// <summary>
     /// Fire-and-forget config save. Used by PTT config changes to persist immediately.
+    /// Surfaces the Network-Mode + encryption fail-closed guard to the user via a
+    /// MessageBox instead of silently swallowing the InvalidOperationException.
     /// </summary>
     private void SaveConfigAsync()
     {
         if (_config is null) return;
         var configPath = Path.Combine(_ssdRoot, "config", "portable-config.json");
-        _ = _config.SaveAsync(configPath);
+        _ = _config.SaveAsync(configPath).ContinueWith(t =>
+        {
+            if (t.Exception is null) return;
+            var ex = t.Exception.GetBaseException();
+            Dispatcher.Invoke(() =>
+            {
+                if (ex is InvalidOperationException &&
+                    ex.Message == PortableConfig.NetworkModeEncryptionRequiredMessage)
+                {
+                    System.Windows.MessageBox.Show(
+                        ex.Message,
+                        "Config save blocked",
+                        System.Windows.MessageBoxButton.OK,
+                        System.Windows.MessageBoxImage.Error);
+                }
+                else
+                {
+                    AppendLog($"Failed to save config: {ex.Message}");
+                }
+            });
+        }, TaskScheduler.Default);
     }
+
+    // TODO (phase-a-default-hardening, Task 1 UI confirmation):
+    // There is currently no Runner UI control that toggles NetworkModeEnabled or edits
+    // NetworkBindAddress — users edit portable-config.json directly. When such a UI is
+    // added, call IDialogService.Confirm with the following text before persisting a
+    // non-loopback bind address, and revert to "127.0.0.1" if the user cancels:
+    //
+    //   "Network Mode will expose the Runner API on <addr>:<port>. There is no TLS."
+    //   " Anyone on this network who has your API key can use this machine's AI and"
+    //   " audio. Only enable on a trusted LAN. Continue?"
+    //
+    // The runtime-side warning (logged + AppendLog) in RunnerLocalApiService.StartAsync
+    // fires whenever the effective bind address is not loopback.
 }

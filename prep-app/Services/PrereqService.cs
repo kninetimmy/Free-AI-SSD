@@ -1,6 +1,7 @@
 using System.IO;
 using System.Net.Http;
 using FreeAiSsd.Shared;
+using FreeAiSsd.Shared.Prereqs;
 using FreeAiSsd.Shared.Services;
 
 namespace FreeAiSsd.PrepApp.Services;
@@ -90,42 +91,63 @@ public sealed class PrereqService : IPrereqService
         onLog("Prereq update check complete.");
     }
 
+    /// <summary>
+    /// Phase-A hardening: resolves the latest-stable upstream version + vendor
+    /// hash at runtime via <see cref="PrereqResolver"/> instead of using the
+    /// hardcoded <see cref="PrereqDefinition.SourceUrl"/> values. Every download
+    /// is HTTPS-only, hash-verified (SHA-512 for .NET, SHA-256 when the upstream
+    /// publishes one), and fails closed on any resolve / network / hash error.
+    /// This is the same code path CI uses via tools/FreeAiSsd.PrereqFetch.
+    /// </summary>
     private static async Task DownloadPrereqsAsync(string prereqDir, PrereqManifest manifest,
         Action<string> onLog, CancellationToken ct)
     {
         using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("FreeAiSsd-PrepApp/1.0 (+https://github.com/kninetimmy/free-ai-ssd)");
 
         foreach (var definition in PrereqCatalog.Tier1)
         {
-            var destinationPath = Path.Combine(prereqDir, definition.TargetFileName);
-            var tempPath = destinationPath + ".download";
-
             onLog($"Checking prerequisite update: {definition.DisplayName}");
-            using var response = await client.GetAsync(definition.SourceUrl, HttpCompletionOption.ResponseHeadersRead, ct);
-            response.EnsureSuccessStatusCode();
 
-            await using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            var resolution = await ResolveAsync(definition, client, ct);
+            onLog($"Resolved {definition.Id}: version={resolution.Version} ({resolution.TrustNote})");
+
+            var destinationPath = Path.Combine(prereqDir, definition.TargetFileName);
+            var existingSha = File.Exists(destinationPath)
+                ? DownloadManager.ComputeSha256(destinationPath)
+                : string.Empty;
+
+            var observedSha = await PrereqResolver.DownloadAndVerifyAsync(
+                client, resolution, destinationPath, onLog, ct);
+
+            if (string.Equals(observedSha, existingSha, StringComparison.OrdinalIgnoreCase))
             {
-                await response.Content.CopyToAsync(fs, ct);
-            }
-
-            var downloadedSha = DownloadManager.ComputeSha256(tempPath);
-            var existingSha = File.Exists(destinationPath) ? DownloadManager.ComputeSha256(destinationPath) : string.Empty;
-
-            if (string.Equals(downloadedSha, existingSha, StringComparison.OrdinalIgnoreCase))
-            {
-                File.Delete(tempPath);
                 onLog($"Prereq already up-to-date: {definition.DisplayName}");
             }
             else
             {
-                File.Move(tempPath, destinationPath, overwrite: true);
                 onLog($"Updated prerequisite: {definition.DisplayName}");
             }
 
             var size = new FileInfo(destinationPath).Length;
-            var existingEntry = manifest.Prerequisites.FirstOrDefault(p => string.Equals(p.Id, definition.Id, StringComparison.OrdinalIgnoreCase));
-            var updated = PrereqCatalog.CreateManifestEntry(definition, DownloadManager.ComputeSha256(destinationPath), size);
+            var existingEntry = manifest.Prerequisites.FirstOrDefault(
+                p => string.Equals(p.Id, definition.Id, StringComparison.OrdinalIgnoreCase));
+
+            // Use the resolved URL (not the catalog pin) so the manifest reflects
+            // exactly what was downloaded and verified.
+            var updated = new PrereqManifestEntry
+            {
+                Id = definition.Id,
+                DisplayName = definition.DisplayName,
+                Filename = definition.TargetFileName,
+                SourceUrl = resolution.Url,
+                DownloadedAtUtc = DateTime.UtcNow,
+                Sha256 = observedSha,
+                SizeBytes = size,
+                SilentArgs = definition.SilentArgs,
+                RequiresAdmin = definition.RequiresAdmin,
+                IsOptional = definition.IsOptional,
+            };
 
             if (existingEntry is null)
             {
@@ -144,6 +166,24 @@ public sealed class PrereqService : IPrereqService
                 existingEntry.IsOptional = updated.IsOptional;
             }
         }
+    }
+
+    /// <summary>
+    /// Dispatches to the correct resolver by catalog id. New Tier-1 entries must
+    /// be added here explicitly — we refuse to fall back to a hardcoded URL,
+    /// which is the whole point of the runtime-resolve model.
+    /// </summary>
+    private static Task<PrereqResolution> ResolveAsync(
+        PrereqDefinition definition, HttpClient client, CancellationToken ct)
+    {
+        return definition.Id switch
+        {
+            PrereqCatalog.VcRedistX64Id       => Task.FromResult(PrereqResolver.ResolveVcRedistX64()),
+            PrereqCatalog.DotnetDesktop8X64Id => PrereqResolver.ResolveDotnet8DesktopX64Async(client, ct),
+            _ => throw new InvalidOperationException(
+                $"No runtime resolver registered for prereq id '{definition.Id}'. " +
+                "Add one in PrereqService.ResolveAsync before bundling this prereq."),
+        };
     }
 
     private static string ResolveBundledPrereqDirectory()
