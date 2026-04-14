@@ -3,7 +3,10 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace FreeAiSsd.Companion;
 
-public partial class App : Application
+// Fully-qualify: `Application` is otherwise ambiguous between System.Windows.Application
+// (WPF) and System.Windows.Forms.Application, which is auto-imported via the
+// companion project's UseWindowsForms=true implicit usings.
+public partial class App : System.Windows.Application
 {
     private ServiceProvider? _services;
     private CompanionRuntime? _runtime;
