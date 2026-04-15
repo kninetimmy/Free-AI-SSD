@@ -1,7 +1,7 @@
 <Window x:Class="FreeAiSsd.Runner.PttOverlayWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:runner="clr-namespace:FreeAiSsd.Runner"
+        xmlns:runner="clr-namespace:FreeAiSsd.Runner.Services"
         x:Name="OverlayRoot"
         Title="PTT Status"
         Width="120" Height="40"
