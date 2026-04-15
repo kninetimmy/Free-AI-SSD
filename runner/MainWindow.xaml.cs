@@ -35,13 +35,8 @@ public partial class MainWindow : System.Windows.Window
     private readonly ISpeechToTextService _sttService;
     private readonly IAudioCaptureService _audioCaptureService;
     private readonly IRunnerLocalApiService _localApiService;
+    private readonly ITtsProvider _ttsProvider;
     private ITextToSpeechService? _ttsService;
-
-    /// <summary>
-    /// Current TTS service, exposed so <see cref="IRunnerLocalApiService"/> can reach
-    /// it lazily (TTS is re-created on config load / drive unlock).
-    /// </summary>
-    internal ITextToSpeechService? CurrentTtsService => _ttsService;
 
     private PortableConfig? _config;
     private readonly string _ssdRoot;
@@ -79,7 +74,8 @@ public partial class MainWindow : System.Windows.Window
         IAudioCaptureService audioCaptureService,
         IHotasInputService hotasService,
         PttVoicePipelineService pttPipeline,
-        IRunnerLocalApiService localApiService)
+        IRunnerLocalApiService localApiService,
+        ITtsProvider ttsProvider)
     {
         InitializeComponent();
 
@@ -95,6 +91,7 @@ public partial class MainWindow : System.Windows.Window
         _hotasService = hotasService;
         _pttPipeline = pttPipeline;
         _localApiService = localApiService;
+        _ttsProvider = ttsProvider;
 
         // Wire service events to UI
         _ollamaService.LogMessage += msg => AppendLog(msg);
@@ -896,6 +893,7 @@ public partial class MainWindow : System.Windows.Window
     {
         _ttsService?.Dispose();
         _ttsService = null;
+        _ttsProvider.SetCurrent(null);
 
         if (_config is null) return;
 
@@ -927,11 +925,14 @@ public partial class MainWindow : System.Windows.Window
             {
                 AppendLog($"TTS enabled (engine: {_config.TtsEngine})");
             }
+
+            _ttsProvider.SetCurrent(_ttsService);
         }
         catch (Exception ex)
         {
             AppendLog($"Failed to initialize TTS: {ex.Message}");
             _ttsService = null;
+            _ttsProvider.SetCurrent(null);
         }
     }
 

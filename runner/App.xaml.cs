@@ -42,32 +42,23 @@ public partial class App : System.Windows.Application
         collection.AddSingleton<IHotasInputService, HotasInputService>();
         collection.AddSingleton<PttVoicePipelineService>();
 
-        // RunnerLocalApiService needs a lazy factory for the TTS service because TTS is
-        // (re-)created by MainWindow after config load / drive unlock.
-        collection.AddSingleton<IRunnerLocalApiService>(sp =>
-        {
-            var mainWindowFactory = new Func<MainWindow?>(() => sp.GetService<MainWindow>());
-            return new RunnerLocalApiService(
-                sp.GetRequiredService<IChatService>(),
-                sp.GetRequiredService<ISpeechToTextService>(),
-                () => mainWindowFactory()?.CurrentTtsService,
-                sp.GetRequiredService<SsdLogger>(),
-                ssdRoot);
-        });
+        // Shared holder for the active TTS engine. MainWindow writes this when the
+        // engine is (re-)created on config load / drive unlock; RunnerLocalApiService
+        // reads it to serve network TTS requests. Decouples the background HTTP
+        // service from the WPF View layer and breaks the DI cycle that previously
+        // required a lazy MainWindow factory here.
+        collection.AddSingleton<ITtsProvider, TtsProvider>();
 
-        collection.AddSingleton(sp => new MainWindow(
-            ssdRoot,
-            sp.GetRequiredService<SsdLogger>(),
-            sp.GetRequiredService<IOllamaLifecycleService>(),
-            sp.GetRequiredService<IModelManagementService>(),
-            sp.GetRequiredService<IDocumentOperationsService>(),
+        collection.AddSingleton<IRunnerLocalApiService>(sp => new RunnerLocalApiService(
             sp.GetRequiredService<IChatService>(),
-            sp.GetRequiredService<IDcsBindingsImportService>(),
             sp.GetRequiredService<ISpeechToTextService>(),
-            sp.GetRequiredService<IAudioCaptureService>(),
-            sp.GetRequiredService<IHotasInputService>(),
-            sp.GetRequiredService<PttVoicePipelineService>(),
-            sp.GetRequiredService<IRunnerLocalApiService>()));
+            sp.GetRequiredService<ITtsProvider>(),
+            sp.GetRequiredService<SsdLogger>(),
+            ssdRoot));
+
+        // ActivatorUtilities resolves registered services automatically; ssdRoot is
+        // the only non-DI parameter and is passed positionally.
+        collection.AddSingleton(sp => ActivatorUtilities.CreateInstance<MainWindow>(sp, ssdRoot));
 
         _services = collection.BuildServiceProvider();
 
@@ -93,11 +84,13 @@ public partial class App : System.Windows.Application
         var trimmed = baseDir.TrimEnd(Path.DirectorySeparatorChar);
         if (trimmed.EndsWith($"windows{Path.DirectorySeparatorChar}runner", StringComparison.OrdinalIgnoreCase))
         {
-            return Directory.GetParent(Directory.GetParent(trimmed)!.FullName)!.FullName;
+            // <ssdRoot>/windows/runner -> walk up two levels. Fall back to baseDir if
+            // the path is unexpectedly shallow (e.g. running from a drive root).
+            return Directory.GetParent(trimmed)?.Parent?.FullName ?? baseDir;
         }
         if (trimmed.EndsWith("runner", StringComparison.OrdinalIgnoreCase))
         {
-            return Directory.GetParent(trimmed)!.FullName;
+            return Directory.GetParent(trimmed)?.FullName ?? baseDir;
         }
         return baseDir;
     }

@@ -434,7 +434,9 @@ public sealed class RunnerLocalApiServiceTests
             var chat = new FakeChatService();
             var stt = new FakeSttService();
             var tts = new FakeTtsService();
-            var service = new RunnerLocalApiService(chat, stt, () => tts, logger: null);
+            var ttsProvider = new TtsProvider();
+            ttsProvider.SetCurrent(tts);
+            var service = new RunnerLocalApiService(chat, stt, ttsProvider, logger: null);
             var config = new PortableConfig
             {
                 NetworkModeEnabled = true,
