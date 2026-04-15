@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
+using System.Windows.Threading;
 using FreeAiSsd.PrepApp.Services;
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Models;
@@ -120,9 +121,12 @@ public partial class MainWindow : Window
 
     private void LogLines_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        if (e.Action == NotifyCollectionChangedAction.Add && LogListBox.Items.Count > 0)
-        {
-            LogListBox.ScrollIntoView(LogListBox.Items[^1]);
-        }
+        if (e.Action != NotifyCollectionChangedAction.Add || e.NewItems is null || e.NewItems.Count == 0)
+            return;
+
+        var newestItem = e.NewItems[e.NewItems.Count - 1];
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            new Action(() => LogListBox.ScrollIntoView(newestItem)));
     }
 }
