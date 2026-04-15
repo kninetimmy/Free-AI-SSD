@@ -18,6 +18,8 @@ public sealed class RunnerFirstRunState
     public DateTime LastCheckedUtc { get; set; } = DateTime.UtcNow;
     /// <summary>UTC timestamp of the last successful drive unlock (for encrypted SSDs).</summary>
     public DateTime? EncryptionUnlockedAtUtc { get; set; }
+    /// <summary>Whether the user has completed (or skipped) the first-time guided tour.</summary>
+    public bool FtueCompleted { get; set; }
 
     /// <summary>
     /// Loads the first-run state from disk. Returns defaults if the file

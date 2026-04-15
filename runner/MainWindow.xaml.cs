@@ -3,6 +3,7 @@ using System.IO;
 using System.Net.Http;
 using System.Security.Principal;
 using System.Threading;
+using System.Windows.Threading;
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Documents;
 using FreeAiSsd.Shared.UI.Theme;
@@ -63,6 +64,12 @@ public partial class MainWindow : System.Windows.Window
     private List<DcsAircraftImportItem> _aircraftItems = new();
     private CancellationTokenSource? _importCts;
 
+    // FTUE state
+    private int _ftueStepIndex;
+    private System.Windows.FrameworkElement[] _ftueTargets = Array.Empty<System.Windows.FrameworkElement>();
+    private (string label, string title, string body)[] _ftueSteps = Array.Empty<(string, string, string)>();
+    private bool _ftueCompletedCached;
+
     public MainWindow(
         string ssdRoot,
         SsdLogger logger,
@@ -101,6 +108,7 @@ public partial class MainWindow : System.Windows.Window
             await _localApiService.StopAsync();
             StatusText.Text = "Stopped";
             OllamaStatusLed.State = LedState.Idle;
+            UpdateOllamaOfflineEmptyState();
         });
         _modelService.LogMessage += msg => AppendLog(msg);
         _docService.LogMessage += msg => AppendLog(msg);
@@ -143,6 +151,40 @@ public partial class MainWindow : System.Windows.Window
         LoadConfig();
         _ = ShowModelSizingWarningsOnStartupAsync();
         _ = InitializeCompatibilityAsync();
+
+        Loaded += OnWindowLoaded;
+        SizeChanged += OnWindowSizeChanged;
+        UpdateOllamaOfflineEmptyState();
+    }
+
+    private async void OnWindowLoaded(object sender, System.Windows.RoutedEventArgs e)
+    {
+        // Read the tiny first-run JSON off the UI thread so a slow / contended
+        // SSD can't stall the window's first paint.
+        var statePath = Path.Combine(_ssdRoot, SsdLayout.Config, "runner-first-run.json");
+        RunnerFirstRunState state;
+        try
+        {
+            state = await Task.Run(() => RunnerFirstRunState.Load(statePath));
+        }
+        catch (Exception ex)
+        {
+            _logger?.Warn($"Failed to load runner-first-run state: {ex.Message}");
+            state = new RunnerFirstRunState();
+        }
+        _ftueCompletedCached = state.FtueCompleted;
+        if (!_ftueCompletedCached)
+        {
+            StartFtue();
+        }
+    }
+
+    private void OnWindowSizeChanged(object sender, System.Windows.SizeChangedEventArgs e)
+    {
+        if (FtueOverlay.Visibility == System.Windows.Visibility.Visible)
+        {
+            PositionSpotlight();
+        }
     }
 
     private async Task InitializeCompatibilityAsync()
@@ -215,6 +257,7 @@ public partial class MainWindow : System.Windows.Window
             : new List<string>();
         ModelCombo.ItemsSource = installedModels;
         ModelCombo.SelectedIndex = installedModels.Count > 0 ? 0 : -1;
+        UpdateNoModelsEmptyState();
     }
 
     private void UpdateEncryptionUiState()
@@ -288,6 +331,7 @@ public partial class MainWindow : System.Windows.Window
 
         StatusText.Text = $"Running on {_ollamaService.CurrentHost}";
         OllamaStatusLed.State = LedState.Ok;
+        UpdateOllamaOfflineEmptyState();
         await StartLocalApiIfEnabledAsync();
         await Task.Delay(1000);
     }
@@ -300,6 +344,7 @@ public partial class MainWindow : System.Windows.Window
             _ollamaService.Stop();
             StatusText.Text = "Stopped";
             OllamaStatusLed.State = LedState.Idle;
+            UpdateOllamaOfflineEmptyState();
         }
     }
 
@@ -651,6 +696,18 @@ public partial class MainWindow : System.Windows.Window
         CompatibilityDepsText.Text = _lastDependencyCheck.IsSatisfied
             ? "Dependency status: OK"
             : $"Dependency status: Missing ({string.Join(", ", _lastDependencyCheck.MissingItems.Select(m => m.DisplayName))})";
+
+        // Collapsed-view summary: single LED + one-line status.
+        if (_lastDependencyCheck.IsSatisfied)
+        {
+            ReadinessLed.State = LedState.Ok;
+            ReadinessSummaryText.Text = "Ready";
+        }
+        else
+        {
+            ReadinessLed.State = LedState.Error;
+            ReadinessSummaryText.Text = "Not ready";
+        }
     }
 
     private async Task SaveFirstRunStateAsync(bool promptShown)
@@ -744,6 +801,7 @@ public partial class MainWindow : System.Windows.Window
             ? "No indexing run yet."
             : $"Last indexed: {_activeLibrary.LastIndexedUtc:u}";
         UpdateLibraryActionButtons();
+        UpdateNoLibraryEmptyState();
     }
 
     private async Task<bool> EnsureActiveLibraryAsync()
@@ -758,6 +816,7 @@ public partial class MainWindow : System.Windows.Window
         _activeLibrary = await _docService.SetActiveLibraryAsync(_config, _ssdRoot, selectedId);
         LibraryFilesList.ItemsSource = _activeLibrary?.Files ?? new List<DocumentFileEntry>();
         UpdateLibraryActionButtons();
+        UpdateNoLibraryEmptyState();
         return _activeLibrary is not null;
     }
 
@@ -1168,6 +1227,242 @@ public partial class MainWindow : System.Windows.Window
     private void UnlockDrive_Click(object sender, System.Windows.RoutedEventArgs e)
     {
         TryUnlockEncryptedDrive();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Empty states
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Toggles the "Ollama is offline" CTA over the log area based on whether
+    /// the local server is currently running.
+    /// </summary>
+    private void UpdateOllamaOfflineEmptyState()
+    {
+        var offline = !_ollamaService.IsRunning;
+        OllamaOfflineEmptyState.Visibility = offline
+            ? System.Windows.Visibility.Visible
+            : System.Windows.Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// Toggles the "no library selected" overlay on the reference docs panels.
+    /// </summary>
+    private void UpdateNoLibraryEmptyState()
+    {
+        var hasLibrary = _activeLibrary is not null;
+        NoLibraryEmptyState.Visibility = hasLibrary
+            ? System.Windows.Visibility.Collapsed
+            : System.Windows.Visibility.Visible;
+    }
+
+    /// <summary>
+    /// Toggles the "no models installed" CTA on the model+prompt row. Disables
+    /// the row controls when no models are configured so the user can't try to
+    /// send into the void.
+    /// </summary>
+    private void UpdateNoModelsEmptyState()
+    {
+        var hasModels = ModelCombo.Items.Count > 0;
+        NoModelsEmptyState.Visibility = hasModels
+            ? System.Windows.Visibility.Collapsed
+            : System.Windows.Visibility.Visible;
+        ModelPromptRow.IsEnabled = hasModels;
+    }
+
+    /// <summary>
+    /// Click handler for the "Open Prep app" CTA in the no-models empty state.
+    /// Tries to launch the prep-app executable from its expected layout
+    /// locations on the SSD; falls back to opening the SSD root folder if
+    /// the binary can't be located.
+    /// </summary>
+    private void OpenPrepApp_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        // Released SSDs ship the PrepApp single-file exe at the SSD root
+        // (see .github/workflows/build.yml — payload root). Dev-machine layouts
+        // may still have it under the source tree, so we probe a couple of
+        // fallback locations using the SsdLayout.Windows constant where
+        // applicable rather than hardcoding "windows".
+        const string PrepAppExe = "FreeAiSsd.PrepApp.exe";
+        var candidates = new[]
+        {
+            Path.Combine(_ssdRoot, PrepAppExe),
+            Path.Combine(_ssdRoot, SsdLayout.Windows, "prep-app", PrepAppExe),
+            Path.Combine(_ssdRoot, "prep-app", PrepAppExe),
+        };
+
+        var exe = candidates.FirstOrDefault(File.Exists);
+        if (exe is not null)
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo { FileName = exe, UseShellExecute = true });
+                return;
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"Failed to launch Prep app: {ex.Message}");
+            }
+        }
+
+        AppendLog("Prep app executable not found on the SSD. Opening SSD root folder.");
+        try
+        {
+            Process.Start(new ProcessStartInfo { FileName = _ssdRoot, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Failed to open SSD root: {ex.Message}");
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FTUE (First-Time User Experience): 4-step spotlight tour.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void ReplayTour_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        StartFtue();
+    }
+
+    private void StartFtue()
+    {
+        _ftueSteps = new (string, string, string)[]
+        {
+            ("Step 1 of 4", "Check compatibility",
+                "Confirm GPU, CPU, and dependencies are good. Expand 'System details' if anything looks red."),
+            ("Step 2 of 4", "Start Ollama",
+                "Click Start Ollama to launch the local server. The status LED turns green when it's ready."),
+            ("Step 3 of 4", "Pick a model and send a prompt",
+                "Choose an installed model, type a prompt, and click Send. Use 🎤 Voice for hands-free input."),
+            ("Step 4 of 4", "Optional: bindings or PTT",
+                "Import flight-sim controller bindings into a library, or enable Push-to-Talk to query the AI from your HOTAS."),
+        };
+        _ftueTargets = new System.Windows.FrameworkElement[]
+        {
+            SystemCompatibilityCard,
+            StartOllamaButton,
+            ModelPromptCard,
+            BindingsImportCard,
+        };
+
+        _ftueStepIndex = 0;
+        FtueOverlay.Visibility = System.Windows.Visibility.Visible;
+        ApplyFtueStep();
+    }
+
+    private void ApplyFtueStep()
+    {
+        if (_ftueStepIndex < 0 || _ftueStepIndex >= _ftueSteps.Length)
+        {
+            FinishFtue();
+            return;
+        }
+
+        var (label, title, body) = _ftueSteps[_ftueStepIndex];
+        FtueStepLabel.Text = label;
+        FtueTitleText.Text = title;
+        FtueBodyText.Text = body;
+        FtueNextButton.Content = _ftueStepIndex == _ftueSteps.Length - 1 ? "Finish" : "Next";
+
+        // Step 2 highlights the Start button: pulse the Ollama LED to draw
+        // the eye to it. Restore prior state on later steps.
+        if (_ftueStepIndex == 1)
+        {
+            OllamaStatusLed.State = LedState.Busy;
+        }
+        else if (OllamaStatusLed.State == LedState.Busy && !_ollamaService.IsRunning)
+        {
+            OllamaStatusLed.State = LedState.Idle;
+        }
+
+        // Defer spotlight positioning until the target has a real layout.
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(PositionSpotlight));
+    }
+
+    private void PositionSpotlight()
+    {
+        if (_ftueStepIndex < 0 || _ftueStepIndex >= _ftueTargets.Length)
+        {
+            FtueSpotlight.Visibility = System.Windows.Visibility.Collapsed;
+            return;
+        }
+
+        var target = _ftueTargets[_ftueStepIndex];
+        if (target is null || !target.IsVisible || target.ActualWidth <= 0 || target.ActualHeight <= 0)
+        {
+            FtueSpotlight.Visibility = System.Windows.Visibility.Collapsed;
+            return;
+        }
+
+        try
+        {
+            var transform = target.TransformToVisual(FtueSpotlightCanvas);
+            var topLeft = transform.Transform(new System.Windows.Point(0, 0));
+            const double pad = 8;
+            System.Windows.Controls.Canvas.SetLeft(FtueSpotlight, topLeft.X - pad);
+            System.Windows.Controls.Canvas.SetTop(FtueSpotlight, topLeft.Y - pad);
+            FtueSpotlight.Width = target.ActualWidth + pad * 2;
+            FtueSpotlight.Height = target.ActualHeight + pad * 2;
+            FtueSpotlight.Visibility = System.Windows.Visibility.Visible;
+        }
+        catch (InvalidOperationException)
+        {
+            FtueSpotlight.Visibility = System.Windows.Visibility.Collapsed;
+        }
+    }
+
+    private void OnFtueNextClick(object sender, System.Windows.RoutedEventArgs e)
+    {
+        _ftueStepIndex++;
+        if (_ftueStepIndex >= _ftueSteps.Length)
+        {
+            FinishFtue();
+            return;
+        }
+        ApplyFtueStep();
+    }
+
+    private void OnFtueSkipClick(object sender, System.Windows.RoutedEventArgs e)
+    {
+        FinishFtue();
+    }
+
+    private void FinishFtue()
+    {
+        FtueOverlay.Visibility = System.Windows.Visibility.Collapsed;
+        FtueSpotlight.Visibility = System.Windows.Visibility.Collapsed;
+        // Restore the Ollama LED if step 2 forced it into Busy purely for
+        // attention. Don't clobber a real Busy/Ok/Error coming from runtime.
+        if (OllamaStatusLed.State == LedState.Busy && !_ollamaService.IsRunning)
+        {
+            OllamaStatusLed.State = LedState.Idle;
+        }
+
+        if (_ftueCompletedCached) return;
+        _ftueCompletedCached = true;
+        _ = SaveFtueCompletedAsync();
+    }
+
+    private async Task SaveFtueCompletedAsync()
+    {
+        try
+        {
+            var statePath = Path.Combine(_ssdRoot, SsdLayout.Config, "runner-first-run.json");
+            // Load is synchronous but cheap (small JSON); push it off the UI
+            // thread for consistency since SaveAsync already runs there.
+            var state = await Task.Run(() => RunnerFirstRunState.Load(statePath));
+            if (state.FtueCompleted) return;
+            state.FtueCompleted = true;
+            state.LastCheckedUtc = DateTime.UtcNow;
+            await state.SaveAsync(statePath);
+        }
+        catch (Exception ex)
+        {
+            // Don't let a bad I/O on the SSD crash the app via an unobserved
+            // task exception. Worst case the user sees the FTUE again next launch.
+            _logger?.Warn($"Failed to persist FTUE completion flag: {ex.Message}");
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
