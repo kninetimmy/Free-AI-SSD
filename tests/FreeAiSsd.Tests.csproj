@@ -26,6 +26,7 @@
     <Compile Include="..\runner\Services\IChatService.cs" Link="Runner\IChatService.cs" />
     <Compile Include="..\runner\Services\ISpeechToTextService.cs" Link="Runner\ISpeechToTextService.cs" />
     <Compile Include="..\runner\Services\ITextToSpeechService.cs" Link="Runner\ITextToSpeechService.cs" />
+    <Compile Include="..\runner\Services\ITtsProvider.cs" Link="Runner\ITtsProvider.cs" />
     <Compile Include="..\runner\Services\IRunnerLocalApiService.cs" Link="Runner\IRunnerLocalApiService.cs" />
     <Compile Include="..\runner\Services\RunnerLocalApiService.cs" Link="Runner\RunnerLocalApiService.cs" />
   </ItemGroup>
