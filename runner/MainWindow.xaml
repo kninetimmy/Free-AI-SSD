@@ -226,7 +226,8 @@
 
                 <StackPanel Orientation="Horizontal" Margin="16,0,0,0"
                             VerticalAlignment="Center">
-                    <theme:LedStatusIndicator State="Idle"
+                    <theme:LedStatusIndicator x:Name="OllamaStatusLed"
+                                              State="Idle"
                                               VerticalAlignment="Center"
                                               Margin="0,0,8,0"/>
                     <TextBlock x:Name="StatusText"

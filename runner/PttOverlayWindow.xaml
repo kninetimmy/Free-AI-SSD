@@ -1,6 +1,8 @@
 <Window x:Class="FreeAiSsd.Runner.PttOverlayWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:runner="clr-namespace:FreeAiSsd.Runner"
+        x:Name="OverlayRoot"
         Title="PTT Status"
         Width="120" Height="40"
         WindowStyle="None"
@@ -13,7 +15,10 @@
     <!--  Translucent neumorphic pill. The RootBorder keeps its x:Name so
           the drag handlers in code-behind continue to capture mouse
           events against it. The StatusDot ellipse also keeps its name so
-          UpdateState(...) can still swap Fill for each pipeline state.  -->
+          UpdateState(...) can still swap Fill for each pipeline state.
+          The DataTrigger below binds to the window's PipelineState DP
+          (an enum), not to UI text, so the pulse animation survives
+          localization or label-string changes.  -->
     <Border x:Name="RootBorder"
             CornerRadius="18"
             Background="#CC1A1D24"
@@ -26,7 +31,7 @@
             MouseMove="Border_MouseMove"
             Cursor="Hand">
         <Border.Effect>
-            <DropShadowEffect Color="#0B0D12"
+            <DropShadowEffect Color="{StaticResource SurfaceShadowColor}"
                               Direction="315"
                               ShadowDepth="3"
                               BlurRadius="10"
@@ -36,13 +41,14 @@
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center">
             <!--  Pulsing cyan LED while recording. The storyboard fires
-                  whenever StatusLabel.Text == "Listening"; it animates
-                  opacity on a forever-looping, auto-reversing timeline.  -->
+                  whenever the window's PipelineState DP equals Listening;
+                  it animates opacity on a forever-looping, auto-reversing
+                  timeline.  -->
             <Ellipse x:Name="StatusDot" Width="10" Height="10"
                      Margin="0,0,8,0"
                      Fill="{StaticResource TextMutedBrush}">
                 <Ellipse.Effect>
-                    <DropShadowEffect Color="#00E5FF"
+                    <DropShadowEffect Color="{StaticResource AccentCyanColor}"
                                       ShadowDepth="0"
                                       BlurRadius="12"
                                       Opacity="0.85"/>
@@ -51,8 +57,8 @@
                     <Style TargetType="{x:Type Ellipse}">
                         <Setter Property="Opacity" Value="1.0"/>
                         <Style.Triggers>
-                            <DataTrigger Binding="{Binding Text, ElementName=StatusLabel}"
-                                         Value="Listening">
+                            <DataTrigger Binding="{Binding PipelineState, ElementName=OverlayRoot}"
+                                         Value="{x:Static runner:PttState.Listening}">
                                 <DataTrigger.EnterActions>
                                     <BeginStoryboard x:Name="PulseStoryboard">
                                         <Storyboard RepeatBehavior="Forever" AutoReverse="True">

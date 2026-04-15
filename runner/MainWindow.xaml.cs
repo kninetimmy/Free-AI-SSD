@@ -5,6 +5,7 @@ using System.Security.Principal;
 using System.Threading;
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Documents;
+using FreeAiSsd.Shared.UI.Theme;
 using FreeAiSsd.Runner.Services;
 using Forms = System.Windows.Forms;
 
@@ -99,6 +100,7 @@ public partial class MainWindow : System.Windows.Window
         {
             await _localApiService.StopAsync();
             StatusText.Text = "Stopped";
+            OllamaStatusLed.State = LedState.Idle;
         });
         _modelService.LogMessage += msg => AppendLog(msg);
         _docService.LogMessage += msg => AppendLog(msg);
@@ -263,21 +265,29 @@ public partial class MainWindow : System.Windows.Window
         if (!trust.IsTrusted)
         {
             StatusText.Text = "Blocked: untrusted Ollama package";
+            OllamaStatusLed.State = LedState.Error;
             AppendLog($"Start blocked: {trust.Message}");
             return;
         }
 
-        if (!await EnsureDependenciesReadyAsync(forcePrompt: false, userTriggered: true)) return;
+        OllamaStatusLed.State = LedState.Busy;
+        if (!await EnsureDependenciesReadyAsync(forcePrompt: false, userTriggered: true))
+        {
+            OllamaStatusLed.State = LedState.Idle;
+            return;
+        }
 
         var result = _ollamaService.Start(_config, _ssdRoot);
         if (!result.Success)
         {
             StatusText.Text = result.ErrorMessage ?? "Start failed";
+            OllamaStatusLed.State = LedState.Error;
             AppendLog(result.ErrorMessage ?? "Start failed");
             return;
         }
 
         StatusText.Text = $"Running on {_ollamaService.CurrentHost}";
+        OllamaStatusLed.State = LedState.Ok;
         await StartLocalApiIfEnabledAsync();
         await Task.Delay(1000);
     }
@@ -289,6 +299,7 @@ public partial class MainWindow : System.Windows.Window
             _ = _localApiService.StopAsync();
             _ollamaService.Stop();
             StatusText.Text = "Stopped";
+            OllamaStatusLed.State = LedState.Idle;
         }
     }
 
