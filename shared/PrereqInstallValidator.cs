@@ -30,12 +30,13 @@ public static class PrereqInstallValidator
     /// Builds a validated installation plan from a list of missing dependencies.
     /// For each missing dependency, performs the following checks in order:
     /// 1. Verifies the dependency exists in the known prerequisite catalog.
-    /// 2. Checks the manifest has a matching entry with correct filename.
-    /// 3. Validates the manifest entry has a SHA-256 hash.
-    /// 4. Ensures the installer file path is safe (no path traversal).
-    /// 5. Verifies the installer file exists on disk.
-    /// 6. Computes and compares the file's SHA-256 hash.
-    /// 7. Validates the Authenticode signature (Windows only, for Microsoft installers).
+    /// 2. Checks the manifest has an entry for the dependency.
+    /// 3. Verifies the manifest filename matches the catalog expectation.
+    /// 4. Validates the manifest entry has a SHA-256 hash.
+    /// 5. Ensures the installer file path is safe (no path traversal).
+    /// 6. Verifies the installer file exists on disk.
+    /// 7. Computes and compares the file's SHA-256 hash.
+    /// 8. Validates the Authenticode signature (Windows only, for Microsoft installers).
     /// Any failure at any step adds an error and skips that dependency.
     /// </summary>
     /// <param name="ssdRoot">Root path of the portable SSD.</param>

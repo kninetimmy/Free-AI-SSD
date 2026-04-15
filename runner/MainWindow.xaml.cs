@@ -887,7 +887,7 @@ public partial class MainWindow : System.Windows.Window
 
     /// <summary>
     /// Creates and configures the TTS service based on the current config.
-    /// Called once after config is loaded (or re-loaded after unlock).
+    /// Called after config load and any subsequent config reload/unlock.
     /// </summary>
     private void InitializeTts()
     {
