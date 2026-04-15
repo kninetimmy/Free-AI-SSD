@@ -44,7 +44,19 @@
                                                       Opacity="0.9"/>
                                 </Setter.Value>
                             </Setter>
-                            <DataTrigger.EnterActions>
+                        </DataTrigger>
+
+                        <!-- Pulse storyboard runs only when the OS allows
+                             client-area animation. ReducedMotion.Apply flips
+                             Root.AllowPulse at startup; if the user has
+                             disabled animations, the Busy state still turns
+                             the lamp cyan (above) but does not animate. -->
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding State, ElementName=Root}" Value="Busy"/>
+                                <Condition Binding="{Binding AllowPulse, ElementName=Root}" Value="True"/>
+                            </MultiDataTrigger.Conditions>
+                            <MultiDataTrigger.EnterActions>
                                 <BeginStoryboard x:Name="PulseStoryboard">
                                     <Storyboard RepeatBehavior="Forever" AutoReverse="True">
                                         <DoubleAnimation Storyboard.TargetProperty="Opacity"
@@ -52,11 +64,11 @@
                                                          Duration="0:0:0.8"/>
                                     </Storyboard>
                                 </BeginStoryboard>
-                            </DataTrigger.EnterActions>
-                            <DataTrigger.ExitActions>
+                            </MultiDataTrigger.EnterActions>
+                            <MultiDataTrigger.ExitActions>
                                 <StopStoryboard BeginStoryboardName="PulseStoryboard"/>
-                            </DataTrigger.ExitActions>
-                        </DataTrigger>
+                            </MultiDataTrigger.ExitActions>
+                        </MultiDataTrigger>
 
                         <DataTrigger Binding="{Binding State, ElementName=Root}" Value="Ok">
                             <Setter Property="Fill" Value="{DynamicResource StatusSuccessBrush}"/>

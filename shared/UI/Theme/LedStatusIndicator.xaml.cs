@@ -35,6 +35,17 @@ public partial class LedStatusIndicator : System.Windows.Controls.UserControl
         typeof(LedStatusIndicator),
         new PropertyMetadata(LedState.Idle));
 
+    /// <summary>
+    /// Identifies the <see cref="AllowPulse"/> dependency property. Gated by
+    /// a MultiDataTrigger in the XAML so storyboards only start when both
+    /// State=Busy and AllowPulse=True.
+    /// </summary>
+    public static readonly DependencyProperty AllowPulseProperty = DependencyProperty.Register(
+        nameof(AllowPulse),
+        typeof(bool),
+        typeof(LedStatusIndicator),
+        new PropertyMetadata(true));
+
     /// <summary>Current lamp state. Drives fill, glow, and pulse animation.</summary>
     public LedState State
     {
@@ -42,8 +53,23 @@ public partial class LedStatusIndicator : System.Windows.Controls.UserControl
         set => SetValue(StateProperty, value);
     }
 
+    /// <summary>
+    /// When false, the Busy state still turns the lamp cyan but skips the
+    /// pulse opacity animation. Defaulted from <see cref="ReducedMotion"/>
+    /// so Windows' "Show animations" toggle is honored automatically; can
+    /// still be overridden per instance via XAML.
+    /// </summary>
+    public bool AllowPulse
+    {
+        get => (bool)GetValue(AllowPulseProperty);
+        set => SetValue(AllowPulseProperty, value);
+    }
+
     public LedStatusIndicator()
     {
+        // Initialize BEFORE InitializeComponent so the XAML's initial
+        // MultiDataTrigger evaluation reads the right value.
+        AllowPulse = !ReducedMotion.IsEnabled;
         InitializeComponent();
     }
 }

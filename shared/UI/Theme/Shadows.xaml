@@ -41,15 +41,7 @@
                       Opacity="0.95"
                       RenderingBias="Quality"/>
 
-    <!-- Tighter variants for small / subtle elements (chips, inline buttons). -->
-    <DropShadowEffect x:Key="RaisedHighlightShadowSmall"
-                      Color="#2A2F3A"
-                      Direction="135"
-                      ShadowDepth="3"
-                      BlurRadius="6"
-                      Opacity="0.75"
-                      RenderingBias="Quality"/>
-
+    <!-- Tighter dark variant for small / subtle elements (chips, inline buttons). -->
     <DropShadowEffect x:Key="RaisedDarkShadowSmall"
                       Color="#0B0D12"
                       Direction="315"
@@ -68,14 +60,6 @@
                       Opacity="0.85"
                       RenderingBias="Quality"/>
 
-    <DropShadowEffect x:Key="SunkenHighlightShadow"
-                      Color="#2A2F3A"
-                      Direction="315"
-                      ShadowDepth="4"
-                      BlurRadius="10"
-                      Opacity="0.65"
-                      RenderingBias="Quality"/>
-
     <!--  Focus glows (omnidirectional)  -->
 
     <DropShadowEffect x:Key="FocusGlowCyan"
@@ -88,14 +72,6 @@
 
     <DropShadowEffect x:Key="FocusGlowMagenta"
                       Color="#FF2D92"
-                      Direction="0"
-                      ShadowDepth="0"
-                      BlurRadius="14"
-                      Opacity="0.85"
-                      RenderingBias="Quality"/>
-
-    <DropShadowEffect x:Key="FocusGlowPurple"
-                      Color="#8A2BE2"
                       Direction="0"
                       ShadowDepth="0"
                       BlurRadius="14"

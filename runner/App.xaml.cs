@@ -5,6 +5,7 @@ using FreeAiSsd.Runner.Services;
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Client;
 using FreeAiSsd.Shared.Documents;
+using FreeAiSsd.Shared.UI.Theme;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace FreeAiSsd.Runner;
@@ -16,6 +17,11 @@ public partial class App : System.Windows.Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // Honor the OS "reduce animations" preference before any window is
+        // shown so the LED pulse storyboard and button press translate can
+        // pick up the identity resource from first paint.
+        ReducedMotion.Apply(this);
 
         var ssdRoot = DetectSsdRoot();
 

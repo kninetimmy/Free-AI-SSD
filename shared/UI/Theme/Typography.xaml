@@ -74,12 +74,6 @@
         <Setter Property="LineHeight" Value="16"/>
     </Style>
 
-    <Style x:Key="MonoText" TargetType="{x:Type TextBlock}">
-        <Setter Property="FontFamily" Value="{StaticResource MonoFontFamily}"/>
-        <Setter Property="FontSize" Value="13"/>
-        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
-    </Style>
-
     <!-- Accented headline: paints text with the cyan→magenta gradient.
          Use sparingly for hero / brand moments. -->
     <Style x:Key="NeonHeadlineText" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource H1Text}">

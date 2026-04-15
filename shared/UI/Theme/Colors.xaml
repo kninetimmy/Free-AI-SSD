@@ -17,15 +17,19 @@
     <Color x:Key="BgSunkenColor">#FF15181E</Color>
     <Color x:Key="BgElevatedColor">#FF252934</Color>
 
-    <!-- Neumorphic light/dark edges (drive the raised vs sunken illusion) -->
-    <Color x:Key="SurfaceHighlightColor">#FF2A2F3A</Color>
+    <!-- Neumorphic light/dark edges (drive the raised vs sunken illusion).
+         SurfaceShadow is the color Shadows.xaml uses for dark drops; kept as
+         a token so PttOverlayWindow etc. can echo it via StaticResource. -->
     <Color x:Key="SurfaceShadowColor">#FF0B0D12</Color>
     <Color x:Key="SurfaceBorderColor">#FF222630</Color>
 
-    <!-- Text -->
+    <!-- Text.
+         TextMutedColor is tuned to clear WCAG 2.1 AA 4.5:1 against every
+         surface token (BgBase, BgRaised, BgSunken, BgElevated). Any darker
+         and captions fall below contrast on BgElevated — don't regress. -->
     <Color x:Key="TextPrimaryColor">#FFEAEEF6</Color>
     <Color x:Key="TextSecondaryColor">#FFB6BDCC</Color>
-    <Color x:Key="TextMutedColor">#FF7A8092</Color>
+    <Color x:Key="TextMutedColor">#FF8F95A8</Color>
     <Color x:Key="TextDisabledColor">#FF555A68</Color>
 
     <!-- Neon accents -->
@@ -46,7 +50,6 @@
     <SolidColorBrush x:Key="BgSunkenBrush"    Color="{StaticResource BgSunkenColor}"/>
     <SolidColorBrush x:Key="BgElevatedBrush"  Color="{StaticResource BgElevatedColor}"/>
 
-    <SolidColorBrush x:Key="SurfaceHighlightBrush" Color="{StaticResource SurfaceHighlightColor}"/>
     <SolidColorBrush x:Key="SurfaceShadowBrush"    Color="{StaticResource SurfaceShadowColor}"/>
     <SolidColorBrush x:Key="SurfaceBorderBrush"    Color="{StaticResource SurfaceBorderColor}"/>
 
@@ -71,13 +74,6 @@
     <LinearGradientBrush x:Key="NeonGradientBrush" StartPoint="0,0" EndPoint="1,1">
         <GradientStop Offset="0.0" Color="{StaticResource AccentCyanColor}"/>
         <GradientStop Offset="1.0" Color="{StaticResource AccentMagentaColor}"/>
-    </LinearGradientBrush>
-
-    <!-- Cool accent: cyan → purple. Use for informational accents and
-         secondary highlights. -->
-    <LinearGradientBrush x:Key="NeonCoolGradientBrush" StartPoint="0,0" EndPoint="1,1">
-        <GradientStop Offset="0.0" Color="{StaticResource AccentCyanColor}"/>
-        <GradientStop Offset="1.0" Color="{StaticResource AccentPurpleColor}"/>
     </LinearGradientBrush>
 
     <!-- Hot accent: magenta → purple. Use for destructive / warning

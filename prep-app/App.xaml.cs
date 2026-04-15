@@ -1,6 +1,7 @@
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
+using FreeAiSsd.Shared.UI.Theme;
 
 namespace FreeAiSsd.PrepApp;
 
@@ -23,6 +24,11 @@ public partial class App : Application
         // MainWindow construction via StartupUri) are surfaced to the user
         // instead of failing silently.
         base.OnStartup(e);
+
+        // Honor the OS "reduce animations" preference: disables LED pulse
+        // and the 1px button press nudge. Must run after base.OnStartup so
+        // Application.Resources is populated from the merged theme.
+        ReducedMotion.Apply(this);
     }
 
     private static void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)

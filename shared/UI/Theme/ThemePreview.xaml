@@ -121,7 +121,7 @@
                                    TextWrapping="Wrap"
                                    Text="Shadow direction inverts so the upper-left lip catches darkness. Use for log surfaces, list backings, and read-only readouts."/>
                         <TextBlock Style="{DynamicResource CaptionText}" Margin="0,8,0,0"
-                                   Text="Tokens: SunkenSurfaceGradientBrush · SunkenDarkShadow · SunkenHighlightShadow"/>
+                                   Text="Tokens: SunkenSurfaceGradientBrush · SunkenDarkShadow"/>
                     </StackPanel>
                 </Border>
             </Grid>
