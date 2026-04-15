@@ -1,3 +1,9 @@
+<p align="center">
+  <img src="docs/images/prep-app-mockup.svg" alt="Free AI SSD Prep App — neumorphic UI preview" width="960">
+</p>
+
+*Preview of the Prep App with the new neumorphic dark-mode theme (prompts 1–3). Static mockup — not a screenshot of the running app.*
+
 # Free-AI-SSD
 
 **Plug in a drive. Ask your AI anything. No internet required.**
