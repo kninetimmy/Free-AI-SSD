@@ -157,10 +157,21 @@ public partial class MainWindow : System.Windows.Window
         UpdateOllamaOfflineEmptyState();
     }
 
-    private void OnWindowLoaded(object sender, System.Windows.RoutedEventArgs e)
+    private async void OnWindowLoaded(object sender, System.Windows.RoutedEventArgs e)
     {
+        // Read the tiny first-run JSON off the UI thread so a slow / contended
+        // SSD can't stall the window's first paint.
         var statePath = Path.Combine(_ssdRoot, SsdLayout.Config, "runner-first-run.json");
-        var state = RunnerFirstRunState.Load(statePath);
+        RunnerFirstRunState state;
+        try
+        {
+            state = await Task.Run(() => RunnerFirstRunState.Load(statePath));
+        }
+        catch (Exception ex)
+        {
+            _logger?.Warn($"Failed to load runner-first-run state: {ex.Message}");
+            state = new RunnerFirstRunState();
+        }
         _ftueCompletedCached = state.FtueCompleted;
         if (!_ftueCompletedCached)
         {
@@ -1267,11 +1278,17 @@ public partial class MainWindow : System.Windows.Window
     /// </summary>
     private void OpenPrepApp_Click(object sender, System.Windows.RoutedEventArgs e)
     {
+        // Released SSDs ship the PrepApp single-file exe at the SSD root
+        // (see .github/workflows/build.yml — payload root). Dev-machine layouts
+        // may still have it under the source tree, so we probe a couple of
+        // fallback locations using the SsdLayout.Windows constant where
+        // applicable rather than hardcoding "windows".
+        const string PrepAppExe = "FreeAiSsd.PrepApp.exe";
         var candidates = new[]
         {
-            Path.Combine(_ssdRoot, "windows", "prep-app", "FreeAiSsd.PrepApp.exe"),
-            Path.Combine(_ssdRoot, "prep-app", "FreeAiSsd.PrepApp.exe"),
-            Path.Combine(_ssdRoot, "FreeAiSsd.PrepApp.exe"),
+            Path.Combine(_ssdRoot, PrepAppExe),
+            Path.Combine(_ssdRoot, SsdLayout.Windows, "prep-app", PrepAppExe),
+            Path.Combine(_ssdRoot, "prep-app", PrepAppExe),
         };
 
         var exe = candidates.FirstOrDefault(File.Exists);
@@ -1429,12 +1446,23 @@ public partial class MainWindow : System.Windows.Window
 
     private async Task SaveFtueCompletedAsync()
     {
-        var statePath = Path.Combine(_ssdRoot, SsdLayout.Config, "runner-first-run.json");
-        var state = RunnerFirstRunState.Load(statePath);
-        if (state.FtueCompleted) return;
-        state.FtueCompleted = true;
-        state.LastCheckedUtc = DateTime.UtcNow;
-        await state.SaveAsync(statePath);
+        try
+        {
+            var statePath = Path.Combine(_ssdRoot, SsdLayout.Config, "runner-first-run.json");
+            // Load is synchronous but cheap (small JSON); push it off the UI
+            // thread for consistency since SaveAsync already runs there.
+            var state = await Task.Run(() => RunnerFirstRunState.Load(statePath));
+            if (state.FtueCompleted) return;
+            state.FtueCompleted = true;
+            state.LastCheckedUtc = DateTime.UtcNow;
+            await state.SaveAsync(statePath);
+        }
+        catch (Exception ex)
+        {
+            // Don't let a bad I/O on the SSD crash the app via an unobserved
+            // task exception. Worst case the user sees the FTUE again next launch.
+            _logger?.Warn($"Failed to persist FTUE completion flag: {ex.Message}");
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
