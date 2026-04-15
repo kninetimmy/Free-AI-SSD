@@ -42,7 +42,8 @@ public sealed class PrepTargetPreferenceStore
                 targets,
                 model.InstallVrCompanion,
                 model.CompanionHostAddress ?? string.Empty,
-                model.CompanionHostPort <= 0 ? 41555 : model.CompanionHostPort);
+                model.CompanionHostPort <= 0 ? 41555 : model.CompanionHostPort,
+                model.FtueCompleted);
         }
         catch
         {
@@ -53,7 +54,12 @@ public sealed class PrepTargetPreferenceStore
     public void Save(PrepTargets targets)
     {
         var existing = LoadSettings();
-        SaveSettings(new PrepPreferenceSnapshot(targets, existing.InstallVrCompanion, existing.CompanionHostAddress, existing.CompanionHostPort));
+        SaveSettings(new PrepPreferenceSnapshot(
+            targets,
+            existing.InstallVrCompanion,
+            existing.CompanionHostAddress,
+            existing.CompanionHostPort,
+            existing.FtueCompleted));
     }
 
     public void SaveSettings(PrepPreferenceSnapshot snapshot)
@@ -64,11 +70,24 @@ public sealed class PrepTargetPreferenceStore
             PrepTargetsValue = safeTargets.ToString(),
             InstallVrCompanion = snapshot.InstallVrCompanion,
             CompanionHostAddress = snapshot.CompanionHostAddress,
-            CompanionHostPort = snapshot.CompanionHostPort <= 0 ? 41555 : snapshot.CompanionHostPort
+            CompanionHostPort = snapshot.CompanionHostPort <= 0 ? 41555 : snapshot.CompanionHostPort,
+            FtueCompleted = snapshot.FtueCompleted
         };
 
         var json = JsonSerializer.Serialize(model, new JsonSerializerOptions { WriteIndented = true });
         File.WriteAllText(_settingsPath, json);
+    }
+
+    public void MarkFtueCompleted()
+    {
+        var existing = LoadSettings();
+        if (existing.FtueCompleted) return;
+        SaveSettings(new PrepPreferenceSnapshot(
+            existing.PrepTargets,
+            existing.InstallVrCompanion,
+            existing.CompanionHostAddress,
+            existing.CompanionHostPort,
+            true));
     }
 
     private sealed class PrepAppSettings
@@ -87,10 +106,18 @@ public sealed class PrepTargetPreferenceStore
 
         [JsonPropertyName("companionHostPort")]
         public int CompanionHostPort { get; init; } = 41555;
+
+        [JsonPropertyName("ftue_completed")]
+        public bool FtueCompleted { get; init; }
     }
 }
 
-public readonly record struct PrepPreferenceSnapshot(PrepTargets PrepTargets, bool InstallVrCompanion, string CompanionHostAddress, int CompanionHostPort)
+public readonly record struct PrepPreferenceSnapshot(
+    PrepTargets PrepTargets,
+    bool InstallVrCompanion,
+    string CompanionHostAddress,
+    int CompanionHostPort,
+    bool FtueCompleted)
 {
-    public static PrepPreferenceSnapshot Default => new(PrepTargets.Windows, false, string.Empty, 41555);
+    public static PrepPreferenceSnapshot Default => new(PrepTargets.Windows, false, string.Empty, 41555, false);
 }

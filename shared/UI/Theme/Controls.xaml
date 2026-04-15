@@ -486,6 +486,155 @@
     </Style>
 
     <!--  ────────────────────────────────────────────────────────────
+          6b. NeumorphicToolTip
+          Tooltip styled as a tiny NeumorphicCard with caption
+          typography. Hover delay is applied per-control via
+          ToolTipService.InitialShowDelay (see MainWindow).
+          ────────────────────────────────────────────────────────────  -->
+    <Style x:Key="NeumorphicToolTip" TargetType="{x:Type ToolTip}">
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+        <Setter Property="Background" Value="{StaticResource BgElevatedBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource SurfaceBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="10,6"/>
+        <Setter Property="HasDropShadow" Value="False"/>
+        <Setter Property="Placement" Value="Bottom"/>
+        <Setter Property="HorizontalOffset" Value="0"/>
+        <Setter Property="VerticalOffset" Value="6"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ToolTip}">
+                    <Border CornerRadius="8"
+                            MaxWidth="320"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            Padding="{TemplateBinding Padding}"
+                            Effect="{StaticResource RaisedDarkShadowSmall}">
+                        <TextBlock Text="{TemplateBinding Content}"
+                                   Style="{StaticResource CaptionText}"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   TextWrapping="Wrap"/>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- Apply NeumorphicToolTip to every ToolTip instance without needing
+         to key it on each call site. Individual controls can still override
+         via explicit Style on their ToolTip element. -->
+    <Style TargetType="{x:Type ToolTip}" BasedOn="{StaticResource NeumorphicToolTip}"/>
+
+    <!--  ────────────────────────────────────────────────────────────
+          6c. NeumorphicExpander
+          Expander for progressive disclosure. Collapsed = muted header
+          with a chevron. Expanded = cyan chevron + subtle sunken body.
+          ────────────────────────────────────────────────────────────  -->
+    <Style x:Key="NeumorphicExpanderToggle" TargetType="{x:Type ToggleButton}">
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="HorizontalContentAlignment" Value="Left"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ToggleButton}">
+                    <Border Background="Transparent" Padding="{TemplateBinding Padding}">
+                        <StackPanel Orientation="Horizontal">
+                            <Path x:Name="Chevron"
+                                  Width="10" Height="10"
+                                  Stretch="Uniform"
+                                  VerticalAlignment="Center"
+                                  Margin="0,0,8,0"
+                                  Data="M 0 0 L 5 5 L 10 0 Z"
+                                  Fill="{StaticResource TextMutedBrush}">
+                                <Path.RenderTransform>
+                                    <RotateTransform x:Name="ChevronRotate" Angle="-90" CenterX="5" CenterY="5"/>
+                                </Path.RenderTransform>
+                            </Path>
+                            <ContentPresenter VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"/>
+                        </StackPanel>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="ChevronRotate" Property="Angle" Value="0"/>
+                            <Setter TargetName="Chevron" Property="Fill"
+                                    Value="{StaticResource AccentCyanBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource TextPrimaryBrush}"/>
+                            <Setter TargetName="Chevron" Property="Fill"
+                                    Value="{StaticResource AccentCyanBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="NeumorphicExpander" TargetType="{x:Type Expander}">
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+        <Setter Property="FontFamily" Value="{StaticResource PrimaryFontFamily}"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Expander}">
+                    <StackPanel>
+                        <ToggleButton Style="{StaticResource NeumorphicExpanderToggle}"
+                                      Content="{TemplateBinding Header}"
+                                      IsChecked="{Binding IsExpanded, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"/>
+                        <Border x:Name="ContentPanel"
+                                Margin="0,8,0,0"
+                                Padding="12"
+                                CornerRadius="8"
+                                Background="{StaticResource BgSunkenBrush}"
+                                BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                BorderThickness="1"
+                                Visibility="Collapsed">
+                            <ContentPresenter/>
+                        </Border>
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsExpanded" Value="True">
+                            <Setter TargetName="ContentPanel" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--  ────────────────────────────────────────────────────────────
+          6d. SpotlightRing
+          Used by the FTUE overlay. Border brushed with the
+          cyan→magenta→purple focus gradient plus a soft cyan glow
+          so the highlighted region clearly pops from the scrim.
+          ────────────────────────────────────────────────────────────  -->
+    <Style x:Key="SpotlightRing" TargetType="{x:Type Border}">
+        <Setter Property="CornerRadius" Value="12"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="{StaticResource FocusBorderGradientBrush}"/>
+        <Setter Property="BorderThickness" Value="2"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="IsHitTestVisible" Value="False"/>
+        <Setter Property="Effect">
+            <Setter.Value>
+                <DropShadowEffect Color="#00E5FF"
+                                  ShadowDepth="0"
+                                  BlurRadius="24"
+                                  Opacity="0.85"/>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--  ────────────────────────────────────────────────────────────
           7. GradientProgressBar
           Track = sunken surface; indicator = cyan→magenta gradient
           with a soft cyan glow.
