@@ -931,6 +931,7 @@ public partial class MainWindow : System.Windows.Window
         catch (Exception ex)
         {
             AppendLog($"Failed to initialize TTS: {ex.Message}");
+            try { _ttsService?.Dispose(); } catch { /* swallow secondary disposal errors */ }
             _ttsService = null;
             _ttsProvider.SetCurrent(null);
         }
