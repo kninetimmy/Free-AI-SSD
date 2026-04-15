@@ -15,7 +15,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
 {
     private readonly IChatService _chatService;
     private readonly ISpeechToTextService _sttService;
-    private readonly Func<ITextToSpeechService?> _ttsServiceFactory;
+    private readonly ITtsProvider _ttsProvider;
     private readonly SsdLogger? _logger;
     private readonly string _ssdRoot;
     private readonly SemaphoreSlim _sttInitGate = new(1, 1);
@@ -25,13 +25,13 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
     public RunnerLocalApiService(
         IChatService chatService,
         ISpeechToTextService sttService,
-        Func<ITextToSpeechService?> ttsServiceFactory,
+        ITtsProvider ttsProvider,
         SsdLogger? logger,
         string? ssdRoot = null)
     {
         _chatService = chatService;
         _sttService = sttService;
-        _ttsServiceFactory = ttsServiceFactory;
+        _ttsProvider = ttsProvider;
         _logger = logger;
         _ssdRoot = string.IsNullOrWhiteSpace(ssdRoot) ? AppContext.BaseDirectory : ssdRoot;
     }
@@ -199,7 +199,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
                 return Results.BadRequest(new ErrorResponse("'text' is required."));
             }
 
-            var tts = _ttsServiceFactory();
+            var tts = _ttsProvider.Current;
             if (tts is null)
             {
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
@@ -216,7 +216,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
-            var tts = _ttsServiceFactory();
+            var tts = _ttsProvider.Current;
             if (tts is null)
             {
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
@@ -414,7 +414,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
 
         if (options.SpeakResponse && !string.IsNullOrWhiteSpace(chat.ResponseText) && config.NetworkAllowTts)
         {
-            var tts = _ttsServiceFactory();
+            var tts = _ttsProvider.Current;
             if (tts is not null)
             {
                 if (options.ReturnAudio)
