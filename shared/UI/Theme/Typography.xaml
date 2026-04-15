@@ -1,0 +1,89 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Pull in color tokens so StaticResource lookups inside the style
+         setters below resolve regardless of merge order in Theme.xaml. -->
+    <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="pack://application:,,,/UI/Theme/Colors.xaml"/>
+    </ResourceDictionary.MergedDictionaries>
+
+    <!--  ============================================================
+          Free AI SSD — Neumorphic Dark Theme : Typography
+          ------------------------------------------------------------
+          Text style scale used throughout both apps. The scale is
+          deliberately small: H1, H2, Body, Caption.
+
+          Apply via Style="{StaticResource H1Text}" etc. on a TextBlock.
+          A default un-keyed TextBlock style adopts Body sizing so any
+          stray TextBlock automatically reads correctly on the dark
+          background.
+          ============================================================  -->
+
+    <!-- Default font families. Segoe UI Variable is the modern
+         Windows 11 family; we fall back to Segoe UI for Win10. -->
+    <FontFamily x:Key="PrimaryFontFamily">Segoe UI Variable Text, Segoe UI</FontFamily>
+    <FontFamily x:Key="DisplayFontFamily">Segoe UI Variable Display, Segoe UI</FontFamily>
+    <FontFamily x:Key="MonoFontFamily">Cascadia Mono, Consolas, Courier New</FontFamily>
+
+    <!--  ─── Default TextBlock style (implicit) ───  -->
+    <Style TargetType="{x:Type TextBlock}">
+        <Setter Property="FontFamily" Value="{StaticResource PrimaryFontFamily}"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="TextOptions.TextFormattingMode" Value="Ideal"/>
+        <Setter Property="TextOptions.TextRenderingMode" Value="ClearType"/>
+    </Style>
+
+    <!--  ─── Named text styles ───  -->
+
+    <Style x:Key="H1Text" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontFamily" Value="{StaticResource DisplayFontFamily}"/>
+        <Setter Property="FontSize" Value="28"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="LineHeight" Value="34"/>
+        <Setter Property="Margin" Value="0,0,0,8"/>
+    </Style>
+
+    <Style x:Key="H2Text" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontFamily" Value="{StaticResource DisplayFontFamily}"/>
+        <Setter Property="FontSize" Value="20"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="LineHeight" Value="26"/>
+        <Setter Property="Margin" Value="0,0,0,6"/>
+    </Style>
+
+    <Style x:Key="BodyText" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontFamily" Value="{StaticResource PrimaryFontFamily}"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="LineHeight" Value="20"/>
+    </Style>
+
+    <Style x:Key="BodySecondaryText" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource BodyText}">
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+    </Style>
+
+    <Style x:Key="CaptionText" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontFamily" Value="{StaticResource PrimaryFontFamily}"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
+        <Setter Property="LineHeight" Value="16"/>
+    </Style>
+
+    <Style x:Key="MonoText" TargetType="{x:Type TextBlock}">
+        <Setter Property="FontFamily" Value="{StaticResource MonoFontFamily}"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+    </Style>
+
+    <!-- Accented headline: paints text with the cyan→magenta gradient.
+         Use sparingly for hero / brand moments. -->
+    <Style x:Key="NeonHeadlineText" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource H1Text}">
+        <Setter Property="Foreground" Value="{StaticResource NeonGradientBrush}"/>
+    </Style>
+
+</ResourceDictionary>

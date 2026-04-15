@@ -1,0 +1,114 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--  ============================================================
+          Free AI SSD — Neumorphic Dark Theme : Drop Shadows
+          ------------------------------------------------------------
+          Pairs of DropShadowEffect resources used to fake a single
+          light source from the upper-left.
+
+          Raised surfaces:   apply RaisedHighlightShadow on a layer
+                             behind/around, plus RaisedDarkShadow on
+                             the surface itself (or stack two Borders).
+          Sunken surfaces:   invert direction so darkness sits at the
+                             upper-left lip and highlight at lower-right.
+          Focus glows:       outer color glow used together with the
+                             FocusBorderGradientBrush from Colors.xaml.
+
+          NOTE: WPF DropShadowEffect Direction is in degrees, measured
+          counter-clockwise from the +X axis. 135° points to the upper-
+          left, 315° points to the lower-right.
+          ============================================================  -->
+
+    <!--  ─── Raised: light from upper-left ───  -->
+
+    <!-- Soft light bleed cast toward upper-left. Pair with a Border that
+         sits behind the surface, or set as the Effect on a child layer. -->
+    <DropShadowEffect x:Key="RaisedHighlightShadow"
+                      Color="#2A2F3A"
+                      Direction="135"
+                      ShadowDepth="6"
+                      BlurRadius="14"
+                      Opacity="0.85"
+                      RenderingBias="Quality"/>
+
+    <!-- Deep matte shadow falling toward lower-right. -->
+    <DropShadowEffect x:Key="RaisedDarkShadow"
+                      Color="#0B0D12"
+                      Direction="315"
+                      ShadowDepth="6"
+                      BlurRadius="16"
+                      Opacity="0.95"
+                      RenderingBias="Quality"/>
+
+    <!-- Tighter variants for small / subtle elements (chips, inline buttons). -->
+    <DropShadowEffect x:Key="RaisedHighlightShadowSmall"
+                      Color="#2A2F3A"
+                      Direction="135"
+                      ShadowDepth="3"
+                      BlurRadius="6"
+                      Opacity="0.75"
+                      RenderingBias="Quality"/>
+
+    <DropShadowEffect x:Key="RaisedDarkShadowSmall"
+                      Color="#0B0D12"
+                      Direction="315"
+                      ShadowDepth="3"
+                      BlurRadius="8"
+                      Opacity="0.9"
+                      RenderingBias="Quality"/>
+
+    <!--  ─── Sunken: invert direction so the lip catches darkness  ───  -->
+
+    <DropShadowEffect x:Key="SunkenDarkShadow"
+                      Color="#0B0D12"
+                      Direction="135"
+                      ShadowDepth="4"
+                      BlurRadius="10"
+                      Opacity="0.85"
+                      RenderingBias="Quality"/>
+
+    <DropShadowEffect x:Key="SunkenHighlightShadow"
+                      Color="#2A2F3A"
+                      Direction="315"
+                      ShadowDepth="4"
+                      BlurRadius="10"
+                      Opacity="0.65"
+                      RenderingBias="Quality"/>
+
+    <!--  ─── Focus glows (omnidirectional) ───  -->
+
+    <DropShadowEffect x:Key="FocusGlowCyan"
+                      Color="#00E5FF"
+                      Direction="0"
+                      ShadowDepth="0"
+                      BlurRadius="14"
+                      Opacity="0.85"
+                      RenderingBias="Quality"/>
+
+    <DropShadowEffect x:Key="FocusGlowMagenta"
+                      Color="#FF2D92"
+                      Direction="0"
+                      ShadowDepth="0"
+                      BlurRadius="14"
+                      Opacity="0.85"
+                      RenderingBias="Quality"/>
+
+    <DropShadowEffect x:Key="FocusGlowPurple"
+                      Color="#8A2BE2"
+                      Direction="0"
+                      ShadowDepth="0"
+                      BlurRadius="14"
+                      Opacity="0.85"
+                      RenderingBias="Quality"/>
+
+    <!-- Subtle ambient glow for hover states. -->
+    <DropShadowEffect x:Key="HoverGlowCyan"
+                      Color="#00E5FF"
+                      Direction="0"
+                      ShadowDepth="0"
+                      BlurRadius="10"
+                      Opacity="0.45"
+                      RenderingBias="Quality"/>
+
+</ResourceDictionary>

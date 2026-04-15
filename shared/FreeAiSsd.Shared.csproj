@@ -4,6 +4,19 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
+  <!--
+    The UI/Theme folder hosts WPF resource dictionaries and a developer
+    preview Window. Those files are LINKED into prep-app and runner
+    (which are WPF projects); this shared assembly is plain net8.0 and
+    must not try to compile WPF types. Exclude them from the implicit
+    SDK globs.
+  -->
+  <ItemGroup>
+    <Compile Remove="UI\**\*.cs" />
+    <None Remove="UI\**\*.xaml" />
+    <None Include="UI\**\*.xaml" />
+    <None Include="UI\**\*.cs" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.10" />
     <PackageReference Include="System.Management" Version="8.0.0" />

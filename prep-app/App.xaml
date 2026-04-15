@@ -2,5 +2,16 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              StartupUri="MainWindow.xaml">
-    <Application.Resources />
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!--
+                    Neumorphic dark theme. The shared XAML lives in
+                    ../shared/UI/Theme/ and is linked into this assembly
+                    as <Page> resources by FreeAiSsd.PrepApp.csproj.
+                -->
+                <ResourceDictionary Source="pack://application:,,,/UI/Theme/Theme.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
 </Application>

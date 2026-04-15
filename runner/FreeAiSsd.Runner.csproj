@@ -25,4 +25,32 @@
   <ItemGroup>
     <ProjectReference Include="..\shared\FreeAiSsd.Shared.csproj" />
   </ItemGroup>
+  <!--
+    Shared neumorphic theme. The XAML resource dictionaries live in
+    ..\shared\UI\Theme but are embedded into THIS assembly as pack
+    resources so App.xaml can MergedDictionary them via
+    pack://application:,,,/UI/Theme/Theme.xaml.
+  -->
+  <ItemGroup>
+    <Page Include="..\shared\UI\Theme\Colors.xaml">
+      <Link>UI\Theme\Colors.xaml</Link>
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="..\shared\UI\Theme\Shadows.xaml">
+      <Link>UI\Theme\Shadows.xaml</Link>
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="..\shared\UI\Theme\Typography.xaml">
+      <Link>UI\Theme\Typography.xaml</Link>
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="..\shared\UI\Theme\Theme.xaml">
+      <Link>UI\Theme\Theme.xaml</Link>
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+  </ItemGroup>
 </Project>
