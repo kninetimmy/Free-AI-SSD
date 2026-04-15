@@ -15,24 +15,30 @@ public sealed class EmptyToVisibilityConverter : IValueConverter
 {
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
-        var count = value switch
+        var isEmpty = value switch
         {
-            null => 0,
-            int i => i,
-            ICollection c => c.Count,
-            IEnumerable e => CountEnumerable(e),
-            _ => 1
+            null => true,
+            int i => i == 0,
+            ICollection c => c.Count == 0,
+            IEnumerable e => IsEmpty(e),
+            _ => false
         };
-        return count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        return isEmpty ? Visibility.Visible : Visibility.Collapsed;
     }
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
         => throw new NotSupportedException();
 
-    private static int CountEnumerable(IEnumerable e)
+    private static bool IsEmpty(IEnumerable e)
     {
-        var n = 0;
-        foreach (var _ in e) n++;
-        return n;
+        var enumerator = e.GetEnumerator();
+        try
+        {
+            return !enumerator.MoveNext();
+        }
+        finally
+        {
+            (enumerator as IDisposable)?.Dispose();
+        }
     }
 }

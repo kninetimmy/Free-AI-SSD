@@ -20,7 +20,12 @@ public partial class MainWindow : Window
     // FTUE state
     private int _ftueStepIndex;
     private FrameworkElement[] _ftueTargets = Array.Empty<FrameworkElement>();
+    private int[] _ftueTargetTabIndex = Array.Empty<int>();
     private (string label, string title, string body)[] _ftueSteps = Array.Empty<(string, string, string)>();
+
+    // Cached once at load time so the per-keystroke save path doesn't
+    // have to re-read the settings file on every PropertyChanged tick.
+    private bool _ftueCompleted;
 
     public MainWindow()
     {
@@ -76,21 +81,25 @@ public partial class MainWindow : Window
         _viewModel.CompanionHostAddress = pref.CompanionHostAddress;
         _viewModel.CompanionHostPort = pref.CompanionHostPort;
 
+        _ftueCompleted = pref.FtueCompleted;
+
         _viewModel.OnPrepTargetsChanged = () =>
         {
+            // Fires on every keystroke while CompanionHostAddress is being
+            // edited (UpdateSourceTrigger=PropertyChanged). Use the cached
+            // _ftueCompleted instead of touching disk each time.
             var current = PrepTargets.None;
             if (_viewModel.PrepareWindows) current |= PrepTargets.Windows;
             if (_viewModel.PrepareMac) current |= PrepTargets.Mac;
-            var existing = _prefStore!.LoadSettings();
-            _prefStore.SaveSettings(new PrepPreferenceSnapshot(
+            _prefStore!.SaveSettings(new PrepPreferenceSnapshot(
                 current,
                 _viewModel.InstallVrCompanion,
                 _viewModel.CompanionHostAddress,
                 _viewModel.CompanionHostPort,
-                existing.FtueCompleted));
+                _ftueCompleted));
         };
 
-        if (!pref.FtueCompleted)
+        if (!_ftueCompleted)
         {
             StartFtue();
         }
@@ -188,6 +197,10 @@ public partial class MainWindow : Window
             StarterModelsCard,
             PullInstallButton
         };
+        // Which tab each spotlight target lives in. Step 1 sits outside
+        // the tab control (no switch needed, -1 means "don't touch").
+        // Steps 2 and 3 live inside the Model Manager tab (index 0).
+        _ftueTargetTabIndex = new[] { -1, 0, 0 };
 
         _ftueStepIndex = 0;
         FtueOverlay.Visibility = Visibility.Visible;
@@ -207,6 +220,19 @@ public partial class MainWindow : Window
         FtueTitleText.Text = title;
         FtueBodyText.Text = body;
         FtueNextButton.Content = _ftueStepIndex == _ftueSteps.Length - 1 ? "Finish" : "Next";
+
+        // Switch to the tab that hosts this step's spotlight target so
+        // the element is actually realized and measurable. Without this,
+        // steps 2/3 silently skip the spotlight if the user is on the
+        // Drive Setup tab when the FTUE advances.
+        if (_ftueStepIndex < _ftueTargetTabIndex.Length)
+        {
+            var tabIndex = _ftueTargetTabIndex[_ftueStepIndex];
+            if (tabIndex >= 0 && tabIndex < MainTabs.Items.Count)
+            {
+                MainTabs.SelectedIndex = tabIndex;
+            }
+        }
 
         // Defer spotlight positioning until the target has a real layout
         // (first-render pass won't have resolved TabItem sizes yet).
@@ -272,6 +298,7 @@ public partial class MainWindow : Window
     {
         FtueOverlay.Visibility = Visibility.Collapsed;
         FtueSpotlight.Visibility = Visibility.Collapsed;
+        _ftueCompleted = true;
         _prefStore?.MarkFtueCompleted();
     }
 

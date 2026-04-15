@@ -549,9 +549,10 @@
                                   VerticalAlignment="Center"
                                   Margin="0,0,8,0"
                                   Data="M 0 0 L 5 5 L 10 0 Z"
-                                  Fill="{StaticResource TextMutedBrush}">
+                                  Fill="{StaticResource TextMutedBrush}"
+                                  RenderTransformOrigin="0.5,0.5">
                                 <Path.RenderTransform>
-                                    <RotateTransform x:Name="ChevronRotate" Angle="-90" CenterX="5" CenterY="5"/>
+                                    <RotateTransform Angle="-90"/>
                                 </Path.RenderTransform>
                             </Path>
                             <ContentPresenter VerticalAlignment="Center"
@@ -560,7 +561,11 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="ChevronRotate" Property="Angle" Value="0"/>
+                            <Setter TargetName="Chevron" Property="RenderTransform">
+                                <Setter.Value>
+                                    <RotateTransform Angle="0"/>
+                                </Setter.Value>
+                            </Setter>
                             <Setter TargetName="Chevron" Property="Fill"
                                     Value="{StaticResource AccentCyanBrush}"/>
                         </Trigger>

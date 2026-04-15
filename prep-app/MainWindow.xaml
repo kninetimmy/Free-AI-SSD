@@ -41,7 +41,8 @@
             </StackPanel>
 
             <!-- Row 1: Tab control with Model Manager and Drive Setup -->
-            <TabControl Grid.Row="1" Margin="0,0,0,12"
+            <TabControl x:Name="MainTabs"
+                        Grid.Row="1" Margin="0,0,0,12"
                         Background="Transparent"
                         BorderThickness="0">
 
