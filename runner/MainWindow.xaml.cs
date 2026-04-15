@@ -713,18 +713,26 @@ public partial class MainWindow : System.Windows.Window
         {
             LibraryCombo.ItemsSource = new[] { "None" };
             LibraryCombo.SelectedIndex = 0;
+            UpdateLibraryActionButtons();
             return;
         }
 
+        AppendLog("Refreshing library list...");
         var info = _docService.GetLibraryDisplayInfo(_config);
         LibraryCombo.ItemsSource = info.Options;
         LibraryCombo.SelectedIndex = info.SelectedIndex;
         _activeLibrary = info.ActiveLibrary;
+        AppendLog($"Library list refreshed ({Math.Max(info.Options.Count - 1, 0)} libraries).");
+        if (_activeLibrary is not null)
+        {
+            AppendLog($"Selected library: {_activeLibrary.Name} ({_activeLibrary.Id})");
+        }
 
         LibraryFilesList.ItemsSource = _activeLibrary?.Files ?? new List<DocumentFileEntry>();
         IndexingStatusText.Text = _activeLibrary?.LastIndexedUtc is null
             ? "No indexing run yet."
             : $"Last indexed: {_activeLibrary.LastIndexedUtc:u}";
+        UpdateLibraryActionButtons();
     }
 
     private async Task<bool> EnsureActiveLibraryAsync()
@@ -738,6 +746,7 @@ public partial class MainWindow : System.Windows.Window
 
         _activeLibrary = await _docService.SetActiveLibraryAsync(_config, _ssdRoot, selectedId);
         LibraryFilesList.ItemsSource = _activeLibrary?.Files ?? new List<DocumentFileEntry>();
+        UpdateLibraryActionButtons();
         return _activeLibrary is not null;
     }
 
@@ -750,9 +759,33 @@ public partial class MainWindow : System.Windows.Window
     {
         if (_config is null) return;
 
-        var name = string.IsNullOrWhiteSpace(NewLibraryNameText.Text) ? "Library" : NewLibraryNameText.Text.Trim();
-        await _docService.CreateLibraryAsync(_config, _ssdRoot, name);
-        RefreshLibraryUi();
+        var requestedName = NewLibraryNameText.Text ?? string.Empty;
+        try
+        {
+            var created = await _docService.CreateLibraryAsync(_config, _ssdRoot, requestedName);
+            RefreshLibraryUi();
+            await _docService.SetActiveLibraryAsync(_config, _ssdRoot, created.Id);
+            RefreshLibraryUi();
+            IndexingStatusText.Text = $"Created and selected library: {created.Name}";
+            AppendLog($"Created and selected library: {created.Name}");
+        }
+        catch (ArgumentException ex)
+        {
+            AppendLog(ex.Message);
+            IndexingStatusText.Text = ex.Message;
+        }
+        catch (InvalidOperationException ex)
+        {
+            AppendLog(ex.Message);
+            IndexingStatusText.Text = ex.Message;
+        }
+    }
+
+    private void UpdateLibraryActionButtons()
+    {
+        var enabled = _activeLibrary is not null;
+        AddFilesButton.IsEnabled = enabled;
+        AddFolderButton.IsEnabled = enabled;
     }
 
     private async void AddFiles_Click(object sender, System.Windows.RoutedEventArgs e)

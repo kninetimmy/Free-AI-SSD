@@ -59,8 +59,8 @@
                     <Button Content="Create library" Margin="8,0,0,0" Click="CreateLibrary_Click"/>
                 </StackPanel>
                 <WrapPanel Margin="0,8,0,0">
-                    <Button Content="Add files" Click="AddFiles_Click" Margin="0,0,8,0"/>
-                    <Button Content="Add folder" Click="AddFolder_Click" Margin="0,0,8,0"/>
+                    <Button x:Name="AddFilesButton" Content="Add files" Click="AddFiles_Click" Margin="0,0,8,0"/>
+                    <Button x:Name="AddFolderButton" Content="Add folder" Click="AddFolder_Click" Margin="0,0,8,0"/>
                     <Button Content="Sweep folders now" Click="SweepFolders_Click" Margin="0,0,8,0"/>
                     <Button Content="Rebuild index" Click="RebuildIndex_Click" Margin="0,0,8,0"/>
                     <Button Content="Pull embedding model" Click="PullEmbeddingModel_Click" Margin="0,0,8,0"/>

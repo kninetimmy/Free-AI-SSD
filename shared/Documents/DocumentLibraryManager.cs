@@ -17,20 +17,24 @@ public sealed class DocumentLibraryManager
 
     public DocumentLibraryRegistry LoadRegistry()
     {
+        DocumentLibraryRegistry registry;
         if (!File.Exists(RegistryPath))
         {
-            return new DocumentLibraryRegistry();
+            registry = new DocumentLibraryRegistry();
+            return ReconcileRegistryWithDisk(registry);
         }
 
         try
         {
             var json = File.ReadAllText(RegistryPath);
-            return JsonSerializer.Deserialize<DocumentLibraryRegistry>(json) ?? new DocumentLibraryRegistry();
+            registry = JsonSerializer.Deserialize<DocumentLibraryRegistry>(json, JsonOptions()) ?? new DocumentLibraryRegistry();
         }
         catch
         {
-            return new DocumentLibraryRegistry();
+            registry = new DocumentLibraryRegistry();
         }
+
+        return ReconcileRegistryWithDisk(registry);
     }
 
     public async Task SaveRegistryAsync(DocumentLibraryRegistry registry)
@@ -51,12 +55,25 @@ public sealed class DocumentLibraryManager
 
     public async Task<DocumentLibraryManifest> CreateLibraryAsync(string name)
     {
+        var trimmedName = name?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(trimmedName))
+        {
+            throw new ArgumentException("Library name cannot be empty.");
+        }
+
         var registry = LoadRegistry();
+        var duplicate = registry.Libraries.Any(l =>
+            string.Equals(l.Name?.Trim(), trimmedName, StringComparison.OrdinalIgnoreCase));
+        if (duplicate)
+        {
+            throw new InvalidOperationException($"A library named '{trimmedName}' already exists. Choose a different name.");
+        }
+
         var id = $"lib-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}";
         var entry = new DocumentLibraryEntry
         {
             Id = id,
-            Name = name,
+            Name = trimmedName,
             CreatedAtUtc = DateTime.UtcNow,
             UpdatedAtUtc = DateTime.UtcNow
         };
@@ -67,7 +84,7 @@ public sealed class DocumentLibraryManager
         var manifest = new DocumentLibraryManifest
         {
             Id = id,
-            Name = name,
+            Name = trimmedName,
             CreatedAtUtc = DateTime.UtcNow,
             UpdatedAtUtc = DateTime.UtcNow
         };
@@ -98,7 +115,7 @@ public sealed class DocumentLibraryManager
         try
         {
             var json = File.ReadAllText(path);
-            return JsonSerializer.Deserialize<DocumentLibraryManifest>(json) ?? new DocumentLibraryManifest { Id = libraryId };
+            return JsonSerializer.Deserialize<DocumentLibraryManifest>(json, JsonOptions()) ?? new DocumentLibraryManifest { Id = libraryId };
         }
         catch
         {
@@ -133,5 +150,76 @@ public sealed class DocumentLibraryManager
         await SaveRegistryAsync(registry);
     }
 
-    private static JsonSerializerOptions JsonOptions() => new() { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private static JsonSerializerOptions JsonOptions() => new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true
+    };
+
+    private DocumentLibraryRegistry ReconcileRegistryWithDisk(DocumentLibraryRegistry registry)
+    {
+        var normalized = new DocumentLibraryRegistry
+        {
+            ActiveLibraryId = registry.ActiveLibraryId
+        };
+
+        var byId = new Dictionary<string, DocumentLibraryEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in registry.Libraries.Where(e => !string.IsNullOrWhiteSpace(e.Id)))
+        {
+            var key = entry.Id.Trim();
+            if (!byId.TryGetValue(key, out var existing) || existing.UpdatedAtUtc < entry.UpdatedAtUtc)
+            {
+                byId[key] = new DocumentLibraryEntry
+                {
+                    Id = key,
+                    Name = string.IsNullOrWhiteSpace(entry.Name) ? key : entry.Name.Trim(),
+                    CreatedAtUtc = entry.CreatedAtUtc,
+                    UpdatedAtUtc = entry.UpdatedAtUtc
+                };
+            }
+        }
+
+        var librariesDir = Path.Combine(_ssdRoot, SsdLayout.DocLibraries);
+        if (Directory.Exists(librariesDir))
+        {
+            foreach (var dir in Directory.EnumerateDirectories(librariesDir))
+            {
+                var id = Path.GetFileName(dir);
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    continue;
+                }
+
+                var diskManifest = LoadManifest(id);
+                var displayName = string.IsNullOrWhiteSpace(diskManifest.Name)
+                    ? id
+                    : diskManifest.Name.Trim();
+
+                if (!byId.TryGetValue(id, out var entry))
+                {
+                    byId[id] = new DocumentLibraryEntry
+                    {
+                        Id = id,
+                        Name = displayName,
+                        CreatedAtUtc = diskManifest.CreatedAtUtc,
+                        UpdatedAtUtc = diskManifest.UpdatedAtUtc
+                    };
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(entry.Name))
+                {
+                    entry.Name = displayName;
+                }
+            }
+        }
+
+        normalized.Libraries = byId.Values
+            .OrderByDescending(x => x.UpdatedAtUtc)
+            .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return normalized;
+    }
 }

@@ -20,7 +20,8 @@ public sealed class DocumentOperationsService : IDocumentOperationsService
     {
         var registry = _libraryManager.LoadRegistry();
         var options = new List<string> { "None" };
-        options.AddRange(registry.Libraries.Select(l => $"{l.Name} ({l.Id})"));
+        options.AddRange(registry.Libraries.Select(l =>
+            string.IsNullOrWhiteSpace(l.Name) ? l.Id : l.Name.Trim()));
 
         DocumentLibraryManifest? activeLibrary = null;
         var selectedIndex = 0;
@@ -74,10 +75,16 @@ public sealed class DocumentOperationsService : IDocumentOperationsService
     public async Task<DocumentLibraryManifest> CreateLibraryAsync(
         PortableConfig config, string ssdRoot, string name)
     {
+        LogMessage?.Invoke($"Create library requested: '{name}'");
         var manifest = await _libraryManager.CreateLibraryAsync(name);
         config.ActiveDocumentLibraryId = manifest.Id;
+        var reg = _libraryManager.LoadRegistry();
+        reg.ActiveLibraryId = manifest.Id;
+        await _libraryManager.SaveRegistryAsync(reg);
         await SaveConfigAsync(config, ssdRoot);
-        LogMessage?.Invoke($"Created library: {manifest.Name}");
+        var path = _libraryManager.GetLibraryPath(manifest.Id);
+        LogMessage?.Invoke($"Created library: name='{manifest.Name}', id='{manifest.Id}', path='{path}'");
+        LogMessage?.Invoke($"Selected library: {manifest.Name} ({manifest.Id})");
         return manifest;
     }
 
