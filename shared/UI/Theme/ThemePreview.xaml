@@ -1,8 +1,9 @@
 <Window x:Class="FreeAiSsd.Shared.UI.Theme.ThemePreview"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:theme="clr-namespace:FreeAiSsd.Shared.UI.Theme"
         Title="Theme Preview — Neumorphic Dark"
-        Height="640" Width="900"
+        Height="900" Width="1100"
         Background="{DynamicResource BgBaseBrush}"
         UseLayoutRounding="True"
         SnapsToDevicePixels="True">
@@ -11,137 +12,307 @@
           Open from a debug build by `new ThemePreview().Show();` if you
           want to sanity-check a token change.  -->
 
-    <Grid Margin="24">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-        </Grid.RowDefinitions>
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <Grid Margin="24">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
 
-        <!-- Headline -->
-        <StackPanel>
-            <TextBlock Text="Free AI SSD" Style="{DynamicResource NeonHeadlineText}"/>
-            <TextBlock Text="Neumorphic dark theme — token preview"
-                       Style="{DynamicResource BodySecondaryText}"
-                       Margin="0,0,0,16"/>
-        </StackPanel>
+            <!-- Headline -->
+            <StackPanel>
+                <TextBlock Text="Free AI SSD" Style="{DynamicResource NeonHeadlineText}"/>
+                <TextBlock Text="Neumorphic dark theme — token &amp; control preview"
+                           Style="{DynamicResource BodySecondaryText}"
+                           Margin="0,0,0,16"/>
+            </StackPanel>
 
-        <!-- Swatches -->
-        <WrapPanel Grid.Row="1" Margin="0,0,0,20">
-            <!-- Surfaces -->
-            <Border Width="120" Height="64" Margin="0,0,12,12" CornerRadius="8"
-                    Background="{DynamicResource BgBaseBrush}"
-                    BorderBrush="{DynamicResource SurfaceBorderBrush}" BorderThickness="1">
-                <TextBlock Text="BgBase" VerticalAlignment="Bottom" HorizontalAlignment="Left"
-                           Margin="8" Style="{DynamicResource CaptionText}"/>
-            </Border>
-            <Border Width="120" Height="64" Margin="0,0,12,12" CornerRadius="8"
-                    Background="{DynamicResource BgRaisedBrush}"
-                    BorderBrush="{DynamicResource SurfaceBorderBrush}" BorderThickness="1">
-                <TextBlock Text="BgRaised" VerticalAlignment="Bottom" Margin="8"
-                           Style="{DynamicResource CaptionText}"/>
-            </Border>
-            <Border Width="120" Height="64" Margin="0,0,12,12" CornerRadius="8"
-                    Background="{DynamicResource BgSunkenBrush}"
-                    BorderBrush="{DynamicResource SurfaceBorderBrush}" BorderThickness="1">
-                <TextBlock Text="BgSunken" VerticalAlignment="Bottom" Margin="8"
-                           Style="{DynamicResource CaptionText}"/>
-            </Border>
+            <!-- Swatches -->
+            <WrapPanel Grid.Row="1" Margin="0,0,0,20">
+                <!-- Surfaces -->
+                <Border Width="120" Height="64" Margin="0,0,12,12" CornerRadius="8"
+                        Background="{DynamicResource BgBaseBrush}"
+                        BorderBrush="{DynamicResource SurfaceBorderBrush}" BorderThickness="1">
+                    <TextBlock Text="BgBase" VerticalAlignment="Bottom" HorizontalAlignment="Left"
+                               Margin="8" Style="{DynamicResource CaptionText}"/>
+                </Border>
+                <Border Width="120" Height="64" Margin="0,0,12,12" CornerRadius="8"
+                        Background="{DynamicResource BgRaisedBrush}"
+                        BorderBrush="{DynamicResource SurfaceBorderBrush}" BorderThickness="1">
+                    <TextBlock Text="BgRaised" VerticalAlignment="Bottom" Margin="8"
+                               Style="{DynamicResource CaptionText}"/>
+                </Border>
+                <Border Width="120" Height="64" Margin="0,0,12,12" CornerRadius="8"
+                        Background="{DynamicResource BgSunkenBrush}"
+                        BorderBrush="{DynamicResource SurfaceBorderBrush}" BorderThickness="1">
+                    <TextBlock Text="BgSunken" VerticalAlignment="Bottom" Margin="8"
+                               Style="{DynamicResource CaptionText}"/>
+                </Border>
 
-            <!-- Accents -->
-            <Border Width="120" Height="64" Margin="0,0,12,12" CornerRadius="8"
-                    Background="{DynamicResource AccentCyanBrush}">
-                <TextBlock Text="Cyan #00E5FF" VerticalAlignment="Bottom" Margin="8"
-                           Foreground="#101218" FontSize="12" FontWeight="SemiBold"/>
-            </Border>
-            <Border Width="120" Height="64" Margin="0,0,12,12" CornerRadius="8"
-                    Background="{DynamicResource AccentMagentaBrush}">
-                <TextBlock Text="Magenta #FF2D92" VerticalAlignment="Bottom" Margin="8"
-                           Foreground="#101218" FontSize="12" FontWeight="SemiBold"/>
-            </Border>
-            <Border Width="120" Height="64" Margin="0,0,12,12" CornerRadius="8"
-                    Background="{DynamicResource AccentPurpleBrush}">
-                <TextBlock Text="Purple #8A2BE2" VerticalAlignment="Bottom" Margin="8"
-                           Foreground="#FFFFFF" FontSize="12" FontWeight="SemiBold"/>
-            </Border>
-            <Border Width="248" Height="64" Margin="0,0,12,12" CornerRadius="8"
-                    Background="{DynamicResource NeonGradientBrush}">
-                <TextBlock Text="NeonGradient (cyan → magenta)"
-                           VerticalAlignment="Bottom" Margin="8"
-                           Foreground="#101218" FontSize="12" FontWeight="SemiBold"/>
-            </Border>
-        </WrapPanel>
+                <!-- Accents -->
+                <Border Width="120" Height="64" Margin="0,0,12,12" CornerRadius="8"
+                        Background="{DynamicResource AccentCyanBrush}">
+                    <TextBlock Text="Cyan #00E5FF" VerticalAlignment="Bottom" Margin="8"
+                               Foreground="#101218" FontSize="12" FontWeight="SemiBold"/>
+                </Border>
+                <Border Width="120" Height="64" Margin="0,0,12,12" CornerRadius="8"
+                        Background="{DynamicResource AccentMagentaBrush}">
+                    <TextBlock Text="Magenta #FF2D92" VerticalAlignment="Bottom" Margin="8"
+                               Foreground="#101218" FontSize="12" FontWeight="SemiBold"/>
+                </Border>
+                <Border Width="120" Height="64" Margin="0,0,12,12" CornerRadius="8"
+                        Background="{DynamicResource AccentPurpleBrush}">
+                    <TextBlock Text="Purple #8A2BE2" VerticalAlignment="Bottom" Margin="8"
+                               Foreground="#FFFFFF" FontSize="12" FontWeight="SemiBold"/>
+                </Border>
+                <Border Width="248" Height="64" Margin="0,0,12,12" CornerRadius="8"
+                        Background="{DynamicResource NeonGradientBrush}">
+                    <TextBlock Text="NeonGradient (cyan → magenta)"
+                               VerticalAlignment="Bottom" Margin="8"
+                               Foreground="#101218" FontSize="12" FontWeight="SemiBold"/>
+                </Border>
+            </WrapPanel>
 
-        <!-- Demo: raised card and sunken panel side by side -->
-        <Grid Grid.Row="2">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="32"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
+            <!-- Demo: raised card and sunken panel side by side -->
+            <Grid Grid.Row="2" Margin="0,0,0,20">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="32"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
 
-            <!-- ───── Raised card (faked light from upper-left) ─────
-                 We stack two Borders: the outer one carries the dark
-                 lower-right shadow, the inner one carries the light
-                 upper-left shadow. The actual visible surface is the
-                 inner Border. -->
-            <Border Background="Transparent" Effect="{DynamicResource RaisedDarkShadow}">
-                <Border CornerRadius="14"
+                <!-- ───── Raised card (faked light from upper-left) ─────
+                     We stack two Borders: the outer one carries the dark
+                     lower-right shadow, the inner one carries the light
+                     upper-left shadow. The actual visible surface is the
+                     inner Border. -->
+                <Border Background="Transparent" Effect="{DynamicResource RaisedDarkShadow}">
+                    <Border CornerRadius="14"
+                            Padding="20"
+                            Background="{DynamicResource RaisedSurfaceGradientBrush}"
+                            BorderBrush="{DynamicResource SurfaceBorderBrush}"
+                            BorderThickness="1"
+                            Effect="{DynamicResource RaisedHighlightShadow}">
+                        <StackPanel>
+                            <TextBlock Text="Raised card" Style="{DynamicResource H2Text}"/>
+                            <TextBlock Style="{DynamicResource BodyText}"
+                                       TextWrapping="Wrap"
+                                       Text="Light leaks toward the upper-left, dark falls toward the lower-right. This is the elevation primitive used for action surfaces, tabs, and hero panels."/>
+                            <TextBlock Style="{DynamicResource CaptionText}" Margin="0,8,0,0"
+                                       Text="Tokens: RaisedSurfaceGradientBrush · RaisedHighlightShadow · RaisedDarkShadow"/>
+                        </StackPanel>
+                    </Border>
+                </Border>
+
+                <!-- ───── Sunken panel (inverted shadow direction) ───── -->
+                <Border Grid.Column="2"
+                        CornerRadius="14"
                         Padding="20"
-                        Background="{DynamicResource RaisedSurfaceGradientBrush}"
+                        Background="{DynamicResource SunkenSurfaceGradientBrush}"
                         BorderBrush="{DynamicResource SurfaceBorderBrush}"
                         BorderThickness="1"
-                        Effect="{DynamicResource RaisedHighlightShadow}">
+                        Effect="{DynamicResource SunkenDarkShadow}">
                     <StackPanel>
-                        <TextBlock Text="Raised card" Style="{DynamicResource H2Text}"/>
+                        <TextBlock Text="Sunken panel" Style="{DynamicResource H2Text}"/>
                         <TextBlock Style="{DynamicResource BodyText}"
                                    TextWrapping="Wrap"
-                                   Text="Light leaks toward the upper-left, dark falls toward the lower-right. This is the elevation primitive used for action surfaces, tabs, and hero panels."/>
+                                   Text="Shadow direction inverts so the upper-left lip catches darkness. Use for log surfaces, list backings, and read-only readouts."/>
                         <TextBlock Style="{DynamicResource CaptionText}" Margin="0,8,0,0"
-                                   Text="Tokens: RaisedSurfaceGradientBrush · RaisedHighlightShadow · RaisedDarkShadow"/>
-
-                        <!-- Mock focused input: 1px gradient border + cyan glow -->
-                        <Border Margin="0,16,0,0"
-                                CornerRadius="8"
-                                BorderBrush="{DynamicResource FocusBorderGradientBrush}"
-                                BorderThickness="1"
-                                Background="{DynamicResource BgSunkenBrush}"
-                                Effect="{DynamicResource FocusGlowCyan}">
-                            <TextBlock Margin="12,8"
-                                       Foreground="{DynamicResource TextPrimaryBrush}"
-                                       Text="Focused input — gradient border + outer glow"/>
-                        </Border>
+                                   Text="Tokens: SunkenSurfaceGradientBrush · SunkenDarkShadow · SunkenHighlightShadow"/>
                     </StackPanel>
                 </Border>
-            </Border>
+            </Grid>
 
-            <!-- ───── Sunken panel (inverted shadow direction) ───── -->
-            <Border Grid.Column="2"
-                    CornerRadius="14"
-                    Padding="20"
-                    Background="{DynamicResource SunkenSurfaceGradientBrush}"
-                    BorderBrush="{DynamicResource SurfaceBorderBrush}"
-                    BorderThickness="1"
-                    Effect="{DynamicResource SunkenDarkShadow}">
-                <StackPanel>
-                    <TextBlock Text="Sunken panel" Style="{DynamicResource H2Text}"/>
-                    <TextBlock Style="{DynamicResource BodyText}"
-                               TextWrapping="Wrap"
-                               Text="Shadow direction inverts so the upper-left lip catches darkness. Use for log surfaces, list backings, and read-only readouts."/>
-                    <TextBlock Style="{DynamicResource CaptionText}" Margin="0,8,0,0"
-                               Text="Tokens: SunkenSurfaceGradientBrush · SunkenDarkShadow · SunkenHighlightShadow"/>
+            <!--  ─────────────────────────────────────────────────────
+                  Control library showcase
+                  ─────────────────────────────────────────────────────  -->
+            <TextBlock Grid.Row="3"
+                       Text="Control library"
+                       Style="{DynamicResource H2Text}"
+                       Margin="0,12,0,12"/>
 
-                    <!-- Type scale sample -->
-                    <StackPanel Margin="0,16,0,0">
-                        <TextBlock Text="H1 — display"  Style="{DynamicResource H1Text}"/>
-                        <TextBlock Text="H2 — section"  Style="{DynamicResource H2Text}"/>
-                        <TextBlock Text="Body — default running text. The quick brown fox jumps over the lazy dog."
-                                   Style="{DynamicResource BodyText}" TextWrapping="Wrap"/>
-                        <TextBlock Text="Caption — auxiliary metadata"
-                                   Style="{DynamicResource CaptionText}"/>
+            <Grid Grid.Row="4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="24"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="24"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="24"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- Row 0, Col 0 : Buttons inside a NeumorphicCard -->
+                <Border Style="{DynamicResource NeumorphicCard}">
+                    <StackPanel>
+                        <TextBlock Text="NeumorphicCard · Buttons"
+                                   Style="{DynamicResource H2Text}"/>
+                        <TextBlock Style="{DynamicResource CaptionText}"
+                                   Text="Primary = Start/Stop/Send/Pull. Ghost = secondary."
+                                   Margin="0,0,0,12"/>
+                        <WrapPanel>
+                            <Button Content="Start"
+                                    Style="{DynamicResource TactilePrimaryButton}"
+                                    Margin="0,0,12,12"/>
+                            <Button Content="Send"
+                                    Style="{DynamicResource TactilePrimaryButton}"
+                                    Margin="0,0,12,12"/>
+                            <Button Content="Pull"
+                                    Style="{DynamicResource TactilePrimaryButton}"
+                                    IsEnabled="False"
+                                    Margin="0,0,12,12"/>
+                            <Button Content="Cancel"
+                                    Style="{DynamicResource GhostSecondaryButton}"
+                                    Margin="0,0,12,12"/>
+                            <Button Content="Settings"
+                                    Style="{DynamicResource GhostSecondaryButton}"
+                                    Margin="0,0,12,12"/>
+                        </WrapPanel>
                     </StackPanel>
-                </StackPanel>
-            </Border>
+                </Border>
+
+                <!-- Row 0, Col 2 : Toggles + LEDs -->
+                <Border Grid.Column="2" Style="{DynamicResource NeumorphicCard}">
+                    <StackPanel>
+                        <TextBlock Text="NeonToggleSwitch · LedStatusIndicator"
+                                   Style="{DynamicResource H2Text}"/>
+                        <TextBlock Style="{DynamicResource CaptionText}"
+                                   Text="Pill switch + 10px status lamp in four states."
+                                   Margin="0,0,0,12"/>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <ToggleButton Style="{DynamicResource NeonToggleSwitch}"
+                                          IsChecked="False"
+                                          VerticalAlignment="Center"/>
+                            <TextBlock Text="Off (sunken track, muted thumb)"
+                                       Style="{DynamicResource BodyText}"
+                                       VerticalAlignment="Center"
+                                       Margin="12,0,0,0"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                            <ToggleButton Style="{DynamicResource NeonToggleSwitch}"
+                                          IsChecked="True"
+                                          VerticalAlignment="Center"/>
+                            <TextBlock Text="On (neon track, glowing thumb)"
+                                       Style="{DynamicResource BodyText}"
+                                       VerticalAlignment="Center"
+                                       Margin="12,0,0,0"/>
+                        </StackPanel>
+
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <theme:LedStatusIndicator State="Idle"
+                                                      VerticalAlignment="Center"
+                                                      Margin="0,0,10,0"/>
+                            <TextBlock Text="Idle" Style="{DynamicResource BodyText}"
+                                       VerticalAlignment="Center" Width="60"/>
+                            <theme:LedStatusIndicator State="Busy"
+                                                      VerticalAlignment="Center"
+                                                      Margin="16,0,10,0"/>
+                            <TextBlock Text="Busy (pulsing)" Style="{DynamicResource BodyText}"
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <theme:LedStatusIndicator State="Ok"
+                                                      VerticalAlignment="Center"
+                                                      Margin="0,0,10,0"/>
+                            <TextBlock Text="Ok" Style="{DynamicResource BodyText}"
+                                       VerticalAlignment="Center" Width="60"/>
+                            <theme:LedStatusIndicator State="Error"
+                                                      VerticalAlignment="Center"
+                                                      Margin="16,0,10,0"/>
+                            <TextBlock Text="Error" Style="{DynamicResource BodyText}"
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- Row 2, Col 0 : Inputs -->
+                <Border Grid.Row="2" Style="{DynamicResource NeumorphicCard}">
+                    <StackPanel>
+                        <TextBlock Text="GlowFocusTextBox · GlowFocusComboBox"
+                                   Style="{DynamicResource H2Text}"/>
+                        <TextBlock Style="{DynamicResource CaptionText}"
+                                   Text="Sunken by default; gradient border + cyan glow on focus."
+                                   Margin="0,0,0,12"/>
+
+                        <TextBlock Text="Prompt" Style="{DynamicResource CaptionText}"/>
+                        <TextBox Style="{DynamicResource GlowFocusTextBox}"
+                                 Text="Type here and tab to focus…"
+                                 Margin="0,4,0,12"/>
+
+                        <TextBlock Text="Model" Style="{DynamicResource CaptionText}"/>
+                        <ComboBox Style="{DynamicResource GlowFocusComboBox}"
+                                  SelectedIndex="0"
+                                  Margin="0,4,0,0">
+                            <ComboBoxItem Content="llama3.2:3b"/>
+                            <ComboBoxItem Content="qwen2.5:7b"/>
+                            <ComboBoxItem Content="mistral:latest"/>
+                        </ComboBox>
+                    </StackPanel>
+                </Border>
+
+                <!-- Row 2, Col 2 : Progress -->
+                <Border Grid.Row="2" Grid.Column="2" Style="{DynamicResource NeumorphicCard}">
+                    <StackPanel>
+                        <TextBlock Text="GradientProgressBar"
+                                   Style="{DynamicResource H2Text}"/>
+                        <TextBlock Style="{DynamicResource CaptionText}"
+                                   Text="Sunken track, cyan→magenta indicator with soft glow."
+                                   Margin="0,0,0,12"/>
+
+                        <TextBlock Text="25%" Style="{DynamicResource CaptionText}"/>
+                        <ProgressBar Style="{DynamicResource GradientProgressBar}"
+                                     Value="25" Minimum="0" Maximum="100"
+                                     Margin="0,4,0,12"/>
+
+                        <TextBlock Text="60%" Style="{DynamicResource CaptionText}"/>
+                        <ProgressBar Style="{DynamicResource GradientProgressBar}"
+                                     Value="60" Minimum="0" Maximum="100"
+                                     Margin="0,4,0,12"/>
+
+                        <TextBlock Text="92%" Style="{DynamicResource CaptionText}"/>
+                        <ProgressBar Style="{DynamicResource GradientProgressBar}"
+                                     Value="92" Minimum="0" Maximum="100"
+                                     Margin="0,4,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Row 4, Col 0-2 : Log viewer (span both columns) -->
+                <Border Grid.Row="4" Grid.ColumnSpan="3"
+                        Style="{DynamicResource NeumorphicCard}">
+                    <StackPanel>
+                        <TextBlock Text="SunkenLogViewer"
+                                   Style="{DynamicResource H2Text}"/>
+                        <TextBlock Style="{DynamicResource CaptionText}"
+                                   Text="Mono, cyan text on near-black, faked inner shadow."
+                                   Margin="0,0,0,12"/>
+                        <ScrollViewer Style="{DynamicResource SunkenLogViewer}"
+                                      Height="180">
+                            <TextBlock FontFamily="{DynamicResource MonoFontFamily}"
+                                       FontSize="13"
+                                       Foreground="{DynamicResource AccentCyanBrush}"
+                                       TextWrapping="NoWrap">
+                                <Run Text="[12:04:17] runner: starting ollama server on 127.0.0.1:11434"/><LineBreak/>
+                                <Run Text="[12:04:17] runner: probing health endpoint…"/><LineBreak/>
+                                <Run Text="[12:04:18] runner: ok — 7 models resident on drive X:\models"/><LineBreak/>
+                                <Run Text="[12:04:18] runner: whisper runtime ready (base.en, 142 MB)"/><LineBreak/>
+                                <Run Text="[12:04:21] chat: user → &quot;summarise the last flight debrief&quot;"/><LineBreak/>
+                                <Run Text="[12:04:21] chat: llama3.2:3b streaming (128 tok/s)…"/><LineBreak/>
+                                <Run Text="[12:04:24] chat: tokens=412 latency=2.91s"/><LineBreak/>
+                                <Run Text="[12:04:30] ptt: DirectInput button#2 pressed → capture"/><LineBreak/>
+                                <Run Text="[12:04:32] ptt: captured 2.1s pcm → whisper"/><LineBreak/>
+                                <Run Text="[12:04:33] ptt: transcript → &quot;hostile east, angels ten&quot;"/>
+                            </TextBlock>
+                        </ScrollViewer>
+                    </StackPanel>
+                </Border>
+            </Grid>
         </Grid>
-    </Grid>
+    </ScrollViewer>
 </Window>

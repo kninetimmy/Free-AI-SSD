@@ -47,10 +47,31 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </Page>
+    <Page Include="..\shared\UI\Theme\Controls.xaml">
+      <Link>UI\Theme\Controls.xaml</Link>
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
     <Page Include="..\shared\UI\Theme\Theme.xaml">
       <Link>UI\Theme\Theme.xaml</Link>
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </Page>
+  </ItemGroup>
+  <!--
+    LedStatusIndicator is a reusable UserControl. Linked in so the
+    runner can drop an LED anywhere in its visual tree without taking
+    a dependency on prep-app.
+  -->
+  <ItemGroup>
+    <Page Include="..\shared\UI\Theme\LedStatusIndicator.xaml">
+      <Link>UI\Theme\LedStatusIndicator.xaml</Link>
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
+    <Compile Include="..\shared\UI\Theme\LedStatusIndicator.xaml.cs">
+      <Link>UI\Theme\LedStatusIndicator.xaml.cs</Link>
+      <DependentUpon>LedStatusIndicator.xaml</DependentUpon>
+    </Compile>
   </ItemGroup>
 </Project>

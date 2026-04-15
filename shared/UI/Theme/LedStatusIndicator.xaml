@@ -1,0 +1,91 @@
+<UserControl x:Class="FreeAiSsd.Shared.UI.Theme.LedStatusIndicator"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:theme="clr-namespace:FreeAiSsd.Shared.UI.Theme"
+             x:Name="Root"
+             Width="10" Height="10"
+             SnapsToDevicePixels="True"
+             UseLayoutRounding="True">
+
+    <!--  ============================================================
+          LedStatusIndicator
+
+          Tiny 10×10 status lamp. Exposes a `State` dependency property
+          with four values (Idle / Busy / Ok / Error). The Ellipse
+          style swaps Fill + Effect per state; Busy additionally runs
+          a pulsing opacity Storyboard via EnterActions.
+
+          The glow is a DropShadowEffect with ShadowDepth=0 so it
+          radiates uniformly around the lamp.
+          ============================================================  -->
+
+    <Grid>
+        <Ellipse x:Name="Lamp"
+                 Width="10" Height="10">
+            <Ellipse.Style>
+                <Style TargetType="{x:Type Ellipse}">
+                    <!-- Default: Idle -->
+                    <Setter Property="Fill" Value="{DynamicResource TextDisabledBrush}"/>
+                    <Setter Property="Opacity" Value="0.85"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding State, ElementName=Root}" Value="Idle">
+                            <Setter Property="Fill" Value="{DynamicResource TextDisabledBrush}"/>
+                            <Setter Property="Opacity" Value="0.85"/>
+                            <Setter Property="Effect" Value="{x:Null}"/>
+                        </DataTrigger>
+
+                        <DataTrigger Binding="{Binding State, ElementName=Root}" Value="Busy">
+                            <Setter Property="Fill" Value="{DynamicResource AccentCyanBrush}"/>
+                            <Setter Property="Effect">
+                                <Setter.Value>
+                                    <DropShadowEffect Color="#00E5FF"
+                                                      ShadowDepth="0"
+                                                      BlurRadius="10"
+                                                      Opacity="0.9"/>
+                                </Setter.Value>
+                            </Setter>
+                            <DataTrigger.EnterActions>
+                                <BeginStoryboard x:Name="PulseStoryboard">
+                                    <Storyboard RepeatBehavior="Forever" AutoReverse="True">
+                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                         From="1.0" To="0.25"
+                                                         Duration="0:0:0.8"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </DataTrigger.EnterActions>
+                            <DataTrigger.ExitActions>
+                                <StopStoryboard BeginStoryboardName="PulseStoryboard"/>
+                            </DataTrigger.ExitActions>
+                        </DataTrigger>
+
+                        <DataTrigger Binding="{Binding State, ElementName=Root}" Value="Ok">
+                            <Setter Property="Fill" Value="{DynamicResource StatusSuccessBrush}"/>
+                            <Setter Property="Opacity" Value="1.0"/>
+                            <Setter Property="Effect">
+                                <Setter.Value>
+                                    <DropShadowEffect Color="#4CE0B3"
+                                                      ShadowDepth="0"
+                                                      BlurRadius="12"
+                                                      Opacity="0.95"/>
+                                </Setter.Value>
+                            </Setter>
+                        </DataTrigger>
+
+                        <DataTrigger Binding="{Binding State, ElementName=Root}" Value="Error">
+                            <Setter Property="Fill" Value="{DynamicResource AccentMagentaBrush}"/>
+                            <Setter Property="Opacity" Value="1.0"/>
+                            <Setter Property="Effect">
+                                <Setter.Value>
+                                    <DropShadowEffect Color="#FF2D92"
+                                                      ShadowDepth="0"
+                                                      BlurRadius="12"
+                                                      Opacity="0.95"/>
+                                </Setter.Value>
+                            </Setter>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Ellipse.Style>
+        </Ellipse>
+    </Grid>
+</UserControl>
