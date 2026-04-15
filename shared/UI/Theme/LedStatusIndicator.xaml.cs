@@ -1,5 +1,4 @@
 using System.Windows;
-using System.Windows.Controls;
 
 namespace FreeAiSsd.Shared.UI.Theme;
 
@@ -27,7 +26,7 @@ public enum LedState
 /// Visuals are driven entirely by the <see cref="State"/> dependency
 /// property; see LedStatusIndicator.xaml for the per-state triggers.
 /// </summary>
-public partial class LedStatusIndicator : UserControl
+public partial class LedStatusIndicator : System.Windows.Controls.UserControl
 {
     /// <summary>Identifies the <see cref="State"/> dependency property.</summary>
     public static readonly DependencyProperty StateProperty = DependencyProperty.Register(
