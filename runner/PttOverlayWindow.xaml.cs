@@ -25,6 +25,23 @@ public partial class PttOverlayWindow : Window
     private static readonly SolidColorBrush YellowBrush = new(System.Windows.Media.Color.FromRgb(0xE0, 0xC0, 0x30));
     private static readonly SolidColorBrush GreenBrush = new(System.Windows.Media.Color.FromRgb(0x40, 0xC0, 0x60));
 
+    /// <summary>
+    /// Current pipeline state, exposed as a DP so the XAML DataTrigger
+    /// that drives the cyan pulse animation binds to a state enum rather
+    /// than to the (mutable, localizable) status label text.
+    /// </summary>
+    public static readonly DependencyProperty PipelineStateProperty = DependencyProperty.Register(
+        nameof(PipelineState),
+        typeof(PttState),
+        typeof(PttOverlayWindow),
+        new PropertyMetadata(PttState.Idle));
+
+    public PttState PipelineState
+    {
+        get => (PttState)GetValue(PipelineStateProperty);
+        set => SetValue(PipelineStateProperty, value);
+    }
+
     private bool _isDragging;
     private System.Windows.Point _dragStart;
 
@@ -62,6 +79,8 @@ public partial class PttOverlayWindow : Window
             Dispatcher.Invoke(() => UpdateState(state));
             return;
         }
+
+        PipelineState = state;
 
         switch (state)
         {
