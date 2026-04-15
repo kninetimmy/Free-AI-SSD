@@ -6,54 +6,6 @@
         Background="{StaticResource BgBaseBrush}">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
-
-        <!--  Destructive variant of GhostSecondaryButton: magenta hover border
-              for Remove/Delete and Cancel Current Operation actions.  -->
-        <Style x:Key="GhostSecondaryDestructiveButton" TargetType="{x:Type Button}">
-            <Setter Property="FontFamily" Value="{StaticResource PrimaryFontFamily}"/>
-            <Setter Property="FontSize" Value="14"/>
-            <Setter Property="FontWeight" Value="Normal"/>
-            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
-            <Setter Property="Padding" Value="16,8"/>
-            <Setter Property="MinHeight" Value="34"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="SnapsToDevicePixels" Value="True"/>
-            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="{x:Type Button}">
-                        <Border x:Name="Surface"
-                                CornerRadius="8"
-                                Background="Transparent"
-                                BorderBrush="{StaticResource SurfaceBorderBrush}"
-                                BorderThickness="1">
-                            <ContentPresenter Margin="{TemplateBinding Padding}"
-                                              HorizontalAlignment="Center"
-                                              VerticalAlignment="Center"
-                                              RecognizesAccessKey="True"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Surface" Property="BorderBrush"
-                                        Value="{StaticResource AccentMagentaBrush}"/>
-                                <Setter Property="Foreground"
-                                        Value="{StaticResource TextPrimaryBrush}"/>
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="Surface" Property="Background"
-                                        Value="{StaticResource BgSunkenBrush}"/>
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Foreground"
-                                        Value="{StaticResource TextDisabledBrush}"/>
-                                <Setter TargetName="Surface" Property="Opacity" Value="0.55"/>
-                                <Setter Property="Cursor" Value="Arrow"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
     </Window.Resources>
 
     <Grid Margin="16">
@@ -203,7 +155,8 @@
                                             Style="{StaticResource TactilePrimaryButton}"
                                             Command="{Binding VerifyCommand}"/>
                                     <Button Content="Remove/Delete..." Margin="8,0,0,0"
-                                            Style="{StaticResource GhostSecondaryDestructiveButton}"
+                                            Style="{StaticResource GhostSecondaryButton}"
+                                            Tag="{StaticResource AccentMagentaBrush}"
                                             Command="{Binding RemoveCommand}"/>
                                     <Button Content="Add to config" Margin="8,0,0,0"
                                             Style="{StaticResource TactilePrimaryButton}"
@@ -212,7 +165,8 @@
                                             Style="{StaticResource TactilePrimaryButton}"
                                             Command="{Binding PullSelectedCommand}"/>
                                     <Button Content="Cancel Current Operation" Margin="8,0,0,0"
-                                            Style="{StaticResource GhostSecondaryDestructiveButton}"
+                                            Style="{StaticResource GhostSecondaryButton}"
+                                            Tag="{StaticResource AccentMagentaBrush}"
                                             Command="{Binding CancelOperationCommand}"/>
                                 </StackPanel>
                                 <DataGrid x:Name="ModelStatusGrid"
@@ -386,16 +340,23 @@
                            Text="Log"
                            Style="{StaticResource H2Text}"
                            Margin="0,0,0,8"/>
-                <ScrollViewer Style="{StaticResource SunkenLogViewer}">
-                    <ListBox ItemsSource="{Binding LogLines}"
-                             x:Name="LogListBox"
-                             Background="Transparent"
-                             BorderThickness="0"
-                             Foreground="{StaticResource AccentCyanBrush}"
-                             VerticalAlignment="Stretch"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             ScrollViewer.VerticalScrollBarVisibility="Disabled"/>
-                </ScrollViewer>
+                <!--  ListBox keeps its internal ScrollViewer so UI virtualization
+                      stays active and ScrollIntoView (code-behind) keeps working.
+                      The sunken visual comes from styling that inner ScrollViewer
+                      via ListBox.Resources.  -->
+                <ListBox ItemsSource="{Binding LogLines}"
+                         x:Name="LogListBox"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         Foreground="{StaticResource AccentCyanBrush}"
+                         VerticalAlignment="Stretch"
+                         ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto">
+                    <ListBox.Resources>
+                        <Style TargetType="{x:Type ScrollViewer}"
+                               BasedOn="{StaticResource SunkenLogViewer}"/>
+                    </ListBox.Resources>
+                </ListBox>
             </DockPanel>
         </Border>
     </Grid>
