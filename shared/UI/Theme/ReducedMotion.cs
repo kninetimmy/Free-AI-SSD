@@ -1,4 +1,3 @@
-using System.Windows;
 using System.Windows.Media;
 
 namespace FreeAiSsd.Shared.UI.Theme;
@@ -9,36 +8,35 @@ namespace FreeAiSsd.Shared.UI.Theme;
 /// press translate (<c>ButtonPressTransform</c> resource) and the LED pulse
 /// storyboard in <see cref="LedStatusIndicator"/>.
 ///
-/// Call <see cref="Apply"/> from each WPF host's <c>OnStartup</c> after
-/// <c>base.OnStartup(e)</c> so <see cref="Application.Resources"/> is
-/// available.
+/// Call <see cref="Apply"/> from each WPF host's <c>OnStartup</c> to swap
+/// the button-press transform. <see cref="IsEnabled"/> reads the OS toggle
+/// live, so controls constructed before <c>Apply</c> runs still see the
+/// correct value.
 ///
-/// <para>Detection reads <see cref="SystemParameters.ClientAreaAnimation"/>,
+/// <para>Detection reads <see cref="System.Windows.SystemParameters.ClientAreaAnimation"/>,
 /// which reflects the OS "Show animations in Windows" toggle (Settings →
-/// Accessibility → Visual effects). When the user turns animations off we
-/// swap the resource for an identity transform and set a static flag that
-/// <c>LedStatusIndicator</c> checks on construction to skip starting the
-/// pulse storyboard on its Busy state.</para>
+/// Accessibility → Visual effects).</para>
 /// </summary>
 public static class ReducedMotion
 {
     /// <summary>
-    /// True when the OS requests reduced animation. Read by
-    /// <see cref="LedStatusIndicator"/> to decide whether to kick off the
-    /// Busy-state pulse storyboard.
+    /// True when the OS requests reduced animation. Read live from
+    /// <see cref="System.Windows.SystemParameters.ClientAreaAnimation"/> so
+    /// the value is correct even when queried before <see cref="Apply"/>
+    /// has run (e.g. a <c>LedStatusIndicator</c> constructed during
+    /// <c>base.OnStartup</c> via <c>StartupUri</c>).
     /// </summary>
-    public static bool IsEnabled { get; private set; }
+    public static bool IsEnabled => !System.Windows.SystemParameters.ClientAreaAnimation;
 
     /// <summary>
-    /// Applies the reduced-motion policy to <paramref name="app"/>. Safe to
-    /// call from any thread, but expects <see cref="Application.Resources"/>
-    /// to have been initialized (so call after <c>base.OnStartup(e)</c>).
+    /// Applies the reduced-motion policy to <paramref name="app"/>. Must be
+    /// called on the UI (STA) thread — touches <see cref="System.Windows.Application.Resources"/>
+    /// and constructs a <see cref="TranslateTransform"/> (a
+    /// <see cref="System.Windows.DependencyObject"/>).
     /// </summary>
-    public static void Apply(Application app)
+    public static void Apply(System.Windows.Application app)
     {
         if (app is null) return;
-
-        IsEnabled = !SystemParameters.ClientAreaAnimation;
         if (!IsEnabled) return;
 
         // Swap the button press translate for an identity transform so
