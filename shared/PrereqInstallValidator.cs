@@ -112,7 +112,7 @@ public static class PrereqInstallValidator
                 continue;
             }
 
-            // Step 7: Does the file hash match the manifest?
+            // Step 6: Does the file hash match the manifest?
             var actualSha = ComputeSha256(installerPath);
             if (!string.Equals(actualSha, entry.Sha256, StringComparison.OrdinalIgnoreCase))
             {
@@ -120,7 +120,7 @@ public static class PrereqInstallValidator
                 continue;
             }
 
-            // Step 8: Does the Authenticode signature validate (Windows, Microsoft installers)?
+            // Step 7: Does the Authenticode signature validate (Windows, Microsoft installers)?
             var signatureResult = ValidateSignature(installerPath, definition, onWarn);
             if (!signatureResult.Valid)
             {
