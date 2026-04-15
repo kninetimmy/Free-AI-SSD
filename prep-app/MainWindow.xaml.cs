@@ -15,6 +15,17 @@ namespace FreeAiSsd.PrepApp;
 public partial class MainWindow : Window
 {
     private readonly PrepViewModel _viewModel;
+    private PrepTargetPreferenceStore? _prefStore;
+
+    // FTUE state
+    private int _ftueStepIndex;
+    private FrameworkElement[] _ftueTargets = Array.Empty<FrameworkElement>();
+    private int[] _ftueTargetTabIndex = Array.Empty<int>();
+    private (string label, string title, string body)[] _ftueSteps = Array.Empty<(string, string, string)>();
+
+    // Cached once at load time so the per-keystroke save path doesn't
+    // have to re-read the settings file on every PropertyChanged tick.
+    private bool _ftueCompleted;
 
     public MainWindow()
     {
@@ -49,7 +60,11 @@ public partial class MainWindow : Window
 
         _viewModel.LogLines.CollectionChanged += LogLines_CollectionChanged;
 
+        ShowModelDetailsToggle.Checked += OnShowModelDetailsChanged;
+        ShowModelDetailsToggle.Unchecked += OnShowModelDetailsChanged;
+
         Loaded += OnWindowLoaded;
+        SizeChanged += OnWindowSizeChanged;
     }
 
     private void OnWindowLoaded(object sender, RoutedEventArgs e)
@@ -58,25 +73,36 @@ public partial class MainWindow : Window
 
         LoadStarterCatalog();
 
-        var prefStore = new PrepTargetPreferenceStore();
-        var pref = prefStore.LoadSettings();
+        _prefStore = new PrepTargetPreferenceStore();
+        var pref = _prefStore.LoadSettings();
         _viewModel.PrepareWindows = pref.PrepTargets.HasFlag(PrepTargets.Windows);
         _viewModel.PrepareMac = pref.PrepTargets.HasFlag(PrepTargets.Mac);
         _viewModel.InstallVrCompanion = pref.InstallVrCompanion;
         _viewModel.CompanionHostAddress = pref.CompanionHostAddress;
         _viewModel.CompanionHostPort = pref.CompanionHostPort;
 
+        _ftueCompleted = pref.FtueCompleted;
+
         _viewModel.OnPrepTargetsChanged = () =>
         {
+            // Fires on every keystroke while CompanionHostAddress is being
+            // edited (UpdateSourceTrigger=PropertyChanged). Use the cached
+            // _ftueCompleted instead of touching disk each time.
             var current = PrepTargets.None;
             if (_viewModel.PrepareWindows) current |= PrepTargets.Windows;
             if (_viewModel.PrepareMac) current |= PrepTargets.Mac;
-            prefStore.SaveSettings(new PrepPreferenceSnapshot(
+            _prefStore!.SaveSettings(new PrepPreferenceSnapshot(
                 current,
                 _viewModel.InstallVrCompanion,
                 _viewModel.CompanionHostAddress,
-                _viewModel.CompanionHostPort));
+                _viewModel.CompanionHostPort,
+                _ftueCompleted));
         };
+
+        if (!_ftueCompleted)
+        {
+            StartFtue();
+        }
     }
 
     private void LoadStarterCatalog()
@@ -128,5 +154,159 @@ public partial class MainWindow : Window
         Dispatcher.BeginInvoke(
             DispatcherPriority.Background,
             new Action(() => LogListBox.ScrollIntoView(newestItem)));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Progressive disclosure: "Show details" toggle on Configured
+    // models. Hides Sha256 / Last verified columns by default.
+    // ─────────────────────────────────────────────────────────────
+    private void OnShowModelDetailsChanged(object sender, RoutedEventArgs e)
+    {
+        var show = ShowModelDetailsToggle.IsChecked == true;
+        var vis = show ? Visibility.Visible : Visibility.Collapsed;
+        Sha256Column.Visibility = vis;
+        LastVerifiedColumn.Visibility = vis;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Actionable empty-state handler: scrolls the Starter models
+    // grid into view inside the Model Manager tab.
+    // ─────────────────────────────────────────────────────────────
+    private void OnBrowseStarterModelsClick(object sender, RoutedEventArgs e)
+    {
+        StarterModelsCard?.BringIntoView();
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // FTUE (First-Time User Experience): 3-step spotlight tour.
+    // ─────────────────────────────────────────────────────────────
+    private void StartFtue()
+    {
+        _ftueSteps = new (string, string, string)[]
+        {
+            ("Step 1 of 3", "Pick your target drive",
+                "Choose the drive where Ollama and models will be installed."),
+            ("Step 2 of 3", "Choose a starter model",
+                "The Starter models card lists vetted picks grouped by size. Toggle one or more to add."),
+            ("Step 3 of 3", "Pull & verify",
+                "Use Pull/Install to download the models. Verify confirms the files are intact.")
+        };
+        _ftueTargets = new FrameworkElement[]
+        {
+            TargetDriveRow,
+            StarterModelsCard,
+            PullInstallButton
+        };
+        // Which tab each spotlight target lives in. Step 1 sits outside
+        // the tab control (no switch needed, -1 means "don't touch").
+        // Steps 2 and 3 live inside the Model Manager tab (index 0).
+        _ftueTargetTabIndex = new[] { -1, 0, 0 };
+
+        _ftueStepIndex = 0;
+        FtueOverlay.Visibility = Visibility.Visible;
+        ApplyFtueStep();
+    }
+
+    private void ApplyFtueStep()
+    {
+        if (_ftueStepIndex < 0 || _ftueStepIndex >= _ftueSteps.Length)
+        {
+            FinishFtue();
+            return;
+        }
+
+        var (label, title, body) = _ftueSteps[_ftueStepIndex];
+        FtueStepLabel.Text = label;
+        FtueTitleText.Text = title;
+        FtueBodyText.Text = body;
+        FtueNextButton.Content = _ftueStepIndex == _ftueSteps.Length - 1 ? "Finish" : "Next";
+
+        // Switch to the tab that hosts this step's spotlight target so
+        // the element is actually realized and measurable. Without this,
+        // steps 2/3 silently skip the spotlight if the user is on the
+        // Drive Setup tab when the FTUE advances.
+        if (_ftueStepIndex < _ftueTargetTabIndex.Length)
+        {
+            var tabIndex = _ftueTargetTabIndex[_ftueStepIndex];
+            if (tabIndex >= 0 && tabIndex < MainTabs.Items.Count)
+            {
+                MainTabs.SelectedIndex = tabIndex;
+            }
+        }
+
+        // Defer spotlight positioning until the target has a real layout
+        // (first-render pass won't have resolved TabItem sizes yet).
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(PositionSpotlight));
+    }
+
+    private void PositionSpotlight()
+    {
+        if (_ftueStepIndex < 0 || _ftueStepIndex >= _ftueTargets.Length)
+        {
+            FtueSpotlight.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var target = _ftueTargets[_ftueStepIndex];
+        if (target is null || !target.IsVisible || target.ActualWidth <= 0 || target.ActualHeight <= 0)
+        {
+            FtueSpotlight.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        try
+        {
+            // Canvas and target aren't in an ancestor/descendant relationship
+            // (the overlay is a sibling of the main content), so go through
+            // TransformToVisual which just needs a common ancestor — the
+            // root Grid of the window.
+            var transform = target.TransformToVisual(FtueSpotlightCanvas);
+            var topLeft = transform.Transform(new Point(0, 0));
+            const double pad = 8;
+            Canvas.SetLeft(FtueSpotlight, topLeft.X - pad);
+            Canvas.SetTop(FtueSpotlight, topLeft.Y - pad);
+            FtueSpotlight.Width = target.ActualWidth + pad * 2;
+            FtueSpotlight.Height = target.ActualHeight + pad * 2;
+            FtueSpotlight.Visibility = Visibility.Visible;
+        }
+        catch (InvalidOperationException)
+        {
+            // Target not yet parented into the visual tree (e.g. a tab
+            // that hasn't been rendered). Hide the ring; the card
+            // caption still guides the user.
+            FtueSpotlight.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void OnFtueNextClick(object sender, RoutedEventArgs e)
+    {
+        _ftueStepIndex++;
+        if (_ftueStepIndex >= _ftueSteps.Length)
+        {
+            FinishFtue();
+            return;
+        }
+        ApplyFtueStep();
+    }
+
+    private void OnFtueSkipClick(object sender, RoutedEventArgs e)
+    {
+        FinishFtue();
+    }
+
+    private void FinishFtue()
+    {
+        FtueOverlay.Visibility = Visibility.Collapsed;
+        FtueSpotlight.Visibility = Visibility.Collapsed;
+        _ftueCompleted = true;
+        _prefStore?.MarkFtueCompleted();
+    }
+
+    private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (FtueOverlay.Visibility == Visibility.Visible)
+        {
+            PositionSpotlight();
+        }
     }
 }

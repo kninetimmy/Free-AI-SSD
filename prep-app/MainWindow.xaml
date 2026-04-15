@@ -2,362 +2,538 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:theme="clr-namespace:FreeAiSsd.Shared.UI.Theme"
+        xmlns:local="clr-namespace:FreeAiSsd.PrepApp"
         Title="Free AI SSD - Host Setup" Height="900" Width="1020" MinHeight="768"
-        Background="{StaticResource BgBaseBrush}">
+        Background="{StaticResource BgBaseBrush}"
+        ToolTipService.InitialShowDelay="400"
+        ToolTipService.BetweenShowDelay="200"
+        ToolTipService.ShowDuration="15000">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+        <local:EmptyToVisibilityConverter x:Key="EmptyToVisibilityConverter"/>
     </Window.Resources>
 
-    <Grid Margin="16">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="5*"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="2*"/>
-        </Grid.RowDefinitions>
-
-        <!-- Row 0: Drive selector -->
-        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-            <TextBlock Text="Target Drive:"
-                       Foreground="{StaticResource TextSecondaryBrush}"
-                       VerticalAlignment="Center" Margin="0,0,8,0"/>
-            <ComboBox Width="500"
-                      Style="{StaticResource GlowFocusComboBox}"
-                      DisplayMemberPath="Name"
-                      ItemsSource="{Binding Drives}"
-                      SelectedItem="{Binding SelectedDrive, Mode=TwoWay}"/>
-            <Button Content="Refresh" Margin="8,0,0,0"
-                    Style="{StaticResource GhostSecondaryButton}"
-                    Command="{Binding RefreshDrivesCommand}"/>
-            <CheckBox Margin="12,0,0,0"
-                      VerticalAlignment="Center"
-                      Foreground="{StaticResource TextSecondaryBrush}"
-                      Content="Show fixed drives (advanced)"
-                      IsChecked="{Binding ShowFixedDrives, Mode=TwoWay}"/>
-        </StackPanel>
-
-        <!-- Row 1: Ollama URL -->
-        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,12">
-            <TextBlock Text="Ollama Package URL:"
-                       Foreground="{StaticResource TextSecondaryBrush}"
-                       VerticalAlignment="Center" Margin="0,0,8,0"/>
-            <TextBox Width="620"
-                     Style="{StaticResource GlowFocusTextBox}"
-                     Text="{Binding OllamaUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-        </StackPanel>
-
-        <!-- Row 2: Tab control with Model Manager and Drive Setup -->
-        <TabControl Grid.Row="2" Margin="0,0,0,12"
-                    Background="Transparent"
-                    BorderThickness="0">
-
-            <!-- Tab 1: Model Manager -->
-            <TabItem Header="Model Manager">
-                <!-- Model Manager card -->
-                <Border Style="{StaticResource NeumorphicCard}" Margin="0,8,0,0">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="3*"/>
-                            <RowDefinition Height="2*"/>
-                        </Grid.RowDefinitions>
-
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                            <TextBlock Text="Model tag"
-                                       Foreground="{StaticResource TextSecondaryBrush}"
-                                       VerticalAlignment="Center" Margin="0,0,8,0"/>
-                            <TextBox Width="300"
-                                     Style="{StaticResource GlowFocusTextBox}"
-                                     Text="{Binding ModelTagInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                     IsEnabled="{Binding CanMutateDrive}"
-                                     ToolTip="Examples: llama3.2:3b, qwen2.5:3b, mistral:7b"/>
-                            <Button Content="Add" Margin="8,0,0,0"
-                                    Style="{StaticResource GhostSecondaryButton}"
-                                    Command="{Binding AddModelCommand}"/>
-                        </StackPanel>
-
-                        <!-- Starter Models card -->
-                        <Border Grid.Row="1"
-                                Style="{StaticResource NeumorphicCard}"
-                                Margin="0,0,0,12">
-                            <DockPanel>
-                                <TextBlock DockPanel.Dock="Top"
-                                           Text="Starter models (recommended)"
-                                           Style="{StaticResource H2Text}"
-                                           Margin="0,0,0,8"/>
-                                <TextBlock x:Name="StarterCatalogWarningText"
-                                           DockPanel.Dock="Top"
-                                           Foreground="{StaticResource StatusWarningBrush}"
-                                           Margin="0,0,0,6"
-                                           TextWrapping="Wrap"
-                                           Visibility="Collapsed"/>
-                                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
-                                    <Button Content="Add selected to configuration"
-                                            Style="{StaticResource GhostSecondaryButton}"
-                                            Command="{Binding AddStarterModelsCommand}"/>
-                                    <Button Content="Clear selection" Margin="8,0,0,0"
-                                            Style="{StaticResource GhostSecondaryButton}"
-                                            Command="{Binding ClearStarterSelectionCommand}"/>
-                                </StackPanel>
-                                <DataGrid x:Name="StarterModelGrid"
-                                          AutoGenerateColumns="False"
-                                          CanUserAddRows="False"
-                                          IsReadOnly="False"
-                                          HeadersVisibility="Column"
-                                          ItemsSource="{Binding StarterModels}"
-                                          Background="Transparent"
-                                          BorderThickness="0"
-                                          MinHeight="80">
-                                    <DataGrid.GroupStyle>
-                                        <GroupStyle>
-                                            <GroupStyle.HeaderTemplate>
-                                                <DataTemplate>
-                                                    <TextBlock Text="{Binding Name}" FontWeight="Bold" Margin="4,8,0,4"/>
-                                                </DataTemplate>
-                                            </GroupStyle.HeaderTemplate>
-                                        </GroupStyle>
-                                    </DataGrid.GroupStyle>
-                                    <DataGrid.Columns>
-                                        <DataGridTemplateColumn Header="Select" Width="Auto">
-                                            <DataGridTemplateColumn.CellTemplate>
-                                                <DataTemplate>
-                                                    <ToggleButton Style="{StaticResource NeonToggleSwitch}"
-                                                                  IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                                  HorizontalAlignment="Center"/>
-                                                </DataTemplate>
-                                            </DataGridTemplateColumn.CellTemplate>
-                                        </DataGridTemplateColumn>
-                                        <DataGridTextColumn Header="Tag" Binding="{Binding Tag}" Width="2*" IsReadOnly="True"/>
-                                        <DataGridTextColumn Header="Params" Binding="{Binding Params}" Width="*" IsReadOnly="True"/>
-                                        <DataGridTextColumn Header="Tier" Binding="{Binding SizeTier}" Width="*" IsReadOnly="True"/>
-                                        <DataGridTextColumn Header="Best at" Binding="{Binding Description}" Width="3*" IsReadOnly="True"/>
-                                        <DataGridTextColumn Header="Use cases" Binding="{Binding UseCasesDisplay}" Width="2*" IsReadOnly="True"/>
-                                        <DataGridTextColumn Header="Sizing info" Binding="{Binding SizingWarning}" Width="2*" IsReadOnly="True"/>
-                                    </DataGrid.Columns>
-                                </DataGrid>
-                            </DockPanel>
-                        </Border>
-
-                        <!-- Configured Models card -->
-                        <Border Grid.Row="2"
-                                Style="{StaticResource NeumorphicCard}">
-                            <DockPanel>
-                                <TextBlock DockPanel.Dock="Top"
-                                           Text="Configured models"
-                                           Style="{StaticResource H2Text}"
-                                           Margin="0,0,0,8"/>
-                                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
-                                    <Button Content="Pull/Install"
-                                            Style="{StaticResource TactilePrimaryButton}"
-                                            Command="{Binding PullInstallCommand}"/>
-                                    <Button Content="Verify" Margin="8,0,0,0"
-                                            Style="{StaticResource TactilePrimaryButton}"
-                                            Command="{Binding VerifyCommand}"/>
-                                    <Button Content="Remove/Delete..." Margin="8,0,0,0"
-                                            Style="{StaticResource GhostSecondaryButton}"
-                                            Tag="{StaticResource AccentMagentaBrush}"
-                                            Command="{Binding RemoveCommand}"/>
-                                    <Button Content="Add to config" Margin="8,0,0,0"
-                                            Style="{StaticResource TactilePrimaryButton}"
-                                            Command="{Binding AddOrphanToConfigCommand}"/>
-                                    <Button Content="Pull Selected" Margin="20,0,0,0"
-                                            Style="{StaticResource TactilePrimaryButton}"
-                                            Command="{Binding PullSelectedCommand}"/>
-                                    <Button Content="Cancel Current Operation" Margin="8,0,0,0"
-                                            Style="{StaticResource GhostSecondaryButton}"
-                                            Tag="{StaticResource AccentMagentaBrush}"
-                                            Command="{Binding CancelOperationCommand}"/>
-                                </StackPanel>
-                                <DataGrid x:Name="ModelStatusGrid"
-                                          AutoGenerateColumns="False"
-                                          IsReadOnly="False"
-                                          HeadersVisibility="Column"
-                                          CanUserAddRows="False"
-                                          MinHeight="80"
-                                          Background="Transparent"
-                                          BorderThickness="0"
-                                          ItemsSource="{Binding ModelRows}">
-                                    <DataGrid.Columns>
-                                        <DataGridTemplateColumn Header="Select" Width="Auto">
-                                            <DataGridTemplateColumn.CellTemplate>
-                                                <DataTemplate>
-                                                    <ToggleButton Style="{StaticResource NeonToggleSwitch}"
-                                                                  IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                                  HorizontalAlignment="Center"/>
-                                                </DataTemplate>
-                                            </DataGridTemplateColumn.CellTemplate>
-                                        </DataGridTemplateColumn>
-                                        <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" IsReadOnly="True"/>
-                                        <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="*" IsReadOnly="True"/>
-                                        <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="*" IsReadOnly="True"/>
-                                        <DataGridTextColumn Header="Sizing" Binding="{Binding SizingWarning}" Width="2*" IsReadOnly="True"/>
-                                        <DataGridTextColumn Header="Size" Binding="{Binding SizeDisplay}" Width="*" IsReadOnly="True"/>
-                                        <DataGridTextColumn Header="Sha256" Binding="{Binding ShaPreview}" Width="*" IsReadOnly="True"/>
-                                        <DataGridTextColumn Header="Last verified" Binding="{Binding LastVerifiedDisplay}" Width="*" IsReadOnly="True"/>
-                                    </DataGrid.Columns>
-                                </DataGrid>
-                            </DockPanel>
-                        </Border>
-                    </Grid>
-                </Border>
-            </TabItem>
-
-            <!-- Tab 2: Drive Setup & Finalize -->
-            <TabItem Header="Drive Setup">
-                <!-- Drive Setup card -->
-                <Border Style="{StaticResource NeumorphicCard}" Margin="0,8,0,0">
-                    <StackPanel>
-                        <GroupBox Header="Drive Preparation" Margin="0,0,0,16"
-                                  Foreground="{StaticResource TextPrimaryBrush}">
-                            <StackPanel Margin="8">
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                    <TextBlock Text="Prep targets:"
-                                               Foreground="{StaticResource TextSecondaryBrush}"
-                                               VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                    <CheckBox Content="Prepare for Windows"
-                                              Foreground="{StaticResource TextSecondaryBrush}"
-                                              IsChecked="{Binding PrepareWindows, Mode=TwoWay}"
-                                              Margin="0,0,10,0"/>
-                                    <CheckBox Content="Prepare for macOS"
-                                              Foreground="{StaticResource TextSecondaryBrush}"
-                                              IsChecked="{Binding PrepareMac, Mode=TwoWay}"
-                                              IsEnabled="{Binding IsMacPrepAvailable}"/>
-                                </StackPanel>
-                                <TextBlock Text="{Binding MacPrepAvailabilityMessage}"
-                                           Margin="0,0,0,8"
-                                           Foreground="{StaticResource StatusWarningBrush}"
-                                           TextWrapping="Wrap"/>
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="Volume label:"
-                                               Foreground="{StaticResource TextSecondaryBrush}"
-                                               VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                    <TextBox Width="240" Text="{Binding VolumeLabel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                    <Button Content="Format &amp; Prepare Drive" Margin="12,0,0,0"
-                                            Style="{StaticResource GhostSecondaryButton}"
-                                            Command="{Binding FormatPrepareCommand}"/>
-                                </StackPanel>
-                                <CheckBox Margin="0,10,0,0"
-                                          Foreground="{StaticResource TextSecondaryBrush}"
-                                          Content="Require passphrase to unlock SSD at runtime (encrypt portable config)"
-                                          IsChecked="{Binding EnableEncryption, Mode=TwoWay}"
-                                          IsEnabled="{Binding CanMutateDrive}"/>
-
-                                <CheckBox Margin="0,10,0,0"
-                                          Foreground="{StaticResource TextSecondaryBrush}"
-                                          Content="Install VR-machine companion on SSD (for split-PC setups)"
-                                          IsChecked="{Binding InstallVrCompanion, Mode=TwoWay}"
-                                          IsEnabled="{Binding CanMutateDrive}"/>
-                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                                    <TextBlock Text="AI host IP/hostname:"
-                                               Foreground="{StaticResource TextSecondaryBrush}"
-                                               VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                    <TextBox Width="220" Text="{Binding CompanionHostAddress, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                    <TextBlock Text="Port:"
-                                               Foreground="{StaticResource TextSecondaryBrush}"
-                                               VerticalAlignment="Center" Margin="12,0,6,0"/>
-                                    <TextBox Width="80" Text="{Binding CompanionHostPort, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                </StackPanel>
-                            </StackPanel>
-                        </GroupBox>
-
-                        <GroupBox Header="Finalize &amp; Readiness"
-                                  Foreground="{StaticResource TextPrimaryBrush}">
-                            <StackPanel Margin="8">
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                    <Button Content="Finalize SSD" Padding="16,8"
-                                            Style="{StaticResource GhostSecondaryButton}"
-                                            Command="{Binding FinalizeCommand}"/>
-                                    <Button Content="Check SSD Readiness" Padding="16,8" Margin="8,0,0,0"
-                                            Style="{StaticResource GhostSecondaryButton}"
-                                            Command="{Binding CheckReadinessCommand}"/>
-                                    <Button Content="Check for prereq updates" Padding="16,8" Margin="8,0,0,0"
-                                            Style="{StaticResource GhostSecondaryButton}"
-                                            Command="{Binding CheckPrereqUpdatesCommand}"/>
-                                </StackPanel>
-                                <TextBlock Foreground="{StaticResource StatusInfoBrush}" Margin="0,0,0,4"
-                                           Text="{Binding PrereqStatusText}"/>
-
-                                <DataGrid AutoGenerateColumns="False"
-                                          IsReadOnly="True"
-                                          CanUserAddRows="False"
-                                          HeadersVisibility="Column"
-                                          MinHeight="80"
-                                          MaxHeight="300"
-                                          Background="Transparent"
-                                          BorderThickness="0"
-                                          ItemsSource="{Binding ReadinessItems}">
-                                    <DataGrid.Columns>
-                                        <DataGridTextColumn Header="Check" Binding="{Binding Check}" Width="2*"/>
-                                        <DataGridTextColumn Header="Result" Binding="{Binding Result}" Width="3*"/>
-                                    </DataGrid.Columns>
-                                </DataGrid>
-                            </StackPanel>
-                        </GroupBox>
-                    </StackPanel>
-                </Border>
-            </TabItem>
-        </TabControl>
-
-        <!-- Row 3: Progress bar + status + filesystem warning inline card -->
-        <Grid Grid.Row="3" Margin="0,0,0,12">
+    <!-- Root Grid: main content + FTUE overlay layered on top. -->
+    <Grid>
+        <Grid x:Name="RootContent" Margin="16">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="5*"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="2*"/>
             </Grid.RowDefinitions>
 
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <ProgressBar Width="250" Margin="0,0,12,0"
-                             Style="{StaticResource GradientProgressBar}"
-                             Value="{Binding ProgressValue}"
-                             IsIndeterminate="{Binding ProgressIsIndeterminate}"/>
-                <TextBlock Text="{Binding StatusText}"
+            <!-- Row 0: Drive selector -->
+            <StackPanel x:Name="TargetDriveRow" Orientation="Horizontal" Margin="0,0,0,12">
+                <TextBlock Text="Target Drive:"
                            Foreground="{StaticResource TextSecondaryBrush}"
-                           VerticalAlignment="Center"/>
+                           VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <ComboBox Width="500"
+                          Style="{StaticResource GlowFocusComboBox}"
+                          DisplayMemberPath="Name"
+                          ItemsSource="{Binding Drives}"
+                          SelectedItem="{Binding SelectedDrive, Mode=TwoWay}"
+                          ToolTip="The removable/fixed drive where Ollama and models will be installed."/>
+                <Button Content="Refresh" Margin="8,0,0,0"
+                        Style="{StaticResource GhostSecondaryButton}"
+                        Command="{Binding RefreshDrivesCommand}"
+                        ToolTip="Re-scan connected drives and update the list."/>
             </StackPanel>
 
-            <!-- Filesystem warning as a small inline card with magenta LED -->
-            <Border Grid.Row="1"
-                    Style="{StaticResource NeumorphicCard}"
-                    Padding="12,8"
-                    Margin="0,8,0,0">
-                <StackPanel Orientation="Horizontal">
-                    <theme:LedStatusIndicator State="Error"
-                                              VerticalAlignment="Center"
-                                              Margin="0,0,10,0"/>
-                    <TextBlock Foreground="{StaticResource AccentMagentaBrush}"
-                               VerticalAlignment="Center"
-                               TextWrapping="Wrap"
-                               Text="{Binding SelectedDriveWarning}"/>
+            <!-- Row 1: Tab control with Model Manager and Drive Setup -->
+            <TabControl x:Name="MainTabs"
+                        Grid.Row="1" Margin="0,0,0,12"
+                        Background="Transparent"
+                        BorderThickness="0">
+
+                <!-- Tab 1: Model Manager -->
+                <TabItem Header="Model Manager">
+                    <!-- Model Manager card -->
+                    <Border Style="{StaticResource NeumorphicCard}" Margin="0,8,0,0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="3*"/>
+                                <RowDefinition Height="2*"/>
+                            </Grid.RowDefinitions>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                <TextBlock Text="Model tag"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <TextBox Width="300"
+                                         Style="{StaticResource GlowFocusTextBox}"
+                                         Text="{Binding ModelTagInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         IsEnabled="{Binding CanMutateDrive}"
+                                         ToolTip="Ollama model tag to add to the configuration (e.g. llama3.2:3b, qwen2.5:3b)."/>
+                                <Button Content="Add" Margin="8,0,0,0"
+                                        Style="{StaticResource GhostSecondaryButton}"
+                                        Command="{Binding AddModelCommand}"
+                                        ToolTip="Add the typed tag to the Configured models list."/>
+                            </StackPanel>
+
+                            <!-- Starter Models card -->
+                            <Border x:Name="StarterModelsCard"
+                                    Grid.Row="1"
+                                    Style="{StaticResource NeumorphicCard}"
+                                    Margin="0,0,0,12">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top"
+                                               Text="Starter models (recommended)"
+                                               Style="{StaticResource H2Text}"
+                                               Margin="0,0,0,8"/>
+                                    <TextBlock x:Name="StarterCatalogWarningText"
+                                               DockPanel.Dock="Top"
+                                               Foreground="{StaticResource StatusWarningBrush}"
+                                               Margin="0,0,0,6"
+                                               TextWrapping="Wrap"
+                                               Visibility="Collapsed"/>
+                                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
+                                        <Button Content="Add selected to configuration"
+                                                Style="{StaticResource GhostSecondaryButton}"
+                                                Command="{Binding AddStarterModelsCommand}"
+                                                ToolTip="Copy the ticked starter models into the Configured models list."/>
+                                        <Button Content="Clear selection" Margin="8,0,0,0"
+                                                Style="{StaticResource GhostSecondaryButton}"
+                                                Command="{Binding ClearStarterSelectionCommand}"
+                                                ToolTip="Uncheck all starter models in the grid."/>
+                                    </StackPanel>
+                                    <DataGrid x:Name="StarterModelGrid"
+                                              AutoGenerateColumns="False"
+                                              CanUserAddRows="False"
+                                              IsReadOnly="False"
+                                              HeadersVisibility="Column"
+                                              ItemsSource="{Binding StarterModels}"
+                                              Background="Transparent"
+                                              BorderThickness="0"
+                                              MinHeight="80">
+                                        <DataGrid.GroupStyle>
+                                            <GroupStyle>
+                                                <GroupStyle.HeaderTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding Name}" FontWeight="Bold" Margin="4,8,0,4"/>
+                                                    </DataTemplate>
+                                                </GroupStyle.HeaderTemplate>
+                                            </GroupStyle>
+                                        </DataGrid.GroupStyle>
+                                        <DataGrid.Columns>
+                                            <DataGridTemplateColumn Header="Select" Width="Auto">
+                                                <DataGridTemplateColumn.CellTemplate>
+                                                    <DataTemplate>
+                                                        <ToggleButton Style="{StaticResource NeonToggleSwitch}"
+                                                                      IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                      HorizontalAlignment="Center"/>
+                                                    </DataTemplate>
+                                                </DataGridTemplateColumn.CellTemplate>
+                                            </DataGridTemplateColumn>
+                                            <DataGridTextColumn Header="Tag" Binding="{Binding Tag}" Width="2*" IsReadOnly="True"/>
+                                            <DataGridTextColumn Header="Params" Binding="{Binding Params}" Width="*" IsReadOnly="True"/>
+                                            <DataGridTextColumn Header="Tier" Binding="{Binding SizeTier}" Width="*" IsReadOnly="True"/>
+                                            <DataGridTextColumn Header="Best at" Binding="{Binding Description}" Width="3*" IsReadOnly="True"/>
+                                            <DataGridTextColumn Header="Use cases" Binding="{Binding UseCasesDisplay}" Width="2*" IsReadOnly="True"/>
+                                            <DataGridTextColumn Header="Sizing info" Binding="{Binding SizingWarning}" Width="2*" IsReadOnly="True"/>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </DockPanel>
+                            </Border>
+
+                            <!-- Configured Models card -->
+                            <Border Grid.Row="2"
+                                    Style="{StaticResource NeumorphicCard}">
+                                <DockPanel>
+                                    <Grid DockPanel.Dock="Top" Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Configured models"
+                                                   Style="{StaticResource H2Text}"
+                                                   Margin="0"/>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal"
+                                                    VerticalAlignment="Center">
+                                            <TextBlock Text="Show details"
+                                                       Style="{StaticResource CaptionText}"
+                                                       VerticalAlignment="Center"
+                                                       Margin="0,0,8,0"/>
+                                            <ToggleButton x:Name="ShowModelDetailsToggle"
+                                                          Style="{StaticResource NeonToggleSwitch}"
+                                                          IsChecked="False"
+                                                          ToolTip="Toggle the Sha256 and Last verified columns."/>
+                                        </StackPanel>
+                                    </Grid>
+                                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
+                                        <Button x:Name="PullInstallButton"
+                                                Content="Pull/Install"
+                                                Style="{StaticResource TactilePrimaryButton}"
+                                                Command="{Binding PullInstallCommand}"
+                                                ToolTip="Download and install all configured models onto the target drive."/>
+                                        <Button Content="Verify" Margin="8,0,0,0"
+                                                Style="{StaticResource TactilePrimaryButton}"
+                                                Command="{Binding VerifyCommand}"
+                                                ToolTip="Recompute checksums and confirm each configured model is intact."/>
+                                        <Button Content="Remove/Delete..." Margin="8,0,0,0"
+                                                Style="{StaticResource GhostSecondaryButton}"
+                                                Tag="{StaticResource AccentMagentaBrush}"
+                                                Command="{Binding RemoveCommand}"
+                                                ToolTip="Remove the selected models from the configuration and/or delete their files."/>
+                                        <Button Content="Add to config" Margin="8,0,0,0"
+                                                Style="{StaticResource TactilePrimaryButton}"
+                                                Command="{Binding AddOrphanToConfigCommand}"
+                                                ToolTip="Register orphan models found on the drive into the configuration."/>
+                                        <Button Content="Pull Selected" Margin="20,0,0,0"
+                                                Style="{StaticResource TactilePrimaryButton}"
+                                                Command="{Binding PullSelectedCommand}"
+                                                ToolTip="Download only the models ticked in the grid."/>
+                                        <Button Content="Cancel Current Operation" Margin="8,0,0,0"
+                                                Style="{StaticResource GhostSecondaryButton}"
+                                                Tag="{StaticResource AccentMagentaBrush}"
+                                                Command="{Binding CancelOperationCommand}"
+                                                ToolTip="Abort the in-progress pull/verify operation."/>
+                                    </StackPanel>
+                                    <Grid>
+                                        <DataGrid x:Name="ModelStatusGrid"
+                                                  AutoGenerateColumns="False"
+                                                  IsReadOnly="False"
+                                                  HeadersVisibility="Column"
+                                                  CanUserAddRows="False"
+                                                  MinHeight="80"
+                                                  Background="Transparent"
+                                                  BorderThickness="0"
+                                                  ItemsSource="{Binding ModelRows}">
+                                            <DataGrid.Columns>
+                                                <DataGridTemplateColumn Header="Select" Width="Auto">
+                                                    <DataGridTemplateColumn.CellTemplate>
+                                                        <DataTemplate>
+                                                            <ToggleButton Style="{StaticResource NeonToggleSwitch}"
+                                                                          IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                          HorizontalAlignment="Center"/>
+                                                        </DataTemplate>
+                                                    </DataGridTemplateColumn.CellTemplate>
+                                                </DataGridTemplateColumn>
+                                                <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*" IsReadOnly="True"/>
+                                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="*" IsReadOnly="True"/>
+                                                <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="*" IsReadOnly="True"/>
+                                                <DataGridTextColumn Header="Sizing" Binding="{Binding SizingWarning}" Width="2*" IsReadOnly="True"/>
+                                                <DataGridTextColumn Header="Size" Binding="{Binding SizeDisplay}" Width="*" IsReadOnly="True"/>
+                                                <DataGridTextColumn x:Name="Sha256Column"
+                                                                    Header="Sha256"
+                                                                    Binding="{Binding ShaPreview}"
+                                                                    Width="*"
+                                                                    IsReadOnly="True"
+                                                                    Visibility="Collapsed"/>
+                                                <DataGridTextColumn x:Name="LastVerifiedColumn"
+                                                                    Header="Last verified"
+                                                                    Binding="{Binding LastVerifiedDisplay}"
+                                                                    Width="*"
+                                                                    IsReadOnly="True"
+                                                                    Visibility="Collapsed"/>
+                                            </DataGrid.Columns>
+                                        </DataGrid>
+
+                                        <!-- Actionable empty state for Configured models.
+                                             Painted solid so the (row-less) grid behind
+                                             doesn't bleed through. -->
+                                        <Border IsHitTestVisible="True"
+                                                Background="{StaticResource BgBaseBrush}"
+                                                Visibility="{Binding ModelRows.Count, Converter={StaticResource EmptyToVisibilityConverter}}">
+                                            <StackPanel HorizontalAlignment="Center"
+                                                        VerticalAlignment="Center"
+                                                        MaxWidth="360">
+                                                <Border Width="72" Height="72"
+                                                        CornerRadius="36"
+                                                        HorizontalAlignment="Center"
+                                                        Margin="0,0,0,12"
+                                                        Background="{StaticResource BgSunkenBrush}"
+                                                        BorderBrush="{StaticResource FocusBorderGradientBrush}"
+                                                        BorderThickness="1"
+                                                        Effect="{StaticResource HoverGlowCyan}">
+                                                    <TextBlock Text="&#x2737;"
+                                                               FontSize="32"
+                                                               HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center"
+                                                               Foreground="{StaticResource AccentCyanBrush}"/>
+                                                </Border>
+                                                <TextBlock Text="No models configured yet"
+                                                           Style="{StaticResource H2Text}"
+                                                           HorizontalAlignment="Center"/>
+                                                <TextBlock Text="Pick a recommended starter model to get going, or type a tag above."
+                                                           Style="{StaticResource CaptionText}"
+                                                           TextAlignment="Center"
+                                                           TextWrapping="Wrap"
+                                                           Margin="0,0,0,12"/>
+                                                <Button Content="Browse starter models"
+                                                        HorizontalAlignment="Center"
+                                                        Style="{StaticResource TactilePrimaryButton}"
+                                                        Click="OnBrowseStarterModelsClick"
+                                                        ToolTip="Scroll to the Starter models grid above."/>
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                </DockPanel>
+                            </Border>
+                        </Grid>
+                    </Border>
+                </TabItem>
+
+                <!-- Tab 2: Drive Setup & Finalize -->
+                <TabItem Header="Drive Setup">
+                    <!-- Drive Setup card -->
+                    <Border Style="{StaticResource NeumorphicCard}" Margin="0,8,0,0">
+                        <StackPanel>
+
+                            <!-- Progressive disclosure: advanced toggles live here. -->
+                            <Expander Header="Advanced options"
+                                      Style="{StaticResource NeumorphicExpander}"
+                                      IsExpanded="False"
+                                      Margin="0,0,0,16"
+                                      ToolTip="Rarely-used settings: custom Ollama package source and listing fixed drives.">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                        <TextBlock Text="Ollama Package URL:"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                                   VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <TextBox Width="540"
+                                                 Style="{StaticResource GlowFocusTextBox}"
+                                                 Text="{Binding OllamaUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 ToolTip="Override the trusted Ollama installer source. Leave as default unless you have a specific mirror."/>
+                                    </StackPanel>
+                                    <CheckBox VerticalAlignment="Center"
+                                              Foreground="{StaticResource TextSecondaryBrush}"
+                                              Content="Show fixed drives (advanced)"
+                                              IsChecked="{Binding ShowFixedDrives, Mode=TwoWay}"
+                                              ToolTip="Include non-removable drives in the Target Drive list. Only for power users."/>
+                                </StackPanel>
+                            </Expander>
+
+                            <GroupBox Header="Drive Preparation" Margin="0,0,0,16"
+                                      Foreground="{StaticResource TextPrimaryBrush}">
+                                <StackPanel Margin="8">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                        <TextBlock Text="Prep targets:"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                                   VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <CheckBox Content="Prepare for Windows"
+                                                  Foreground="{StaticResource TextSecondaryBrush}"
+                                                  IsChecked="{Binding PrepareWindows, Mode=TwoWay}"
+                                                  Margin="0,0,10,0"
+                                                  ToolTip="Stage artifacts so the SSD can boot the Windows runner."/>
+                                        <CheckBox Content="Prepare for macOS"
+                                                  Foreground="{StaticResource TextSecondaryBrush}"
+                                                  IsChecked="{Binding PrepareMac, Mode=TwoWay}"
+                                                  IsEnabled="{Binding IsMacPrepAvailable}"
+                                                  ToolTip="Stage artifacts so the SSD can boot the macOS runner. Requires the mac-runner payload."/>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding MacPrepAvailabilityMessage}"
+                                               Margin="0,0,0,8"
+                                               Foreground="{StaticResource StatusWarningBrush}"
+                                               TextWrapping="Wrap"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Volume label:"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                                   VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <TextBox Width="240"
+                                                 Text="{Binding VolumeLabel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 ToolTip="Filesystem label written when the drive is formatted."/>
+                                        <Button Content="Format &amp; Prepare Drive" Margin="12,0,0,0"
+                                                Style="{StaticResource GhostSecondaryButton}"
+                                                Command="{Binding FormatPrepareCommand}"
+                                                ToolTip="Erase and re-layout the target drive for Free AI SSD use. Destroys existing data."/>
+                                    </StackPanel>
+                                    <CheckBox Margin="0,10,0,0"
+                                              Foreground="{StaticResource TextSecondaryBrush}"
+                                              Content="Require passphrase to unlock SSD at runtime (encrypt portable config)"
+                                              IsChecked="{Binding EnableEncryption, Mode=TwoWay}"
+                                              IsEnabled="{Binding CanMutateDrive}"
+                                              ToolTip="Wrap the portable config with a passphrase-derived key. Prompted on every runner launch."/>
+
+                                    <CheckBox Margin="0,10,0,0"
+                                              Foreground="{StaticResource TextSecondaryBrush}"
+                                              Content="Install VR-machine companion on SSD (for split-PC setups)"
+                                              IsChecked="{Binding InstallVrCompanion, Mode=TwoWay}"
+                                              IsEnabled="{Binding CanMutateDrive}"
+                                              ToolTip="Copy the VR companion client so the SSD can bridge to a separate AI host over the network."/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                        <TextBlock Text="AI host IP/hostname:"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                                   VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <TextBox Width="220"
+                                                 Text="{Binding CompanionHostAddress, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 ToolTip="Address the VR companion should reach out to for inference."/>
+                                        <TextBlock Text="Port:"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                                   VerticalAlignment="Center" Margin="12,0,6,0"/>
+                                        <TextBox Width="80"
+                                                 Text="{Binding CompanionHostPort, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 ToolTip="TCP port the AI host is listening on (default 41555)."/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </GroupBox>
+
+                            <GroupBox Header="Finalize &amp; Readiness"
+                                      Foreground="{StaticResource TextPrimaryBrush}">
+                                <StackPanel Margin="8">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                        <Button Content="Finalize SSD" Padding="16,8"
+                                                Style="{StaticResource GhostSecondaryButton}"
+                                                Command="{Binding FinalizeCommand}"
+                                                ToolTip="Write the final manifest and lock the drive layout for runtime use."/>
+                                        <Button Content="Check SSD Readiness" Padding="16,8" Margin="8,0,0,0"
+                                                Style="{StaticResource GhostSecondaryButton}"
+                                                Command="{Binding CheckReadinessCommand}"
+                                                ToolTip="Run the readiness diagnostics against the currently selected drive."/>
+                                        <Button Content="Check for prereq updates" Padding="16,8" Margin="8,0,0,0"
+                                                Style="{StaticResource GhostSecondaryButton}"
+                                                Command="{Binding CheckPrereqUpdatesCommand}"
+                                                ToolTip="Query the prereq manifest for newer installer versions."/>
+                                    </StackPanel>
+                                    <TextBlock Foreground="{StaticResource StatusInfoBrush}" Margin="0,0,0,4"
+                                               Text="{Binding PrereqStatusText}"/>
+
+                                    <DataGrid AutoGenerateColumns="False"
+                                              IsReadOnly="True"
+                                              CanUserAddRows="False"
+                                              HeadersVisibility="Column"
+                                              MinHeight="80"
+                                              MaxHeight="300"
+                                              Background="Transparent"
+                                              BorderThickness="0"
+                                              ItemsSource="{Binding ReadinessItems}">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Check" Binding="{Binding Check}" Width="2*"/>
+                                            <DataGridTextColumn Header="Result" Binding="{Binding Result}" Width="3*"/>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </StackPanel>
+                            </GroupBox>
+                        </StackPanel>
+                    </Border>
+                </TabItem>
+            </TabControl>
+
+            <!-- Row 2: Progress bar + status + filesystem warning inline card -->
+            <Grid Grid.Row="2" Margin="0,0,0,12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <ProgressBar Width="250" Margin="0,0,12,0"
+                                 Style="{StaticResource GradientProgressBar}"
+                                 Value="{Binding ProgressValue}"
+                                 IsIndeterminate="{Binding ProgressIsIndeterminate}"/>
+                    <TextBlock Text="{Binding StatusText}"
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               VerticalAlignment="Center"/>
                 </StackPanel>
+
+                <!-- Filesystem warning as a small inline card with magenta LED -->
+                <Border Grid.Row="1"
+                        Style="{StaticResource NeumorphicCard}"
+                        Padding="12,8"
+                        Margin="0,8,0,0">
+                    <StackPanel Orientation="Horizontal">
+                        <theme:LedStatusIndicator State="Error"
+                                                  VerticalAlignment="Center"
+                                                  Margin="0,0,10,0"/>
+                        <TextBlock Foreground="{StaticResource AccentMagentaBrush}"
+                                   VerticalAlignment="Center"
+                                   TextWrapping="Wrap"
+                                   Text="{Binding SelectedDriveWarning}"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- Row 3: Log card (always visible) -->
+            <Border Grid.Row="3" Style="{StaticResource NeumorphicCard}">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top"
+                               Text="Log"
+                               Style="{StaticResource H2Text}"
+                               Margin="0,0,0,8"/>
+                    <Grid>
+                        <!--  ListBox keeps its internal ScrollViewer so UI virtualization
+                              stays active and ScrollIntoView (code-behind) keeps working.
+                              The sunken visual comes from styling that inner ScrollViewer
+                              via ListBox.Resources.  -->
+                        <ListBox ItemsSource="{Binding LogLines}"
+                                 x:Name="LogListBox"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 Foreground="{StaticResource AccentCyanBrush}"
+                                 VerticalAlignment="Stretch"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto">
+                            <ListBox.Resources>
+                                <Style TargetType="{x:Type ScrollViewer}"
+                                       BasedOn="{StaticResource SunkenLogViewer}"/>
+                            </ListBox.Resources>
+                        </ListBox>
+
+                        <!-- Empty-state caption overlaid on top of the ListBox surface. -->
+                        <TextBlock Text="Actions will appear here"
+                                   Style="{StaticResource CaptionText}"
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   IsHitTestVisible="False"
+                                   Visibility="{Binding LogLines.Count, Converter={StaticResource EmptyToVisibilityConverter}}"/>
+                    </Grid>
+                </DockPanel>
             </Border>
         </Grid>
 
-        <!-- Row 4: Log card (always visible) -->
-        <Border Grid.Row="4" Style="{StaticResource NeumorphicCard}">
-            <DockPanel>
-                <TextBlock DockPanel.Dock="Top"
-                           Text="Log"
-                           Style="{StaticResource H2Text}"
-                           Margin="0,0,0,8"/>
-                <!--  ListBox keeps its internal ScrollViewer so UI virtualization
-                      stays active and ScrollIntoView (code-behind) keeps working.
-                      The sunken visual comes from styling that inner ScrollViewer
-                      via ListBox.Resources.  -->
-                <ListBox ItemsSource="{Binding LogLines}"
-                         x:Name="LogListBox"
-                         Background="Transparent"
-                         BorderThickness="0"
-                         Foreground="{StaticResource AccentCyanBrush}"
-                         VerticalAlignment="Stretch"
-                         ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                         ScrollViewer.VerticalScrollBarVisibility="Auto">
-                    <ListBox.Resources>
-                        <Style TargetType="{x:Type ScrollViewer}"
-                               BasedOn="{StaticResource SunkenLogViewer}"/>
-                    </ListBox.Resources>
-                </ListBox>
-            </DockPanel>
-        </Border>
+        <!-- ═════════════════════════════════════════════════════════════
+             FTUE Overlay: shown on first launch. Semi-transparent scrim
+             plus a neon "spotlight" ring positioned over the step's
+             target element (set in code-behind). The instruction card
+             floats in the lower-right corner.
+             ═════════════════════════════════════════════════════════════ -->
+        <Grid x:Name="FtueOverlay" Visibility="Collapsed">
+            <!-- Scrim: catches clicks so the user can't interact with
+                 the underlying UI until they finish or skip FTUE. -->
+            <Rectangle Fill="#B3000000"/>
+
+            <!-- Spotlight canvas: code-behind positions FtueSpotlight
+                 over the target element using TransformToAncestor. -->
+            <Canvas x:Name="FtueSpotlightCanvas">
+                <Border x:Name="FtueSpotlight"
+                        Style="{StaticResource SpotlightRing}"
+                        Visibility="Collapsed"/>
+            </Canvas>
+
+            <!-- Instruction card: pinned to the bottom-right. -->
+            <Border HorizontalAlignment="Right"
+                    VerticalAlignment="Bottom"
+                    Margin="0,0,32,40"
+                    MaxWidth="360"
+                    Style="{StaticResource NeumorphicCard}">
+                <StackPanel>
+                    <TextBlock x:Name="FtueStepLabel"
+                               Text="Step 1 of 3"
+                               Style="{StaticResource CaptionText}"
+                               Foreground="{StaticResource AccentCyanBrush}"
+                               Margin="0,0,0,6"/>
+                    <TextBlock x:Name="FtueTitleText"
+                               Text="Pick your target drive"
+                               Style="{StaticResource H2Text}"/>
+                    <TextBlock x:Name="FtueBodyText"
+                               Text="Choose the drive where Ollama and models will be installed."
+                               Style="{StaticResource BodyText}"
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,16"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Content="Skip"
+                                Style="{StaticResource GhostSecondaryButton}"
+                                Click="OnFtueSkipClick"/>
+                        <Button x:Name="FtueNextButton"
+                                Content="Next"
+                                Margin="8,0,0,0"
+                                Style="{StaticResource TactilePrimaryButton}"
+                                Click="OnFtueNextClick"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
     </Grid>
 </Window>
