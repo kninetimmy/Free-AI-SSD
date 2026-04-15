@@ -3,26 +3,26 @@
 
     <!--  ============================================================
           Free AI SSD — Neumorphic Dark Theme : Drop Shadows
-          ------------------------------------------------------------
+
           Pairs of DropShadowEffect resources used to fake a single
-          light source from the upper-left.
+          light source from the upper left.
 
           Raised surfaces:   apply RaisedHighlightShadow on a layer
                              behind/around, plus RaisedDarkShadow on
                              the surface itself (or stack two Borders).
           Sunken surfaces:   invert direction so darkness sits at the
-                             upper-left lip and highlight at lower-right.
+                             upper-left lip and highlight at lower right.
           Focus glows:       outer color glow used together with the
                              FocusBorderGradientBrush from Colors.xaml.
 
           NOTE: WPF DropShadowEffect Direction is in degrees, measured
-          counter-clockwise from the +X axis. 135° points to the upper-
-          left, 315° points to the lower-right.
+          counter-clockwise from the +X axis. 135° points to the upper
+          left, 315° points to the lower right.
           ============================================================  -->
 
-    <!--  ─── Raised: light from upper-left ───  -->
+    <!--  Raised: light from upper left  -->
 
-    <!-- Soft light bleed cast toward upper-left. Pair with a Border that
+    <!-- Soft light bleed cast toward upper left. Pair with a Border that
          sits behind the surface, or set as the Effect on a child layer. -->
     <DropShadowEffect x:Key="RaisedHighlightShadow"
                       Color="#2A2F3A"
@@ -32,7 +32,7 @@
                       Opacity="0.85"
                       RenderingBias="Quality"/>
 
-    <!-- Deep matte shadow falling toward lower-right. -->
+    <!-- Deep matte shadow falling toward lower right. -->
     <DropShadowEffect x:Key="RaisedDarkShadow"
                       Color="#0B0D12"
                       Direction="315"
@@ -58,7 +58,7 @@
                       Opacity="0.9"
                       RenderingBias="Quality"/>
 
-    <!--  ─── Sunken: invert direction so the lip catches darkness  ───  -->
+    <!--  Sunken: invert direction so the lip catches darkness  -->
 
     <DropShadowEffect x:Key="SunkenDarkShadow"
                       Color="#0B0D12"
@@ -76,7 +76,7 @@
                       Opacity="0.65"
                       RenderingBias="Quality"/>
 
-    <!--  ─── Focus glows (omnidirectional) ───  -->
+    <!--  Focus glows (omnidirectional)  -->
 
     <DropShadowEffect x:Key="FocusGlowCyan"
                       Color="#00E5FF"

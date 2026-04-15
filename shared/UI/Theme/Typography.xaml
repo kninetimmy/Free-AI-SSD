@@ -9,7 +9,7 @@
 
     <!--  ============================================================
           Free AI SSD — Neumorphic Dark Theme : Typography
-          ------------------------------------------------------------
+
           Text style scale used throughout both apps. The scale is
           deliberately small: H1, H2, Body, Caption.
 
@@ -25,7 +25,7 @@
     <FontFamily x:Key="DisplayFontFamily">Segoe UI Variable Display, Segoe UI</FontFamily>
     <FontFamily x:Key="MonoFontFamily">Cascadia Mono, Consolas, Courier New</FontFamily>
 
-    <!--  ─── Default TextBlock style (implicit) ───  -->
+    <!--  Default TextBlock style (implicit)  -->
     <Style TargetType="{x:Type TextBlock}">
         <Setter Property="FontFamily" Value="{StaticResource PrimaryFontFamily}"/>
         <Setter Property="FontSize" Value="14"/>
@@ -34,7 +34,7 @@
         <Setter Property="TextOptions.TextRenderingMode" Value="ClearType"/>
     </Style>
 
-    <!--  ─── Named text styles ───  -->
+    <!--  Named text styles  -->
 
     <Style x:Key="H1Text" TargetType="{x:Type TextBlock}">
         <Setter Property="FontFamily" Value="{StaticResource DisplayFontFamily}"/>

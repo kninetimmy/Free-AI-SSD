@@ -3,13 +3,13 @@
 
     <!--  ============================================================
           Free AI SSD — Neumorphic Dark Theme : Color Tokens
-          ------------------------------------------------------------
+
           All color tokens used across prep-app and runner. Anything
           color-related in the UI should resolve to one of these
           brushes. Raw hex literals in views are considered a smell.
           ============================================================  -->
 
-    <!--  ───── Raw Color values (kept separately so brushes can share)  -->
+    <!--  Raw Color values (kept separately so brushes can share)  -->
 
     <!-- Surfaces -->
     <Color x:Key="BgBaseColor">#FF1A1D24</Color>
@@ -39,7 +39,7 @@
     <Color x:Key="StatusDangerColor">#FFFF4D6D</Color>
     <Color x:Key="StatusInfoColor">#FF5BC0FF</Color>
 
-    <!--  ───── SolidColorBrush tokens  -->
+    <!--  SolidColorBrush tokens  -->
 
     <SolidColorBrush x:Key="BgBaseBrush"      Color="{StaticResource BgBaseColor}"/>
     <SolidColorBrush x:Key="BgRaisedBrush"    Color="{StaticResource BgRaisedColor}"/>
@@ -64,7 +64,7 @@
     <SolidColorBrush x:Key="StatusDangerBrush"  Color="{StaticResource StatusDangerColor}"/>
     <SolidColorBrush x:Key="StatusInfoBrush"    Color="{StaticResource StatusInfoColor}"/>
 
-    <!--  ───── Neon gradient brushes  -->
+    <!--  Neon gradient brushes  -->
 
     <!-- Primary accent: cyan → magenta. Use for primary action buttons,
          active tab indicators, headline glyphs. -->

@@ -3,7 +3,7 @@
 
     <!--  ============================================================
           Free AI SSD — Neumorphic Dark Theme : Aggregate
-          ------------------------------------------------------------
+
           Single entry point for both prep-app and runner. Apps merge
           ONLY this dictionary; downstream control styles will land
           here in subsequent passes.
