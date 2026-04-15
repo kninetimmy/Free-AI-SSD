@@ -101,6 +101,9 @@
           Minimal chrome by default; gradient outline reveals itself
           on hover. Use for Cancel, secondary links, sidebar actions.
           ────────────────────────────────────────────────────────────  -->
+    <!--  Override the hover BorderBrush by setting the Button's Tag to any
+          Brush (e.g. AccentMagentaBrush for destructive actions). Tag defaults
+          to FocusBorderGradientBrush so un-customised callers are unaffected.  -->
     <Style x:Key="GhostSecondaryButton" TargetType="{x:Type Button}">
         <Setter Property="FontFamily" Value="{StaticResource PrimaryFontFamily}"/>
         <Setter Property="FontSize" Value="14"/>
@@ -111,6 +114,7 @@
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
         <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="Tag" Value="{StaticResource FocusBorderGradientBrush}"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type Button}">
@@ -127,7 +131,7 @@
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Surface" Property="BorderBrush"
-                                    Value="{StaticResource FocusBorderGradientBrush}"/>
+                                    Value="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"/>
                             <Setter Property="Foreground"
                                     Value="{StaticResource TextPrimaryBrush}"/>
                         </Trigger>
