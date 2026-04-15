@@ -16,6 +16,7 @@
         <ResourceDictionary Source="pack://application:,,,/UI/Theme/Colors.xaml"/>
         <ResourceDictionary Source="pack://application:,,,/UI/Theme/Shadows.xaml"/>
         <ResourceDictionary Source="pack://application:,,,/UI/Theme/Typography.xaml"/>
+        <ResourceDictionary Source="pack://application:,,,/UI/Theme/Controls.xaml"/>
     </ResourceDictionary.MergedDictionaries>
 
 </ResourceDictionary>

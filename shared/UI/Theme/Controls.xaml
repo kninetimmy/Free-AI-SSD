@@ -1,0 +1,528 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--  ============================================================
+          Free AI SSD — Neumorphic Dark Theme : Control Styles
+
+          Named styles and control templates composed from the color,
+          shadow, and typography tokens. Everything here is keyed so
+          apps opt-in; nothing applies implicitly to the visual tree.
+
+          Pull in the upstream dictionaries so StaticResource lookups
+          inside setters and templates resolve at parse time regardless
+          of merge order in Theme.xaml.
+          ============================================================  -->
+
+    <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="pack://application:,,,/UI/Theme/Colors.xaml"/>
+        <ResourceDictionary Source="pack://application:,,,/UI/Theme/Shadows.xaml"/>
+        <ResourceDictionary Source="pack://application:,,,/UI/Theme/Typography.xaml"/>
+    </ResourceDictionary.MergedDictionaries>
+
+    <!--  ────────────────────────────────────────────────────────────
+          1. NeumorphicCard
+          Wrapper Border for grouping related content. Sits flush on
+          BgBaseBrush so it reads as "lifted from" the window surface
+          via shadow alone.
+          ────────────────────────────────────────────────────────────  -->
+    <Style x:Key="NeumorphicCard" TargetType="{x:Type Border}">
+        <Setter Property="CornerRadius" Value="12"/>
+        <Setter Property="Background" Value="{StaticResource BgBaseBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource SurfaceBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="16"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Effect" Value="{StaticResource RaisedDarkShadow}"/>
+    </Style>
+
+    <!--  ────────────────────────────────────────────────────────────
+          2. TactilePrimaryButton
+          Large action button. Raised by default, sinks 1px on press,
+          gains a neon gradient border on hover.
+          ────────────────────────────────────────────────────────────  -->
+    <Style x:Key="TactilePrimaryButton" TargetType="{x:Type Button}">
+        <Setter Property="FontFamily" Value="{StaticResource PrimaryFontFamily}"/>
+        <Setter Property="FontSize" Value="15"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="Padding" Value="24,12"/>
+        <Setter Property="MinHeight" Value="44"/>
+        <Setter Property="MinWidth" Value="140"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Button}">
+                    <Grid>
+                        <Border x:Name="Surface"
+                                CornerRadius="10"
+                                Background="{StaticResource RaisedSurfaceGradientBrush}"
+                                BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                BorderThickness="1"
+                                Effect="{StaticResource RaisedDarkShadow}">
+                            <ContentPresenter x:Name="Content"
+                                              Margin="{TemplateBinding Padding}"
+                                              HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              RecognizesAccessKey="True">
+                                <ContentPresenter.RenderTransform>
+                                    <TranslateTransform x:Name="ContentShift" X="0" Y="0"/>
+                                </ContentPresenter.RenderTransform>
+                            </ContentPresenter>
+                        </Border>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Surface" Property="BorderBrush"
+                                    Value="{StaticResource FocusBorderGradientBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Surface" Property="Effect"
+                                    Value="{StaticResource SunkenDarkShadow}"/>
+                            <Setter TargetName="Surface" Property="Background"
+                                    Value="{StaticResource SunkenSurfaceGradientBrush}"/>
+                            <Setter TargetName="ContentShift" Property="X" Value="1"/>
+                            <Setter TargetName="ContentShift" Property="Y" Value="1"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource TextDisabledBrush}"/>
+                            <Setter TargetName="Surface" Property="Opacity" Value="0.55"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--  ────────────────────────────────────────────────────────────
+          3. GhostSecondaryButton
+          Minimal chrome by default; gradient outline reveals itself
+          on hover. Use for Cancel, secondary links, sidebar actions.
+          ────────────────────────────────────────────────────────────  -->
+    <Style x:Key="GhostSecondaryButton" TargetType="{x:Type Button}">
+        <Setter Property="FontFamily" Value="{StaticResource PrimaryFontFamily}"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="FontWeight" Value="Normal"/>
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+        <Setter Property="Padding" Value="16,8"/>
+        <Setter Property="MinHeight" Value="34"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type Button}">
+                    <Border x:Name="Surface"
+                            CornerRadius="8"
+                            Background="Transparent"
+                            BorderBrush="{StaticResource SurfaceBorderBrush}"
+                            BorderThickness="1">
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          RecognizesAccessKey="True"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Surface" Property="BorderBrush"
+                                    Value="{StaticResource FocusBorderGradientBrush}"/>
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource TextPrimaryBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Surface" Property="Background"
+                                    Value="{StaticResource BgSunkenBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource TextDisabledBrush}"/>
+                            <Setter TargetName="Surface" Property="Opacity" Value="0.55"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--  ────────────────────────────────────────────────────────────
+          4. NeonToggleSwitch
+          ToggleButton styled as a pill switch. Off = sunken track,
+          muted thumb. On = track paints with NeonGradientBrush and
+          the thumb glows cyan.
+          ────────────────────────────────────────────────────────────  -->
+    <Style x:Key="NeonToggleSwitch" TargetType="{x:Type ToggleButton}">
+        <Setter Property="Width" Value="48"/>
+        <Setter Property="Height" Value="24"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="Background" Value="{StaticResource SunkenSurfaceGradientBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ToggleButton}">
+                    <Grid>
+                        <Border x:Name="Track"
+                                CornerRadius="12"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                BorderThickness="1"
+                                Effect="{StaticResource SunkenDarkShadow}"/>
+                        <Border x:Name="Thumb"
+                                Width="18" Height="18"
+                                CornerRadius="9"
+                                HorizontalAlignment="Left"
+                                Margin="3,0,0,0"
+                                Background="{TemplateBinding Foreground}">
+                            <Border.RenderTransform>
+                                <TranslateTransform x:Name="ThumbShift" X="0" Y="0"/>
+                            </Border.RenderTransform>
+                        </Border>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Track" Property="Background"
+                                    Value="{StaticResource NeonGradientBrush}"/>
+                            <Setter TargetName="Track" Property="Effect" Value="{x:Null}"/>
+                            <Setter TargetName="Thumb" Property="Background"
+                                    Value="{StaticResource TextPrimaryBrush}"/>
+                            <Setter TargetName="Thumb" Property="Effect"
+                                    Value="{StaticResource FocusGlowCyan}"/>
+                            <Setter TargetName="ThumbShift" Property="X" Value="24"/>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Track" Property="BorderBrush"
+                                    Value="{StaticResource AccentCyanBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.5"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--  ────────────────────────────────────────────────────────────
+          5a. GlowFocusTextBox
+          Sunken input by default. On keyboard focus, 1px gradient
+          border + soft cyan outer glow.
+          ────────────────────────────────────────────────────────────  -->
+    <Style x:Key="GlowFocusTextBox" TargetType="{x:Type TextBox}">
+        <Setter Property="FontFamily" Value="{StaticResource PrimaryFontFamily}"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="CaretBrush" Value="{StaticResource AccentCyanBrush}"/>
+        <Setter Property="SelectionBrush" Value="{StaticResource AccentCyanBrush}"/>
+        <Setter Property="Padding" Value="10,8"/>
+        <Setter Property="MinHeight" Value="34"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type TextBox}">
+                    <Border x:Name="Surface"
+                            CornerRadius="8"
+                            Background="{StaticResource BgSunkenBrush}"
+                            BorderBrush="{StaticResource SurfaceBorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            Effect="{StaticResource SunkenDarkShadow}">
+                        <ScrollViewer x:Name="PART_ContentHost"
+                                      Margin="{TemplateBinding Padding}"
+                                      VerticalAlignment="Center"
+                                      Focusable="False"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                            <Setter TargetName="Surface" Property="BorderBrush"
+                                    Value="{StaticResource FocusBorderGradientBrush}"/>
+                            <Setter TargetName="Surface" Property="Effect">
+                                <Setter.Value>
+                                    <DropShadowEffect Color="#00E5FF"
+                                                      ShadowDepth="0"
+                                                      BlurRadius="12"
+                                                      Opacity="0.75"/>
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource TextDisabledBrush}"/>
+                            <Setter TargetName="Surface" Property="Opacity" Value="0.6"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--  ────────────────────────────────────────────────────────────
+          5b. GlowFocusComboBox (+ matching ComboBoxItem style)
+          Same sunken surface + focus glow treatment as GlowFocusTextBox,
+          adapted for ComboBox's ToggleButton + Popup structure.
+          ────────────────────────────────────────────────────────────  -->
+    <Style x:Key="GlowFocusComboBoxItem" TargetType="{x:Type ComboBoxItem}">
+        <Setter Property="Padding" Value="10,6"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ComboBoxItem}">
+                    <Border x:Name="ItemBorder"
+                            Background="{TemplateBinding Background}"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsHighlighted" Value="True">
+                            <Setter TargetName="ItemBorder" Property="Background"
+                                    Value="{StaticResource BgRaisedBrush}"/>
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource AccentCyanBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="GlowFocusComboBox" TargetType="{x:Type ComboBox}">
+        <Setter Property="FontFamily" Value="{StaticResource PrimaryFontFamily}"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="Padding" Value="12,6"/>
+        <Setter Property="MinHeight" Value="34"/>
+        <Setter Property="MinWidth" Value="140"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="ItemContainerStyle" Value="{StaticResource GlowFocusComboBoxItem}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ComboBox}">
+                    <Grid>
+                        <Border x:Name="Surface"
+                                CornerRadius="8"
+                                Background="{StaticResource BgSunkenBrush}"
+                                BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                BorderThickness="1"
+                                Effect="{StaticResource SunkenDarkShadow}"/>
+                        <ToggleButton x:Name="ToggleButton"
+                                      Background="Transparent"
+                                      BorderThickness="0"
+                                      Focusable="False"
+                                      ClickMode="Press"
+                                      IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                            <ToggleButton.Template>
+                                <ControlTemplate TargetType="{x:Type ToggleButton}">
+                                    <Border Background="Transparent">
+                                        <Path x:Name="Arrow"
+                                              Width="10" Height="6"
+                                              HorizontalAlignment="Right"
+                                              VerticalAlignment="Center"
+                                              Margin="0,0,12,0"
+                                              Data="M 0 0 L 5 5 L 10 0 Z"
+                                              Fill="{StaticResource TextSecondaryBrush}"/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Arrow" Property="Fill"
+                                                    Value="{StaticResource AccentCyanBrush}"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </ToggleButton.Template>
+                        </ToggleButton>
+                        <ContentPresenter x:Name="ContentSite"
+                                          Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="Left"
+                                          VerticalAlignment="Center"
+                                          IsHitTestVisible="False"
+                                          Content="{TemplateBinding SelectionBoxItem}"
+                                          ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                          ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                                          ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"/>
+                        <Popup x:Name="PART_Popup"
+                               AllowsTransparency="True"
+                               IsOpen="{TemplateBinding IsDropDownOpen}"
+                               Placement="Bottom"
+                               PopupAnimation="Slide"
+                               Focusable="False">
+                            <Border CornerRadius="8"
+                                    MinWidth="{TemplateBinding ActualWidth}"
+                                    MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                                    Background="{StaticResource BgElevatedBrush}"
+                                    BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                    BorderThickness="1"
+                                    Margin="0,4,0,0"
+                                    Effect="{StaticResource RaisedDarkShadowSmall}">
+                                <ScrollViewer>
+                                    <ItemsPresenter SnapsToDevicePixels="True"/>
+                                </ScrollViewer>
+                            </Border>
+                        </Popup>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                            <Setter TargetName="Surface" Property="BorderBrush"
+                                    Value="{StaticResource FocusBorderGradientBrush}"/>
+                            <Setter TargetName="Surface" Property="Effect">
+                                <Setter.Value>
+                                    <DropShadowEffect Color="#00E5FF"
+                                                      ShadowDepth="0"
+                                                      BlurRadius="12"
+                                                      Opacity="0.75"/>
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+                        <Trigger Property="IsDropDownOpen" Value="True">
+                            <Setter TargetName="Surface" Property="BorderBrush"
+                                    Value="{StaticResource FocusBorderGradientBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource TextDisabledBrush}"/>
+                            <Setter TargetName="Surface" Property="Opacity" Value="0.6"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--  ────────────────────────────────────────────────────────────
+          6. SunkenLogViewer
+          Styled ScrollViewer for read-only logs / transcripts. WPF
+          has no real inner-shadow primitive so we overlay a second
+          non-hit-testable Border with a top-darkening gradient on top
+          of the sunken surface to fake the inset lip.
+          ────────────────────────────────────────────────────────────  -->
+    <Style x:Key="SunkenLogViewer" TargetType="{x:Type ScrollViewer}">
+        <Setter Property="FontFamily" Value="{StaticResource MonoFontFamily}"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="Foreground" Value="{StaticResource AccentCyanBrush}"/>
+        <Setter Property="Background" Value="#FF101318"/>
+        <Setter Property="Padding" Value="14"/>
+        <Setter Property="HorizontalScrollBarVisibility" Value="Auto"/>
+        <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ScrollViewer}">
+                    <Grid>
+                        <!-- Base sunken surface (carries the outer dark drop) -->
+                        <Border CornerRadius="10"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{StaticResource SurfaceShadowBrush}"
+                                BorderThickness="1"
+                                Effect="{StaticResource SunkenDarkShadow}"/>
+
+                        <!-- Scrollable content + bars -->
+                        <Grid ClipToBounds="True">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <ScrollContentPresenter x:Name="PART_ScrollContentPresenter"
+                                                    Margin="{TemplateBinding Padding}"
+                                                    Content="{TemplateBinding Content}"
+                                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                    CanContentScroll="{TemplateBinding CanContentScroll}"/>
+
+                            <ScrollBar x:Name="PART_VerticalScrollBar"
+                                       Grid.Column="1"
+                                       Orientation="Vertical"
+                                       Maximum="{TemplateBinding ScrollableHeight}"
+                                       ViewportSize="{TemplateBinding ViewportHeight}"
+                                       Value="{Binding VerticalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}"
+                                       Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"/>
+
+                            <ScrollBar x:Name="PART_HorizontalScrollBar"
+                                       Grid.Row="1"
+                                       Orientation="Horizontal"
+                                       Maximum="{TemplateBinding ScrollableWidth}"
+                                       ViewportSize="{TemplateBinding ViewportWidth}"
+                                       Value="{Binding HorizontalOffset, RelativeSource={RelativeSource TemplatedParent}, Mode=OneWay}"
+                                       Visibility="{TemplateBinding ComputedHorizontalScrollBarVisibility}"/>
+                        </Grid>
+
+                        <!-- Fake inner shadow: darkens the top lip. -->
+                        <Border CornerRadius="10" IsHitTestVisible="False">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                    <GradientStop Offset="0.0" Color="#80000000"/>
+                                    <GradientStop Offset="0.35" Color="#00000000"/>
+                                    <GradientStop Offset="1.0" Color="#00000000"/>
+                                </LinearGradientBrush>
+                            </Border.Background>
+                        </Border>
+
+                        <!-- Second overlay: subtle highlight along the bottom. -->
+                        <Border CornerRadius="10" IsHitTestVisible="False">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,1" EndPoint="0,0">
+                                    <GradientStop Offset="0.0" Color="#202A2F3A"/>
+                                    <GradientStop Offset="0.35" Color="#00000000"/>
+                                    <GradientStop Offset="1.0" Color="#00000000"/>
+                                </LinearGradientBrush>
+                            </Border.Background>
+                        </Border>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--  ────────────────────────────────────────────────────────────
+          7. GradientProgressBar
+          Track = sunken surface; indicator = cyan→magenta gradient
+          with a soft cyan glow.
+          ────────────────────────────────────────────────────────────  -->
+    <Style x:Key="GradientProgressBar" TargetType="{x:Type ProgressBar}">
+        <Setter Property="Height" Value="10"/>
+        <Setter Property="MinHeight" Value="10"/>
+        <Setter Property="Background" Value="{StaticResource BgSunkenBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource NeonGradientBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource SurfaceBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ProgressBar}">
+                    <Grid>
+                        <Border x:Name="PART_Track"
+                                CornerRadius="5"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Effect="{StaticResource SunkenDarkShadow}"/>
+                        <Border CornerRadius="5" ClipToBounds="True">
+                            <Border x:Name="PART_Indicator"
+                                    HorizontalAlignment="Left"
+                                    CornerRadius="5"
+                                    Background="{TemplateBinding Foreground}"
+                                    Effect="{StaticResource HoverGlowCyan}"/>
+                        </Border>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsIndeterminate" Value="True">
+                            <Setter TargetName="PART_Indicator" Property="HorizontalAlignment"
+                                    Value="Stretch"/>
+                            <Setter TargetName="PART_Indicator" Property="Opacity" Value="0.6"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+</ResourceDictionary>
