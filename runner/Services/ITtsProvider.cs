@@ -23,9 +23,12 @@ public interface ITtsProvider
 }
 
 /// <summary>
-/// Default thread-safe implementation backed by a volatile field. No locking is
-/// required because the reference itself is the unit of exchange — in-flight
-/// calls on a swapped-out engine continue against that engine until they return.
+/// Default thread-safe implementation backed by a volatile field. Writers (the UI)
+/// own the engine's lifetime and dispose it synchronously on swap, so readers must
+/// treat retrieved references as short-lived: an in-flight call racing with a swap
+/// may observe <see cref="ObjectDisposedException"/>. Callers should handle that
+/// case (e.g. return a transient error) rather than assume the reference stays
+/// valid for the duration of their call.
 /// </summary>
 public sealed class TtsProvider : ITtsProvider
 {
