@@ -5,14 +5,19 @@ name: Build and Package
 #   - softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
 # TODO(phase-a): pin the following first-party actions to commit SHAs once verified
 # from the official repos (use `git ls-remote` or the GitHub API refs/tags/<tag> endpoint):
-#   - actions/checkout@v4
-#   - actions/setup-dotnet@v4
-#   - actions/upload-artifact@v4
-#   - actions/download-artifact@v4
-#   - actions/cache@v4
-# These remain tag-pinned in this pass because their v4 tag SHAs were not
-# independently verified in this change. Bumping them without SHA pins keeps
+#   - actions/checkout@v6
+#   - actions/setup-dotnet@v5
+#   - actions/upload-artifact@v7
+#   - actions/download-artifact@v8
+#   - actions/cache@v5
+# These remain tag-pinned in this pass because the tag SHAs were not
+# independently verified in this change. Bumping majors without SHA pins keeps
 # the supply-chain risk consistent with prior behavior; do not weaken further.
+#
+# Node runtime migration note:
+#   - first-party actions in this workflow were upgraded from Node 20-backed
+#     majors to Node 24-backed majors to proactively avoid Node 20 deprecation
+#     warnings in GitHub-hosted runners.
 #
 # Phase-A hardening (Task 3, round 3): the prereq download steps no longer carry
 # hardcoded URL + SHA-256 pins. Resolution + verification is delegated to
@@ -47,8 +52,8 @@ jobs:
   windows-build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
       - run: dotnet restore FreeAiSsd.sln
@@ -77,7 +82,7 @@ jobs:
       # resolver (SHA-512 for .NET, SHA-256 for Ollama, HTTPS-only aka.ms for
       # VC++). The tool fails closed on any network/parse/hash error.
       #
-      # actions/cache@v4 caches the downloaded installers across runs so that
+      # actions/cache@v5 caches the downloaded installers across runs so that
       # repeated dispatches of the same latest-stable upstream don't re-download
       # the Microsoft / GitHub assets. Cache key is intentionally date-scoped so
       # a new upstream release is picked up within 24h even if the key otherwise
@@ -98,7 +103,7 @@ jobs:
       - name: Cache offline Windows prerequisites
         if: github.event_name == 'workflow_dispatch'
         id: cache-windows-prereqs
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: out/windows/tools/prereqs
           key: windows-prereqs-v2-${{ runner.os }}-${{ steps.prereq-cache-key.outputs.date }}
@@ -108,7 +113,7 @@ jobs:
       - name: Cache macOS Ollama archive
         if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
         id: cache-mac-ollama
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: out/mac/tools/ollama
           key: mac-ollama-v2-${{ runner.os }}-${{ steps.prereq-cache-key.outputs.date }}
@@ -131,7 +136,7 @@ jobs:
         run: |
           dotnet run --project tools/FreeAiSsd.PrereqFetch/FreeAiSsd.PrereqFetch.csproj -c Release -- --kind windows --out out/windows/tools/prereqs
           if (-not $?) { throw "Windows prereq resolve/fetch step failed." }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-build-output
           path: |
@@ -147,7 +152,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build Runner.app bundle
         run: |
           mkdir -p out/Runner.app/Contents/MacOS out/Runner.app/Contents/Resources
@@ -194,7 +199,7 @@ jobs:
         run: |
           ditto -c -k --keepParent out/Runner.app out/Runner.app.zip
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: mac-runner-artifact
           path: out/Runner.app.zip
@@ -225,12 +230,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v8
         with:
           name: windows-build-output
           path: in/windows
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
         with:
           name: mac-runner-artifact
@@ -293,11 +298,11 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
         shell: pwsh
         run: Compress-Archive -Path out_beta/* -DestinationPath dist/Free-AI-SSD-beta-crossplatform.zip -Force
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Free-AI-SSD-win
           path: dist/Free-AI-SSD-win.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
         with:
           name: Free-AI-SSD-beta-crossplatform
