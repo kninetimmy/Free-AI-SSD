@@ -247,7 +247,10 @@ jobs:
           $payloadRoot = Join-Path $winRoot "payload"
           New-Item -ItemType Directory -Path $winRoot -Force | Out-Null
           New-Item -ItemType Directory -Path $payloadRoot -Force | Out-Null
-          Copy-Item "in/windows/out/prepapp-publish/*" $payloadRoot -Recurse -Force
+          # Stage PrepApp publish output at ZIP root so the app launches with all
+          # required sidecar files from the same directory users open after unzip.
+          # Keep payload/ for runner + companion + prereq assets only.
+          Copy-Item "in/windows/out/prepapp-publish/*" $winRoot -Recurse -Force
           Copy-Item "in/windows/prep-app/bin/Release/net8.0-windows/runner-publish" (Join-Path $payloadRoot "runner-publish") -Recurse -Force
           Copy-Item "in/windows/out/companion-publish" (Join-Path $payloadRoot "companion") -Recurse -Force
           @"
@@ -264,7 +267,10 @@ jobs:
           "@ | Set-Content -Path (Join-Path $payloadRoot "companion/companion-config.json") -Encoding UTF8
           Copy-Item "in/windows/out/windows" (Join-Path $payloadRoot "windows") -Recurse -Force
 
-          Copy-Item (Join-Path $payloadRoot "FreeAiSsd.PrepApp.exe") (Join-Path $winRoot "FreeAiSsd.PrepApp.exe") -Force
+          # Defensive guard: payload/ must not ship a second PrepApp exe.
+          if (Test-Path (Join-Path $payloadRoot "FreeAiSsd.PrepApp.exe")) {
+            Remove-Item (Join-Path $payloadRoot "FreeAiSsd.PrepApp.exe") -Force
+          }
           Copy-Item "in/windows/docs/QUICKSTART.txt" (Join-Path $winRoot "QUICKSTART.txt") -Force
           Copy-Item "in/windows/LICENSE" (Join-Path $winRoot "LICENSE") -Force
 
@@ -313,6 +319,15 @@ jobs:
         run: |
           if (-not (Test-Path "dist/Free-AI-SSD-win.zip")) {
             throw "Missing required release asset: dist/Free-AI-SSD-win.zip"
+          }
+
+          $tmp = Join-Path $env:RUNNER_TEMP "free-ai-ssd-win-zip-check"
+          if (Test-Path $tmp) {
+            Remove-Item $tmp -Recurse -Force
+          }
+          Expand-Archive -Path "dist/Free-AI-SSD-win.zip" -DestinationPath $tmp -Force
+          if (Test-Path (Join-Path $tmp "payload/FreeAiSsd.PrepApp.exe")) {
+            throw "Invalid release payload: duplicate payload/FreeAiSsd.PrepApp.exe found."
           }
 
           if ('${{ fromJSON(github.event.inputs.include_macos || 'false') }}' -eq 'true' -and -not (Test-Path "dist/Free-AI-SSD-beta-crossplatform.zip")) {
