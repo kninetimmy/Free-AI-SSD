@@ -65,6 +65,14 @@
       <Link>UI\Theme\LedStatusIndicator.xaml.cs</Link>
       <DependentUpon>LedStatusIndicator.xaml</DependentUpon>
     </Compile>
+    <!--
+      ReducedMotion lives alongside the theme tokens. It touches WPF types
+      (Application, TranslateTransform, SystemParameters), so it can't live
+      in the plain-net8.0 shared assembly; we link it into each WPF host.
+    -->
+    <Compile Include="..\shared\UI\Theme\ReducedMotion.cs">
+      <Link>UI\Theme\ReducedMotion.cs</Link>
+    </Compile>
   </ItemGroup>
   <!--
     ThemePreview is a developer-only scratch window for eyeballing

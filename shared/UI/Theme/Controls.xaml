@@ -20,6 +20,15 @@
     </ResourceDictionary.MergedDictionaries>
 
     <!--  ────────────────────────────────────────────────────────────
+          ButtonPressTransform
+          Tiny 1×1 nudge applied to button content on IsPressed. Kept
+          as a keyed resource (not inlined in each template) so the
+          reduced-motion path can swap it for an identity transform at
+          startup — see ReducedMotion.Apply in shared/UI/Theme.
+          ────────────────────────────────────────────────────────────  -->
+    <TranslateTransform x:Key="ButtonPressTransform" X="1" Y="1"/>
+
+    <!--  ────────────────────────────────────────────────────────────
           1. NeumorphicCard
           Wrapper Border for grouping related content. Sits flush on
           BgBaseBrush so it reads as "lifted from" the window surface
@@ -73,16 +82,22 @@
                             <Setter TargetName="Surface" Property="BorderBrush"
                                     Value="{StaticResource FocusBorderGradientBrush}"/>
                         </Trigger>
+                        <!-- Keyboard focus: matches mouse-hover affordance so
+                             tab-navigating users see the same gradient ring
+                             plus a soft cyan glow. -->
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Surface" Property="BorderBrush"
+                                    Value="{StaticResource FocusBorderGradientBrush}"/>
+                            <Setter TargetName="Surface" Property="Effect"
+                                    Value="{StaticResource FocusGlowCyan}"/>
+                        </Trigger>
                         <Trigger Property="IsPressed" Value="True">
                             <Setter TargetName="Surface" Property="Effect"
                                     Value="{StaticResource SunkenDarkShadow}"/>
                             <Setter TargetName="Surface" Property="Background"
                                     Value="{StaticResource SunkenSurfaceGradientBrush}"/>
-                            <Setter TargetName="Content" Property="RenderTransform">
-                                <Setter.Value>
-                                    <TranslateTransform X="1" Y="1"/>
-                                </Setter.Value>
-                            </Setter>
+                            <Setter TargetName="Content" Property="RenderTransform"
+                                    Value="{DynamicResource ButtonPressTransform}"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Foreground"
@@ -132,6 +147,15 @@
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Surface" Property="BorderBrush"
                                     Value="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"/>
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource TextPrimaryBrush}"/>
+                        </Trigger>
+                        <!-- Keyboard focus: same gradient border + glow as primary. -->
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Surface" Property="BorderBrush"
+                                    Value="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"/>
+                            <Setter TargetName="Surface" Property="Effect"
+                                    Value="{StaticResource FocusGlowCyan}"/>
                             <Setter Property="Foreground"
                                     Value="{StaticResource TextPrimaryBrush}"/>
                         </Trigger>
@@ -200,6 +224,14 @@
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Track" Property="BorderBrush"
                                     Value="{StaticResource AccentCyanBrush}"/>
+                        </Trigger>
+                        <!-- Keyboard focus: gradient ring + cyan glow so tab
+                             users see the switch is the active control. -->
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Track" Property="BorderBrush"
+                                    Value="{StaticResource FocusBorderGradientBrush}"/>
+                            <Setter TargetName="Track" Property="Effect"
+                                    Value="{StaticResource FocusGlowCyan}"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.5"/>
@@ -570,6 +602,15 @@
                                     Value="{StaticResource AccentCyanBrush}"/>
                         </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource TextPrimaryBrush}"/>
+                            <Setter TargetName="Chevron" Property="Fill"
+                                    Value="{StaticResource AccentCyanBrush}"/>
+                        </Trigger>
+                        <!-- Keyboard focus: header text + chevron match hover
+                             treatment so the expander is visibly "selected"
+                             when tab-navigating. -->
+                        <Trigger Property="IsKeyboardFocused" Value="True">
                             <Setter Property="Foreground"
                                     Value="{StaticResource TextPrimaryBrush}"/>
                             <Setter TargetName="Chevron" Property="Fill"

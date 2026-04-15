@@ -53,14 +53,19 @@
                                 <Setter TargetName="Surface" Property="Effect"
                                         Value="{StaticResource FocusGlowMagenta}"/>
                             </Trigger>
+                            <!-- Keyboard focus: magenta border + glow so
+                                 tab-navigating users get the same affordance. -->
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Surface" Property="BorderBrush"
+                                        Value="{StaticResource AccentMagentaBrush}"/>
+                                <Setter TargetName="Surface" Property="Effect"
+                                        Value="{StaticResource FocusGlowMagenta}"/>
+                            </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="Surface" Property="Effect"
                                         Value="{StaticResource SunkenDarkShadow}"/>
-                                <Setter TargetName="Content" Property="RenderTransform">
-                                    <Setter.Value>
-                                        <TranslateTransform X="1" Y="1"/>
-                                    </Setter.Value>
-                                </Setter>
+                                <Setter TargetName="Content" Property="RenderTransform"
+                                        Value="{DynamicResource ButtonPressTransform}"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Foreground"
@@ -125,6 +130,14 @@
                                 <Setter Property="Foreground"
                                         Value="{StaticResource TextPrimaryBrush}"/>
                             </Trigger>
+                            <!-- Keyboard focus: reveal the cyan underline so
+                                 tab users can tell which segment they're on. -->
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Underline" Property="Visibility"
+                                        Value="Visible"/>
+                                <Setter Property="Foreground"
+                                        Value="{StaticResource TextPrimaryBrush}"/>
+                            </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Foreground"
                                         Value="{StaticResource TextDisabledBrush}"/>
@@ -173,6 +186,14 @@
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="Pill" Property="BorderBrush"
                                         Value="{StaticResource AccentCyanBrush}"/>
+                                <Setter Property="Foreground"
+                                        Value="{StaticResource TextPrimaryBrush}"/>
+                            </Trigger>
+                            <!-- Keyboard focus: gradient border so tab users
+                                 can tell which pill they're on. -->
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Pill" Property="BorderBrush"
+                                        Value="{StaticResource FocusBorderGradientBrush}"/>
                                 <Setter Property="Foreground"
                                         Value="{StaticResource TextPrimaryBrush}"/>
                             </Trigger>
