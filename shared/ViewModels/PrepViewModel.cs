@@ -40,6 +40,7 @@ public class PrepViewModel : BaseViewModel
     private bool _installVrCompanion;
     private string _companionHostAddress = string.Empty;
     private int _companionHostPort = 41555;
+    private readonly SynchronizationContext? _uiSyncContext;
 
     public PrepViewModel(
         IDriveService driveService,
@@ -61,6 +62,7 @@ public class PrepViewModel : BaseViewModel
         _encryptionService = encryptionService;
         _dialogService = dialogService;
         _logService = logService;
+        _uiSyncContext = SynchronizationContext.Current;
 
         ModelRows = new ObservableCollection<ModelGridRow>();
         StarterModels = new ObservableCollection<StarterModelRow>();
@@ -1097,7 +1099,15 @@ public class PrepViewModel : BaseViewModel
 
     private void AppendLog(string message)
     {
-        LogLines.Add(message);
+        if (_uiSyncContext is null || SynchronizationContext.Current == _uiSyncContext)
+        {
+            LogLines.Add(message);
+        }
+        else
+        {
+            _uiSyncContext.Post(_ => LogLines.Add(message), null);
+        }
+
         _logService.AppendLog(message);
     }
 
