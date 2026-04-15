@@ -27,7 +27,7 @@ public sealed class DocumentLibraryManager
         try
         {
             var json = File.ReadAllText(RegistryPath);
-            registry = JsonSerializer.Deserialize<DocumentLibraryRegistry>(json) ?? new DocumentLibraryRegistry();
+            registry = JsonSerializer.Deserialize<DocumentLibraryRegistry>(json, JsonOptions()) ?? new DocumentLibraryRegistry();
         }
         catch
         {
@@ -115,7 +115,7 @@ public sealed class DocumentLibraryManager
         try
         {
             var json = File.ReadAllText(path);
-            return JsonSerializer.Deserialize<DocumentLibraryManifest>(json) ?? new DocumentLibraryManifest { Id = libraryId };
+            return JsonSerializer.Deserialize<DocumentLibraryManifest>(json, JsonOptions()) ?? new DocumentLibraryManifest { Id = libraryId };
         }
         catch
         {
@@ -150,7 +150,12 @@ public sealed class DocumentLibraryManager
         await SaveRegistryAsync(registry);
     }
 
-    private static JsonSerializerOptions JsonOptions() => new() { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private static JsonSerializerOptions JsonOptions() => new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true
+    };
 
     private DocumentLibraryRegistry ReconcileRegistryWithDisk(DocumentLibraryRegistry registry)
     {
