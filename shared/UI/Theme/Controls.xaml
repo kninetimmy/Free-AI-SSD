@@ -65,11 +65,7 @@
                                               Margin="{TemplateBinding Padding}"
                                               HorizontalAlignment="Center"
                                               VerticalAlignment="Center"
-                                              RecognizesAccessKey="True">
-                                <ContentPresenter.RenderTransform>
-                                    <TranslateTransform x:Name="ContentShift" X="0" Y="0"/>
-                                </ContentPresenter.RenderTransform>
-                            </ContentPresenter>
+                                              RecognizesAccessKey="True"/>
                         </Border>
                     </Grid>
                     <ControlTemplate.Triggers>
@@ -82,8 +78,11 @@
                                     Value="{StaticResource SunkenDarkShadow}"/>
                             <Setter TargetName="Surface" Property="Background"
                                     Value="{StaticResource SunkenSurfaceGradientBrush}"/>
-                            <Setter TargetName="ContentShift" Property="X" Value="1"/>
-                            <Setter TargetName="ContentShift" Property="Y" Value="1"/>
+                            <Setter TargetName="Content" Property="RenderTransform">
+                                <Setter.Value>
+                                    <TranslateTransform X="1" Y="1"/>
+                                </Setter.Value>
+                            </Setter>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Foreground"
@@ -177,11 +176,7 @@
                                 CornerRadius="9"
                                 HorizontalAlignment="Left"
                                 Margin="3,0,0,0"
-                                Background="{TemplateBinding Foreground}">
-                            <Border.RenderTransform>
-                                <TranslateTransform x:Name="ThumbShift" X="0" Y="0"/>
-                            </Border.RenderTransform>
-                        </Border>
+                                Background="{TemplateBinding Foreground}"/>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
@@ -192,7 +187,11 @@
                                     Value="{StaticResource TextPrimaryBrush}"/>
                             <Setter TargetName="Thumb" Property="Effect"
                                     Value="{StaticResource FocusGlowCyan}"/>
-                            <Setter TargetName="ThumbShift" Property="X" Value="24"/>
+                            <Setter TargetName="Thumb" Property="RenderTransform">
+                                <Setter.Value>
+                                    <TranslateTransform X="24" Y="0"/>
+                                </Setter.Value>
+                            </Setter>
                         </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Track" Property="BorderBrush"
