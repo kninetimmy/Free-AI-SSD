@@ -8,8 +8,6 @@ public partial class App : Application
 {
     protected override void OnStartup(StartupEventArgs e)
     {
-        base.OnStartup(e);
-
         // Catch unhandled exceptions on the UI thread so the app shows the error
         // instead of silently force-closing.
         DispatcherUnhandledException += OnDispatcherUnhandledException;
@@ -20,6 +18,11 @@ public partial class App : Application
         // Catch unobserved Task exceptions (fire-and-forget tasks) so they don't
         // silently swallow errors or tear down the process.
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+
+        // Call base after handlers are wired so startup failures (such as
+        // MainWindow construction via StartupUri) are surfaced to the user
+        // instead of failing silently.
+        base.OnStartup(e);
     }
 
     private static void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
