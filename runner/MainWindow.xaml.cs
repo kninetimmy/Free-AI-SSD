@@ -37,9 +37,15 @@ public partial class MainWindow : System.Windows.Window
     private readonly IRunnerLocalApiService _localApiService;
     private ITextToSpeechService? _ttsService;
 
+    /// <summary>
+    /// Current TTS service, exposed so <see cref="IRunnerLocalApiService"/> can reach
+    /// it lazily (TTS is re-created on config load / drive unlock).
+    /// </summary>
+    internal ITextToSpeechService? CurrentTtsService => _ttsService;
+
     private PortableConfig? _config;
-    private string _ssdRoot = string.Empty;
-    private SsdLogger? _logger;
+    private readonly string _ssdRoot;
+    private readonly SsdLogger? _logger;
     private DependencyCheckResult _lastDependencyCheck = new(true, Array.Empty<MissingDependency>());
     private bool _isEncryptedDrive;
     private bool _isUnlocked;
@@ -61,39 +67,34 @@ public partial class MainWindow : System.Windows.Window
     private List<DcsAircraftImportItem> _aircraftItems = new();
     private CancellationTokenSource? _importCts;
 
-    public MainWindow()
+    public MainWindow(
+        string ssdRoot,
+        SsdLogger logger,
+        IOllamaLifecycleService ollamaService,
+        IModelManagementService modelService,
+        IDocumentOperationsService docService,
+        IChatService chatService,
+        IDcsBindingsImportService dcsImportService,
+        ISpeechToTextService sttService,
+        IAudioCaptureService audioCaptureService,
+        IHotasInputService hotasService,
+        PttVoicePipelineService pttPipeline,
+        IRunnerLocalApiService localApiService)
     {
         InitializeComponent();
 
-        // Detect SSD root
-        _ssdRoot = AppContext.BaseDirectory;
-        var baseTrimmed = _ssdRoot.TrimEnd(Path.DirectorySeparatorChar);
-        if (baseTrimmed.EndsWith($"windows{Path.DirectorySeparatorChar}runner", StringComparison.OrdinalIgnoreCase))
-        {
-            _ssdRoot = Directory.GetParent(Directory.GetParent(baseTrimmed)!.FullName)!.FullName;
-        }
-        else if (baseTrimmed.EndsWith("runner", StringComparison.OrdinalIgnoreCase))
-        {
-            _ssdRoot = Directory.GetParent(baseTrimmed)!.FullName;
-        }
-
-        // Create shared dependencies
-        _logger = new SsdLogger(_ssdRoot, "runner");
-        var http = new HttpClient();
-        var libraryManager = new DocumentLibraryManager(_ssdRoot);
-        var documentIngestor = new DocumentIngestor(libraryManager, new EmbeddingClient(http), _logger);
-
-        // Create services
-        _ollamaService = new OllamaLifecycleService(_logger);
-        _modelService = new ModelManagementService(http);
-        _docService = new DocumentOperationsService(libraryManager, documentIngestor);
-        _chatService = new ChatService(http, libraryManager, _logger);
-        _dcsImportService = new DcsBindingsImportService(libraryManager);
-        _sttService = new WhisperSpeechToTextService();
-        _audioCaptureService = new AudioCaptureService();
-        _hotasService = new HotasInputService();
-        _pttPipeline = new PttVoicePipelineService(_audioCaptureService, _sttService, _chatService);
-        _localApiService = new RunnerLocalApiService(_chatService, _sttService, () => _ttsService, _logger, _ssdRoot);
+        _ssdRoot = ssdRoot;
+        _logger = logger;
+        _ollamaService = ollamaService;
+        _modelService = modelService;
+        _docService = docService;
+        _chatService = chatService;
+        _dcsImportService = dcsImportService;
+        _sttService = sttService;
+        _audioCaptureService = audioCaptureService;
+        _hotasService = hotasService;
+        _pttPipeline = pttPipeline;
+        _localApiService = localApiService;
 
         // Wire service events to UI
         _ollamaService.LogMessage += msg => AppendLog(msg);
