@@ -1,0 +1,21 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--  ============================================================
+          Free AI SSD — Neumorphic Dark Theme : Aggregate
+
+          Single entry point for both prep-app and runner. Apps merge
+          ONLY this dictionary; downstream control styles will land
+          here in subsequent passes.
+
+          Order matters: Colors must come first because Shadows and
+          Typography both reference color tokens.
+          ============================================================  -->
+
+    <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="pack://application:,,,/UI/Theme/Colors.xaml"/>
+        <ResourceDictionary Source="pack://application:,,,/UI/Theme/Shadows.xaml"/>
+        <ResourceDictionary Source="pack://application:,,,/UI/Theme/Typography.xaml"/>
+    </ResourceDictionary.MergedDictionaries>
+
+</ResourceDictionary>
