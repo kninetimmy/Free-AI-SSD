@@ -2,6 +2,19 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Session continuity
+
+Before starting work, read `agent_docs/project_state.md` to understand
+where things stand. Pay special attention to "Stable decisions (don't
+revisit)" — those are locked in and re-opening them wastes time.
+
+If this session produces meaningful progress, new decisions, or a
+natural stopping point, prompt me to run `/wrap-up` before context
+gets heavy. Don't run it yourself — suggest it, and I'll decide.
+
+If `agent_docs/project_state.md` doesn't exist yet, suggest I run
+`/init-project-state` to bootstrap it.
+
 ## What This Project Is
 
 Free-AI-SSD is a cross-platform offline AI assistant that runs entirely from an encrypted external SSD. A Windows WPF prep tool stages Ollama, models, and prerequisites onto the drive; a Windows WPF runner (or beta macOS Swift app) boots from the drive and provides a RAG-augmented chat UI with voice I/O (STT via Whisper.cpp, TTS via Windows SAPI or Piper), HOTAS PTT, DCS binding import, and a LAN API for a lightweight companion app on a second PC.
