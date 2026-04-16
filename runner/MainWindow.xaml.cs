@@ -426,9 +426,9 @@ public partial class MainWindow : System.Windows.Window
         {
             var response = await _chatService.SendPromptStreamingAsync(
                 model, PromptText.Text, host, _config!,
-                token =>
+                async token =>
                 {
-                    Dispatcher.Invoke(() => ResponseText.AppendText(token));
+                    await Dispatcher.InvokeAsync(() => ResponseText.AppendText(token));
                     ttsSpeaker?.FeedToken(token);
                 },
                 ct);

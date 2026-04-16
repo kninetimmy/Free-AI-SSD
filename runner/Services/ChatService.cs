@@ -52,7 +52,7 @@ public sealed class ChatService : IChatService
 
     public async Task<ChatResponse> SendPromptStreamingAsync(
         string model, string userPrompt, string host, PortableConfig config,
-        Action<string> onToken, CancellationToken cancellationToken = default)
+        Func<string, Task> onToken, CancellationToken cancellationToken = default)
     {
         var (promptToSend, sources, usedContext) = await PrepareRagContextAsync(userPrompt, host, config);
 
@@ -91,13 +91,13 @@ public sealed class ChatService : IChatService
                     using var doc = JsonDocument.Parse(line);
                     if (doc.RootElement.TryGetProperty("response", out var tokenElement))
                     {
-                        var token = tokenElement.GetString() ?? string.Empty;
-                        if (token.Length > 0)
-                        {
-                            assembled.Append(token);
-                            onToken(token);
+                            var token = tokenElement.GetString() ?? string.Empty;
+                            if (token.Length > 0)
+                            {
+                                assembled.Append(token);
+                                await onToken(token);
+                            }
                         }
-                    }
                 }
                 catch (JsonException)
                 {
@@ -119,7 +119,7 @@ public sealed class ChatService : IChatService
             var partial = assembled.ToString();
             if (partial.Length > 0)
             {
-                onToken($"\n\n[Error: {ex.Message}]");
+                await onToken($"\n\n[Error: {ex.Message}]");
             }
             return new ChatResponse(partial, sources, usedContext);
         }
