@@ -81,6 +81,83 @@ public sealed class RunnerLocalApiServiceTests
     }
 
     [Fact]
+    public async Task ChatStream_EmitsNdjsonTokensInOrder()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true);
+        fixture.Chat.StreamingTokens = new List<string> { "alpha", "bravo", "charlie" };
+        fixture.Chat.Response = new ChatResponse("alphabravocharlie", new List<string> { "src-1" }, true);
+        using var http = new HttpClient();
+
+        using var response = await http.PostAsJsonAsync($"{fixture.BaseUrl}/api/chat/stream", new { model = "phi3", prompt = "status" });
+        response.EnsureSuccessStatusCode();
+        var lines = await ReadNdjsonLinesAsync(response);
+        Assert.True(lines.Count >= 5);
+
+        var events = lines.Select(line => JsonDocument.Parse(line).RootElement.Clone()).ToList();
+        Assert.Equal("start", events[0].GetProperty("type").GetString());
+        Assert.Equal("token", events[1].GetProperty("type").GetString());
+        Assert.Equal("alpha", events[1].GetProperty("token").GetString());
+        Assert.Equal("bravo", events[2].GetProperty("token").GetString());
+        Assert.Equal("charlie", events[3].GetProperty("token").GetString());
+        Assert.Equal("complete", events[^1].GetProperty("type").GetString());
+        Assert.Equal("alphabravocharlie", events[^1].GetProperty("responseText").GetString());
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ChatStream_AwaitsAsyncTokenCallbackPath()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true);
+        fixture.Chat.StreamingTokens = new List<string> { "tok" };
+        fixture.Chat.BlockTokenCallbacks = true;
+        fixture.Chat.Response = new ChatResponse("tok", null, false);
+        using var http = new HttpClient();
+
+        var requestTask = http.PostAsJsonAsync($"{fixture.BaseUrl}/api/chat/stream", new { model = "phi3", prompt = "status" });
+        await fixture.Chat.WaitForTokenCallbackAttemptAsync(TimeSpan.FromSeconds(2));
+        Assert.False(requestTask.IsCompleted);
+
+        fixture.Chat.ReleaseTokenCallbacks();
+        using var response = await requestTask.WaitAsync(TimeSpan.FromSeconds(2));
+        response.EnsureSuccessStatusCode();
+        var lines = await ReadNdjsonLinesAsync(response);
+        Assert.Contains(lines, line => line.Contains("\"type\":\"token\"", StringComparison.Ordinal));
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ChatStream_ClientCancellation_PropagatesToChatService()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true);
+        fixture.Chat.StreamingTokens = new List<string> { "tok" };
+        fixture.Chat.StreamUntilCancelled = true;
+        using var http = new HttpClient();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        using var response = await http.SendAsync(
+            new HttpRequestMessage(HttpMethod.Post, $"{fixture.BaseUrl}/api/chat/stream")
+            {
+                Content = JsonContent.Create(new { model = "phi3", prompt = "status" })
+            },
+            HttpCompletionOption.ResponseHeadersRead,
+            cts.Token);
+        response.EnsureSuccessStatusCode();
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cts.Token);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        var firstLine = await reader.ReadLineAsync(cts.Token);
+        Assert.NotNull(firstLine);
+
+        response.Dispose();
+        await fixture.Chat.WaitForCancellationAsync(TimeSpan.FromSeconds(2));
+        Assert.True(fixture.Chat.StreamingCancellationObserved);
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
     public async Task TtsEndpoints_RespectAllowTtsFlag()
     {
         var blocked = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: false);
@@ -492,10 +569,68 @@ public sealed class RunnerLocalApiServiceTests
             return Task.FromResult(Response);
         }
 
-        public Task<ChatResponse> SendPromptStreamingAsync(string model, string userPrompt, string host, PortableConfig config, Action<string> onToken, CancellationToken cancellationToken = default)
+        public List<string> StreamingTokens { get; set; } = new() { "tok" };
+        public bool BlockTokenCallbacks { get; set; }
+        public bool StreamUntilCancelled { get; set; }
+        public bool StreamingCancellationObserved { get; private set; }
+
+        private readonly TaskCompletionSource<bool> _tokenCallbackAttempted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _allowTokenCallbacks = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _streamCancellationObserved = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<ChatResponse> SendPromptStreamingAsync(string model, string userPrompt, string host, PortableConfig config, Func<string, Task> onToken, CancellationToken cancellationToken = default)
         {
-            onToken("tok");
-            return Task.FromResult(Response with { ResponseText = "tok" });
+            var assembled = new StringBuilder();
+
+            foreach (var token in StreamingTokens)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                _tokenCallbackAttempted.TrySetResult(true);
+
+                if (BlockTokenCallbacks)
+                {
+                    await _allowTokenCallbacks.Task.WaitAsync(cancellationToken);
+                }
+
+                await onToken(token);
+                assembled.Append(token);
+            }
+
+            if (StreamUntilCancelled)
+            {
+                while (true)
+                {
+                    try
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        await onToken("tick");
+                        await Task.Delay(50, cancellationToken);
+                    }
+                    catch (Exception ex) when (ex is OperationCanceledException or IOException or ObjectDisposedException)
+                    {
+                        StreamingCancellationObserved = true;
+                        _streamCancellationObserved.TrySetResult(true);
+                        throw new OperationCanceledException("Streaming canceled.", ex, cancellationToken);
+                    }
+                }
+            }
+
+            return Response with { ResponseText = assembled.ToString() };
+        }
+
+        public Task WaitForTokenCallbackAttemptAsync(TimeSpan timeout)
+        {
+            return _tokenCallbackAttempted.Task.WaitAsync(timeout);
+        }
+
+        public void ReleaseTokenCallbacks()
+        {
+            _allowTokenCallbacks.TrySetResult(true);
+        }
+
+        public Task WaitForCancellationAsync(TimeSpan timeout)
+        {
+            return _streamCancellationObserved.Task.WaitAsync(timeout);
         }
     }
 
@@ -718,5 +853,27 @@ public sealed class RunnerLocalApiServiceTests
         writer.Write(pcm);
         writer.Flush();
         return ms.ToArray();
+    }
+
+    private static async Task<List<string>> ReadNdjsonLinesAsync(HttpResponseMessage response)
+    {
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        var lines = new List<string>();
+        while (true)
+        {
+            var line = await reader.ReadLineAsync();
+            if (line is null)
+            {
+                break;
+            }
+
+            if (line.Length > 0)
+            {
+                lines.Add(line);
+            }
+        }
+
+        return lines;
     }
 }
