@@ -25,10 +25,10 @@ public interface IChatService
 
     /// <summary>
     /// Sends a prompt and streams the response token-by-token.
-    /// <paramref name="onToken"/> is called with each incremental text fragment.
+    /// <paramref name="onToken"/> is called with each incremental text fragment and awaited.
     /// Returns the final assembled response and RAG metadata.
     /// </summary>
     Task<ChatResponse> SendPromptStreamingAsync(
         string model, string userPrompt, string host, PortableConfig config,
-        Action<string> onToken, CancellationToken cancellationToken = default);
+        Func<string, Task> onToken, CancellationToken cancellationToken = default);
 }

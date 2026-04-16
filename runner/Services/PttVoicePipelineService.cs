@@ -233,6 +233,7 @@ public sealed class PttVoicePipelineService : IPttVoicePipelineService
                 {
                     ttsSpeaker?.FeedToken(token);
                     ResponseTokenReceived?.Invoke(token);
+                    return Task.CompletedTask;
                 },
                 ct);
 

@@ -172,10 +172,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
                 request.Prompt.Trim(),
                 ollamaHost,
                 config,
-                onToken: token =>
-                {
-                    WriteNdjsonAsync(context.Response, new { type = "token", token }, ct).GetAwaiter().GetResult();
-                },
+                onToken: token => WriteNdjsonAsync(context.Response, new { type = "token", token }, ct),
                 cancellationToken: ct);
 
             await WriteNdjsonAsync(context.Response, new
