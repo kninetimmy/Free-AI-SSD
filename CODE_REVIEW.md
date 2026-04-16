@@ -12,6 +12,7 @@
 - **Problem:** embedding failures are swallowed per chunk, then `UpsertFileChunks(...)` and manifest metadata are still committed even when many/all chunks failed.
 - **Why it matters:** normal usage can produce silently incomplete retrieval corpora (or zero-vector coverage) while UI/manifest imply success, causing incorrect answers and hard-to-debug data quality failures.
 - **Suggested fix:** if `chunks.Count == 0` or failure ratio exceeds threshold, fail file ingestion explicitly, do not mutate manifest, and bubble/log an actionable error.
+- **Status (Codex):** ✅ Fixed. Ingestion now aborts when no chunks are produced or when embedding failures exceed a defined threshold; in those failure paths it avoids `UpsertFileChunks(...)`/manifest mutation and emits actionable error context with success/failure counts.
 
 
 ## 2) High
@@ -21,6 +22,7 @@
 - **Problem:** `WriteNdjsonAsync(...).GetAwaiter().GetResult()` blocks synchronously inside async flow.
 - **Why it matters:** under slow clients/backpressure this can stall request processing threads and increase deadlock risk.
 - **Suggested fix:** make callback async (`Func<string,Task>`) end-to-end and `await` writes; alternatively queue tokens to a channel and drain asynchronously.
+- **Status (Codex):** ✅ Fixed. The streaming token callback path was converted to async end-to-end so NDJSON writes are awaited instead of using sync-over-async blocking (`GetAwaiter().GetResult()`), improving behavior under backpressure/slow clients.
 
 ### H2 — Companion voice handler is `async void` and runs blocking audio loop on UI context
 - **File/lines:** `companion/CompanionRuntime.cs` lines **157-239**, **291-314**.
