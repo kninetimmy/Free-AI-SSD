@@ -145,11 +145,12 @@ public sealed class RunnerLocalApiServiceTests
             cts.Token);
         response.EnsureSuccessStatusCode();
 
-        await using var stream = await response.Content.ReadAsStreamAsync(cts.Token);
+        var stream = await response.Content.ReadAsStreamAsync(cts.Token);
         using var reader = new StreamReader(stream, Encoding.UTF8);
         var firstLine = await reader.ReadLineAsync(cts.Token);
         Assert.NotNull(firstLine);
 
+        await stream.DisposeAsync();
         response.Dispose();
         await fixture.Chat.WaitForCancellationAsync(TimeSpan.FromSeconds(2));
         Assert.True(fixture.Chat.StreamingCancellationObserved);
