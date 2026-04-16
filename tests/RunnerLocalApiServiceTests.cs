@@ -150,7 +150,7 @@ public sealed class RunnerLocalApiServiceTests
         var firstLine = await reader.ReadLineAsync(cts.Token);
         Assert.NotNull(firstLine);
 
-        cts.Cancel();
+        response.Dispose();
         await fixture.Chat.WaitForCancellationAsync(TimeSpan.FromSeconds(2));
         Assert.True(fixture.Chat.StreamingCancellationObserved);
 
