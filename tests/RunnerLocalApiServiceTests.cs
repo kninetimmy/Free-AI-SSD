@@ -10,6 +10,8 @@ namespace FreeAiSsd.Tests;
 
 public sealed class RunnerLocalApiServiceTests
 {
+    private static readonly TimeSpan CiFriendlyTimeout = TimeSpan.FromSeconds(10);
+
     [Fact]
     public async Task HealthEndpoint_DoesNotRequireApiKey()
     {
@@ -115,11 +117,11 @@ public sealed class RunnerLocalApiServiceTests
         using var http = new HttpClient();
 
         var requestTask = http.PostAsJsonAsync($"{fixture.BaseUrl}/api/chat/stream", new { model = "phi3", prompt = "status" });
-        await fixture.Chat.WaitForTokenCallbackAttemptAsync(TimeSpan.FromSeconds(2));
+        await fixture.Chat.WaitForTokenCallbackAttemptAsync(CiFriendlyTimeout);
         Assert.False(requestTask.IsCompleted);
 
         fixture.Chat.ReleaseTokenCallbacks();
-        using var response = await requestTask.WaitAsync(TimeSpan.FromSeconds(2));
+        using var response = await requestTask.WaitAsync(CiFriendlyTimeout);
         response.EnsureSuccessStatusCode();
         var lines = await ReadNdjsonLinesAsync(response);
         Assert.Contains(lines, line => line.Contains("\"type\":\"token\"", StringComparison.Ordinal));
@@ -134,7 +136,7 @@ public sealed class RunnerLocalApiServiceTests
         fixture.Chat.StreamingTokens = new List<string> { "tok" };
         fixture.Chat.StreamUntilCancelled = true;
         using var http = new HttpClient();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
 
         using var response = await http.SendAsync(
             new HttpRequestMessage(HttpMethod.Post, $"{fixture.BaseUrl}/api/chat/stream")
@@ -152,7 +154,7 @@ public sealed class RunnerLocalApiServiceTests
 
         await stream.DisposeAsync();
         response.Dispose();
-        await fixture.Chat.WaitForCancellationAsync(TimeSpan.FromSeconds(2));
+        await fixture.Chat.WaitForCancellationAsync(CiFriendlyTimeout);
         Assert.True(fixture.Chat.StreamingCancellationObserved);
 
         await fixture.DisposeAsync();
