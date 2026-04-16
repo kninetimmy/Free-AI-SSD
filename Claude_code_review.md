@@ -54,6 +54,11 @@ appended as its own top-level section.
 - Delete the stored copy before throwing.
 - Consider calling `SaveManifestAsync` incrementally (after each successful file) so partial progress survives a later failure.
 
+**Completion (Prompt 0a):** Closed all three concerns in `shared/Documents/DocumentIngestor.cs`:
+- Added a `perFileErrors` accumulator (line 33) and wrapped the post-parse per-file block (lines 93–219) in a `try/catch (Exception ex) when (ex is not OperationCanceledException)`. The catch calls a new best-effort `TryDeleteStoredFile` helper (lines 240–254) to remove the staged copy at `storedAbsPath`, records the exception, and continues to the next file. This addresses concerns #1 (orphaned stored file) and #3 (batch-wide abort) — both the zero-chunks throw (line 109) and the `failureRatio > threshold` throw (line 186) are now caught per-file instead of aborting the loop.
+- Added an incremental `await _libraryManager.SaveManifestAsync(manifest)` at line 208, right after the manifest entry is populated for a successful file. This closes concern #2: because `VectorIndex.UpsertFileChunks` commits per-file, successful files now always have a matching manifest entry persisted to disk before the next file is attempted, eliminating the vectors-without-manifest-entries divergence when a later file fails or the batch is cancelled.
+- After the loop (lines 222–237) the manifest is still saved with `LastIndexedUtc` set, then any collected errors are surfaced: a single error is rethrown as-is (preserving the existing `InvalidOperationException` contract that `tests/DocumentIngestorFailureHandlingTests.cs` asserts), and multiple errors are wrapped in an `AggregateException` so multi-file batches still signal failure without losing per-file diagnostics. `OperationCanceledException` is excluded from the catch filter, so user cancellation still aborts cleanly while already-saved incremental progress survives.
+
 #### Fix 2 — H1: Streaming token callback converted to async end-to-end
 
 **Claim:** "The streaming token callback path was converted to async end-to-end so NDJSON writes are awaited instead of using sync-over-async blocking (`GetAwaiter().GetResult()`), improving behavior under backpressure/slow clients."

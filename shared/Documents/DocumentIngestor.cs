@@ -30,6 +30,7 @@ public sealed class DocumentIngestor
         var total = candidates.Count;
         var done = 0;
         var maxSizeBytes = (long)config.MaxDocumentSizeMB * 1024 * 1024;
+        var perFileErrors = new List<Exception>();
 
         foreach (var sourcePath in candidates)
         {
@@ -89,120 +90,167 @@ public sealed class DocumentIngestor
                 continue;
             }
 
-            // Flatten all text chunks with their segment metadata, preserving document order.
-            var textItems = new List<(string Text, int? Page)>();
-            foreach (var segment in parsed.Segments)
+            try
             {
-                var texts = DocumentChunker.ChunkText(segment.Text, config.ChunkSize, config.ChunkOverlap);
-                foreach (var text in texts)
-                    textItems.Add((text, segment.Page));
-            }
-
-            var totalChunks = textItems.Count;
-            if (totalChunks == 0)
-            {
-                var error = $"Ingestion failed for '{fileName}': no chunks were generated after parsing and chunking.";
-                _logger?.Error(error);
-                throw new InvalidOperationException(error);
-            }
-
-            var embeddedChunks = 0;
-            var failedChunkCount = 0;
-            var results = new DocumentChunk?[totalChunks];
-
-            var maxConcurrency = Math.Max(1, config.MaxEmbeddingConcurrency);
-            using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
-
-            var tasks = textItems.Select(async (item, i) =>
-            {
-                await semaphore.WaitAsync(cancellationToken);
-                try
+                // Flatten all text chunks with their segment metadata, preserving document order.
+                var textItems = new List<(string Text, int? Page)>();
+                foreach (var segment in parsed.Segments)
                 {
-                    var embedding = await _embeddingClient.EmbedAsync(host, config.EmbeddingModelName, item.Text, cancellationToken);
-                    results[i] = new DocumentChunk
+                    var texts = DocumentChunker.ChunkText(segment.Text, config.ChunkSize, config.ChunkOverlap);
+                    foreach (var text in texts)
+                        textItems.Add((text, segment.Page));
+                }
+
+                var totalChunks = textItems.Count;
+                if (totalChunks == 0)
+                {
+                    var error = $"Ingestion failed for '{fileName}': no chunks were generated after parsing and chunking.";
+                    _logger?.Error(error);
+                    throw new InvalidOperationException(error);
+                }
+
+                var embeddedChunks = 0;
+                var failedChunkCount = 0;
+                var results = new DocumentChunk?[totalChunks];
+
+                var maxConcurrency = Math.Max(1, config.MaxEmbeddingConcurrency);
+                using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+
+                var tasks = textItems.Select(async (item, i) =>
+                {
+                    await semaphore.WaitAsync(cancellationToken);
+                    try
                     {
-                        LibraryId = manifest.Id,
-                        SourceFileName = fileName,
-                        StoredRelativePath = storedRelativePath,
-                        Page = item.Page,
-                        ChunkIndex = i,
-                        Text = item.Text,
-                        TextLength = item.Text.Length,
-                        Sha256 = sha,
-                        Embedding = embedding
-                    };
-                    var completed = Interlocked.Increment(ref embeddedChunks);
+                        var embedding = await _embeddingClient.EmbedAsync(host, config.EmbeddingModelName, item.Text, cancellationToken);
+                        results[i] = new DocumentChunk
+                        {
+                            LibraryId = manifest.Id,
+                            SourceFileName = fileName,
+                            StoredRelativePath = storedRelativePath,
+                            Page = item.Page,
+                            ChunkIndex = i,
+                            Text = item.Text,
+                            TextLength = item.Text.Length,
+                            Sha256 = sha,
+                            Embedding = embedding
+                        };
+                        var completed = Interlocked.Increment(ref embeddedChunks);
+                        progress?.Invoke(new IndexingProgress
+                        {
+                            TotalFiles = total,
+                            CompletedFiles = done - 1,
+                            CurrentFile = fileName,
+                            EmbeddedChunks = completed,
+                            TotalChunks = totalChunks
+                        });
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception)
+                    {
+                        Interlocked.Increment(ref failedChunkCount);
+                    }
+                    finally
+                    {
+                        semaphore.Release();
+                    }
+                });
+
+                await Task.WhenAll(tasks);
+
+                // Collect successfully embedded chunks in original document order.
+                var chunks = results.Where(r => r is not null).Select(r => r!).ToList();
+                var failureRatio = totalChunks == 0 ? 0d : (double)failedChunkCount / totalChunks;
+
+                if (failedChunkCount > 0)
+                {
                     progress?.Invoke(new IndexingProgress
                     {
                         TotalFiles = total,
                         CompletedFiles = done - 1,
                         CurrentFile = fileName,
-                        EmbeddedChunks = completed,
-                        TotalChunks = totalChunks
+                        EmbeddedChunks = embeddedChunks,
+                        TotalChunks = totalChunks,
+                        FailedChunks = failedChunkCount
                     });
                 }
-                catch (OperationCanceledException)
+
+                if (failureRatio > MaxEmbeddingFailureRatioBeforeAbort)
                 {
-                    throw;
+                    var error =
+                        $"Ingestion failed for '{fileName}': embedding failures exceeded threshold " +
+                        $"(total={totalChunks}, succeeded={embeddedChunks}, failed={failedChunkCount}, ratio={failureRatio:P1}, threshold={MaxEmbeddingFailureRatioBeforeAbort:P0}).";
+                    _logger?.Error(error);
+                    throw new InvalidOperationException(error);
                 }
-                catch (Exception)
+
+                vectorIndex.UpsertFileChunks(manifest.Id, storedRelativePath, chunks);
+
+                if (current is null)
                 {
-                    Interlocked.Increment(ref failedChunkCount);
+                    manifest.Files.Add(new DocumentFileEntry());
+                    current = manifest.Files.Last();
                 }
-                finally
-                {
-                    semaphore.Release();
-                }
-            });
 
-            await Task.WhenAll(tasks);
+                current.SourceOriginalPath = sourcePath;
+                current.StoredRelativePath = storedRelativePath;
+                current.FileName = fileName;
+                current.Sha256 = sha;
+                current.SizeBytes = new FileInfo(sourcePath).Length;
+                current.ImportedAtUtc = DateTime.UtcNow;
+                current.LastModifiedUtc = File.GetLastWriteTimeUtc(sourcePath);
 
-            // Collect successfully embedded chunks in original document order.
-            var chunks = results.Where(r => r is not null).Select(r => r!).ToList();
-            var failureRatio = totalChunks == 0 ? 0d : (double)failedChunkCount / totalChunks;
-
-            if (failedChunkCount > 0)
-            {
-                progress?.Invoke(new IndexingProgress
-                {
-                    TotalFiles = total,
-                    CompletedFiles = done - 1,
-                    CurrentFile = fileName,
-                    EmbeddedChunks = embeddedChunks,
-                    TotalChunks = totalChunks,
-                    FailedChunks = failedChunkCount
-                });
+                // Persist the manifest incrementally so that vectors committed per-file
+                // (UpsertFileChunks above) do not become orphaned if a later file in the
+                // batch fails or the operation is cancelled before the final save below.
+                await _libraryManager.SaveManifestAsync(manifest);
             }
-
-            if (failureRatio > MaxEmbeddingFailureRatioBeforeAbort)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                var error =
-                    $"Ingestion failed for '{fileName}': embedding failures exceeded threshold " +
-                    $"(total={totalChunks}, succeeded={embeddedChunks}, failed={failedChunkCount}, ratio={failureRatio:P1}, threshold={MaxEmbeddingFailureRatioBeforeAbort:P0}).";
-                _logger?.Error(error);
-                throw new InvalidOperationException(error);
+                // Per-file failure: roll back the staged copy on disk (the vectors
+                // were only committed on the success path above) and record the
+                // error so the remaining files in the batch can still be processed.
+                // Aggregated errors are thrown after the loop so callers still see
+                // the failure.
+                TryDeleteStoredFile(storedAbsPath);
+                perFileErrors.Add(ex);
             }
-
-            vectorIndex.UpsertFileChunks(manifest.Id, storedRelativePath, chunks);
-
-            if (current is null)
-            {
-                manifest.Files.Add(new DocumentFileEntry());
-                current = manifest.Files.Last();
-            }
-
-            current.SourceOriginalPath = sourcePath;
-            current.StoredRelativePath = storedRelativePath;
-            current.FileName = fileName;
-            current.Sha256 = sha;
-            current.SizeBytes = new FileInfo(sourcePath).Length;
-            current.ImportedAtUtc = DateTime.UtcNow;
-            current.LastModifiedUtc = File.GetLastWriteTimeUtc(sourcePath);
         }
 
         manifest.LastIndexedUtc = DateTime.UtcNow;
         await _libraryManager.SaveManifestAsync(manifest);
         progress?.Invoke(new IndexingProgress { TotalFiles = total, CompletedFiles = total, CurrentFile = string.Empty });
+
+        if (perFileErrors.Count == 1)
+        {
+            // Preserve the single-file-failure contract: callers (and tests) that
+            // expect the original InvalidOperationException continue to see it.
+            throw perFileErrors[0];
+        }
+        if (perFileErrors.Count > 1)
+        {
+            throw new AggregateException(
+                $"Document ingestion completed with {perFileErrors.Count} file failure(s); successful files were persisted.",
+                perFileErrors);
+        }
+    }
+
+    private static void TryDeleteStoredFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup; leaving a stray file on disk is preferable to
+            // masking the underlying ingestion failure with an IO exception.
+        }
     }
 
     public async Task SweepFoldersAsync(DocumentLibraryManifest manifest, string host, PortableConfig config, Action<IndexingProgress>? progress = null, CancellationToken cancellationToken = default)
