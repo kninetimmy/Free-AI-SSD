@@ -104,6 +104,20 @@ cache/                    — prep-time download cache
 
 `SsdLayout` in shared is the single source of truth for all these paths — always use it rather than constructing paths manually.
 
+## GitHub Push & Pull Request Workflow
+
+When pushing changes to this repository, always follow this workflow:
+
+1. **Create a pull request** rather than pushing directly to main. Use a clear title and summary describing what changed and why.
+
+2. **Monitor CI checks** — after the PR is created, watch for check results:
+   - If all checks pass: notify the user and ask whether to merge to main.
+   - If any check fails: notify the user immediately with which check failed and why (if determinable), then ask whether they'd like to debug the issue and push an updated branch.
+
+3. **Merging** — only merge to main after explicit user confirmation.
+
+4. **On check failure and debug request** — investigate the failure, propose or apply a fix, push the updated branch, and re-enter the monitor step above.
+
 ## Known Gaps / Out of Scope
 
 - DOCX format not supported (PDF, TXT, Markdown only)
