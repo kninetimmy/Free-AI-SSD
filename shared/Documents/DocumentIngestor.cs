@@ -2,6 +2,8 @@ namespace FreeAiSsd.Shared.Documents;
 
 public sealed class DocumentIngestor
 {
+    private const double MaxEmbeddingFailureRatioBeforeAbort = 0.50d;
+
     private readonly DocumentLibraryManager _libraryManager;
     private readonly EmbeddingClient _embeddingClient;
     private readonly SsdLogger? _logger;
@@ -97,6 +99,13 @@ public sealed class DocumentIngestor
             }
 
             var totalChunks = textItems.Count;
+            if (totalChunks == 0)
+            {
+                var error = $"Ingestion failed for '{fileName}': no chunks were generated after parsing and chunking.";
+                _logger?.Error(error);
+                throw new InvalidOperationException(error);
+            }
+
             var embeddedChunks = 0;
             var failedChunkCount = 0;
             var results = new DocumentChunk?[totalChunks];
@@ -150,6 +159,7 @@ public sealed class DocumentIngestor
 
             // Collect successfully embedded chunks in original document order.
             var chunks = results.Where(r => r is not null).Select(r => r!).ToList();
+            var failureRatio = totalChunks == 0 ? 0d : (double)failedChunkCount / totalChunks;
 
             if (failedChunkCount > 0)
             {
@@ -162,6 +172,15 @@ public sealed class DocumentIngestor
                     TotalChunks = totalChunks,
                     FailedChunks = failedChunkCount
                 });
+            }
+
+            if (failureRatio > MaxEmbeddingFailureRatioBeforeAbort)
+            {
+                var error =
+                    $"Ingestion failed for '{fileName}': embedding failures exceeded threshold " +
+                    $"(total={totalChunks}, succeeded={embeddedChunks}, failed={failedChunkCount}, ratio={failureRatio:P1}, threshold={MaxEmbeddingFailureRatioBeforeAbort:P0}).";
+                _logger?.Error(error);
+                throw new InvalidOperationException(error);
             }
 
             vectorIndex.UpsertFileChunks(manifest.Id, storedRelativePath, chunks);
