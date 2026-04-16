@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Documents;
+using Microsoft.Data.Sqlite;
 
 namespace FreeAiSsd.Tests;
 
@@ -17,6 +18,7 @@ public sealed class DocumentIngestorFailureHandlingTests : IDisposable
 
     public void Dispose()
     {
+        SqliteConnection.ClearAllPools();
         if (Directory.Exists(_tempRoot))
         {
             Directory.Delete(_tempRoot, recursive: true);
