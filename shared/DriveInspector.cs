@@ -83,31 +83,43 @@ public static class DriveInspector
         {
             using var diskSearcher = new ManagementObjectSearcher(
                 "SELECT DeviceID FROM Win32_DiskDrive WHERE InterfaceType = 'USB'");
-            foreach (ManagementObject disk in diskSearcher.Get())
+            using var diskCollection = diskSearcher.Get();
+            foreach (ManagementObject disk in diskCollection)
             {
-                var diskId = disk["DeviceID"]?.ToString();
-                if (diskId == null) continue;
-
-                // WMI ASSOCIATORS queries require backslashes doubled
-                var escapedDiskId = diskId.Replace("\\", "\\\\");
-
-                using var partSearcher = new ManagementObjectSearcher(
-                    $"ASSOCIATORS OF {{Win32_DiskDrive.DeviceID='{escapedDiskId}'}} " +
-                    "WHERE AssocClass=Win32_DiskDriveToDiskPartition");
-                foreach (ManagementObject partition in partSearcher.Get())
+                using (disk)
                 {
-                    var partId = partition["DeviceID"]?.ToString();
-                    if (partId == null) continue;
+                    var diskId = disk["DeviceID"]?.ToString();
+                    if (diskId == null) continue;
 
-                    var escapedPartId = partId.Replace("\\", "\\\\");
-                    using var logicalSearcher = new ManagementObjectSearcher(
-                        $"ASSOCIATORS OF {{Win32_DiskPartition.DeviceID='{escapedPartId}'}} " +
-                        "WHERE AssocClass=Win32_LogicalDiskToPartition");
-                    foreach (ManagementObject logical in logicalSearcher.Get())
+                    // WMI ASSOCIATORS queries require backslashes doubled
+                    var escapedDiskId = diskId.Replace("\\", "\\\\");
+
+                    using var partSearcher = new ManagementObjectSearcher(
+                        $"ASSOCIATORS OF {{Win32_DiskDrive.DeviceID='{escapedDiskId}'}} " +
+                        "WHERE AssocClass=Win32_DiskDriveToDiskPartition");
+                    using var partCollection = partSearcher.Get();
+                    foreach (ManagementObject partition in partCollection)
                     {
-                        var name = logical["Name"]?.ToString();
-                        if (name != null)
-                            roots.Add(name + "\\");
+                        using (partition)
+                        {
+                            var partId = partition["DeviceID"]?.ToString();
+                            if (partId == null) continue;
+
+                            var escapedPartId = partId.Replace("\\", "\\\\");
+                            using var logicalSearcher = new ManagementObjectSearcher(
+                                $"ASSOCIATORS OF {{Win32_DiskPartition.DeviceID='{escapedPartId}'}} " +
+                                "WHERE AssocClass=Win32_LogicalDiskToPartition");
+                            using var logicalCollection = logicalSearcher.Get();
+                            foreach (ManagementObject logical in logicalCollection)
+                            {
+                                using (logical)
+                                {
+                                    var name = logical["Name"]?.ToString();
+                                    if (name != null)
+                                        roots.Add(name + "\\");
+                                }
+                            }
+                        }
                     }
                 }
             }
