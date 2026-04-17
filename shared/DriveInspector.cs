@@ -1,3 +1,5 @@
+using System.Management;
+
 namespace FreeAiSsd.Shared;
 
 /// <summary>
@@ -23,51 +25,112 @@ public sealed record DriveTarget(
 public static class DriveInspector
 {
     /// <summary>
-    /// Enumerates ready drives on the system, filtering to removable drives by default.
-    /// Fixed drives can be included via the <paramref name="includeFixed"/> flag.
-    /// Each drive is annotated with filesystem compatibility warnings.
+    /// Enumerates ready drives on the system. Includes removable drives and
+    /// USB-connected drives that Windows misclassifies as Fixed (common for
+    /// USB SSDs). True internal fixed drives are only included when
+    /// <paramref name="includeFixed"/> is true.
     /// </summary>
     /// <param name="includeFixed">When true, internal/fixed drives are also listed (with extra safety warnings).</param>
     /// <returns>A list of candidate drives with metadata and warnings.</returns>
     public static IReadOnlyList<DriveTarget> GetCandidateDrives(bool includeFixed = false)
     {
+        var usbRoots = GetUsbConnectedRootPaths();
+
         return DriveInfo.GetDrives()
-            .Where(d => d.IsReady && (d.DriveType == DriveType.Removable || (includeFixed && d.DriveType == DriveType.Fixed)))
-            .Select(d => new DriveTarget(
-                Name: FormatDriveName(d),
-                RootPath: d.RootDirectory.FullName,
-                VolumeLabel: d.VolumeLabel,
-                FreeBytes: d.AvailableFreeSpace,
-                TotalBytes: d.TotalSize,
-                DriveFormat: d.DriveFormat,
-                IsReady: d.IsReady,
-                IsRemovable: d.DriveType == DriveType.Removable,
-                IsFixed: d.DriveType == DriveType.Fixed,
-                Warning: DriveWarning(d)))
+            .Where(d => d.IsReady && IsEligible(d, usbRoots, includeFixed))
+            .Select(d =>
+            {
+                bool externalFixed = d.DriveType == DriveType.Fixed && usbRoots.Contains(d.RootDirectory.FullName);
+                bool isRemovable = d.DriveType == DriveType.Removable || externalFixed;
+                bool isFixed = d.DriveType == DriveType.Fixed && !externalFixed;
+                return new DriveTarget(
+                    Name: FormatDriveName(d, isRemovable),
+                    RootPath: d.RootDirectory.FullName,
+                    VolumeLabel: d.VolumeLabel,
+                    FreeBytes: d.AvailableFreeSpace,
+                    TotalBytes: d.TotalSize,
+                    DriveFormat: d.DriveFormat,
+                    IsReady: d.IsReady,
+                    IsRemovable: isRemovable,
+                    IsFixed: isFixed,
+                    Warning: DriveWarning(d, isFixed));
+            })
             .ToList();
     }
 
-    /// <summary>
-    /// Builds a human-readable display name for a drive, including its letter,
-    /// volume label (or "No Label"), and type (Fixed vs Removable).
-    /// </summary>
-    private static string FormatDriveName(DriveInfo drive)
+    private static bool IsEligible(DriveInfo d, HashSet<string> usbRoots, bool includeFixed)
     {
-        var label = string.IsNullOrWhiteSpace(drive.VolumeLabel) ? "No Label" : drive.VolumeLabel;
-        var kind = drive.DriveType == DriveType.Fixed ? "Fixed" : "Removable";
-        return $"{drive.Name} ({label}, {kind})";
+        if (d.DriveType == DriveType.Removable) return true;
+        if (d.DriveType == DriveType.Fixed)
+        {
+            // USB SSDs that Windows marks Fixed are always eligible
+            if (usbRoots.Contains(d.RootDirectory.FullName)) return true;
+            // True internal drives only when the user explicitly opts in
+            if (includeFixed) return true;
+        }
+        return false;
     }
 
     /// <summary>
-    /// Generates a filesystem suitability warning based on the drive's format.
-    /// NTFS is recommended; exFAT/FAT32 may work but with limitations;
-    /// other formats are flagged as untested.
+    /// Uses WMI to build the set of drive root paths that are physically
+    /// connected via USB, regardless of how Windows classifies their DriveType.
+    /// Returns an empty set if WMI is unavailable.
     /// </summary>
-    private static string DriveWarning(DriveInfo drive)
+    private static HashSet<string> GetUsbConnectedRootPaths()
+    {
+        var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            using var diskSearcher = new ManagementObjectSearcher(
+                "SELECT DeviceID FROM Win32_DiskDrive WHERE InterfaceType = 'USB'");
+            foreach (ManagementObject disk in diskSearcher.Get())
+            {
+                var diskId = disk["DeviceID"]?.ToString();
+                if (diskId == null) continue;
+
+                // WMI ASSOCIATORS queries require backslashes doubled
+                var escapedDiskId = diskId.Replace("\\", "\\\\");
+
+                using var partSearcher = new ManagementObjectSearcher(
+                    $"ASSOCIATORS OF {{Win32_DiskDrive.DeviceID='{escapedDiskId}'}} " +
+                    "WHERE AssocClass=Win32_DiskDriveToDiskPartition");
+                foreach (ManagementObject partition in partSearcher.Get())
+                {
+                    var partId = partition["DeviceID"]?.ToString();
+                    if (partId == null) continue;
+
+                    var escapedPartId = partId.Replace("\\", "\\\\");
+                    using var logicalSearcher = new ManagementObjectSearcher(
+                        $"ASSOCIATORS OF {{Win32_DiskPartition.DeviceID='{escapedPartId}'}} " +
+                        "WHERE AssocClass=Win32_LogicalDiskToPartition");
+                    foreach (ManagementObject logical in logicalSearcher.Get())
+                    {
+                        var name = logical["Name"]?.ToString();
+                        if (name != null)
+                            roots.Add(name + "\\");
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // WMI unavailable — fall back to DriveType classification only
+        }
+        return roots;
+    }
+
+    private static string FormatDriveName(DriveInfo drive, bool isRemovable)
+    {
+        var label = string.IsNullOrWhiteSpace(drive.VolumeLabel) ? "No Label" : drive.VolumeLabel;
+        var kind = isRemovable ? "Removable" : "Fixed";
+        return $"{drive.Name} ({label}, {kind})";
+    }
+
+    private static string DriveWarning(DriveInfo drive, bool isInternalFixed)
     {
         if (drive.DriveFormat.Equals("NTFS", StringComparison.OrdinalIgnoreCase))
         {
-            return drive.DriveType == DriveType.Fixed
+            return isInternalFixed
                 ? "Warning: fixed/internal drive selected. Verify target path carefully. Filesystem NTFS is recommended."
                 : "Filesystem: NTFS (recommended).";
         }
