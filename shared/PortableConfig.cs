@@ -52,6 +52,13 @@ public sealed class PortableConfig
 {
     /// <summary>Config schema version for forward compatibility.</summary>
     public string Version { get; set; } = "1.0";
+
+    /// <summary>
+    /// Active user profile. Null means the user has not yet chosen a profile
+    /// (first-run dialog pending). Defaults are applied by <see cref="ProfileDefaults.Apply"/>
+    /// when the user makes their selection.
+    /// </summary>
+    public UserProfile? ActiveProfile { get; set; }
     /// <summary>Preferred TCP port for the local Ollama server (default: 11434).</summary>
     public int OllamaPort { get; set; } = 11434;
     /// <summary>Relative path from SSD root to the Ollama executable.</summary>

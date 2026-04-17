@@ -64,6 +64,9 @@ public partial class MainWindow : System.Windows.Window
     private List<DcsAircraftImportItem> _aircraftItems = new();
     private CancellationTokenSource? _importCts;
 
+    // Profile pill toggle state
+    private bool _suppressPillEvents;
+
     // FTUE state
     private int _ftueStepIndex;
     private System.Windows.FrameworkElement[] _ftueTargets = Array.Empty<System.Windows.FrameworkElement>();
@@ -159,6 +162,13 @@ public partial class MainWindow : System.Windows.Window
 
     private async void OnWindowLoaded(object sender, System.Windows.RoutedEventArgs e)
     {
+        // Profile selection must happen before FTUE so the tour only highlights
+        // features that are relevant to the chosen profile.
+        if (_config is not null && _config.ActiveProfile is null)
+        {
+            await ShowProfileSelectionAsync(isRequired: true);
+        }
+
         // Read the tiny first-run JSON off the UI thread so a slow / contended
         // SSD can't stall the window's first paint.
         var statePath = Path.Combine(_ssdRoot, SsdLayout.Config, "runner-first-run.json");
@@ -246,8 +256,70 @@ public partial class MainWindow : System.Windows.Window
         RefreshLibraryUi();
         InitializeTts();
         InitializePtt();
+        RefreshProfileVisibility();
         StatusText.Text = "Ready (not running)";
         AppendLog($"Loaded config from {configPath}");
+    }
+
+    private void RefreshProfileVisibility()
+    {
+        var isFlightSim = _config?.ActiveProfile == UserProfile.FlightSim;
+        var vis = isFlightSim ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+        BindingsImportCard.Visibility = vis;
+        PttCard.Visibility = vis;
+
+        _suppressPillEvents = true;
+        ProfileFlightSimPill.IsChecked = isFlightSim;
+        ProfileGeneralPill.IsChecked = !isFlightSim;
+        _suppressPillEvents = false;
+    }
+
+    private async Task ShowProfileSelectionAsync(bool isRequired)
+    {
+        if (_config is null) return;
+
+        var dialog = new ProfileSelectionDialog(isRequired) { Owner = this };
+        if (dialog.ShowDialog() != true || dialog.SelectedProfile is null) return;
+
+        var profile = dialog.SelectedProfile.Value;
+        _config.ActiveProfile = profile;
+        ProfileDefaults.Apply(_config, profile);
+
+        var configPath = Path.Combine(_ssdRoot, "config", "portable-config.json");
+        await _config.SaveAsync(configPath);
+
+        RefreshProfileVisibility();
+        AppendLog($"Profile set to {profile}.");
+
+        if (!isRequired)
+            NotifyRestartRequired();
+    }
+
+    private void NotifyRestartRequired()
+    {
+        System.Windows.MessageBox.Show(
+            "Profile saved. Voice and PTT settings will take effect after restarting the app.",
+            "Restart required",
+            System.Windows.MessageBoxButton.OK,
+            System.Windows.MessageBoxImage.Information);
+    }
+
+    private async void ProfilePill_Checked(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_suppressPillEvents || _config is null) return;
+
+        var profile = sender == ProfileFlightSimPill ? UserProfile.FlightSim : UserProfile.GeneralAssistant;
+        if (_config.ActiveProfile == profile) return;
+
+        _config.ActiveProfile = profile;
+        ProfileDefaults.Apply(_config, profile);
+
+        var configPath = Path.Combine(_ssdRoot, "config", "portable-config.json");
+        await _config.SaveAsync(configPath);
+
+        RefreshProfileVisibility();
+        AppendLog($"Profile set to {profile}.");
+        NotifyRestartRequired();
     }
 
     private void PopulateModelCombo()

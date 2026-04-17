@@ -265,6 +265,29 @@
                                Foreground="{StaticResource TextSecondaryBrush}"
                                VerticalAlignment="Center"/>
                 </StackPanel>
+
+                <Border Margin="16,0,0,0"
+                        CornerRadius="14"
+                        Background="{StaticResource BgSunkenBrush}"
+                        BorderBrush="{StaticResource SurfaceBorderBrush}"
+                        BorderThickness="1"
+                        Padding="3"
+                        Effect="{StaticResource SunkenDarkShadow}"
+                        VerticalAlignment="Center"
+                        ToolTip="Switch between Flight Sim and General Assistant profiles.">
+                    <StackPanel Orientation="Horizontal">
+                        <RadioButton x:Name="ProfileFlightSimPill"
+                                     Content="✈ Flight Sim"
+                                     Style="{StaticResource PillRadioButton}"
+                                     GroupName="ProfilePills"
+                                     Checked="ProfilePill_Checked"/>
+                        <RadioButton x:Name="ProfileGeneralPill"
+                                     Content="◈ General"
+                                     Style="{StaticResource PillRadioButton}"
+                                     GroupName="ProfilePills"
+                                     Checked="ProfilePill_Checked"/>
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </Border>
 
