@@ -4,20 +4,23 @@
         Title="Remove model"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
-        SizeToContent="WidthAndHeight">
-    <Grid Margin="16" MinWidth="420">
+        SizeToContent="WidthAndHeight"
+        Background="{StaticResource BgBaseBrush}">
+    <Grid Margin="24" MinWidth="420">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <TextBlock x:Name="PromptText" TextWrapping="Wrap" Margin="0,0,0,12"/>
+        <TextBlock x:Name="PromptText" Style="{StaticResource BodyText}" TextWrapping="Wrap" Margin="0,0,0,16"/>
 
         <StackPanel Grid.Row="1" Orientation="Vertical">
-            <Button Content="Remove from list (config only)" Padding="10,6" Click="RemoveConfigOnly_Click" Margin="0,0,0,6"/>
-            <Button Content="Delete from disk" Padding="10,6" Click="DeleteFromDisk_Click" Margin="0,0,0,6"/>
-            <Button Content="Cancel" Padding="10,6" Click="Cancel_Click"/>
+            <Button Content="Remove from list (config only)" Style="{StaticResource TactilePrimaryButton}"
+                    HorizontalAlignment="Stretch" Margin="0,0,0,8" Click="RemoveConfigOnly_Click"/>
+            <Button Content="Delete from disk" Style="{StaticResource GhostSecondaryButton}"
+                    HorizontalAlignment="Stretch" Margin="0,0,0,8" Click="DeleteFromDisk_Click"/>
+            <Button Content="Cancel" Style="{StaticResource GhostSecondaryButton}"
+                    HorizontalAlignment="Stretch" Click="Cancel_Click"/>
         </StackPanel>
     </Grid>
 </Window>
