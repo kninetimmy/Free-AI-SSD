@@ -1,8 +1,11 @@
 <p align="center">
-  <img src="docs/images/prep-app-mockup.svg" alt="Free AI SSD Prep App — neumorphic UI preview" width="960">
+  <img src="docs/images/prep-app-model-manager.png" alt="Free AI SSD Prep App — Model Manager tab" width="960">
+</p>
+<p align="center">
+  <img src="docs/images/prep-app-drive-setup.png" alt="Free AI SSD Prep App — Drive Setup tab" width="960">
 </p>
 
-*Preview of the Prep App with the new neumorphic dark-mode theme. Static mockup — not a screenshot of the running app.*
+*Prep App — Model Manager (top) and Drive Setup (bottom). Runner screenshots coming once live-drive testing is complete.*
 
 # Free-AI-SSD
 
@@ -614,7 +617,7 @@ dotnet test FreeAiSsd.sln -c Release
 
 ### Test Coverage
 
-212 tests across 17 test files. 1 Windows-specific path test expected to fail on Linux.
+311 tests across 17 test files. 1 Windows-specific path test expected to fail on Linux.
 
 | Area | Tests | Status |
 |---|---|---|
@@ -649,6 +652,9 @@ Signing is disabled by default in CI (`MAC_SIGNING_ENABLED=false`). Supported vi
 
 ### Recent Changes
 
+- **2026-04-17**: Fix WMI `ManagementObjectCollection` and `ManagementObject` disposal leaks in drive inspection and GPU/RAM detection — COM handles now properly released on all WMI query paths
+- **2026-04-17**: Fix drive selection missing USB SSDs — Windows classifies some external SSDs as `DriveType.Fixed`; prep-app now uses WMI `Win32_DiskDrive.InterfaceType` to detect USB connection regardless of OS drive type
+- **2026-04-17**: Prep-app UI polish — neumorphic dark theme applied throughout; implicit styles for DataGrid, TabControl, GroupBox, CheckBox; Model Manager layout restructured; drive warning strip made collapsible
 - **2026-04-14**: Split-PC TTS return path — `/api/voice/query` accepts `returnAudio=true` and returns the synthesized WAV inline as `AudioBase64` + `AudioMime`, so the Companion client can play TTS locally instead of on the Runner host; returned audio is WAV PCM 16-bit mono 16kHz and bounded by `networkMaxAudioUploadMB`. Companion tray app gained a VR-usable PTT UX: activation beep, always-on-top `PttOverlayWindow`, and a mic preflight in the Settings window, wired to new `pttActivationSoundEnabled` / `pttOverlayEnabled` keys in `companion-config.json`.
 - **2026-04-14**: Network Mode v2 — added LAN audio upload endpoints for host-side Whisper transcription (`/api/stt/transcribe`) and voice-query orchestration (`/api/voice/query`) with optional host-side TTS trigger
 - **2026-02-21**: DCS Bindings Import — reads DCS `diff.lua` files, auto-detects saved games folder, merges multi-device HOTAS inputs, writes per-aircraft reference documents into the library for RAG
