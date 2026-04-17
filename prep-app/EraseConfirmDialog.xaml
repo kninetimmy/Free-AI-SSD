@@ -4,8 +4,9 @@
         Title="Confirm drive format"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
-        SizeToContent="WidthAndHeight">
-    <Grid Margin="16" MinWidth="520">
+        SizeToContent="WidthAndHeight"
+        Background="{StaticResource BgBaseBrush}">
+    <Grid Margin="24" MinWidth="520">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -13,13 +14,14 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <TextBlock x:Name="WarningText" TextWrapping="Wrap" Margin="0,0,0,12"/>
-        <TextBlock Grid.Row="1" Text="Type ERASE to continue:" Margin="0,0,0,6"/>
-        <TextBox x:Name="ConfirmText" Grid.Row="2" Width="180"/>
+        <TextBlock x:Name="WarningText" Style="{StaticResource BodyText}" TextWrapping="Wrap" Margin="0,0,0,16"/>
+        <TextBlock Grid.Row="1" Text="Type ERASE to continue:" Style="{StaticResource BodySecondaryText}" Margin="0,0,0,8"/>
+        <TextBox x:Name="ConfirmText" Grid.Row="2" Width="200" HorizontalAlignment="Left"
+                 Style="{StaticResource GlowFocusTextBox}"/>
 
-        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
-            <Button Content="Cancel" Width="90" Margin="0,0,8,0" Click="Cancel_Click"/>
-            <Button Content="Proceed" Width="90" Click="Proceed_Click"/>
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="Cancel" Style="{StaticResource GhostSecondaryButton}" MinWidth="100" Margin="0,0,10,0" Click="Cancel_Click"/>
+            <Button Content="Proceed" Style="{StaticResource TactilePrimaryButton}" MinWidth="100" Click="Proceed_Click"/>
         </StackPanel>
     </Grid>
 </Window>
