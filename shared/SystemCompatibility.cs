@@ -79,20 +79,24 @@ public static class SystemCompatibilityDetector
     {
         try
         {
-            var searcher = new ManagementObjectSearcher("SELECT Name, DriverVersion, AdapterCompatibility, PNPDeviceID FROM Win32_VideoController");
+            using var searcher = new ManagementObjectSearcher("SELECT Name, DriverVersion, AdapterCompatibility, PNPDeviceID FROM Win32_VideoController");
             var gpus = new List<GpuInfo>();
-            foreach (var result in searcher.Get().Cast<ManagementObject>())
+            using var collection = searcher.Get();
+            foreach (ManagementObject result in collection)
             {
-                var name = ReadProperty(result, "Name") ?? "Unknown GPU";
-                var driverVersion = ReadProperty(result, "DriverVersion");
-                var adapterCompatibility = ReadProperty(result, "AdapterCompatibility") ?? string.Empty;
-                var pnpDeviceId = ReadProperty(result, "PNPDeviceID") ?? string.Empty;
+                using (result)
+                {
+                    var name = ReadProperty(result, "Name") ?? "Unknown GPU";
+                    var driverVersion = ReadProperty(result, "DriverVersion");
+                    var adapterCompatibility = ReadProperty(result, "AdapterCompatibility") ?? string.Empty;
+                    var pnpDeviceId = ReadProperty(result, "PNPDeviceID") ?? string.Empty;
 
-                var vendor = InferVendor(adapterCompatibility, pnpDeviceId, name);
-                var isIntegrated = LooksIntegrated(name, pnpDeviceId);
-                var isDiscrete = !isIntegrated;
+                    var vendor = InferVendor(adapterCompatibility, pnpDeviceId, name);
+                    var isIntegrated = LooksIntegrated(name, pnpDeviceId);
+                    var isDiscrete = !isIntegrated;
 
-                gpus.Add(new GpuInfo(name, vendor, driverVersion, isDiscrete, isIntegrated));
+                    gpus.Add(new GpuInfo(name, vendor, driverVersion, isDiscrete, isIntegrated));
+                }
             }
 
             if (gpus.Count > 0)

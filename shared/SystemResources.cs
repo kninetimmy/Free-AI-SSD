@@ -19,12 +19,16 @@ public static class SystemResources
         try
         {
             using var searcher = new ManagementObjectSearcher("SELECT TotalPhysicalMemory FROM Win32_ComputerSystem");
-            foreach (var item in searcher.Get().OfType<ManagementObject>())
+            using var collection = searcher.Get();
+            foreach (ManagementObject item in collection)
             {
-                var raw = item["TotalPhysicalMemory"]?.ToString();
-                if (ulong.TryParse(raw, out var bytes) && bytes > 0)
+                using (item)
                 {
-                    return ToGb(bytes);
+                    var raw = item["TotalPhysicalMemory"]?.ToString();
+                    if (ulong.TryParse(raw, out var bytes) && bytes > 0)
+                    {
+                        return ToGb(bytes);
+                    }
                 }
             }
         }
@@ -48,11 +52,15 @@ public static class SystemResources
         {
             ulong maxBytes = 0;
             using var searcher = new ManagementObjectSearcher("SELECT AdapterRAM FROM Win32_VideoController");
-            foreach (var item in searcher.Get().OfType<ManagementObject>())
+            using var collection = searcher.Get();
+            foreach (ManagementObject item in collection)
             {
-                if (ulong.TryParse(item["AdapterRAM"]?.ToString(), out var bytes) && bytes > maxBytes)
+                using (item)
                 {
-                    maxBytes = bytes;
+                    if (ulong.TryParse(item["AdapterRAM"]?.ToString(), out var bytes) && bytes > maxBytes)
+                    {
+                        maxBytes = bytes;
+                    }
                 }
             }
 
