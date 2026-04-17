@@ -723,4 +723,203 @@
         </Setter>
     </Style>
 
+    <!--  ============================================================
+          GroupBox — neumorphic dark theme
+          ============================================================  -->
+
+    <Style TargetType="GroupBox">
+        <Setter Property="Foreground"   Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="FontFamily"   Value="{StaticResource PrimaryFontFamily}"/>
+        <Setter Property="Padding"      Value="10,8"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="GroupBox">
+                    <Grid SnapsToDevicePixels="True">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <Border Grid.RowSpan="2"
+                                Background="{StaticResource BgSunkenBrush}"
+                                BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Margin="0,8,0,0"/>
+                        <Border Grid.Row="0"
+                                HorizontalAlignment="Left"
+                                Margin="10,0,0,0"
+                                Padding="4,0"
+                                Background="{StaticResource BgBaseBrush}">
+                            <ContentPresenter ContentSource="Header"
+                                              TextElement.Foreground="{StaticResource TextSecondaryBrush}"
+                                              TextElement.FontSize="11"
+                                              TextElement.FontWeight="SemiBold"
+                                              RecognizesAccessKey="True"/>
+                        </Border>
+                        <ContentPresenter Grid.Row="1" Margin="{TemplateBinding Padding}"/>
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--  ============================================================
+          CheckBox — neumorphic dark theme
+          ============================================================  -->
+
+    <Style TargetType="CheckBox">
+        <Setter Property="Foreground"              Value="{StaticResource TextSecondaryBrush}"/>
+        <Setter Property="FontFamily"              Value="{StaticResource PrimaryFontFamily}"/>
+        <Setter Property="FontSize"                Value="13"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="FocusVisualStyle"        Value="{x:Null}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CheckBox">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Border x:Name="CheckBorder"
+                                Width="14" Height="14"
+                                CornerRadius="3"
+                                Background="{StaticResource BgSunkenBrush}"
+                                BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                BorderThickness="1"
+                                Margin="0,0,6,0"
+                                VerticalAlignment="Center">
+                            <TextBlock x:Name="Checkmark"
+                                       Text="✓"
+                                       FontSize="10"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Foreground="{StaticResource AccentCyanBrush}"
+                                       Visibility="Collapsed"/>
+                        </Border>
+                        <ContentPresenter VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Checkmark"   Property="Visibility"  Value="Visible"/>
+                            <Setter TargetName="CheckBorder" Property="BorderBrush" Value="{StaticResource AccentCyanBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="CheckBorder" Property="BorderBrush"  Value="{StaticResource AccentCyanBrush}"/>
+                            <Setter Property="Foreground"                             Value="{StaticResource TextPrimaryBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="CheckBorder" Property="BorderBrush" Value="{StaticResource AccentCyanBrush}"/>
+                            <Setter TargetName="CheckBorder" Property="Effect"      Value="{StaticResource HoverGlowCyan}"/>
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="CheckBorder" Property="Background" Value="{StaticResource BgElevatedBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground"                Value="{StaticResource TextDisabledBrush}"/>
+                            <Setter TargetName="CheckBorder" Property="Opacity" Value="0.4"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--  ============================================================
+          TabControl / TabItem — neumorphic dark theme
+          ============================================================  -->
+
+    <Style TargetType="TabControl">
+        <Setter Property="Background"      Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding"         Value="0"/>
+    </Style>
+
+    <Style TargetType="TabItem">
+        <Setter Property="Background"   Value="{StaticResource BgSunkenBrush}"/>
+        <Setter Property="Foreground"   Value="{StaticResource TextMutedBrush}"/>
+        <Setter Property="BorderBrush"  Value="{StaticResource SurfaceBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1,1,1,0"/>
+        <Setter Property="Padding"      Value="12,5"/>
+        <Setter Property="FontSize"     Value="13"/>
+        <Setter Property="Margin"       Value="0,0,4,0"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TabItem">
+                    <Border x:Name="TabBorder"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="6,6,0,0"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter ContentSource="Header"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="TabBorder" Property="Background" Value="{StaticResource BgRaisedBrush}"/>
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="TabBorder" Property="Background" Value="{StaticResource BgElevatedBrush}"/>
+                            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--  ============================================================
+          DataGrid — neumorphic dark theme
+          Applies implicitly to all DataGrids that inherit this dictionary.
+          ============================================================  -->
+
+    <Style TargetType="DataGrid">
+        <Setter Property="Background"           Value="Transparent"/>
+        <Setter Property="Foreground"           Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="BorderThickness"      Value="0"/>
+        <Setter Property="GridLinesVisibility"  Value="None"/>
+        <Setter Property="RowBackground"        Value="Transparent"/>
+        <Setter Property="AlternatingRowBackground" Value="{StaticResource BgSunkenBrush}"/>
+        <Setter Property="HorizontalGridLinesBrush" Value="{StaticResource SurfaceBorderBrush}"/>
+        <Setter Property="VerticalGridLinesBrush"   Value="{StaticResource SurfaceBorderBrush}"/>
+    </Style>
+
+    <Style TargetType="DataGridColumnHeader">
+        <Setter Property="Background"   Value="{StaticResource BgElevatedBrush}"/>
+        <Setter Property="Foreground"   Value="{StaticResource TextSecondaryBrush}"/>
+        <Setter Property="FontSize"     Value="11"/>
+        <Setter Property="FontWeight"   Value="SemiBold"/>
+        <Setter Property="Padding"      Value="6,3"/>
+        <Setter Property="BorderBrush"  Value="{StaticResource SurfaceBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="0,0,1,1"/>
+        <Setter Property="SeparatorBrush"  Value="{StaticResource SurfaceBorderBrush}"/>
+    </Style>
+
+    <Style TargetType="DataGridRow">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Background" Value="{StaticResource BgElevatedBrush}"/>
+            </Trigger>
+            <Trigger Property="IsSelected" Value="True">
+                <Setter Property="Background" Value="{StaticResource BgElevatedBrush}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style TargetType="DataGridCell">
+        <Setter Property="Background"      Value="Transparent"/>
+        <Setter Property="Foreground"      Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding"         Value="4,2"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Style.Triggers>
+            <Trigger Property="IsSelected" Value="True">
+                <Setter Property="Background" Value="Transparent"/>
+                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
 </ResourceDictionary>
