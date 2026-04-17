@@ -4,24 +4,17 @@ Last updated: 2026-04-17
 
 ## Currently building
 
-Prep-app UI polish pass complete (unstaged). Drive selection bug still
-outstanding — next focus once changes are committed/PRed.
+Between tasks. README update queued for next session.
 
 ## Last session
 
-2026-04-17 — No commits. Extensive prep-app UI polish pass across
-`prep-app/MainWindow.xaml` and `shared/UI/Theme/Controls.xaml`. Added
-implicit dark-theme styles for DataGrid, TabControl/TabItem, GroupBox,
-and CheckBox (with hover/focus/pressed states). Restructured the Model
-Manager layout: model tag input moved inline with tab strip, Starter/
-Configured model card proportions swapped (2*/3*), button rows shrunk,
-card padding tightened globally. Drive Setup tab now fully themed
-(styled textboxes, checkboxes, GroupBoxes, buttons). Drive warning
-strip moved to its own collapsible Row 2 (hidden when no warning);
-LED removed from log header. "Browse starter models" dead button
-removed. Codex adversarial review ran and both findings addressed
-(CheckBox keyboard focus restored, warning strip safety regression fixed).
-All changes build clean, no test regressions expected (XAML-only).
+2026-04-17 — Two PRs shipped. PR #120 (eb6f2c1) committed the prep-app
+UI polish pass: implicit theme styles for DataGrid, TabControl, GroupBox,
+CheckBox in Controls.xaml; Model Manager layout restructured; Drive Setup
+fully themed; warning strip made collapsible. PR #121 (d9b6fd3) fixed the
+drive selection bug — USB SSDs that Windows classifies as DriveType.Fixed
+now appear in the default dropdown via WMI InterfaceType detection.
+311/311 tests green throughout.
 
 2026-04-16 — No commits. v1.1.0 confirmed shipped. First test pass identified
 two UI bugs (theme mismatches and broken drive selection). Testing stalled
@@ -37,27 +30,13 @@ build (Windows only, no macOS) at end of session.
 
 ## Next up
 
-### v1.1.0 bug fix pass
-
-1. **Drive selection broken (blocker)** — Stephen's SSD is reported as
-   "Fixed" by Windows so it doesn't appear in the dropdown. Options:
-   - Expose all drives and filter out true internal drives by connection
-     type (SATA/NVMe via WMI `Win32_DiskDrive.InterfaceType` or
-     `PnPDeviceID` prefix) rather than by Windows "fixed" flag
-   - Prefer connection-type approach if reliable — the toggle was a
-     workaround for a bad default, not a feature
-2. **Commit/PR the UI polish changes** — `prep-app/MainWindow.xaml` and
-   `shared/UI/Theme/Controls.xaml` are unstaged; need a PR before the
-   next test pass
-
-### After bugs are resolved
-
-- Resume full 1.1.0 test pass (model pull, voice, RAG) once drive selection works
-- Pick next feature
+1. **README update** — discussed at end of session, details TBD
+2. **Resume 1.1.0 test pass** — drive selection fix is now in main; full
+   pass (model pull, voice, RAG) can proceed once Stephen tests with SSD
 
 ## Open questions for Stephen
 
-- For the drive filter fix: preference on connection-type detection vs. restoring the toggle?
+[none currently]
 
 ## Stable decisions (don't revisit)
 
@@ -73,3 +52,4 @@ build (Windows only, no macOS) at end of session.
 - DataGrid, TabControl/TabItem, GroupBox, CheckBox all styled via implicit styles in `Controls.xaml` — do not add per-control inline styling for these in WPF hosts
 - Drive warning (`SelectedDriveWarning`) lives in its own collapsible strip (Row 2 of root grid), not in the log header — keep it there for safety visibility
 - Model tag input overlays the tab strip via `Panel.ZIndex=2` + `BgBaseBrush` background — intentional, not a z-order bug
+- USB SSD drive detection uses WMI `Win32_DiskDrive WHERE InterfaceType='USB'` to determine external drives regardless of Windows DriveType. Internal drives still require the ShowFixedDrives toggle. WMI failure falls back silently to DriveType-only — fail-open is acceptable here (drive enumeration, not a security gate).
