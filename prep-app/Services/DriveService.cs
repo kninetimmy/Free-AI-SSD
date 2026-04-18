@@ -32,18 +32,37 @@ public sealed class DriveService : IDriveService
     public void EnsureSsdStructure(string rootPath)
         => SsdLayout.EnsureStructure(rootPath);
 
-    public async Task FormatAsync(string rootPath, string label, string fileSystem, Action<string>? onOutput, CancellationToken ct)
+    public async Task FormatAsync(
+        string rootPath,
+        string label,
+        string fileSystem,
+        Action<string>? onOutput,
+        CancellationToken ct,
+        bool verboseDiagnostics = false)
     {
         var built = DriveFormatCommand.Build(rootPath, label, fileSystem);
 
-        // Buffer the last N lines so a non-zero exit surfaces a meaningful
-        // error instead of just "exit code 1". ProcessRunner merges stdout
-        // and stderr into onOutput so we capture both here.
-        var tail = new System.Collections.Generic.Queue<string>(OutputTailLines + 1);
+        // Verbose diagnostic prelude — only emitted when the caller opted
+        // in via --diag. Default runs keep the log clean; the per-line
+        // stdout/stderr forwarding and exit-code line below always fire
+        // regardless, so non-zero exits still get useful context.
+        if (verboseDiagnostics)
+        {
+            onOutput?.Invoke("--- B3-Redux diagnostic: Format-Volume invocation ---");
+            onOutput?.Invoke(DriveFormatCommand.Describe(built));
+            onOutput?.Invoke($"WorkingDir   : {Environment.SystemDirectory}");
+            onOutput?.Invoke($"RootPath arg : {rootPath}");
+            onOutput?.Invoke($"Label arg    : \"{label}\" (length {label?.Length ?? 0})");
+            onOutput?.Invoke($"FileSystem   : {fileSystem}");
+            onOutput?.Invoke("--- Launching process; stdout+stderr follow ---");
+        }
+
+        // Capture every line so non-zero exits can surface a meaningful
+        // tail. Always-on — the capture is in-memory and cheap.
+        var allOutput = new System.Collections.Generic.List<string>();
         void Capture(string line)
         {
-            tail.Enqueue(line);
-            while (tail.Count > OutputTailLines) tail.Dequeue();
+            allOutput.Add(line);
             onOutput?.Invoke(line);
         }
 
@@ -56,8 +75,19 @@ public sealed class DriveService : IDriveService
             onOutput: Capture,
             ct: ct);
 
+        // Log exit code explicitly on every path — the previous code only
+        // surfaced it on non-zero, so a silent success masked the fact
+        // that Format-Volume returned 0 without actually formatting.
+        if (verboseDiagnostics)
+        {
+            onOutput?.Invoke($"--- Process exited with code {exitCode}. {allOutput.Count} output line(s) captured. ---");
+        }
+
         if (exitCode != 0)
         {
+            var tail = allOutput.Count <= OutputTailLines
+                ? allOutput
+                : allOutput.GetRange(allOutput.Count - OutputTailLines, OutputTailLines);
             var detail = tail.Count == 0 ? "(no output)" : string.Join(Environment.NewLine, tail);
             throw new InvalidOperationException(
                 $"Format-Volume failed on {rootPath} (exit {exitCode}).{Environment.NewLine}{detail}");

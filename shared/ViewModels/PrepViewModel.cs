@@ -44,6 +44,14 @@ public class PrepViewModel : BaseViewModel
     private int _companionHostPort = 41555;
     private readonly SynchronizationContext? _uiSyncContext;
 
+    // B3-Redux phase 2 state: filled from command-line args at startup
+    // so the view model can decide whether to auto-resume a format
+    // across the UAC relaunch and whether to emit diagnostic logging.
+    private bool _diagEnabled;
+    private string? _autoResumeFormatRoot;
+    private string _autoResumeFormatLabel = string.Empty;
+    private bool _isElevated;
+
     public PrepViewModel(
         IDriveService driveService,
         IModelService modelService,
@@ -66,6 +74,7 @@ public class PrepViewModel : BaseViewModel
         _dialogService = dialogService;
         _logService = logService;
         _elevationService = elevationService;
+        _isElevated = elevationService.IsElevated();
         _uiSyncContext = SynchronizationContext.Current;
 
         ModelRows = new ObservableCollection<ModelGridRow>();
@@ -220,6 +229,39 @@ public class PrepViewModel : BaseViewModel
         set => SetProperty(ref _volumeLabel, value);
     }
 
+    /// <summary>
+    /// True when the current process is running with admin rights. Drives
+    /// the persistent elevation banner in the PrepApp window so the user
+    /// always knows which window (elevated vs. not) they're looking at.
+    /// </summary>
+    public bool IsElevated
+    {
+        get => _isElevated;
+        private set
+        {
+            if (SetProperty(ref _isElevated, value))
+            {
+                OnPropertyChanged(nameof(ElevationBannerText));
+            }
+        }
+    }
+
+    /// <summary>
+    /// True iff valid auto-resume intent was parsed from startup args
+    /// (root + label survived revalidation). Used by the banner to pick
+    /// the "ready to continue" copy over the generic "click format"
+    /// fallback copy.
+    /// </summary>
+    public bool HasAutoResumeIntent => !string.IsNullOrEmpty(_autoResumeFormatRoot);
+
+    /// <summary>
+    /// Copy shown in the elevation banner. Consumers bind
+    /// <see cref="IsElevated"/> to Visibility and this string to Text.
+    /// </summary>
+    public string ElevationBannerText =>
+        HasAutoResumeIntent
+            ? "Running as administrator — format operation ready to continue."
+            : "Running as administrator. Click Format & Prepare Drive to continue.";
 
     public bool InstallVrCompanion
     {
@@ -303,6 +345,74 @@ public class PrepViewModel : BaseViewModel
     {
         CheckMacArtifactAvailability();
         RefreshDrives();
+    }
+
+    /// <summary>
+    /// Seed the view model with values parsed from command-line args.
+    /// Called by MainWindow after construction and before
+    /// <see cref="Initialize"/>. Values are expected to have already
+    /// been revalidated by <c>PrepStartupArgs.Parse</c> — this method
+    /// does no further input validation, it just stashes the state.
+    /// </summary>
+    public void ApplyStartupIntent(
+        string? autoResumeFormatRoot,
+        string autoResumeFormatLabel,
+        bool diagEnabled)
+    {
+        _autoResumeFormatRoot = autoResumeFormatRoot;
+        _autoResumeFormatLabel = autoResumeFormatLabel ?? string.Empty;
+        _diagEnabled = diagEnabled;
+        OnPropertyChanged(nameof(HasAutoResumeIntent));
+        OnPropertyChanged(nameof(ElevationBannerText));
+    }
+
+    /// <summary>
+    /// If auto-resume intent was set via <see cref="ApplyStartupIntent"/>,
+    /// attempts to resume the format operation that triggered the UAC
+    /// relaunch. Intent is consumed on attempt (pass or fail) so it
+    /// never fires twice. Safe to call when no intent is set — returns
+    /// immediately. Must run after <see cref="Initialize"/>.
+    /// </summary>
+    public async Task TryAutoResumeFormatAsync()
+    {
+        var root = _autoResumeFormatRoot;
+        if (string.IsNullOrEmpty(root)) return;
+
+        // Consume intent before any branch that might leave state mid-
+        // flight. The banner flips to its no-intent copy after this.
+        var requestedLabel = _autoResumeFormatLabel;
+        _autoResumeFormatRoot = null;
+        _autoResumeFormatLabel = string.Empty;
+        OnPropertyChanged(nameof(HasAutoResumeIntent));
+        OnPropertyChanged(nameof(ElevationBannerText));
+
+        // Drive-letter drift guard: user may have unplugged the SSD
+        // between Format-click and UAC-approval. Re-enumerate fresh
+        // (not relying on Drives already being populated) and bail if
+        // the requested root is no longer present.
+        var drives = _driveService.GetCandidateDrives(_showFixedDrives);
+        var match = drives.FirstOrDefault(d =>
+            string.Equals(d.RootPath, root, StringComparison.OrdinalIgnoreCase));
+        if (match is null)
+        {
+            AppendLog($"Auto-resume format cancelled: drive {root} is no longer present.");
+            _dialogService.ShowWarning(
+                $"The drive {root} that you asked to format is no longer connected." + Environment.NewLine + Environment.NewLine +
+                "Reconnect the drive and click Format & Prepare Drive to continue.",
+                "Drive not found");
+            return;
+        }
+
+        Drives = drives;
+        SelectedDrive = match;
+        VolumeLabel = requestedLabel;
+        AppendLog($"Auto-resume: continuing format of {root} (label '{requestedLabel}') after UAC relaunch.");
+
+        // FormatPrepareAsync contains the non-negotiable ConfirmErase
+        // dialog — that is the post-relaunch safety gate the user must
+        // click through before Format-Volume actually runs. We never
+        // bypass it.
+        await FormatPrepareAsync();
     }
 
     private void RefreshDrives()
@@ -797,7 +907,19 @@ public class PrepViewModel : BaseViewModel
 
             try
             {
-                if (!_elevationService.TryRelaunchElevated())
+                // Forward the current format intent across the UAC gap so
+                // the elevated instance can auto-resume (subject to the
+                // ConfirmErase dialog as the non-negotiable safety gate)
+                // instead of leaving the user staring at a fresh PrepApp
+                // window wondering why their format didn't proceed.
+                var relaunchArgs = new List<string>
+                {
+                    $"--autoresume-format={root}",
+                    $"--autoresume-label={_volumeLabel ?? string.Empty}"
+                };
+                if (_diagEnabled) relaunchArgs.Add("--diag");
+
+                if (!_elevationService.TryRelaunchElevated(relaunchArgs))
                 {
                     AppendLog("Format cancelled: UAC prompt was declined.");
                 }
@@ -817,16 +939,61 @@ public class PrepViewModel : BaseViewModel
         // mid-erase and either fail against a disappearing volume or
         // repopulate the drive before SaveConfigAsync lands.
         SetModelOperationState(true, $"Formatting {root}...");
+
+        // B3-Redux diagnostic sidecar — only opened when the --diag flag
+        // was passed at launch. Duplicates every log line written during
+        // the format flow into a text file on disk because the UI
+        // LogListBox doesn't support free-text selection. Default runs
+        // skip this entirely (clean log, no temp file).
+        var diagPath = Path.Combine(Path.GetTempPath(), "freeai-format-diagnostic.log");
+        StreamWriter? diagSink = null;
+        if (_diagEnabled)
+        {
+            try
+            {
+                diagSink = new StreamWriter(diagPath, append: false)
+                {
+                    AutoFlush = true
+                };
+                diagSink.WriteLine($"# B3-Redux diagnostic log — started {DateTime.Now:O}");
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"[diag] Could not open sidecar log at {diagPath}: {ex.Message}");
+            }
+        }
+
+        void DiagLog(string line)
+        {
+            AppendLog(line);
+            try { diagSink?.WriteLine(line); } catch { /* best-effort */ }
+        }
+
         try
         {
             ProgressIsIndeterminate = true;
+
+            var preLabel = _selectedDrive.VolumeLabel;
+            if (_diagEnabled)
+            {
+                DiagLog("=== B3-Redux diagnostic snapshot (pre-format) ===");
+                DiagLog($"Sidecar log file     : {diagPath}");
+                DiagLog($"Selected root        : {root}");
+                DiagLog($"Selected label (pre) : \"{preLabel}\"");
+                DiagLog($"Requested label      : \"{_volumeLabel}\"");
+                DiagLog($"IsFixed              : {_selectedDrive.IsFixed}");
+                DiagLog($"IsElevated (at call) : {_elevationService.IsElevated()}");
+                DiagLog($"PrepApp base dir     : {AppContext.BaseDirectory}");
+                DiagLog($"PrepApp drive root   : {Path.GetPathRoot(AppContext.BaseDirectory)}");
+            }
             AppendLog($"Formatting {root} as {DriveFormatCommand.DefaultFileSystem} (label: '{_volumeLabel}')...");
 
             await _driveService.FormatAsync(
                 root,
                 _volumeLabel,
                 DriveFormatCommand.DefaultFileSystem,
-                onOutput: AppendLog,
+                onOutput: DiagLog,
+                verboseDiagnostics: _diagEnabled,
                 ct: CancellationToken.None);
 
             StatusText = "Preparing drive structure...";
@@ -852,18 +1019,43 @@ public class PrepViewModel : BaseViewModel
                 string.Equals(d.RootPath, root, StringComparison.OrdinalIgnoreCase))
                 ?? (Drives.Count > 0 ? Drives[0] : null);
 
+            if (_diagEnabled)
+            {
+                DiagLog("=== B3-Redux diagnostic snapshot (post-format) ===");
+                DiagLog($"Enumerated drives    : {Drives.Count}");
+                foreach (var d in Drives)
+                {
+                    DiagLog($"  {d.RootPath} label=\"{d.VolumeLabel}\" fixed={d.IsFixed}");
+                }
+                var selRoot = SelectedDrive?.RootPath ?? "(null)";
+                var selLabel = SelectedDrive?.VolumeLabel ?? "(null)";
+                DiagLog($"Selected after       : {selRoot}");
+                DiagLog($"Selected label (post): \"{selLabel}\"");
+                DiagLog($"Root letter match    : {string.Equals(selRoot, root, StringComparison.OrdinalIgnoreCase)}");
+                DiagLog($"Label actually chgd  : {!string.Equals(preLabel, selLabel, StringComparison.Ordinal)}");
+                DiagLog("=== end B3-Redux diagnostic ===");
+                AppendLog($"[diag] Full diagnostic log saved to: {diagPath}");
+            }
+
             await RefreshModelStatusesAsync();
             SetModelOperationState(false, "Drive prepared");
         }
         catch (Exception ex)
         {
             AppendLog($"Drive preparation failed: {ex.Message}");
+            if (_diagEnabled)
+            {
+                DiagLog($"Exception type       : {ex.GetType().FullName}");
+                DiagLog($"Stack trace          :{Environment.NewLine}{ex.StackTrace}");
+                AppendLog($"[diag] Full diagnostic log saved to: {diagPath}");
+            }
             _dialogService.ShowError(ex.Message, "Format failed");
             SetModelOperationState(false, "Prepare failed");
         }
         finally
         {
             ProgressIsIndeterminate = false;
+            try { diagSink?.Dispose(); } catch { /* best-effort */ }
         }
     }
 

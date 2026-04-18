@@ -10,10 +10,16 @@ public interface IElevationService
     bool IsElevated();
 
     /// <summary>
-    /// Attempts to relaunch the current app elevated. On success, the current
+    /// Attempts to relaunch the current app elevated, forwarding the given
+    /// command-line args to the new instance. On success, the current
     /// process should be shut down by the implementation (the new elevated
     /// instance takes over). Returns false if the user declined UAC; throws
     /// on genuine launch failures.
     /// </summary>
-    bool TryRelaunchElevated();
+    /// <param name="forwardArgs">
+    /// Args to pass to the elevated instance. Forwarded via
+    /// <c>ProcessStartInfo.ArgumentList</c> so each value is quoted safely
+    /// — never string-concatenated. Pass null / empty for no args.
+    /// </param>
+    bool TryRelaunchElevated(IEnumerable<string>? forwardArgs = null);
 }

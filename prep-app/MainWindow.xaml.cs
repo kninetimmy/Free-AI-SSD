@@ -57,6 +57,15 @@ public partial class MainWindow : Window
         _viewModel.SystemRamGb = SystemResources.GetTotalSystemRamGb();
         _viewModel.GpuVramGb = SystemResources.GetGpuVramGb();
 
+        // Thread the parsed command-line intent through to the view
+        // model so the elevation banner binds correctly and the
+        // auto-resume-format path can fire after Initialize() runs.
+        var startup = App.StartupArgs;
+        _viewModel.ApplyStartupIntent(
+            startup.AutoResumeFormatRoot,
+            startup.AutoResumeLabel,
+            startup.DiagEnabled);
+
         DataContext = _viewModel;
 
         _viewModel.LogLines.CollectionChanged += LogLines_CollectionChanged;
@@ -104,6 +113,11 @@ public partial class MainWindow : Window
         {
             StartFtue();
         }
+
+        // Fire auto-resume after Initialize() has loaded drives and after
+        // the FTUE decision, so the confirm-erase dialog isn't competing
+        // with the spotlight. If no intent was passed this is a no-op.
+        _ = _viewModel.TryAutoResumeFormatAsync();
     }
 
     private void LoadStarterCatalog()

@@ -18,7 +18,7 @@ public sealed class WindowsElevationService : IElevationService
         return principal.IsInRole(WindowsBuiltInRole.Administrator);
     }
 
-    public bool TryRelaunchElevated()
+    public bool TryRelaunchElevated(IEnumerable<string>? forwardArgs = null)
     {
         var exePath = Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(exePath))
@@ -33,6 +33,18 @@ public sealed class WindowsElevationService : IElevationService
             Verb = "runas",
             WorkingDirectory = AppContext.BaseDirectory
         };
+
+        // Forward args via ArgumentList (never string concat) so labels
+        // containing spaces/quotes can't be reinterpreted by the shell.
+        // ArgumentList is respected even with UseShellExecute=true on
+        // modern .NET — each entry becomes one quoted CreateProcess token.
+        if (forwardArgs is not null)
+        {
+            foreach (var arg in forwardArgs)
+            {
+                if (arg is not null) startInfo.ArgumentList.Add(arg);
+            }
+        }
 
         try
         {
