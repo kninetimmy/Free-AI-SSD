@@ -27,23 +27,8 @@ public sealed class DialogService : IDialogService
 
     public bool ConfirmFixedDrive(string driveRoot)
     {
-        var firstConfirm = MessageBox.Show(
-            $"You selected a fixed drive: {driveRoot}\n\nThis can overwrite or modify files on that drive. Continue?",
-            "Advanced warning",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning,
-            MessageBoxResult.No);
-
-        if (firstConfirm != MessageBoxResult.Yes) return false;
-
-        var secondConfirm = MessageBox.Show(
-            "Final confirmation: this action may modify important files.\n\nClick Yes only if you fully understand the risk.",
-            "Confirm fixed drive selection",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Exclamation,
-            MessageBoxResult.No);
-
-        return secondConfirm == MessageBoxResult.Yes;
+        var dialog = new FixedDriveConfirmDialog(driveRoot) { Owner = _ownerProvider() };
+        return dialog.ShowDialog() == true;
     }
 
     public bool ConfirmSizingWarnings(IReadOnlyList<string> warnings)

@@ -1,12 +1,12 @@
-<Window x:Class="FreeAiSsd.PrepApp.EraseConfirmDialog"
+<Window x:Class="FreeAiSsd.PrepApp.FixedDriveConfirmDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Confirm drive format"
+        Title="Fixed drive warning"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         SizeToContent="WidthAndHeight"
         Background="{StaticResource BgBaseBrush}">
-    <Grid Margin="24" MinWidth="520">
+    <Grid Margin="24" MinWidth="480">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -16,8 +16,8 @@
         <TextBlock x:Name="WarningText" Style="{StaticResource BodyText}" TextWrapping="Wrap" Margin="0,0,0,16"/>
 
         <CheckBox x:Name="UnderstandCheck" Grid.Row="1"
-                  Content="I understand — this will permanently erase all data on the drive"
-                  Foreground="{StaticResource StatusDangerBrush}"
+                  Content="I understand the risk and want to continue"
+                  Foreground="{StaticResource StatusWarningBrush}"
                   Margin="0,0,0,16"/>
 
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">

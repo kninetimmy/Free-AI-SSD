@@ -22,7 +22,7 @@ public partial class EraseConfirmDialog : System.Windows.Window
 
     private void Proceed_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        IsConfirmed = string.Equals(ConfirmText.Text?.Trim(), "ERASE", StringComparison.Ordinal);
-        DialogResult = IsConfirmed;
+        IsConfirmed = true;
+        DialogResult = true;
     }
 }
