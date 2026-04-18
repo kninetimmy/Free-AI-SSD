@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>FreeAiSsd.RunnerCli</RootNamespace>
+    <AssemblyName>FreeAiSsd.RunnerCli</AssemblyName>
+    <!--
+      Pure net8.0 (no -windows suffix): this is an HTTP client only, zero
+      WPF / Windows dependencies, so it can be published for any runtime
+      the user wants to SSH from. Publish to win-x64 for the primary
+      "same-host as Runner" use case via build.ps1.
+    -->
+  </PropertyGroup>
+</Project>

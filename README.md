@@ -39,6 +39,7 @@ This started as a way to take AI into the field with no cell signal — ham radi
 - ✅ **HOTAS Push-to-Talk** — DirectInput joystick button triggers record → transcribe → send → TTS, hands-free
 - ✅ **Network Mode** — authenticated LAN HTTP API for chat, streaming chat, STT upload, host-side TTS, and voice-query orchestration
 - ✅ **Companion tray app** — lightweight Windows client for a second PC on the LAN (no SSD required on the client)
+- ✅ **Headless CLI (`FreeAiSsd.RunnerCli`)** — terminal REPL for SSH / Tailscale access; streams chat, shows RAG sources, zero GUI deps
 - ✅ **Offline prereq bundle** — .NET 8 Desktop Runtime + VC++ redist staged and SHA-verified so Runner installs cleanly on fresh targets
 
 Known gaps:
@@ -46,6 +47,23 @@ Known gaps:
 - Direct Ollama LAN exposure is intentionally not supported — Runner API is the only network surface.
 
 Note: Remote HOTAS/PTT is supported via the Companion tray app — HOTAS PTT can run on the client machine and drive the full voice loop against Runner over LAN. TTS playback defaults to the host machine running Runner; Companion clients can opt in to local playback by passing `returnAudio=true` on `/api/voice/query`.
+
+### SSH / Tailscale access (CLI)
+
+For headless access from a terminal (including an iPad over Tailscale), the `FreeAiSsd.RunnerCli` binary ships alongside Runner. It's a thin HTTP client against Runner's LAN API — same RAG pipeline, same source citations, but no GUI.
+
+```
+$ FreeAiSsd.RunnerCli --help
+$ FREEAI_URL=http://my-desk:41555 FREEAI_API_KEY=... FreeAiSsd.RunnerCli --model phi3
+Target: http://my-desk:41555
+Host reachable (ollamaRunning=True). Type /help for commands. Ctrl-C or 'exit' to quit.
+phi3> what aircraft can I fly in DCS Open Beta?
+...streamed response...
+— sources: dcs-aircraft-list.pdf
+phi3> /quit
+```
+
+Precedence for configuration: `--url` / `--api-key` flag > `FREEAI_URL` / `FREEAI_API_KEY` env var > default (`http://127.0.0.1:41555`, no key). No TUI libraries — plain `Console.ReadLine`, so it's robust over spotty SSH connections. Use `--no-stream` on very flaky links to fall back to a single-response round-trip.
 
 ---
 
