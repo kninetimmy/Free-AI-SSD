@@ -40,6 +40,7 @@ public partial class MainWindow : Window
         var artifactStagingService = new ArtifactStagingService();
         var readinessService = new ReadinessService(modelService);
         var encryptionService = new EncryptionService();
+        var elevationService = new WindowsElevationService();
 
         _viewModel = new PrepViewModel(
             driveService,
@@ -50,7 +51,8 @@ public partial class MainWindow : Window
             readinessService,
             encryptionService,
             dialogService,
-            logService);
+            logService,
+            elevationService);
 
         _viewModel.SystemRamGb = SystemResources.GetTotalSystemRamGb();
         _viewModel.GpuVramGb = SystemResources.GetGpuVramGb();

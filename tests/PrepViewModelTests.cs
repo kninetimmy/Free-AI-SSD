@@ -18,6 +18,7 @@ public class PrepViewModelTests
     private readonly Mock<IEncryptionService> _encryptionService = new();
     private readonly Mock<IDialogService> _dialogService = new();
     private readonly Mock<ILogService> _logService = new();
+    private readonly Mock<IElevationService> _elevationService = new();
 
     private static DriveTarget MakeDrive(string rootPath, string label = "SSD",
         long freeBytes = 64_000_000_000, long totalBytes = 128_000_000_000,
@@ -35,7 +36,8 @@ public class PrepViewModelTests
             _readinessService.Object,
             _encryptionService.Object,
             _dialogService.Object,
-            _logService.Object);
+            _logService.Object,
+            _elevationService.Object);
     }
 
     private void SetupDefaultMocks(IReadOnlyList<DriveTarget>? drives = null, bool encrypted = false)
@@ -307,5 +309,101 @@ public class PrepViewModelTests
         var method = typeof(PrepViewModel).GetMethod("DetermineConfiguredState",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
         return (string)method!.Invoke(null, new object[] { model, onDisk })!;
+    }
+
+    // ───── Format & Prepare flow ─────
+
+    private void SetupFormatPath(bool elevated)
+    {
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        _elevationService.Setup(e => e.IsElevated()).Returns(elevated);
+    }
+
+    [Fact]
+    public void FormatPrepare_NotElevated_UserDeclinesAdminPrompt_Aborts()
+    {
+        SetupFormatPath(elevated: false);
+        _dialogService.Setup(d => d.ConfirmFixedDrive(It.IsAny<string>())).Returns(true);
+        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+        _dialogService.Setup(d => d.Confirm(It.IsAny<string>(), "Administrator required")).Returns(false);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.FormatPrepareCommand.Execute(null);
+        Thread.Sleep(100);
+
+        _elevationService.Verify(e => e.TryRelaunchElevated(), Times.Never);
+        _driveService.Verify(d => d.FormatAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Contains(vm.LogLines, l => l.Contains("administrator privileges required"));
+    }
+
+    [Fact]
+    public void FormatPrepare_NotElevated_UserAccepts_UacDeclined_LogsAndStops()
+    {
+        SetupFormatPath(elevated: false);
+        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+        _dialogService.Setup(d => d.Confirm(It.IsAny<string>(), "Administrator required")).Returns(true);
+        _elevationService.Setup(e => e.TryRelaunchElevated()).Returns(false);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.FormatPrepareCommand.Execute(null);
+        Thread.Sleep(100);
+
+        _elevationService.Verify(e => e.TryRelaunchElevated(), Times.Once);
+        _driveService.Verify(d => d.FormatAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Contains(vm.LogLines, l => l.Contains("UAC prompt was declined"));
+    }
+
+    [Fact]
+    public void FormatPrepare_EraseNotConfirmed_Aborts()
+    {
+        SetupFormatPath(elevated: true);
+        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>())).Returns(false);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.FormatPrepareCommand.Execute(null);
+        Thread.Sleep(100);
+
+        _driveService.Verify(d => d.FormatAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Contains(vm.LogLines, l => l.Contains("Format cancelled by user"));
+    }
+
+    [Fact]
+    public void FormatPrepare_Elevated_HappyPath_FormatsAndPreparesStructure()
+    {
+        SetupFormatPath(elevated: true);
+        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+        _driveService.Setup(d => d.FormatAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.FormatPrepareCommand.Execute(null);
+        Thread.Sleep(200);
+
+        _driveService.Verify(d => d.FormatAsync("E:\\", It.IsAny<string>(), "NTFS", It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>()), Times.Once);
+        _driveService.Verify(d => d.EnsureSsdStructure("E:\\"), Times.Once);
+        _modelService.Verify(m => m.SaveConfigAsync(It.IsAny<string>(), It.IsAny<PortableConfig>()), Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public void FormatPrepare_FormatThrows_LogsAndShowsError()
+    {
+        SetupFormatPath(elevated: true);
+        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+        _driveService.Setup(d => d.FormatAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Format-Volume failed on E:\\ (exit 5)."));
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.FormatPrepareCommand.Execute(null);
+        Thread.Sleep(200);
+
+        _driveService.Verify(d => d.EnsureSsdStructure(It.IsAny<string>()), Times.Never);
+        Assert.Contains(vm.LogLines, l => l.Contains("Drive preparation failed"));
+        _dialogService.Verify(d => d.ShowError(It.Is<string>(s => s.Contains("Format-Volume failed")), "Format failed"), Times.Once);
     }
 }
