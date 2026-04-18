@@ -1,6 +1,4 @@
 using System.Diagnostics;
-using System.IO;
-using System.Text.Json;
 using FreeAiSsd.Shared.Helpers;
 
 namespace FreeAiSsd.PrepApp;
