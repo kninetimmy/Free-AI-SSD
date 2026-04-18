@@ -31,6 +31,8 @@
     <Compile Include="..\runner\Services\IDocumentOperationsService.cs" Link="Runner\IDocumentOperationsService.cs" />
     <Compile Include="..\runner\Services\DocumentOperationsService.cs" Link="Runner\DocumentOperationsService.cs" />
     <Compile Include="..\runner\Services\RunnerLocalApiService.cs" Link="Runner\RunnerLocalApiService.cs" />
+    <Compile Include="..\runner-cli\RunnerApiClient.cs" Link="RunnerCli\RunnerApiClient.cs" />
+    <Compile Include="..\runner-cli\Repl.cs" Link="RunnerCli\Repl.cs" />
   </ItemGroup>
 
   <ItemGroup>
