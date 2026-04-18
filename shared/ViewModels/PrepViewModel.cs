@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using FreeAiSsd.Shared.Models;
 using FreeAiSsd.Shared.Mvvm;
 using FreeAiSsd.Shared.Services;
@@ -16,6 +17,7 @@ public class PrepViewModel : BaseViewModel
     private readonly IEncryptionService _encryptionService;
     private readonly IDialogService _dialogService;
     private readonly ILogService _logService;
+    private readonly IElevationService _elevationService;
 
     private IReadOnlyList<DriveTarget> _drives = Array.Empty<DriveTarget>();
     private DriveTarget? _selectedDrive;
@@ -51,7 +53,8 @@ public class PrepViewModel : BaseViewModel
         IReadinessService readinessService,
         IEncryptionService encryptionService,
         IDialogService dialogService,
-        ILogService logService)
+        ILogService logService,
+        IElevationService elevationService)
     {
         _driveService = driveService;
         _modelService = modelService;
@@ -62,6 +65,7 @@ public class PrepViewModel : BaseViewModel
         _encryptionService = encryptionService;
         _dialogService = dialogService;
         _logService = logService;
+        _elevationService = elevationService;
         _uiSyncContext = SynchronizationContext.Current;
 
         ModelRows = new ObservableCollection<ModelGridRow>();
@@ -747,26 +751,85 @@ public class PrepViewModel : BaseViewModel
         }
         if (!EnsureWritable("Format & Prepare Drive")) return;
 
+        var root = _selectedDrive.RootPath;
+
+        // Refuse to format the drive the PrepApp itself is running from —
+        // that would wipe the running executable out from under us.
+        var appRoot = Path.GetPathRoot(AppContext.BaseDirectory);
+        if (!string.IsNullOrEmpty(appRoot) &&
+            string.Equals(Path.GetPathRoot(root), appRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            _dialogService.ShowError(
+                $"Cannot format {root} because PrepApp is running from that drive.{Environment.NewLine}" +
+                "Move PrepApp to another drive and try again.",
+                "Self-format blocked");
+            AppendLog($"Format aborted: PrepApp is running from {appRoot}.");
+            return;
+        }
+
         if (_selectedDrive.IsFixed)
         {
-            if (!_dialogService.ConfirmFixedDrive(_selectedDrive.RootPath))
+            if (!_dialogService.ConfirmFixedDrive(root))
             {
                 AppendLog("Format cancelled by user.");
                 return;
             }
         }
 
-        if (!_dialogService.ConfirmErase(_selectedDrive.RootPath,
-            _driveService.GetFreeDiskSpaceGb(_selectedDrive.RootPath)?.ToString() ?? "unknown"))
+        if (!_dialogService.ConfirmErase(root,
+            _driveService.GetFreeDiskSpaceGb(root)?.ToString() ?? "unknown"))
         {
             AppendLog("Format cancelled by user.");
             return;
         }
 
+        if (!_elevationService.IsElevated())
+        {
+            var relaunch = _dialogService.Confirm(
+                "Formatting a drive requires administrator privileges." + Environment.NewLine + Environment.NewLine +
+                "Relaunch PrepApp as administrator now? You'll be prompted by Windows to approve.",
+                "Administrator required");
+            if (!relaunch)
+            {
+                AppendLog("Format cancelled: administrator privileges required.");
+                return;
+            }
+
+            try
+            {
+                if (!_elevationService.TryRelaunchElevated())
+                {
+                    AppendLog("Format cancelled: UAC prompt was declined.");
+                }
+            }
+            catch (Exception ex)
+            {
+                _dialogService.ShowError($"Could not relaunch as administrator: {ex.Message}", "Elevation failed");
+                AppendLog($"Elevated relaunch failed: {ex.Message}");
+            }
+            return;
+        }
+
+        // Mark the whole format+prepare flow as a busy operation so the
+        // other mutating commands (Pull, Verify, Remove, Finalize) are
+        // gated by CanMutateDrive while Format-Volume is running. Without
+        // this, a user could kick off a pull against a drive root that's
+        // mid-erase and either fail against a disappearing volume or
+        // repopulate the drive before SaveConfigAsync lands.
+        SetModelOperationState(true, $"Formatting {root}...");
         try
         {
+            ProgressIsIndeterminate = true;
+            AppendLog($"Formatting {root} as {DriveFormatCommand.DefaultFileSystem} (label: '{_volumeLabel}')...");
+
+            await _driveService.FormatAsync(
+                root,
+                _volumeLabel,
+                DriveFormatCommand.DefaultFileSystem,
+                onOutput: AppendLog,
+                ct: CancellationToken.None);
+
             StatusText = "Preparing drive structure...";
-            var root = _selectedDrive.RootPath;
             _driveService.EnsureSsdStructure(root);
 
             var configPath = GetConfigPath(root);
@@ -778,14 +841,29 @@ public class PrepViewModel : BaseViewModel
             };
             await _modelService.SaveConfigAsync(configPath, config);
 
-            StatusText = "Drive prepared";
-            AppendLog($"Drive structure created on {root}.");
+            AppendLog($"Drive formatted and structure created on {root}.");
+
+            // Re-enumerate drives so the dropdown picks up the new volume
+            // label and post-format free-bytes instead of stale metadata
+            // captured before the format. Preserve selection by root path
+            // so the user's choice doesn't jump to Drives[0].
+            Drives = _driveService.GetCandidateDrives(_showFixedDrives);
+            SelectedDrive = Drives.FirstOrDefault(d =>
+                string.Equals(d.RootPath, root, StringComparison.OrdinalIgnoreCase))
+                ?? (Drives.Count > 0 ? Drives[0] : null);
+
             await RefreshModelStatusesAsync();
+            SetModelOperationState(false, "Drive prepared");
         }
         catch (Exception ex)
         {
-            StatusText = "Prepare failed";
             AppendLog($"Drive preparation failed: {ex.Message}");
+            _dialogService.ShowError(ex.Message, "Format failed");
+            SetModelOperationState(false, "Prepare failed");
+        }
+        finally
+        {
+            ProgressIsIndeterminate = false;
         }
     }
 

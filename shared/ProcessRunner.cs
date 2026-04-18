@@ -20,7 +20,7 @@ public static class ProcessRunner
     /// <param name="onOutput">Callback invoked for each non-empty output line (both stdout and stderr).</param>
     /// <param name="ct">Cancellation token to abort the operation.</param>
     /// <returns>The process exit code.</returns>
-    public static async Task<int> RunAsync(string fileName, string arguments, string workingDirectory, IDictionary<string, string>? env = null, Action<string>? onOutput = null, CancellationToken ct = default)
+    public static Task<int> RunAsync(string fileName, string arguments, string workingDirectory, IDictionary<string, string>? env = null, Action<string>? onOutput = null, CancellationToken ct = default)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -32,7 +32,34 @@ public static class ProcessRunner
             UseShellExecute = false,
             CreateNoWindow = true
         };
+        return RunInternalAsync(startInfo, env, onOutput, ct);
+    }
 
+    /// <summary>
+    /// Overload that populates <see cref="ProcessStartInfo.ArgumentList"/> instead of
+    /// a single string. Required when any argument could contain spaces, quotes, or
+    /// metacharacters — the OS does the quoting so we can't accidentally inject.
+    /// </summary>
+    public static Task<int> RunAsync(string fileName, IReadOnlyList<string> arguments, string workingDirectory, IDictionary<string, string>? env = null, Action<string>? onOutput = null, CancellationToken ct = default)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = fileName,
+            WorkingDirectory = workingDirectory,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        foreach (var arg in arguments)
+        {
+            startInfo.ArgumentList.Add(arg);
+        }
+        return RunInternalAsync(startInfo, env, onOutput, ct);
+    }
+
+    private static async Task<int> RunInternalAsync(ProcessStartInfo startInfo, IDictionary<string, string>? env, Action<string>? onOutput, CancellationToken ct)
+    {
         if (env != null)
         {
             foreach (var pair in env)
