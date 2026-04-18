@@ -4,7 +4,7 @@ Last updated: 2026-04-17
 
 ## Currently building
 
-Between tasks. B1 fully shipped (PRs #124–#126). Immediate next: fix Codex-flagged `ThemedMessageDialog` height cap (add `MaxHeight` + `ScrollViewer` on message region). Then back to backlog priority order.
+F1 fix open as PR #129 (MSFT_PhysicalDisk primary path + fallback; diagnostic script in tools/). Once merged, README update for F1 is due. Next focus: B3 — "Format & Prepare Drive" button actually formats.
 
 ## Planned work — TODO backlog triage
 
@@ -200,6 +200,8 @@ Per Stephen's requested workflow: after each **section** ships (not each stage),
 
 ## Last session
 
+2026-04-17 — Three items shipped. PR #127 (74224c9) fixed the Codex-flagged `ThemedMessageDialog` height regression: `MaxHeight="560"` on the Window, `ScrollViewer` wrapping `MessageText` (MaxHeight=350). PR #128 (0e27815) added B1 user-facing summary to README. PR #129 (ff057e3, b4888e9) fixed F1 USB SSD detection — root cause was UAS adapters reporting `InterfaceType='SCSI'` instead of `'USB'` in `Win32_DiskDrive`, causing Stephen's SSD to be silently missed; switched primary path to `MSFT_PhysicalDisk WHERE BusType=7` (Storage namespace) with Win32_DiskDrive ASSOCIATORS as fallback; replaced silent `catch {}` with `Trace.WriteLine`. Diagnostic script added to `tools/Diagnose-UsbDrives.ps1`. PRs #127 and #128 merged; #129 open pending review.
+
 2026-04-17 — B1 completed across 3 PRs. PR #124 (d39878c) restyled the three unthemed PrepApp dialogs (EraseConfirmDialog, EncryptionSetupDialog, RemoveModelDialog) to match the neumorphic dark theme. PR #125 (92f6872) swapped the "type ERASE" confirmation for a checkbox-gated Proceed and collapsed `ConfirmFixedDrive`'s two sequential MessageBox popups into a single themed `FixedDriveConfirmDialog`. PR #126 (2fed670) built `ThemedMessageDialog` with static `ShowInfo/ShowWarning/ShowError/Confirm` helpers and replaced all 9 remaining raw `MessageBox` call sites in `DialogService` and `EncryptionSetupDialog`; `App.xaml.cs` crash handlers intentionally kept raw (must survive theme-load failures). CI failure on first push: `dotnet format` stripped `using System.Text.Json;` from `ModelOperations.cs` (tests project compiles it directly without prep-app's GlobalUsings); fixed in 1000756 by adding to `tests/GlobalUsings.cs`. Codex adversarial review flagged one unresolved medium finding: `ThemedMessageDialog` has no height cap or `ScrollViewer` — `ConfirmSizingWarnings` payloads could push buttons off-screen.
 
 2026-04-17 — Planning/triage only (no commits). Read Stephen's
@@ -227,15 +229,13 @@ now appear in the default dropdown via WMI InterfaceType detection.
 
 ## Next up
 
-1. **ThemedMessageDialog height fix** — Codex medium finding; add `MaxHeight` + `ScrollViewer` on message region before moving on
-2. **README update for B1** — due now that all 3 stages shipped
-3. **F1 — diagnose USB SSD detection regression** (HIGH priority — blocking Stephen's live-drive test pass)
-4. **B3 — Format button actually formats** (foundational for the prep flow working end-to-end)
-5. **F4 — profile FTUE in PrepApp + companion install target selector** (multi-stage, Opus planning)
-6. **B2 — build LAN discovery** (multi-stage, Opus planning; can run in parallel with F4)
-7. **F3 — PrepApp 3-tab restructure** (Opus planning)
-8. **F2 — live model list fetch** (smaller feature, fits between larger items)
-9. ~~I1 — architecture diagram~~ (folded into F4 Stage 1)
+1. **Merge PR #129** (F1 USB detection fix) — then update README with F1 summary
+2. **B3 — Format button actually formats** (foundational for the prep flow)
+3. **F4 — profile FTUE in PrepApp + companion install target selector** (multi-stage, Opus planning)
+4. **B2 — build LAN discovery** (multi-stage, Opus planning; can run in parallel with F4)
+5. **F3 — PrepApp 3-tab restructure** (Opus planning)
+6. **F2 — live model list fetch** (smaller feature)
+7. ~~I1 — architecture diagram~~ (folded into F4 Stage 1)
 
 **Workflow when Stephen says "tackle section X":**
 1. Claude reads the section's entry in the Planned work block below.
@@ -271,9 +271,8 @@ now appear in the default dropdown via WMI InterfaceType detection.
 - DataGrid, TabControl/TabItem, GroupBox, CheckBox all styled via implicit styles in `Controls.xaml` — do not add per-control inline styling for these in WPF hosts
 - Drive warning (`SelectedDriveWarning`) lives in its own collapsible strip (Row 2 of root grid), not in the log header — keep it there for safety visibility
 - Model tag input overlays the tab strip via `Panel.ZIndex=2` + `BgBaseBrush` background — intentional, not a z-order bug
-- USB SSD drive detection uses WMI `Win32_DiskDrive WHERE InterfaceType='USB'` to determine external drives regardless of Windows DriveType. Internal drives still require the ShowFixedDrives toggle. WMI failure falls back silently to DriveType-only — fail-open is acceptable here (drive enumeration, not a security gate).
+- USB SSD drive detection primary path: `ROOT\Microsoft\Windows\Storage` `MSFT_PhysicalDisk WHERE BusType = 7` (USB) → `MSFT_Partition.DriveLetter`. Fallback: legacy `Win32_DiskDrive WHERE InterfaceType='USB'` ASSOCIATORS chain (kept for compatibility but misses UAS adapters that report SCSI). Both paths log failures via `Trace.WriteLine` instead of silently swallowing. Established F1 fix (PR #129). Internal drives still require the ShowFixedDrives toggle. Fail-open is acceptable here (drive enumeration, not a security gate).
 - WMI disposal pattern: always `using var collection = searcher.Get()` then `using (obj) { ... }` for each loop variable — `ManagementObjectCollection` and `ManagementObject` hold COM handles and must be explicitly disposed. Established PR #122.
 - TODO backlog workflow: "tackle section X" → Claude outputs a well-formed implementation prompt + states the recommended model from the section's `**Model:**` line in the Planned work block. Multi-stage sections target Stage 1 by default unless Stephen overrides. README update follows each completed section, not each stage.
-- WMI `InterfaceType='USB'` silent-fallback from PR #121 is no longer trusted — F1 proves it misses real portable SSDs (Stephen's own drive in v1.2.0 test). Route WMI detection failures to visible logs until F1 ships a fix; do not silently mask.
 - `ThemedMessageDialog` is PrepApp's general-purpose dialog primitive. All new PrepApp dialogs use it (or a custom Window with the same theme resources). `App.xaml.cs` crash handlers are the explicit exception — stay as raw `MessageBox` with zero dependency on the app resource graph.
 - Files compiled by the tests project via `<Compile Include>` must carry their own explicit `using` directives — don't rely on the owning project's `GlobalUsings.cs`. The test project's `GlobalUsings.cs` is the correct fix location (not suppressions in source files). Established PR #126.
