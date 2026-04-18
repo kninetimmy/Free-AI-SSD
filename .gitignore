@@ -14,6 +14,10 @@ project.lock.json
 *~
 .DS_Store
 
+# Claude Code session state: machine-specific permissions and
+# transient subagent worktrees. Never commit.
+.claude/
+
 # Phase-A hardening (Task 5): secret / credential / key material.
 # Never commit signing certs, private keys, env files, or the live portable-config.
 *.pfx
