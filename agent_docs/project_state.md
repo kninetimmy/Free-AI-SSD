@@ -4,7 +4,7 @@ Last updated: 2026-04-17
 
 ## Currently building
 
-F1 shipped (PR pending). ThemedMessageDialog height fix (PR #127) and README B1 update (PR #128) both merged. Next: B3 — "Format & Prepare Drive" button actually formats.
+F1 fix open as PR #129 (MSFT_PhysicalDisk primary path + fallback; diagnostic script in tools/). Once merged, README update for F1 is due. Next focus: B3 — "Format & Prepare Drive" button actually formats.
 
 ## Planned work — TODO backlog triage
 
@@ -200,6 +200,8 @@ Per Stephen's requested workflow: after each **section** ships (not each stage),
 
 ## Last session
 
+2026-04-17 — Three items shipped. PR #127 (74224c9) fixed the Codex-flagged `ThemedMessageDialog` height regression: `MaxHeight="560"` on the Window, `ScrollViewer` wrapping `MessageText` (MaxHeight=350). PR #128 (0e27815) added B1 user-facing summary to README. PR #129 (ff057e3, b4888e9) fixed F1 USB SSD detection — root cause was UAS adapters reporting `InterfaceType='SCSI'` instead of `'USB'` in `Win32_DiskDrive`, causing Stephen's SSD to be silently missed; switched primary path to `MSFT_PhysicalDisk WHERE BusType=7` (Storage namespace) with Win32_DiskDrive ASSOCIATORS as fallback; replaced silent `catch {}` with `Trace.WriteLine`. Diagnostic script added to `tools/Diagnose-UsbDrives.ps1`. PRs #127 and #128 merged; #129 open pending review.
+
 2026-04-17 — B1 completed across 3 PRs. PR #124 (d39878c) restyled the three unthemed PrepApp dialogs (EraseConfirmDialog, EncryptionSetupDialog, RemoveModelDialog) to match the neumorphic dark theme. PR #125 (92f6872) swapped the "type ERASE" confirmation for a checkbox-gated Proceed and collapsed `ConfirmFixedDrive`'s two sequential MessageBox popups into a single themed `FixedDriveConfirmDialog`. PR #126 (2fed670) built `ThemedMessageDialog` with static `ShowInfo/ShowWarning/ShowError/Confirm` helpers and replaced all 9 remaining raw `MessageBox` call sites in `DialogService` and `EncryptionSetupDialog`; `App.xaml.cs` crash handlers intentionally kept raw (must survive theme-load failures). CI failure on first push: `dotnet format` stripped `using System.Text.Json;` from `ModelOperations.cs` (tests project compiles it directly without prep-app's GlobalUsings); fixed in 1000756 by adding to `tests/GlobalUsings.cs`. Codex adversarial review flagged one unresolved medium finding: `ThemedMessageDialog` has no height cap or `ScrollViewer` — `ConfirmSizingWarnings` payloads could push buttons off-screen.
 
 2026-04-17 — Planning/triage only (no commits). Read Stephen's
@@ -227,12 +229,13 @@ now appear in the default dropdown via WMI InterfaceType detection.
 
 ## Next up
 
-1. **B3 — Format button actually formats** (foundational for the prep flow working end-to-end)
-5. **F4 — profile FTUE in PrepApp + companion install target selector** (multi-stage, Opus planning)
-6. **B2 — build LAN discovery** (multi-stage, Opus planning; can run in parallel with F4)
-7. **F3 — PrepApp 3-tab restructure** (Opus planning)
-8. **F2 — live model list fetch** (smaller feature, fits between larger items)
-9. ~~I1 — architecture diagram~~ (folded into F4 Stage 1)
+1. **Merge PR #129** (F1 USB detection fix) — then update README with F1 summary
+2. **B3 — Format button actually formats** (foundational for the prep flow)
+3. **F4 — profile FTUE in PrepApp + companion install target selector** (multi-stage, Opus planning)
+4. **B2 — build LAN discovery** (multi-stage, Opus planning; can run in parallel with F4)
+5. **F3 — PrepApp 3-tab restructure** (Opus planning)
+6. **F2 — live model list fetch** (smaller feature)
+7. ~~I1 — architecture diagram~~ (folded into F4 Stage 1)
 
 **Workflow when Stephen says "tackle section X":**
 1. Claude reads the section's entry in the Planned work block below.
