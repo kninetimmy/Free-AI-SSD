@@ -1,4 +1,3 @@
-using System.IO;
 using System.Net.Http;
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Prereqs;
@@ -178,7 +177,7 @@ public sealed class PrereqService : IPrereqService
     {
         return definition.Id switch
         {
-            PrereqCatalog.VcRedistX64Id       => Task.FromResult(PrereqResolver.ResolveVcRedistX64()),
+            PrereqCatalog.VcRedistX64Id => Task.FromResult(PrereqResolver.ResolveVcRedistX64()),
             PrereqCatalog.DotnetDesktop8X64Id => PrereqResolver.ResolveDotnet8DesktopX64Async(client, ct),
             _ => throw new InvalidOperationException(
                 $"No runtime resolver registered for prereq id '{definition.Id}'. " +

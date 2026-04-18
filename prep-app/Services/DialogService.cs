@@ -14,16 +14,16 @@ public sealed class DialogService : IDialogService
     }
 
     public void ShowInfo(string message, string title)
-        => MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Information);
+        => ThemedMessageDialog.ShowInfo(message, title, _ownerProvider());
 
     public void ShowWarning(string message, string title)
-        => MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
+        => ThemedMessageDialog.ShowWarning(message, title, _ownerProvider());
 
     public void ShowError(string message, string title)
-        => MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Error);
+        => ThemedMessageDialog.ShowError(message, title, _ownerProvider());
 
     public bool Confirm(string message, string title)
-        => MessageBox.Show(message, title, MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
+        => ThemedMessageDialog.Confirm(message, title, _ownerProvider());
 
     public bool ConfirmFixedDrive(string driveRoot)
     {
@@ -39,12 +39,7 @@ public sealed class DialogService : IDialogService
             + Environment.NewLine + Environment.NewLine
             + "Continue anyway?";
 
-        return MessageBox.Show(
-            message,
-            "Model sizing warnings",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning,
-            MessageBoxResult.No) == MessageBoxResult.Yes;
+        return ThemedMessageDialog.Confirm(message, "Model sizing warnings", _ownerProvider());
     }
 
     public bool ConfirmErase(string driveRoot, string sizeDisplay)
@@ -69,11 +64,9 @@ public sealed class DialogService : IDialogService
 
     public bool ConfirmPrereqRefresh()
     {
-        return MessageBox.Show(
+        return ThemedMessageDialog.Confirm(
             "Prerequisite bundle is missing or inconsistent. Re-download prerequisites now (online) and rewrite manifest?",
             "Prerequisite bundle verification",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning,
-            MessageBoxResult.Yes) == MessageBoxResult.Yes;
+            _ownerProvider());
     }
 }
