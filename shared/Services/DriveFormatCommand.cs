@@ -63,6 +63,25 @@ public static class DriveFormatCommand
         return new Built(powershellPath, args, env, driveLetter);
     }
 
+    /// <summary>
+    /// Diagnostic-only helper. Renders a Built command as a human-readable
+    /// multi-line string safe to write to the UI log or a diagnostic file.
+    /// Env values are quoted so empty strings / whitespace are visible.
+    /// </summary>
+    public static string Describe(Built built)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append("FileName     : ").AppendLine(built.FileName);
+        sb.Append("DriveLetter  : ").Append(built.DriveLetter).AppendLine();
+        sb.Append("Arguments    : ").AppendLine(string.Join(" ", built.Arguments));
+        sb.AppendLine("Environment  :");
+        foreach (var kv in built.Environment)
+        {
+            sb.Append("  ").Append(kv.Key).Append(" = \"").Append(kv.Value).AppendLine("\"");
+        }
+        return sb.ToString().TrimEnd();
+    }
+
     internal static char ParseDriveLetter(string rootPath)
     {
         if (string.IsNullOrWhiteSpace(rootPath))

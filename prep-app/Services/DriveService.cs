@@ -36,14 +36,26 @@ public sealed class DriveService : IDriveService
     {
         var built = DriveFormatCommand.Build(rootPath, label, fileSystem);
 
-        // Buffer the last N lines so a non-zero exit surfaces a meaningful
-        // error instead of just "exit code 1". ProcessRunner merges stdout
-        // and stderr into onOutput so we capture both here.
-        var tail = new System.Collections.Generic.Queue<string>(OutputTailLines + 1);
+        // B3-Redux diagnostic logging — log every detail of the command
+        // being constructed and run so that a live test against the real
+        // SSD produces enough evidence to discriminate between UAC /
+        // exit-0-without-formatting / drive-letter-mismatch hypotheses.
+        // Behavior is unchanged; this is additive logging only.
+        onOutput?.Invoke("--- B3-Redux diagnostic: Format-Volume invocation ---");
+        onOutput?.Invoke(DriveFormatCommand.Describe(built));
+        onOutput?.Invoke($"WorkingDir   : {Environment.SystemDirectory}");
+        onOutput?.Invoke($"RootPath arg : {rootPath}");
+        onOutput?.Invoke($"Label arg    : \"{label}\" (length {label?.Length ?? 0})");
+        onOutput?.Invoke($"FileSystem   : {fileSystem}");
+        onOutput?.Invoke("--- Launching process; stdout+stderr follow ---");
+
+        // Capture every line — the previous 10-line tail was dropping
+        // earlier stdout/stderr that might contain warnings explaining
+        // why an exit-0 run didn't actually wipe the drive.
+        var allOutput = new System.Collections.Generic.List<string>();
         void Capture(string line)
         {
-            tail.Enqueue(line);
-            while (tail.Count > OutputTailLines) tail.Dequeue();
+            allOutput.Add(line);
             onOutput?.Invoke(line);
         }
 
@@ -56,8 +68,16 @@ public sealed class DriveService : IDriveService
             onOutput: Capture,
             ct: ct);
 
+        // Log exit code explicitly on every path — the previous code only
+        // surfaced it on non-zero, so a silent success masked the fact
+        // that Format-Volume returned 0 without actually formatting.
+        onOutput?.Invoke($"--- Process exited with code {exitCode}. {allOutput.Count} output line(s) captured. ---");
+
         if (exitCode != 0)
         {
+            var tail = allOutput.Count <= OutputTailLines
+                ? allOutput
+                : allOutput.GetRange(allOutput.Count - OutputTailLines, OutputTailLines);
             var detail = tail.Count == 0 ? "(no output)" : string.Join(Environment.NewLine, tail);
             throw new InvalidOperationException(
                 $"Format-Volume failed on {rootPath} (exit {exitCode}).{Environment.NewLine}{detail}");

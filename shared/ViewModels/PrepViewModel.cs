@@ -817,16 +817,59 @@ public class PrepViewModel : BaseViewModel
         // mid-erase and either fail against a disappearing volume or
         // repopulate the drive before SaveConfigAsync lands.
         SetModelOperationState(true, $"Formatting {root}...");
+
+        // B3-Redux diagnostic sidecar — duplicate every log line written
+        // during the format flow into a text file on disk, because the UI
+        // LogListBox doesn't support free-text selection and there's no
+        // reliable way for the user to copy the log contents to share.
+        // Truncates on each run so we only keep the most recent attempt.
+        var diagPath = Path.Combine(Path.GetTempPath(), "freeai-format-diagnostic.log");
+        StreamWriter? diagSink = null;
+        try
+        {
+            diagSink = new StreamWriter(diagPath, append: false)
+            {
+                AutoFlush = true
+            };
+            diagSink.WriteLine($"# B3-Redux diagnostic log — started {DateTime.Now:O}");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"[diag] Could not open sidecar log at {diagPath}: {ex.Message}");
+        }
+
+        void DiagLog(string line)
+        {
+            AppendLog(line);
+            try { diagSink?.WriteLine(line); } catch { /* best-effort */ }
+        }
+
         try
         {
             ProgressIsIndeterminate = true;
-            AppendLog($"Formatting {root} as {DriveFormatCommand.DefaultFileSystem} (label: '{_volumeLabel}')...");
+
+            // B3-Redux diagnostic logging — log the state of the world at
+            // the exact moment we're about to invoke FormatAsync, so the
+            // live test captures enough context to diagnose why the drive
+            // ends up unwiped despite an exit-0 run.
+            var elevatedNow = _elevationService.IsElevated();
+            var preLabel = _selectedDrive.VolumeLabel;
+            DiagLog("=== B3-Redux diagnostic snapshot (pre-format) ===");
+            DiagLog($"Sidecar log file     : {diagPath}");
+            DiagLog($"Selected root        : {root}");
+            DiagLog($"Selected label (pre) : \"{preLabel}\"");
+            DiagLog($"Requested label      : \"{_volumeLabel}\"");
+            DiagLog($"IsFixed              : {_selectedDrive.IsFixed}");
+            DiagLog($"IsElevated (at call) : {elevatedNow}");
+            DiagLog($"PrepApp base dir     : {AppContext.BaseDirectory}");
+            DiagLog($"PrepApp drive root   : {Path.GetPathRoot(AppContext.BaseDirectory)}");
+            DiagLog($"Formatting {root} as {DriveFormatCommand.DefaultFileSystem} (label: '{_volumeLabel}')...");
 
             await _driveService.FormatAsync(
                 root,
                 _volumeLabel,
                 DriveFormatCommand.DefaultFileSystem,
-                onOutput: AppendLog,
+                onOutput: DiagLog,
                 ct: CancellationToken.None);
 
             StatusText = "Preparing drive structure...";
@@ -841,7 +884,7 @@ public class PrepViewModel : BaseViewModel
             };
             await _modelService.SaveConfigAsync(configPath, config);
 
-            AppendLog($"Drive formatted and structure created on {root}.");
+            DiagLog($"Drive formatted and structure created on {root}.");
 
             // Re-enumerate drives so the dropdown picks up the new volume
             // label and post-format free-bytes instead of stale metadata
@@ -852,18 +895,40 @@ public class PrepViewModel : BaseViewModel
                 string.Equals(d.RootPath, root, StringComparison.OrdinalIgnoreCase))
                 ?? (Drives.Count > 0 ? Drives[0] : null);
 
+            // B3-Redux diagnostic logging — dump the post-format drive
+            // state so we can confirm the label actually changed and the
+            // letter we formatted matches what the user now sees.
+            DiagLog("=== B3-Redux diagnostic snapshot (post-format) ===");
+            DiagLog($"Enumerated drives    : {Drives.Count}");
+            foreach (var d in Drives)
+            {
+                DiagLog($"  {d.RootPath} label=\"{d.VolumeLabel}\" fixed={d.IsFixed}");
+            }
+            var selRoot = SelectedDrive?.RootPath ?? "(null)";
+            var selLabel = SelectedDrive?.VolumeLabel ?? "(null)";
+            DiagLog($"Selected after       : {selRoot}");
+            DiagLog($"Selected label (post): \"{selLabel}\"");
+            DiagLog($"Root letter match    : {string.Equals(selRoot, root, StringComparison.OrdinalIgnoreCase)}");
+            DiagLog($"Label actually chgd  : {!string.Equals(preLabel, selLabel, StringComparison.Ordinal)}");
+            DiagLog("=== end B3-Redux diagnostic ===");
+            AppendLog($"[diag] Full diagnostic log saved to: {diagPath}");
+
             await RefreshModelStatusesAsync();
             SetModelOperationState(false, "Drive prepared");
         }
         catch (Exception ex)
         {
-            AppendLog($"Drive preparation failed: {ex.Message}");
+            DiagLog($"Drive preparation failed: {ex.Message}");
+            DiagLog($"Exception type       : {ex.GetType().FullName}");
+            DiagLog($"Stack trace          :{Environment.NewLine}{ex.StackTrace}");
+            AppendLog($"[diag] Full diagnostic log saved to: {diagPath}");
             _dialogService.ShowError(ex.Message, "Format failed");
             SetModelOperationState(false, "Prepare failed");
         }
         finally
         {
             ProgressIsIndeterminate = false;
+            try { diagSink?.Dispose(); } catch { /* best-effort */ }
         }
     }
 
