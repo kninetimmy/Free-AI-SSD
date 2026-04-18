@@ -13,31 +13,19 @@ public partial class EncryptionSetupDialog : System.Windows.Window
     {
         if (string.IsNullOrWhiteSpace(PasswordBox.Password))
         {
-            System.Windows.MessageBox.Show(
-                "Passphrase cannot be empty.",
-                "Encryption setup",
-                System.Windows.MessageBoxButton.OK,
-                System.Windows.MessageBoxImage.Warning);
+            ThemedMessageDialog.ShowWarning("Passphrase cannot be empty.", "Encryption setup", this);
             return;
         }
 
         if (PasswordBox.Password.Length < 8)
         {
-            System.Windows.MessageBox.Show(
-                "Passphrase must be at least 8 characters.",
-                "Encryption setup",
-                System.Windows.MessageBoxButton.OK,
-                System.Windows.MessageBoxImage.Warning);
+            ThemedMessageDialog.ShowWarning("Passphrase must be at least 8 characters.", "Encryption setup", this);
             return;
         }
 
         if (!string.Equals(PasswordBox.Password, ConfirmPasswordBox.Password, StringComparison.Ordinal))
         {
-            System.Windows.MessageBox.Show(
-                "Passphrases do not match.",
-                "Encryption setup",
-                System.Windows.MessageBoxButton.OK,
-                System.Windows.MessageBoxImage.Warning);
+            ThemedMessageDialog.ShowWarning("Passphrases do not match.", "Encryption setup", this);
             return;
         }
 
