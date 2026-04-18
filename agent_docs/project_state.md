@@ -4,7 +4,7 @@ Last updated: 2026-04-17
 
 ## Currently building
 
-Between tasks. B1 fully shipped (PRs #124–#126). Immediate next: fix Codex-flagged `ThemedMessageDialog` height cap (add `MaxHeight` + `ScrollViewer` on message region). Then back to backlog priority order.
+F1 shipped (PR pending). ThemedMessageDialog height fix (PR #127) and README B1 update (PR #128) both merged. Next: B3 — "Format & Prepare Drive" button actually formats.
 
 ## Planned work — TODO backlog triage
 
@@ -227,10 +227,7 @@ now appear in the default dropdown via WMI InterfaceType detection.
 
 ## Next up
 
-1. **ThemedMessageDialog height fix** — Codex medium finding; add `MaxHeight` + `ScrollViewer` on message region before moving on
-2. **README update for B1** — due now that all 3 stages shipped
-3. **F1 — diagnose USB SSD detection regression** (HIGH priority — blocking Stephen's live-drive test pass)
-4. **B3 — Format button actually formats** (foundational for the prep flow working end-to-end)
+1. **B3 — Format button actually formats** (foundational for the prep flow working end-to-end)
 5. **F4 — profile FTUE in PrepApp + companion install target selector** (multi-stage, Opus planning)
 6. **B2 — build LAN discovery** (multi-stage, Opus planning; can run in parallel with F4)
 7. **F3 — PrepApp 3-tab restructure** (Opus planning)
@@ -271,9 +268,8 @@ now appear in the default dropdown via WMI InterfaceType detection.
 - DataGrid, TabControl/TabItem, GroupBox, CheckBox all styled via implicit styles in `Controls.xaml` — do not add per-control inline styling for these in WPF hosts
 - Drive warning (`SelectedDriveWarning`) lives in its own collapsible strip (Row 2 of root grid), not in the log header — keep it there for safety visibility
 - Model tag input overlays the tab strip via `Panel.ZIndex=2` + `BgBaseBrush` background — intentional, not a z-order bug
-- USB SSD drive detection uses WMI `Win32_DiskDrive WHERE InterfaceType='USB'` to determine external drives regardless of Windows DriveType. Internal drives still require the ShowFixedDrives toggle. WMI failure falls back silently to DriveType-only — fail-open is acceptable here (drive enumeration, not a security gate).
+- USB SSD drive detection primary path: `ROOT\Microsoft\Windows\Storage` `MSFT_PhysicalDisk WHERE BusType = 7` (USB) → `MSFT_Partition.DriveLetter`. Fallback: legacy `Win32_DiskDrive WHERE InterfaceType='USB'` ASSOCIATORS chain (kept for compatibility but misses UAS adapters that report SCSI). Both paths log failures via `Trace.WriteLine` instead of silently swallowing. Established F1 fix (PR #129). Internal drives still require the ShowFixedDrives toggle. Fail-open is acceptable here (drive enumeration, not a security gate).
 - WMI disposal pattern: always `using var collection = searcher.Get()` then `using (obj) { ... }` for each loop variable — `ManagementObjectCollection` and `ManagementObject` hold COM handles and must be explicitly disposed. Established PR #122.
 - TODO backlog workflow: "tackle section X" → Claude outputs a well-formed implementation prompt + states the recommended model from the section's `**Model:**` line in the Planned work block. Multi-stage sections target Stage 1 by default unless Stephen overrides. README update follows each completed section, not each stage.
-- WMI `InterfaceType='USB'` silent-fallback from PR #121 is no longer trusted — F1 proves it misses real portable SSDs (Stephen's own drive in v1.2.0 test). Route WMI detection failures to visible logs until F1 ships a fix; do not silently mask.
 - `ThemedMessageDialog` is PrepApp's general-purpose dialog primitive. All new PrepApp dialogs use it (or a custom Window with the same theme resources). `App.xaml.cs` crash handlers are the explicit exception — stay as raw `MessageBox` with zero dependency on the app resource graph.
 - Files compiled by the tests project via `<Compile Include>` must carry their own explicit `using` directives — don't rely on the owning project's `GlobalUsings.cs`. The test project's `GlobalUsings.cs` is the correct fix location (not suppressions in source files). Established PR #126.

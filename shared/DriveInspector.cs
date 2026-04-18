@@ -79,6 +79,49 @@ public static class DriveInspector
     private static HashSet<string> GetUsbConnectedRootPaths()
     {
         var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Primary: ROOT\Microsoft\Windows\Storage MSFT_PhysicalDisk BusType=7 (USB).
+        // Correctly identifies USB NVMe/SATA enclosures that report InterfaceType='SCSI'
+        // via UAS in Win32_DiskDrive and therefore evade the legacy query below.
+        try
+        {
+            using var pdSearcher = new ManagementObjectSearcher(
+                @"ROOT\Microsoft\Windows\Storage",
+                "SELECT DeviceID FROM MSFT_PhysicalDisk WHERE BusType = 7");
+            using var pdCollection = pdSearcher.Get();
+            foreach (ManagementObject pd in pdCollection)
+            {
+                using (pd)
+                {
+                    if (!uint.TryParse(pd["DeviceID"]?.ToString(), out var diskNumber)) continue;
+
+                    using var partSearcher = new ManagementObjectSearcher(
+                        @"ROOT\Microsoft\Windows\Storage",
+                        $"SELECT DriveLetter FROM MSFT_Partition WHERE DiskNumber = {diskNumber}");
+                    using var partCollection = partSearcher.Get();
+                    foreach (ManagementObject part in partCollection)
+                    {
+                        using (part)
+                        {
+                            var letterObj = part["DriveLetter"];
+                            if (letterObj == null) continue;
+                            char letter = Convert.ToChar(letterObj);
+                            if (letter != '\0')
+                                roots.Add(letter + ":\\");
+                        }
+                    }
+                }
+            }
+
+            if (roots.Count > 0) return roots;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"[DriveInspector] MSFT_PhysicalDisk query failed: {ex.Message}");
+        }
+
+        // Fallback: Win32_DiskDrive ASSOCIATORS chain. Works on most systems but misses
+        // USB SSDs behind UAS adapters (they report InterfaceType='SCSI', not 'USB').
         try
         {
             using var diskSearcher = new ManagementObjectSearcher(
@@ -124,10 +167,11 @@ public static class DriveInspector
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // WMI unavailable — fall back to DriveType classification only
+            System.Diagnostics.Trace.WriteLine($"[DriveInspector] Win32_DiskDrive query failed: {ex.Message}");
         }
+
         return roots;
     }
 
