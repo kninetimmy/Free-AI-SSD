@@ -4,38 +4,13 @@ Last updated: 2026-04-17
 
 ## Currently building
 
-Between tasks. Switching to Sonnet 4.6 to implement B1 Stage 1 — restyle the 3 unthemed PrepApp dialogs (EraseConfirmDialog, EncryptionSetupDialog, RemoveModelDialog). All 7 TODO backlog sections are scoped in the Planned work block below, awaiting "tackle X" trigger.
+Between tasks. B1 fully shipped (PRs #124–#126). Immediate next: fix Codex-flagged `ThemedMessageDialog` height cap (add `MaxHeight` + `ScrollViewer` on message region). Then back to backlog priority order.
 
 ## Planned work — TODO backlog triage
 
 Source: `C:\Users\Kninetimmy\Downloads\# Free-AI-SSD Project TODO.md` (dictated-while-driving notes — treat assumptions with skepticism).
 
 Each section below is addressable independently. Sections flagged **⚠ premise check** contain TODO claims that don't match the code — confirm with Stephen before implementing. After each section ships, update README with the user-facing change (per Stephen's rule).
-
----
-
-### B1 — Themed confirmation dialogs + simplified erase flow
-**Scope:** Staged (3 stages). **Model:** Sonnet 4.6 fine for Stage 1–2; Stage 3 is optional cleanup.
-
-**Existence:** Partially valid. Three issues, not one:
-1. Custom dialogs `EraseConfirmDialog.xaml`, `EncryptionSetupDialog.xaml`, `RemoveModelDialog.xaml` have no `Background` or theme `StaticResource` references — they render as unstyled white Windows.
-2. `DialogService.cs` uses raw `System.Windows.MessageBox` for info/warn/error/Yes-No — these are **native OS dialogs, not themeable**. That's the "white dialog" the user is seeing most often.
-3. `ConfirmFixedDrive` in `DialogService.cs:28-47` fires **two sequential `MessageBox` prompts** — that's the "double-popup" described in the TODO.
-4. "Type ERASE to continue" lives in `EraseConfirmDialog.xaml:17-18` and `EraseConfirmDialog.xaml.cs:25`.
-
-**Affected files:**
-- `prep-app/EraseConfirmDialog.xaml(.cs)` — restyle + swap typed ERASE → checkbox-gated Proceed
-- `prep-app/EncryptionSetupDialog.xaml(.cs)` — restyle only
-- `prep-app/RemoveModelDialog.xaml(.cs)` — restyle only
-- `prep-app/Services/DialogService.cs` — replace `MessageBox.Show` calls with a new themed dialog; collapse `ConfirmFixedDrive`'s double-prompt into one
-- New: `prep-app/ThemedMessageDialog.xaml(.cs)` (info/warn/error/yes-no primitive)
-
-**Staging:**
-- **Stage 1** — restyle the 3 existing custom dialogs (match `MainWindow.xaml`: `Background="{StaticResource BgBaseBrush}"`, neumorphic card, themed buttons). One-shot.
-- **Stage 2** — collapse `EraseConfirmDialog` + `ConfirmFixedDrive` double-popup into a single dialog with "I understand" checkbox gating Proceed. One-shot.
-- **Stage 3** (optional) — build `ThemedMessageDialog` and replace all raw `MessageBox` call sites (~10 in `DialogService.cs` + a few scattered). Larger cleanup.
-
-**⚠ Scope warning:** TODO calls this "straightforward UI fix" — Stage 1–2 are, but any remaining `MessageBox.Show` will still render as an unthemed OS dialog until Stage 3 runs.
 
 ---
 
@@ -225,6 +200,8 @@ Per Stephen's requested workflow: after each **section** ships (not each stage),
 
 ## Last session
 
+2026-04-17 — B1 completed across 3 PRs. PR #124 (d39878c) restyled the three unthemed PrepApp dialogs (EraseConfirmDialog, EncryptionSetupDialog, RemoveModelDialog) to match the neumorphic dark theme. PR #125 (92f6872) swapped the "type ERASE" confirmation for a checkbox-gated Proceed and collapsed `ConfirmFixedDrive`'s two sequential MessageBox popups into a single themed `FixedDriveConfirmDialog`. PR #126 (2fed670) built `ThemedMessageDialog` with static `ShowInfo/ShowWarning/ShowError/Confirm` helpers and replaced all 9 remaining raw `MessageBox` call sites in `DialogService` and `EncryptionSetupDialog`; `App.xaml.cs` crash handlers intentionally kept raw (must survive theme-load failures). CI failure on first push: `dotnet format` stripped `using System.Text.Json;` from `ModelOperations.cs` (tests project compiles it directly without prep-app's GlobalUsings); fixed in 1000756 by adding to `tests/GlobalUsings.cs`. Codex adversarial review flagged one unresolved medium finding: `ThemedMessageDialog` has no height cap or `ScrollViewer` — `ConfirmSizingWarnings` payloads could push buttons off-screen.
+
 2026-04-17 — Planning/triage only (no commits). Read Stephen's
 `Downloads/# Free-AI-SSD Project TODO.md` (9 items: 3 bugs, 5
 features, 1 idea) and cross-walked each against the repo. Produced
@@ -248,24 +225,17 @@ drive selection bug — USB SSDs that Windows classifies as DriveType.Fixed
 now appear in the default dropdown via WMI InterfaceType detection.
 311/311 tests green throughout.
 
-2026-04-16 — Finished and shipped the profile switcher (dab8692 / PR #119,
-merged e636a60). Completed the three remaining UX items: bullet-list card
-descriptions in `ProfileSelectionDialog.xaml`, a `NotifyRestartRequired()`
-`MessageBox` helper called on mid-session profile change, and a two-segment
-`PillRadioButton` inline toggle replacing the old `SwitchProfileButton`.
-311/311 tests green. Also triggered a v1.1.0 `workflow_dispatch` release
-build (Windows only, no macOS) at end of session.
-
 ## Next up
 
-1. **F1 — diagnose USB SSD detection regression** (HIGH priority — blocking Stephen's live-drive test pass)
-2. **B3 — Format button actually formats** (foundational for the prep flow working end-to-end)
-3. **B1 — themed dialogs + simplified erase flow** (quick UX win)
-4. **F4 — profile FTUE in PrepApp + companion install target selector** (multi-stage, Opus planning)
-5. **B2 — build LAN discovery** (multi-stage, Opus planning; can run in parallel with F4)
-6. **F3 — PrepApp 3-tab restructure** (Opus planning)
-7. **F2 — live model list fetch** (smaller feature, fits between larger items)
-8. ~~I1 — architecture diagram~~ (folded into F4 Stage 1)
+1. **ThemedMessageDialog height fix** — Codex medium finding; add `MaxHeight` + `ScrollViewer` on message region before moving on
+2. **README update for B1** — due now that all 3 stages shipped
+3. **F1 — diagnose USB SSD detection regression** (HIGH priority — blocking Stephen's live-drive test pass)
+4. **B3 — Format button actually formats** (foundational for the prep flow working end-to-end)
+5. **F4 — profile FTUE in PrepApp + companion install target selector** (multi-stage, Opus planning)
+6. **B2 — build LAN discovery** (multi-stage, Opus planning; can run in parallel with F4)
+7. **F3 — PrepApp 3-tab restructure** (Opus planning)
+8. **F2 — live model list fetch** (smaller feature, fits between larger items)
+9. ~~I1 — architecture diagram~~ (folded into F4 Stage 1)
 
 **Workflow when Stephen says "tackle section X":**
 1. Claude reads the section's entry in the Planned work block below.
@@ -283,7 +253,6 @@ build (Windows only, no macOS) at end of session.
 - ~~F1: polish or close? → **Neither — it's broken. Diagnose and fix.**~~
 - ~~F4 profile: move entirely to PrepApp? → **Yes, PrepApp owns FTUE; Runner reads config silently.**~~
 - ~~F4 companion install target: → **Program Files default + desktop shortcut optional + custom path for portable use.**~~
-
 - ~~I1: standalone or fold into F4? → **Fold into F4 as Step 1 of the rebuilt FTUE.**~~
 
 **Still open:** None.
@@ -306,3 +275,5 @@ build (Windows only, no macOS) at end of session.
 - WMI disposal pattern: always `using var collection = searcher.Get()` then `using (obj) { ... }` for each loop variable — `ManagementObjectCollection` and `ManagementObject` hold COM handles and must be explicitly disposed. Established PR #122.
 - TODO backlog workflow: "tackle section X" → Claude outputs a well-formed implementation prompt + states the recommended model from the section's `**Model:**` line in the Planned work block. Multi-stage sections target Stage 1 by default unless Stephen overrides. README update follows each completed section, not each stage.
 - WMI `InterfaceType='USB'` silent-fallback from PR #121 is no longer trusted — F1 proves it misses real portable SSDs (Stephen's own drive in v1.2.0 test). Route WMI detection failures to visible logs until F1 ships a fix; do not silently mask.
+- `ThemedMessageDialog` is PrepApp's general-purpose dialog primitive. All new PrepApp dialogs use it (or a custom Window with the same theme resources). `App.xaml.cs` crash handlers are the explicit exception — stay as raw `MessageBox` with zero dependency on the app resource graph.
+- Files compiled by the tests project via `<Compile Include>` must carry their own explicit `using` directives — don't rely on the owning project's `GlobalUsings.cs`. The test project's `GlobalUsings.cs` is the correct fix location (not suppressions in source files). Established PR #126.
