@@ -15,7 +15,29 @@
 
     <!-- Root Grid: main content + FTUE overlay layered on top. -->
     <Grid>
-        <Grid x:Name="RootContent" Margin="12,8,12,8">
+        <DockPanel LastChildFill="True">
+            <!-- ═════════════════════════════════════════════════════════════
+                 Elevation banner (B3-Redux phase 2): persistent strip shown
+                 whenever PrepApp is running elevated. Copy depends on
+                 HasAutoResumeIntent — guides the user either to continue
+                 the pending format or to click Format & Prepare Drive in
+                 this (elevated) window.
+                 ═════════════════════════════════════════════════════════════ -->
+            <Border DockPanel.Dock="Top"
+                    Background="{StaticResource AccentCyanBrush}"
+                    Padding="12,6"
+                    Visibility="{Binding IsElevated, Converter={StaticResource BoolToVisibilityConverter}}">
+                <StackPanel Orientation="Horizontal">
+                    <theme:LedStatusIndicator State="Ok" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock Text="{Binding ElevationBannerText}"
+                               Foreground="{StaticResource BgBaseBrush}"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
+            </Border>
+
+            <Grid x:Name="RootContent" Margin="12,8,12,8">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="5*"/>
@@ -522,7 +544,8 @@
                     </Grid>
                 </DockPanel>
             </Border>
-        </Grid>
+            </Grid>
+        </DockPanel>
 
         <!-- ═════════════════════════════════════════════════════════════
              FTUE Overlay: shown on first launch. Semi-transparent scrim

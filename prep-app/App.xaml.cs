@@ -6,8 +6,19 @@ namespace FreeAiSsd.PrepApp;
 
 public partial class App : Application
 {
+    /// <summary>
+    /// Parsed command-line intent for this process, available to any
+    /// window/view-model that needs to honor startup flags (e.g. the
+    /// auto-resume-format path after a UAC relaunch). Populated in
+    /// <see cref="OnStartup"/> before any window is shown.
+    /// </summary>
+    public static PrepStartupArgs StartupArgs { get; private set; } = PrepStartupArgs.Empty;
+
     protected override void OnStartup(StartupEventArgs e)
     {
+        StartupArgs = PrepStartupArgs.Parse(e.Args);
+
+
         // Catch unhandled exceptions on the UI thread so the app shows the error
         // instead of silently force-closing.
         DispatcherUnhandledException += OnDispatcherUnhandledException;

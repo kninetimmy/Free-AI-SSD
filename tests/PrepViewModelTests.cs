@@ -333,8 +333,8 @@ public class PrepViewModelTests
         vm.FormatPrepareCommand.Execute(null);
         Thread.Sleep(100);
 
-        _elevationService.Verify(e => e.TryRelaunchElevated(), Times.Never);
-        _driveService.Verify(d => d.FormatAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>()), Times.Never);
+        _elevationService.Verify(e => e.TryRelaunchElevated(It.IsAny<IEnumerable<string>?>()), Times.Never);
+        _driveService.Verify(d => d.FormatAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Never);
         Assert.Contains(vm.LogLines, l => l.Contains("administrator privileges required"));
     }
 
@@ -344,14 +344,18 @@ public class PrepViewModelTests
         SetupFormatPath(elevated: false);
         _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
         _dialogService.Setup(d => d.Confirm(It.IsAny<string>(), "Administrator required")).Returns(true);
-        _elevationService.Setup(e => e.TryRelaunchElevated()).Returns(false);
+        _elevationService.Setup(e => e.TryRelaunchElevated(It.IsAny<IEnumerable<string>?>())).Returns(false);
 
         var vm = CreateViewModel();
         vm.Initialize();
         vm.FormatPrepareCommand.Execute(null);
         Thread.Sleep(100);
 
-        _elevationService.Verify(e => e.TryRelaunchElevated(), Times.Once);
+        _elevationService.Verify(
+            e => e.TryRelaunchElevated(It.Is<IEnumerable<string>>(args =>
+                args.Contains("--autoresume-format=E:\\") &&
+                args.Contains("--autoresume-label=Portable AI"))),
+            Times.Once);
         _driveService.Verify(d => d.FormatAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>()), Times.Never);
         Assert.Contains(vm.LogLines, l => l.Contains("UAC prompt was declined"));
     }
@@ -387,6 +391,118 @@ public class PrepViewModelTests
         _driveService.Verify(d => d.FormatAsync("E:\\", It.IsAny<string>(), "NTFS", It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>()), Times.Once);
         _driveService.Verify(d => d.EnsureSsdStructure("E:\\"), Times.Once);
         _modelService.Verify(m => m.SaveConfigAsync(It.IsAny<string>(), It.IsAny<PortableConfig>()), Times.AtLeastOnce);
+    }
+
+    // ───── Auto-resume (B3-Redux phase 2) ─────
+
+    [Fact]
+    public async Task TryAutoResumeFormat_NoIntent_IsNoOp()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+
+        await vm.TryAutoResumeFormatAsync();
+
+        _driveService.Verify(
+            d => d.FormatAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task TryAutoResumeFormat_DriveNoLongerPresent_ShowsWarning_NoFormat()
+    {
+        // Setup: intent targets G:\ but enumeration only returns E:\.
+        // Must log + show warning + never call FormatAsync.
+        SetupDefaultMocks(); // returns [E:\]
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.ApplyStartupIntent("G:\\", "Portable AI", diagEnabled: false);
+
+        await vm.TryAutoResumeFormatAsync();
+
+        _dialogService.Verify(
+            d => d.ShowWarning(It.Is<string>(s => s.Contains("G:\\")), "Drive not found"),
+            Times.Once);
+        _driveService.Verify(
+            d => d.FormatAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+            Times.Never);
+        Assert.Contains(vm.LogLines, l => l.Contains("no longer present"));
+    }
+
+    [Fact]
+    public async Task TryAutoResumeFormat_ConsumesIntent_SecondCallIsNoOp()
+    {
+        // Intent must be consumed on attempt so it never fires twice.
+        SetupDefaultMocks(); // returns [E:\] — intent for G:\ won't match
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.ApplyStartupIntent("G:\\", "label", diagEnabled: false);
+
+        await vm.TryAutoResumeFormatAsync();
+        _dialogService.Invocations.Clear();
+
+        await vm.TryAutoResumeFormatAsync();
+
+        _dialogService.Verify(
+            d => d.ShowWarning(It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task TryAutoResumeFormat_DrivePresent_SelectsAndFiresFormatWithConfirm()
+    {
+        SetupFormatPath(elevated: true);
+        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+        _driveService.Setup(d => d.FormatAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()))
+            .Returns(Task.CompletedTask);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.ApplyStartupIntent("E:\\", "Resumed Label", diagEnabled: false);
+
+        await vm.TryAutoResumeFormatAsync();
+
+        Assert.Equal("Resumed Label", vm.VolumeLabel);
+        _dialogService.Verify(d => d.ConfirmErase("E:\\", It.IsAny<string>()), Times.Once);
+        _driveService.Verify(d => d.FormatAsync("E:\\", "Resumed Label", "NTFS",
+            It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>(), false), Times.Once);
+    }
+
+    [Fact]
+    public async Task TryAutoResumeFormat_UserDeclinesConfirm_NoFormat()
+    {
+        SetupFormatPath(elevated: true);
+        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>())).Returns(false);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.ApplyStartupIntent("E:\\", "label", diagEnabled: false);
+
+        await vm.TryAutoResumeFormatAsync();
+
+        _driveService.Verify(d => d.FormatAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Never);
+    }
+
+    [Fact]
+    public void ElevationBanner_ReflectsIntent()
+    {
+        SetupDefaultMocks();
+        _elevationService.Setup(e => e.IsElevated()).Returns(true);
+        var vm = CreateViewModel();
+
+        // No intent → fallback copy.
+        Assert.False(vm.HasAutoResumeIntent);
+        Assert.Contains("Click Format", vm.ElevationBannerText);
+
+        // Intent applied → "ready to continue" copy.
+        vm.ApplyStartupIntent("E:\\", "label", diagEnabled: false);
+        Assert.True(vm.HasAutoResumeIntent);
+        Assert.Contains("ready to continue", vm.ElevationBannerText);
     }
 
     [Fact]

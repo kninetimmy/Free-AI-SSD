@@ -23,6 +23,8 @@
 
   <ItemGroup>
     <Compile Include="..\prep-app\ModelOperations.cs" Link="PrepApp\ModelOperations.cs" />
+    <Compile Include="..\prep-app\PrepStartupArgs.cs" Link="PrepApp\PrepStartupArgs.cs" />
+    <Compile Include="..\prep-app\Services\DriveService.cs" Link="PrepApp\DriveService.cs" />
     <Compile Include="..\runner\Services\IChatService.cs" Link="Runner\IChatService.cs" />
     <Compile Include="..\runner\Services\ISpeechToTextService.cs" Link="Runner\ISpeechToTextService.cs" />
     <Compile Include="..\runner\Services\ITextToSpeechService.cs" Link="Runner\ITextToSpeechService.cs" />

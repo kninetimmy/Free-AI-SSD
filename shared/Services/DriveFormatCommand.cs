@@ -82,7 +82,7 @@ public static class DriveFormatCommand
         return sb.ToString().TrimEnd();
     }
 
-    internal static char ParseDriveLetter(string rootPath)
+    public static char ParseDriveLetter(string rootPath)
     {
         if (string.IsNullOrWhiteSpace(rootPath))
             throw new System.ArgumentException("Drive root path is empty.", nameof(rootPath));
@@ -110,7 +110,7 @@ public static class DriveFormatCommand
         return upper;
     }
 
-    internal static string SanitizeLabel(string? label)
+    public static string SanitizeLabel(string? label)
     {
         if (string.IsNullOrWhiteSpace(label))
             return string.Empty;

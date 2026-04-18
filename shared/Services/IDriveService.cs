@@ -13,5 +13,11 @@ public interface IDriveService
     /// on the target volume is erased. Caller is responsible for user confirmation
     /// and admin elevation. Throws on non-zero exit from the format command.
     /// </summary>
-    Task FormatAsync(string rootPath, string label, string fileSystem, Action<string>? onOutput, CancellationToken ct);
+    Task FormatAsync(
+        string rootPath,
+        string label,
+        string fileSystem,
+        Action<string>? onOutput,
+        CancellationToken ct,
+        bool verboseDiagnostics = false);
 }
