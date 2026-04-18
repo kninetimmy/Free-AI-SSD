@@ -87,27 +87,43 @@ public static class DriveInspector
         {
             using var pdSearcher = new ManagementObjectSearcher(
                 @"ROOT\Microsoft\Windows\Storage",
-                "SELECT DeviceID FROM MSFT_PhysicalDisk WHERE BusType = 7");
+                "SELECT UniqueId FROM MSFT_PhysicalDisk WHERE BusType = 7");
             using var pdCollection = pdSearcher.Get();
             foreach (ManagementObject pd in pdCollection)
             {
                 using (pd)
                 {
-                    if (!uint.TryParse(pd["DeviceID"]?.ToString(), out var diskNumber)) continue;
+                    var uniqueId = pd["UniqueId"]?.ToString();
+                    if (string.IsNullOrEmpty(uniqueId)) continue;
 
-                    using var partSearcher = new ManagementObjectSearcher(
+                    // MSFT_PhysicalDisk.DeviceID != MSFT_Disk.Number; join through MSFT_Disk
+                    // so that MSFT_Partition.DiskNumber resolves correctly on UAS/NVMe enclosures.
+                    var escapedUniqueId = uniqueId.Replace("\\", "\\\\").Replace("'", "\\'");
+                    using var diskSearcher = new ManagementObjectSearcher(
                         @"ROOT\Microsoft\Windows\Storage",
-                        $"SELECT DriveLetter FROM MSFT_Partition WHERE DiskNumber = {diskNumber}");
-                    using var partCollection = partSearcher.Get();
-                    foreach (ManagementObject part in partCollection)
+                        $"SELECT Number FROM MSFT_Disk WHERE UniqueId = '{escapedUniqueId}'");
+                    using var diskCollection = diskSearcher.Get();
+                    foreach (ManagementObject disk in diskCollection)
                     {
-                        using (part)
+                        using (disk)
                         {
-                            var letterObj = part["DriveLetter"];
-                            if (letterObj == null) continue;
-                            char letter = Convert.ToChar(letterObj);
-                            if (letter != '\0')
-                                roots.Add(letter + ":\\");
+                            if (!uint.TryParse(disk["Number"]?.ToString(), out var diskNumber)) continue;
+
+                            using var partSearcher = new ManagementObjectSearcher(
+                                @"ROOT\Microsoft\Windows\Storage",
+                                $"SELECT DriveLetter FROM MSFT_Partition WHERE DiskNumber = {diskNumber}");
+                            using var partCollection = partSearcher.Get();
+                            foreach (ManagementObject part in partCollection)
+                            {
+                                using (part)
+                                {
+                                    var letterObj = part["DriveLetter"];
+                                    if (letterObj == null) continue;
+                                    char letter = Convert.ToChar(letterObj);
+                                    if (letter != '\0')
+                                        roots.Add(letter + ":\\");
+                                }
+                            }
                         }
                     }
                 }
