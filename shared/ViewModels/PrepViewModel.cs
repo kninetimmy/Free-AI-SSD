@@ -810,9 +810,15 @@ public class PrepViewModel : BaseViewModel
             return;
         }
 
+        // Mark the whole format+prepare flow as a busy operation so the
+        // other mutating commands (Pull, Verify, Remove, Finalize) are
+        // gated by CanMutateDrive while Format-Volume is running. Without
+        // this, a user could kick off a pull against a drive root that's
+        // mid-erase and either fail against a disappearing volume or
+        // repopulate the drive before SaveConfigAsync lands.
+        SetModelOperationState(true, $"Formatting {root}...");
         try
         {
-            StatusText = $"Formatting {root}...";
             ProgressIsIndeterminate = true;
             AppendLog($"Formatting {root} as {DriveFormatCommand.DefaultFileSystem} (label: '{_volumeLabel}')...");
 
@@ -835,7 +841,6 @@ public class PrepViewModel : BaseViewModel
             };
             await _modelService.SaveConfigAsync(configPath, config);
 
-            StatusText = "Drive prepared";
             AppendLog($"Drive formatted and structure created on {root}.");
 
             // Re-enumerate drives so the dropdown picks up the new volume
@@ -848,12 +853,13 @@ public class PrepViewModel : BaseViewModel
                 ?? (Drives.Count > 0 ? Drives[0] : null);
 
             await RefreshModelStatusesAsync();
+            SetModelOperationState(false, "Drive prepared");
         }
         catch (Exception ex)
         {
-            StatusText = "Prepare failed";
             AppendLog($"Drive preparation failed: {ex.Message}");
             _dialogService.ShowError(ex.Message, "Format failed");
+            SetModelOperationState(false, "Prepare failed");
         }
         finally
         {

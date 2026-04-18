@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.IO;
 
 namespace FreeAiSsd.Shared.Services;
 
@@ -50,7 +51,16 @@ public static class DriveFormatCommand
             [LabelEnvVar] = sanitizedLabel
         };
 
-        return new Built("powershell.exe", args, env, driveLetter);
+        // Absolute path to System32\powershell.exe — never a bare name.
+        // With UseShellExecute=false (what ProcessRunner uses), Windows
+        // CreateProcess searches the app's load directory before System32,
+        // so a bare "powershell.exe" could resolve to an attacker-planted
+        // binary co-located with PrepApp and run with administrator
+        // privileges (Format & Prepare requires UAC elevation).
+        var powershellPath = Path.Combine(System.Environment.SystemDirectory,
+            "WindowsPowerShell", "v1.0", "powershell.exe");
+
+        return new Built(powershellPath, args, env, driveLetter);
     }
 
     internal static char ParseDriveLetter(string rootPath)

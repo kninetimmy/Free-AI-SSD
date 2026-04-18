@@ -46,10 +46,18 @@ public class DriveFormatCommandTests
     }
 
     [Fact]
-    public void Build_UsesPowerShellExe()
+    public void Build_UsesAbsolutePowerShellPath()
     {
+        // Must be an absolute path rooted in System32 — never a bare
+        // "powershell.exe" that CreateProcess could resolve to an
+        // attacker-planted binary co-located with PrepApp (Format flow
+        // runs elevated, so PATH hijacking would be privilege escalation).
         var built = DriveFormatCommand.Build("D:\\", "AI", "NTFS");
-        Assert.Equal("powershell.exe", built.FileName);
+        Assert.True(System.IO.Path.IsPathRooted(built.FileName),
+            $"FileName must be absolute, got '{built.FileName}'.");
+        Assert.EndsWith("powershell.exe", built.FileName,
+            System.StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("System32", built.FileName, System.StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
