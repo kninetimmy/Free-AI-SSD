@@ -216,6 +216,9 @@
 
     <!-- Root: main content + FTUE overlay layered on top. -->
     <Grid>
+    <ScrollViewer x:Name="RootScroll"
+                  VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled">
     <Grid x:Name="RootContent" Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -224,7 +227,7 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
@@ -808,6 +811,8 @@
                  AcceptsReturn="True"
                  VerticalScrollBarVisibility="Auto"
                  TextWrapping="Wrap"
+                 MinHeight="300"
+                 MaxHeight="500"
                  ToolTip="The model's most recent answer. Streaming output appears here token-by-token."/>
 
         <!-- ═══════════════════════════════════════════════════════════ -->
@@ -881,6 +886,7 @@
             </Grid>
         </Border>
     </Grid>
+    </ScrollViewer>
 
     <!-- ═════════════════════════════════════════════════════════════
          FTUE Overlay: shown on first launch. Semi-transparent scrim

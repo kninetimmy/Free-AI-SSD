@@ -1467,6 +1467,15 @@ public partial class MainWindow : System.Windows.Window
             return;
         }
 
+        // Scroll the outer ScrollViewer so the target is on-screen before
+        // measuring. BringIntoView queues a scroll; we re-post at Background
+        // priority so coordinates are sampled after layout has settled.
+        target.BringIntoView();
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => PlaceSpotlightOver(target)));
+    }
+
+    private void PlaceSpotlightOver(System.Windows.FrameworkElement target)
+    {
         try
         {
             var transform = target.TransformToVisual(FtueSpotlightCanvas);
