@@ -652,6 +652,7 @@ Signing is disabled by default in CI (`MAC_SIGNING_ENABLED=false`). Supported vi
 
 ### Recent Changes
 
+- **2026-04-17**: All PrepApp dialogs now match the neumorphic dark theme — error, warning, info, and confirmation prompts use a shared `ThemedMessageDialog` primitive instead of raw system `MessageBox` popups. The drive-erase confirmation replaced the "type ERASE" text box with a checkbox-gated Proceed button, and the fixed-drive warning collapsed from two sequential popups into one. Long dialog messages now scroll rather than pushing buttons off-screen.
 - **2026-04-17**: Fix WMI `ManagementObjectCollection` and `ManagementObject` disposal leaks in drive inspection and GPU/RAM detection — COM handles now properly released on all WMI query paths
 - **2026-04-17**: Fix drive selection missing USB SSDs — Windows classifies some external SSDs as `DriveType.Fixed`; prep-app now uses WMI `Win32_DiskDrive.InterfaceType` to detect USB connection regardless of OS drive type
 - **2026-04-17**: Prep-app UI polish — neumorphic dark theme applied throughout; implicit styles for DataGrid, TabControl, GroupBox, CheckBox; Model Manager layout restructured; drive warning strip made collapsible
