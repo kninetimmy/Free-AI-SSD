@@ -86,6 +86,7 @@ the style to match.
 
 **Field-test surface from v1.2.5 walkthrough (2026-04-19):**
 - **X14** — 50 MB upload limit silently rejects files with no user-facing hint (140 MB PDF case). Small UX fix.
+- **X15** — revisit RAG file-size and chunk-size caps so large DCS airframe manuals (Chuck's Guides, 120-160 MB, 800-900 pages) ingest cleanly. Investigation + tuning pass — paired follow-up to X14. Not near-term; slot after F3 once the v1.2.x patch stream clears.
 
 **Also outstanding:** README update for F1 (USB SSD detection fix). Small, can be bundled with any doc PR — or folded into H1 below.
 
@@ -706,7 +707,7 @@ Could be implemented via a `DataTrigger` binding on `IsRunning` or via visibilit
 
 ### X9 — Encrypted config persistence lifecycle
 
-**Status:** Stage 1 plan locked 2026-04-19 (Opus 4.7 + advisor pass). **Critical.** Stage 2 unblocked.
+**Status:** Stage 2 shipped 2026-04-19 (PR #144, `49ce6a0`). **Critical.** Stage 3 unblocked.
 **Scope:** Multi-concern; single cohesive fix across shared lib + Runner + Prep.
 **Model:** Opus 4.7 for planning, Sonnet 4.6 for implementation stages
 
@@ -769,7 +770,7 @@ sealed record UnlockMaterial(byte[] DerivedKey, byte[] Salt, int Iterations, str
 
 **Staging:**
 - **Stage 1 — plan (Opus). DONE 2026-04-19.**
-- **Stage 2 — shared lib (Sonnet 4.6):** `IConfigStore` + `ConfigStore` + `UnlockMaterial`, symmetric encrypted save with two-file atomic commit, in-memory encrypt overload, `TryUnlockPortableConfigWithMaterial`. Real-crypto unit tests. No wiring yet.
+- **Stage 2 — shared lib. DONE 2026-04-19 (PR #144, `49ce6a0`).** `IConfigStore` + `ConfigStore` + `UnlockMaterial`, symmetric encrypted save with two-file atomic commit, in-memory encrypt overload, `TryUnlockPortableConfigWithMaterial`. 10 real-crypto tests. No wiring yet.
 - **Stage 3 — Runner wiring (Sonnet 4.6):** route Runner saves through store; capture `UnlockMaterial` on unlock; `OnClosing` flush+lock. Integration test with real encrypted-drive fixture.
 - **Stage 4 — Prep finalize + migration + guard rewrite (Sonnet 4.6):** encrypt-from-memory finalize; modal migration prompt with mtime-aware branches; guard test rewrite. End-to-end test: finalize + Network Mode + API key.
 
@@ -955,7 +956,7 @@ sealed record UnlockMaterial(byte[] DerivedKey, byte[] Salt, int Iterations, str
 - Both (toast on rejection + static hint in the empty state).
 
 **Watch for:**
-- Don't raise the limit without a downstream plan — 50 MB is paired with chunking / embedding throughput assumptions. This is a messaging fix, not a cap change.
+- Don't raise the limit without a downstream plan — 50 MB is paired with chunking / embedding throughput assumptions. This is a messaging fix, not a cap change. Actual cap revisit lives in **X15**.
 - Check if PrepApp's staging path has the same silent-rejection gap before shipping — likely does.
 
 **Affected files (expected):**
@@ -963,3 +964,39 @@ sealed record UnlockMaterial(byte[] DerivedKey, byte[] Salt, int Iterations, str
 - Whatever validator emits the current `WARN` log line — surface the same text via a user-visible channel.
 
 **Exit criterion:** rejected file shows a visible, actionable message naming the limit. No silent failure path.
+
+### X15 — Revisit RAG file-size and chunk-size caps for large reference PDFs
+
+**Status:** backlog 2026-04-19. **Medium (capability).** Paired follow-up to X14 (messaging).
+**Scope:** Investigation + tuning pass, not a one-liner cap bump.
+**Model:** Opus planning (touches embedding throughput, index size, memory).
+
+**Driver (2026-04-19 field observation):**
+- Chuck's Guides and similar DCS airframe manuals routinely run 120-160 MB and 800-900 pages per jet. Current caps — 50 MB file size, 10k chunk size — reject these outright at the drop target (see X14 log line). Workaround today would be splitting manuals by hand, which defeats the "drop the whole manual in" UX the library is supposed to offer.
+- This is a primary use case for the project (DCS pilot reference lookup), not an edge case — the current limit turns the most valuable documents away.
+
+**What to investigate when this comes up (not now):**
+- Where the 50 MB limit lives and what assumptions ride on it (PDF parser memory footprint, embedding job duration, per-doc chunk count headroom, index file size on the SSD).
+- Where the 10k chunk cap lives and whether it's per-document or global. An 800-page manual at ~500 tokens/chunk is 3-5k chunks — within cap — but aggressive splitting could push it over.
+- Embedding throughput at scale: does indexing a 150 MB PDF finish in a reasonable wall-clock time on the target hardware, or does it need a progress UI + background queue first?
+- Index storage growth: how does a library of ~10 such manuals affect SSD free-space planning?
+- Retrieval quality: do larger documents benefit from larger chunks (more context per hit) or smaller (more precise hits)? May want to expose chunk size as a library-level setting rather than a global.
+
+**Likely deliverable shape:**
+- Raise file cap to something like 250 MB (covers Chuck's Guides + headroom).
+- Raise chunk cap to whatever the largest expected manual needs + margin, or remove and rely on natural embedding-time bounds.
+- Possibly expose chunk-size/overlap as tunables in PrepApp library settings.
+- Update X14's rejection message to match the new cap (coordinate so messages don't drift).
+
+**Watch for:**
+- PDF parser OOM on very large files — may need streamed parsing rather than load-all.
+- Embedding job cancellation + progress visibility (today's UX assumes ~seconds; a 150 MB manual is minutes).
+- Storage on the SSD itself — remember the product ships *from* the SSD, so index bloat eats user capacity.
+
+**Affected files (expected — verify when the time comes):**
+- Whatever validator emits the current `WARN` log line (same spot X14 touches).
+- Library ingestion pipeline (PDF extraction → chunking → embedding).
+- Any hard-coded `50 * 1024 * 1024` / `10000` constants in shared.
+- `agent_docs/project_arch.md` RAG section — update limits + rationale.
+
+**Exit criterion:** Chuck's Guide-sized manuals (120-160 MB, 800-900 pages) ingest cleanly, index in acceptable time with a visible progress indicator, and retrieve quality hits during chat. X14's rejection messaging reflects the new cap.
