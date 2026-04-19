@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-04-18 (X8 shipped via PR #138; X1-Redux phase 1 diagnostic awaiting SSD log)
+Last updated: 2026-04-18 (Codex deep-review intake — 6 backlog items added; X1-Redux phase 1 still awaiting SSD log)
 
 Last live-tested release: **v1.2.4**. Next tag target: **v1.2.5** (rolls up X8 + X1-Redux fix once the diagnostic round-trips).
 
@@ -14,11 +14,12 @@ Last live-tested release: **v1.2.4**. Next tag target: **v1.2.5** (rolls up X8 +
   pattern between `[watchdog-bg]` vs `[ui-hb]` pings will discriminate
   UI-thread deadlock vs process-level hang vs HTTP-stream-never-ends.
 
-- **Docs framework restructure.** `CLAUDE.md` slimmed to a pointer file;
-  `agent_docs/project_{arch,backlog,decisions,state}.md` is now the source
-  of truth split. This doc is the dashboard loaded every session.
-
 ## Recently shipped
+
+- **Docs framework restructure — PR #139 merged** as commit `74629a4`.
+  `CLAUDE.md` slimmed to a pointer file;
+  `agent_docs/project_{arch,backlog,decisions,state}.md` split is now
+  the source of truth loaded every session.
 
 - **X8 (post-v1.2.4) — PR #138 merged** as commit `fa34828`.
   - Initial commit `591a39b` split model teardown from full `Dispose()` so
@@ -41,8 +42,15 @@ Last live-tested release: **v1.2.4**. Next tag target: **v1.2.5** (rolls up X8 +
 **Blocking v1.2.5 tag:** Track B (X1-Redux) log from SSD. Fix lands as a
 follow-up PR once the log identifies the stall point.
 
-**After v1.2.5 tag:** F3 PrepApp 3-tab restructure (Opus plan first), then
-re-evaluate F2 / F4 stage 1 / B2 / R1 Stage 2 / X6 / X7 / F5.
+**After v1.2.5 tag — Codex deep-review remediation queue (triaged 2026-04-18):**
+X9 (encrypted config lifecycle — Critical, Opus plan), X10 (document
+replacement + rebuild), X11 (companion keyboard PTT + first-run validation),
+X12 (download verify-before-move), X13 (chat/STT surface real failures),
+H2 (hardening batch). Each ships as its own PR + patch release per the
+v1.2.x cadence decision.
+
+**After hardening queue:** F3 PrepApp 3-tab restructure (Opus plan first),
+then re-evaluate F2 / F4 stage 1 / B2 / R1 Stage 2 / X6 / X7 / F5.
 
 **v1.3.x territory:** X4 (bundled web chat UI), Runner tab restructure, X5
 (GPU/CPU indicator).
@@ -51,36 +59,24 @@ See `project_backlog.md` for full item details.
 
 ## Last session
 
-2026-04-18 (X8 follow-up) — **X8 race hardening shipped; PR #138 merged.**
-Resumed from the prior session's Codex adversarial review which flagged
-two residual races on top of the initial gate-lifetime fix: dispose vs
-in-flight transcription, and unsynchronized init across the three
-singleton consumers. Solved with a single `_lifecycleGate` + `_shutdownCts`
-and a `CancellationToken` threaded through `ISpeechToTextService` into
-PTT + network API. Commit `9c3a054` pushed to the X8 branch, merged
-on GitHub as `fa34828`. Docs restructure opened as follow-up PR on
-`docs/agent-docs-framework`.
+2026-04-18 (Codex deep-review intake) — **Session housekeeping, no code changes.**
+Stephen pasted a large Codex deep-review report. Verified every Critical /
+High / Medium finding against live source — all confirmed real (encrypted
+config `SaveAsync` always-plaintext + finalize bootstrap fail-closed;
+`DocumentIngestor` stale-vector + rebuild-from-originals; `KeyboardPttHotkey`
+100ms fake release; `DownloadManager` hash-after-move; `ChatService` /
+`WhisperSpeechToTextService` empty-on-failure). No false positives on the
+sample checked. Routed findings into backlog as X9 (Critical, Opus plan),
+X10, X11, X12, X13, H2. Priority order in `project_backlog.md` updated to
+slot the queue between X1-Redux and F3.
 
-2026-04-18 (X1-Redux phase 1 + X8 initial) — **X8 opened as PR #138;
-X1-Redux diagnostic branch pushed.** Reading Stephen's Runner log for
-X1-Redux surfaced a distinct bug — Whisper `ObjectDisposedException`
-on STT re-init — which became Track A and shipped as `591a39b` with
-4 reflection-based regression tests. Track B = diagnostic-only branch
-`diag/x1-redux-send-hang` with instrumented Send path and twin
-heartbeats; Stephen runs it on the SSD, sends back
-`%TEMP%\freeai-x1redux-diagnostic.log`. Dead ends: tried to infer the
-hang root cause from reading MainWindow/StreamingTtsSpeaker alone —
-advisor correctly pointed out the code gaps would fire the finally
-*too early*, not stall it, so instrumentation is the only way forward.
-
-2026-04-18 (v1.2.4 field test) — **Field test walked; v1.2.4 tag deferred.**
-Findings at `v1.2.4_field_test_findingd.md`. Sections 1 and 3 clean (B3-Redux
-UAC auto-resume on real SSD confirmed end-to-end, closing v1.2.3 deferred
-verification). Sections 2 + 4a surfaced the X1 hang is not actually fixed:
-Runner crashed on first TTS attempt (Section 2 never ran), Section 4a
-reproduced "generating…" stall via example-prompt Send. Four new backlog items
-filed: X1-Redux (blocks tag), X6 (Create Library hang), X7 (DCS bindings
-false-negative), F5 (in-app TTS settings UI).
+2026-04-18 (wrap-up + K9 framework extraction) — **Session housekeeping, no code changes.**
+Ran `/check-init` — Yellow: flagged `project_state.md` at 87 lines
+(approaching 100-line budget) and a stale "in flight" item for the
+docs restructure (already merged as `74629a4` / PR #139). Confirmed
+K9-Claude-Framework is now its own repo at
+`github.com/kninetimmy/K9-Claude-Framework`, portable install path
+sorted.
 
 ## Open questions
 

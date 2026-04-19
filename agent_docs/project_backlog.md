@@ -59,17 +59,25 @@ the style to match.
 **Blocking v1.2.5 tag:**
 4b. **X1-Redux** — hang regression still present after PR #136; phase 1 diagnostic branch `diag/x1-redux-send-hang` pushed 2026-04-18, awaiting repro log from SSD. **NEW 2026-04-18.**
 
-**After v1.2.2 ships:**
-5. **F3** — PrepApp 3-tab restructure (Opus planning) — also folds in the "Add File button disabled" tooltip hint
-6. **F4** — profile FTUE in PrepApp + companion install target selector (multi-stage, Opus planning)
-7. **B2** — build LAN discovery (multi-stage, Opus planning; can run in parallel with F4)
-8. **F2** — live model list fetch (smaller feature)
-9. **R1 Stage 2** — `/api/documents` + `/api/documents/reindex` server endpoints + `/docs` / `/reindex` CLI commands (follow-up to R1 Stage 1)
+**Codex deep-review findings (intake 2026-04-18 — slot between X1-Redux and feature queue):**
+5. **X9** — encrypted config persistence lifecycle (Critical; Opus planning)
+6. **X10** — document replacement + rebuild consistency (High)
+7. **X11** — companion keyboard PTT + first-run validation (High)
+8. **X12** — download verify-before-move (Medium, security-adjacent)
+9. **X13** — chat/STT surface real failures (Medium)
+10. **H2** — repo hardening pass (housekeeping batch)
+
+**After hardening batch ships:**
+11. **F3** — PrepApp 3-tab restructure (Opus planning) — also folds in the "Add File button disabled" tooltip hint
+12. **F4** — profile FTUE in PrepApp + companion install target selector (multi-stage, Opus planning)
+13. **B2** — build LAN discovery (multi-stage, Opus planning; can run in parallel with F4)
+14. **F2** — live model list fetch (smaller feature)
+15. **R1 Stage 2** — `/api/documents` + `/api/documents/reindex` server endpoints + `/docs` / `/reindex` CLI commands (follow-up to R1 Stage 1)
 
 **v1.3.x territory:**
-10. **X4** — Bundle a real web chat UI (static SPA served from Runner's Kestrel, reusing existing `/api/chat` endpoints)
-11. **Runner tab restructure** — follow-up to X2 once F3's tabbed aesthetic lands
-12. **X5** — GPU/CPU compute indicator (read-only first, selector later)
+16. **X4** — Bundle a real web chat UI (static SPA served from Runner's Kestrel, reusing existing `/api/chat` endpoints)
+17. **Runner tab restructure** — follow-up to X2 once F3's tabbed aesthetic lands
+18. **X5** — GPU/CPU compute indicator (read-only first, selector later)
 
 **Field-test surface from v1.2.4 walkthrough (2026-04-18):**
 - **X6** — "Create Library" click hangs UI, crashes, library created on reopen (separate hang from X1).
@@ -690,3 +698,208 @@ Could be implemented via a `DataTrigger` binding on `IsRunning` or via visibilit
 - If any deletion surfaces that a file is actually load-bearing (linked from a workflow, referenced in code comments), **keep it and flag for Stephen** rather than silently leaving the reference dangling.
 
 **Exit criterion:** One PR, one commit per logical grouping (deletions in one commit, README refresh in another, QUICKSTART refresh in a third). After merge, `README.md` and `docs/QUICKSTART.txt` both reflect the current v1.2.x UX exactly.
+
+---
+
+### X9 — Encrypted config persistence lifecycle
+
+**Status:** triaged 2026-04-18 (Codex deep-review intake). **Critical.**
+**Scope:** Multi-concern; single cohesive fix. Opus planning.
+**Model:** Opus 4.7 for planning, Sonnet 4.6 for implementation stages
+
+**Symptom:** On an encrypted SSD, changes made post-unlock silently revert after restart, and a plaintext `portable-config.json` containing secrets (API key, etc.) lives on disk alongside the encrypted blob.
+
+**Root cause (verified against live code 2026-04-18):**
+- `PortableConfig.SaveAsync` (`shared/PortableConfig.cs:291-320`) always writes plaintext JSON. The fail-closed guard at 299-306 only blocks when Network Mode + Require API Key is on AND the drive is NOT effectively encrypted. On an encrypted drive the guard *passes*, and plaintext is written anyway.
+- `MainWindow.LoadConfig` (`runner/MainWindow.xaml.cs:215-242`) unlocks from the encrypted blob on every startup when `IsEffectivelyEncryptedForWriteGuard` returns true — the plaintext file written by the previous session's saves is ignored.
+- `SsdEncryption.EnableConfigEncryptionAsync` (`shared/SsdEncryption.cs:130-195`) is one-way: plaintext → encrypted + state files, then plaintext deleted. No symmetric "save encrypted from in-memory config" path exists, so nothing in Runner or Prep can update the encrypted payload after initial setup.
+- Finalize bootstrap (`shared/ViewModels/PrepViewModel.cs:1222-1226`) sets `config.IsEncrypted = true` then calls `SaveConfigAsync` *before* `EnableConfigEncryptionAsync` creates any encrypted artifact. If Network Mode + Require API Key is on at finalize time, the guard throws because encrypted artifacts don't yet exist — finalize fails-closed in that combo.
+- `MainWindow.SaveConfigAsync` (`runner/MainWindow.xaml.cs:2084-2108`) is fire-and-forget and unsynchronized; rapid successive calls all target the same `.tmp` path (`PortableConfig.SaveAsync:309`), so concurrent saves can race on `File.Replace` / `File.Move`.
+
+**Fix (design sketch — confirm in Opus plan):**
+- New `shared/Services/IConfigStore.cs` + `ConfigStore` concrete that owns load/save and picks encrypted vs plaintext based on drive state. Callers stop touching `PortableConfig.Save/LoadAsync` directly.
+- Add `SsdEncryption.SaveEncryptedConfigAsync(root, config, password-or-existing-state-unlock)` — symmetric to `EnableConfigEncryptionAsync` but for ongoing updates. Must atomically update the encrypted payload without round-tripping through plaintext on disk.
+- Runner caches the unlock key (or derived key) in memory for the session so post-unlock saves can re-encrypt without re-prompting.
+- Rework finalize to encrypt directly from the in-memory `PortableConfig` rather than writing plaintext first. `EnableConfigEncryptionAsync` grows an in-memory overload.
+- Serialized save queue in Runner: single background worker drains save requests, so fire-and-forget callers can't race on `.tmp`.
+- Preserve fail-closed guard semantics — Network Mode + Require API Key must still refuse any path that would land plaintext-with-key on disk.
+
+**Affected files:**
+- `shared/PortableConfig.cs` — deprecate direct `SaveAsync` callers; keep load paths.
+- `shared/SsdEncryption.cs` — add symmetric save + in-memory encrypt overload.
+- New: `shared/Services/IConfigStore.cs`, `shared/Services/ConfigStore.cs`.
+- `runner/MainWindow.xaml.cs` — route all saves through `IConfigStore`; introduce serialized save queue; cache unlock key/derived key.
+- `runner/Services/DocumentOperationsService.cs:130-133` — use `IConfigStore`.
+- `prep-app/Services/ModelService.cs` — use `IConfigStore`.
+- `shared/ViewModels/PrepViewModel.cs:1212-1226` — encrypt from memory; no plaintext intermediate.
+- `tests/PortableConfigSaveGuardTests.cs:73-96` — rewrite around encrypted persistence (current tests codify the insecure plaintext-after-encryption behaviour).
+- New tests: finalize-with-encryption + Network Mode + API key combo; post-unlock edit round-trip; save concurrency on encrypted drive.
+
+**Staging:**
+- **Stage 1 — plan (Opus):** Lock the `IConfigStore` contract, key-caching strategy, and migration plan for existing encrypted SSDs in the field.
+- **Stage 2 — shared lib:** `IConfigStore`, symmetric encrypted save, in-memory encrypt overload. Unit tests.
+- **Stage 3 — Runner wiring:** Route Runner saves through `IConfigStore` + serialized queue. Session key caching.
+- **Stage 4 — Prep finalize:** Encrypt-from-memory finalize path. Rewrite guard tests. End-to-end test that exercises encrypted + Network Mode + API key.
+
+**⚠ Security / data safety:**
+- Do NOT keep a plaintext copy on disk during any transitional step. In-memory only until encrypted payload is written.
+- Key caching: only in-process memory, cleared on window close / app exit. Never written to disk or logs.
+- Existing SSDs in the field may have a stale plaintext `portable-config.json` from previous Runner sessions. Migration path: on first unlock after this ships, detect stale plaintext, warn the user, offer to delete it. Don't silently delete — Stephen should see the prompt.
+- Test plan must explicitly cover the migration case (encrypted drive + stale plaintext present → expected behaviour).
+
+---
+
+### X10 — Document replacement + rebuild consistency
+
+**Status:** triaged 2026-04-18 (Codex deep-review intake). **High.**
+**Scope:** One cohesive fix; transactional replace + rebuild-from-stored.
+**Model:** Sonnet 4.6
+
+**Symptom:**
+- Re-ingesting a changed document leaves stale chunks in the vector DB and stale stored files in the library folder.
+- "Rebuild index" silently drops any document whose original source file has been moved or deleted, even though the SSD still has the stored library copy.
+
+**Root cause (verified 2026-04-18):**
+- Stored filenames are `{sha[..12]}_{fileName}` (`shared/Documents/DocumentIngestor.cs:70`). When content changes, the SHA prefix changes, producing a new `StoredRelativePath`.
+- `VectorIndex.UpsertFileChunks` (`shared/Documents/VectorIndex.cs:303-338`) deletes rows keyed on the *new* `storedRelativePath`. Old rows tied to the previous path survive. Old stored file on disk also survives — nothing removes it on replacement.
+- `DocumentIngestor.RebuildIndexAsync` (`shared/Documents/DocumentIngestor.cs:285-296`) enumerates `manifest.Files.Select(f => f.SourceOriginalPath).Where(File.Exists)` — i.e. originals, not the stored library copies. Moving/deleting originals breaks rebuild even though the SSD is self-contained.
+- Per-file ingestion failure ordering: vectors are committed (`DocumentIngestor.cs:189`) before the manifest save (`:208`). The catch block at `:210-219` deletes the staged file but not the just-written vectors, so late I/O failure can leave vectors orphaned from manifest state.
+
+**Fix:**
+- On replacement in `IngestFilesAsync`: capture `current.StoredRelativePath` *before* overwriting it; after the new vectors + manifest commit successfully, delete the old vectors (via `VectorIndex.RemoveFile(libraryId, oldStoredRelativePath)`) and the old stored file on disk.
+- `RebuildIndexAsync` rebuilds from `StoredRelativePath` under the library folder, not `SourceOriginalPath`. Re-parse and re-embed from the stored copy. The original path becomes informational metadata only.
+- Tighten per-file transactionality: either (a) save manifest before committing vectors so a failed manifest save leaves no orphaned vectors, or (b) on exception, remove the just-written vectors as part of rollback. Pick whichever matches the existing transactional story best.
+- Watch-folder sweep (`SweepFoldersAsync`, `:256-283`) uses `EnumerationOptions { IgnoreInaccessible = true, RecurseSubdirectories = true }` or catches per-subtree so one protected folder doesn't abort the whole sweep.
+
+**Affected files:**
+- `shared/Documents/DocumentIngestor.cs` — replacement cleanup, rebuild from stored, sweep resilience, per-file rollback.
+- `shared/Documents/VectorIndex.cs` — confirm `RemoveFile` is sufficient for old-path cleanup, or add a helper.
+- `tests/` — new tests: changed-file replacement removes old vectors + old stored file; rebuild works with originals missing; watch-folder sweep survives inaccessible subtree; late-failure rollback leaves no orphaned vectors.
+
+**⚠ Watch for:**
+- Don't change `StoredRelativePath` naming scheme — it's baseline for tests and existing SSDs. Fix the cleanup, not the key.
+- `DocumentFileEntry` has no "previous stored path" field. Capture locally inside the replace loop; don't mutate the entry until after cleanup succeeds.
+- Rebuild from stored means the embedding model must be compatible with what generated the existing stored files. If a user changes models, rebuild may still need to re-embed from scratch — confirm behaviour matches user expectations.
+
+---
+
+### X11 — Companion keyboard PTT + first-run validation
+
+**Status:** triaged 2026-04-18 (Codex deep-review intake). **High.**
+**Scope:** One-shot; three related companion defects in a single PR.
+**Model:** Sonnet 4.6
+
+**Symptoms:**
+1. Keyboard fallback PTT records only ~100 ms regardless of actual key-hold duration. Hotkey registration failures are silent.
+2. Canceling the first-run Settings dialog still starts the app in an invalid state — HOTAS polling kicks off against default button 0 on null device.
+3. API key is shown in plain text in the Settings window, editing is disabled once a key exists, and blank textbox on save silently preserves the old key.
+
+**Root cause (verified 2026-04-18):**
+- `companion/KeyboardPttHotkey.cs:25-47`: uses `RegisterHotKey` (which delivers `WM_HOTKEY` on key-down only) and fakes release with `Task.Delay(100)`. `RegisterHotKey` return value is discarded at line 27. This is not PTT — it's a 100 ms one-shot trigger that lies about being PTT.
+- `companion/CompanionRuntime.cs:64-67`: if `_config.IsComplete()` returns false, `OpenSettings()` is called but control falls through to `InitializeBindings()` and the health loop regardless of whether the user cancelled the dialog.
+- `companion/CompanionRuntime.cs:460-470` (`ParseHotasBinding`): empty/malformed input falls through with `deviceName=null`, `buttonIndex=0`. `_hotas.Start(null, 0)` then polls for nothing in particular.
+- `companion/SettingsWindow.xaml` uses a `TextBox` for the API key (plaintext on-screen); save logic preserves old key when textbox is blank, making rotation/reset awkward.
+- `shared/Models/CompanionConfig.cs:43-47`: `IsComplete()` hard-requires an API key even when the Runner may not require one (Network Mode off, or auth disabled).
+
+**Fix:**
+- Replace `RegisterHotKey`-based approach with a low-level keyboard hook (`SetWindowsHookEx` with `WH_KEYBOARD_LL`) that delivers real `WM_KEYDOWN` / `WM_KEYUP` events. Fire `_onPress` on down, `_onRelease` on up. Log registration failure; surface to UI.
+- In `CompanionRuntime.Start`: if config is incomplete after `OpenSettings()` returns (user cancelled or saved incomplete data), show a clear error and either block startup (tray icon with "Configure to continue" state) or exit cleanly. Do not start `InitializeBindings` / health loop against invalid config.
+- Validate HOTAS binding before starting the poll — refuse to start with null device or button-0-default fallback. Surface the invalid-binding state to the user.
+- Replace the API key `TextBox` with a `PasswordBox`. Add an explicit "Replace key" / "Clear key" flow; blank textbox means "no key," not "keep existing."
+- Make `CompanionConfig.IsComplete()` conditional: if the Runner's server has Network Mode off or auth disabled, an API key is not required. Detect via health probe at first-run setup, or let the user explicitly mark "server does not require a key."
+
+**Affected files:**
+- `companion/KeyboardPttHotkey.cs` — rewrite around low-level hook.
+- `companion/CompanionRuntime.cs:55-72, 83-99, 460-470` — startup gating, binding validation.
+- `companion/SettingsWindow.xaml` + `.xaml.cs` — `PasswordBox` + explicit reset flow.
+- `shared/Models/CompanionConfig.cs:43-47` — conditional completeness check.
+- `tests/CompanionConfigTests.cs` — new coverage for conditional completeness; first-run cancel behaviour; binding validation.
+
+**⚠ Watch for:**
+- Low-level keyboard hook runs on the UI thread and must be non-blocking. Dispatch to a background worker for any non-trivial work in `_onPress`/`_onRelease` handlers.
+- `SetWindowsHookEx` with `WH_KEYBOARD_LL` captures *all* key events system-wide. Be surgical: only intercept the configured PTT key; pass everything else through unchanged.
+- API key masking in UI: do NOT log the key anywhere — not in `CompanionLog`, not in error messages, not in health probe debug output.
+
+---
+
+### X12 — DownloadManager verify-before-move
+
+**Status:** triaged 2026-04-18 (Codex deep-review intake). **Medium (security-adjacent).**
+**Scope:** One-shot.
+**Model:** Sonnet 4.6
+
+**Symptom:** A corrupted or tampered download lands at its final destination path *before* SHA-256 verification runs. Mismatch throws, but the bad file is already in place.
+
+**Root cause (verified 2026-04-18):**
+- `shared/DownloadManager.cs:95-101`: `File.Move(tempPath, request.DestinationPath, overwrite: true)` runs before `VerifySha256(request.DestinationPath, ...)`. If verification throws, the bad file sits at the destination.
+
+**Fix:**
+- Reorder: close stream → `VerifySha256(tempPath, expected)` → `File.Move` only on success.
+- On mismatch: delete temp file and throw. If the destination already exists from a prior successful download, do NOT overwrite it based on a verification that hasn't run yet.
+- If resume semantics (the existing `FileMode.Append` path at `:80`) are affected by this, confirm resumed partial downloads still verify correctly before being promoted.
+
+**Affected files:**
+- `shared/DownloadManager.cs:75-102`.
+- `tests/` — new test: mismatched SHA leaves no file at destination and temp is cleaned up.
+
+**⚠ Watch for:**
+- Callers (PrereqFetch tool, `OllamaPackageService`) that expect the file to exist at `DestinationPath` after `DownloadAsync` returns — verification failure becomes the exception path, destination file is absent. Confirm no caller treats "destination exists" as implicit success without catching the throw.
+
+---
+
+### X13 — Chat/STT surface real failures
+
+**Status:** triaged 2026-04-18 (Codex deep-review intake). **Medium.**
+**Scope:** One-shot; two services, one PR.
+**Model:** Sonnet 4.6
+
+**Symptom:** Backend / transport failures in `ChatService` and `WhisperSpeechToTextService` are flattened into empty-string success. Callers (UI, LAN API) cannot distinguish "model returned no answer" from "system failed" — users see silent empty responses instead of actionable errors.
+
+**Root cause (verified 2026-04-18):**
+- `runner/Services/ChatService.cs:46-50` — catch returns `new ChatResponse(string.Empty, null, false)` on any exception. Streaming path at `:115-125` is slightly better (injects `[Error: …]` into the token stream when partial content exists) but still returns success-shaped object.
+- `runner/Services/WhisperSpeechToTextService.cs:127-131` — catch returns `string.Empty` on exception.
+
+**Fix:**
+- Add `ChatResult` / `TranscriptionResult` record types that are either success (with payload) or failure (with error message + optional inner exception). Callers switch on the union.
+- `RunnerLocalApiService` translates failure results to proper HTTP error responses (500 with error body, or 502 if the failure is clearly a downstream issue like Ollama unreachable).
+- UI (Runner MainWindow) translates failure results to a visible error log line + appropriate state transition (don't leave "generating…" stuck).
+- Keep the streaming `[Error: …]` in-band injection as a UX nicety *in addition to* a structured failure return so the API consumer also sees the error.
+
+**Affected files:**
+- `runner/Services/IChatService.cs`, `ChatService.cs` — new result type; update all callers.
+- `runner/Services/ISpeechToTextService.cs`, `WhisperSpeechToTextService.cs` — same.
+- `runner/Services/RunnerLocalApiService.cs` — error response mapping.
+- `runner/MainWindow.xaml.cs` — UI error handling at Send / STT call sites.
+- `runner-cli/RunnerApiClient.cs` — surface server error responses as CLI errors.
+- `tests/RunnerLocalApiServiceTests.cs`, `ChatServiceTests.cs` (new), `WhisperSpeechToTextServiceTests.cs` — regression tests proving backend failure propagates end-to-end, not empty success.
+
+**⚠ Watch for:**
+- Existing tests may assume empty string = failure. Update, don't preserve — the whole point is distinguishing empty vs failure.
+- Don't leak backend URLs, auth headers, or stack traces into user-facing error text. Log rich details; show concise messages.
+
+---
+
+### H2 — Repo hardening batch (Codex deep-review low-severity sweep)
+
+**Status:** triaged 2026-04-18 (Codex deep-review intake). **Low.**
+**Scope:** One-shot housekeeping batch. Slot between bug fixes, not mid-feature.
+**Model:** Sonnet 4.6 (mechanical)
+
+**Intent:** Fold all Low-severity Codex findings into one cohesive housekeeping PR so they don't each burn a separate round-trip.
+
+**Concrete targets:**
+
+1. **`build.ps1:35-38`** — staged `runner-publish` directory is reused without cleanup. Removed artifacts linger and can be shipped. Fix: `Remove-Item -Recurse -Force` before `New-Item` / `Copy-Item`.
+2. **`shared/SsdLogger.cs:40-43`** — unsynchronized `File.AppendAllText`. Add a lock or route through a serialized writer. Match the pattern already used by `companion/CompanionLog.cs`.
+3. **`shared/SystemResources.cs`, `shared/DriveInspector.cs`** — `System.Management` / WMI calls are Windows-only but shared project builds cross-platform. Add `[SupportedOSPlatform("windows")]` attributes or `OperatingSystem.IsWindows()` guards. Resolves the CA1416 warnings.
+4. **`.github/workflows/build.yml`** — first-party GitHub actions are tag-pinned; pin to exact SHAs per the repo's own TODO (lines ~55-56, 139, 155, 202, 233-238, 307-311 per Codex; verify before changing).
+5. **`README.md`** — drift: test count says 375 (actual: 380+), target framework says net8.0 (tests are net10.0), offline voice wording is inconsistent across sections. Audit against live state and refresh.
+6. **`tests/RunnerLocalApiServiceTests.cs:282-283`** — uses `.Result` which trips an xUnit analyzer warning. Convert to `await` in an `async` test.
+
+**Deliberately NOT in H2:**
+- Any of the X9/X10/X11/X12/X13 items — they get their own PRs.
+- The oversized `runner/MainWindow.xaml.cs` and `shared/ViewModels/PrepViewModel.cs` — splitting those is a separate, larger refactor task (slot into F3 or a future R2).
+
+**Affected files:** as listed above.
+
+**Exit criterion:** One PR, one commit per logical grouping (build.ps1 fix; platform guards; workflow pinning; docs refresh; test cleanup). CA1416 warnings clean; README reflects live state; no new test failures.
