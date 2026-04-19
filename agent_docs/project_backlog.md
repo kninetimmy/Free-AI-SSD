@@ -703,8 +703,8 @@ Could be implemented via a `DataTrigger` binding on `IsRunning` or via visibilit
 
 ### X9 — Encrypted config persistence lifecycle
 
-**Status:** triaged 2026-04-18 (Codex deep-review intake). **Critical.**
-**Scope:** Multi-concern; single cohesive fix. Opus planning.
+**Status:** Stage 1 plan locked 2026-04-19 (Opus 4.7 + advisor pass). **Critical.** Stage 2 unblocked.
+**Scope:** Multi-concern; single cohesive fix across shared lib + Runner + Prep.
 **Model:** Opus 4.7 for planning, Sonnet 4.6 for implementation stages
 
 **Symptom:** On an encrypted SSD, changes made post-unlock silently revert after restart, and a plaintext `portable-config.json` containing secrets (API key, etc.) lives on disk alongside the encrypted blob.
@@ -716,36 +716,66 @@ Could be implemented via a `DataTrigger` binding on `IsRunning` or via visibilit
 - Finalize bootstrap (`shared/ViewModels/PrepViewModel.cs:1222-1226`) sets `config.IsEncrypted = true` then calls `SaveConfigAsync` *before* `EnableConfigEncryptionAsync` creates any encrypted artifact. If Network Mode + Require API Key is on at finalize time, the guard throws because encrypted artifacts don't yet exist — finalize fails-closed in that combo.
 - `MainWindow.SaveConfigAsync` (`runner/MainWindow.xaml.cs:2084-2108`) is fire-and-forget and unsynchronized; rapid successive calls all target the same `.tmp` path (`PortableConfig.SaveAsync:309`), so concurrent saves can race on `File.Replace` / `File.Move`.
 
-**Fix (design sketch — confirm in Opus plan):**
-- New `shared/Services/IConfigStore.cs` + `ConfigStore` concrete that owns load/save and picks encrypted vs plaintext based on drive state. Callers stop touching `PortableConfig.Save/LoadAsync` directly.
-- Add `SsdEncryption.SaveEncryptedConfigAsync(root, config, password-or-existing-state-unlock)` — symmetric to `EnableConfigEncryptionAsync` but for ongoing updates. Must atomically update the encrypted payload without round-tripping through plaintext on disk.
-- Runner caches the unlock key (or derived key) in memory for the session so post-unlock saves can re-encrypt without re-prompting.
-- Rework finalize to encrypt directly from the in-memory `PortableConfig` rather than writing plaintext first. `EnableConfigEncryptionAsync` grows an in-memory overload.
-- Serialized save queue in Runner: single background worker drains save requests, so fire-and-forget callers can't race on `.tmp`.
-- Preserve fail-closed guard semantics — Network Mode + Require API Key must still refuse any path that would land plaintext-with-key on disk.
+**Locked plan (Stage 1, 2026-04-19):**
+
+*Contract.* New `shared/Services/IConfigStore.cs` + `ConfigStore` concrete owns all load/save. Picks encrypted vs plaintext based on drive state. Every existing `PortableConfig.SaveAsync` / `IModelService.SaveConfigAsync` caller routes through it.
+
+```csharp
+interface IConfigStore {
+    Task<PortableConfig?> LoadAsync(string ssdRoot, CancellationToken ct);
+    Task SaveAsync(string ssdRoot, PortableConfig config, CancellationToken ct);
+    void UnlockSession(UnlockMaterial material);
+    Task FlushAsync(TimeSpan timeout);   // drain pending saves before LockSession
+    void LockSession();                  // zeroes DerivedKey bytes
+    bool IsSessionUnlocked { get; }
+}
+
+sealed record UnlockMaterial(byte[] DerivedKey, byte[] Salt, int Iterations, string Scheme);
+```
+
+*Key caching.* Cache the 32-byte derived key + salt + iterations + scheme. **Never** cache the password. Key lives in a private `byte[]`, zeroed via `CryptographicOperations.ZeroMemory` on `LockSession()`. Reuse the existing salt across saves; rotate a fresh random GCM nonce per save (safe because (key, nonce) pairs stay unique). Process-kill leaves the key in memory pages until OS reclaim — inherent; do not try to patch around it.
+
+*Symmetric encrypted save.* New `SsdEncryption.SaveEncryptedConfigAsync(ssdRoot, config, material, ct)`. Serializes `config` in memory, encrypts with cached key + fresh nonce, writes **both** the encrypted blob and the state file atomically: both to `.tmp`, rename encrypted first, rename state second; if the second rename fails, roll back the first. No plaintext ever touches disk.
+
+*In-memory finalize overload.* New `SsdEncryption.EnableConfigEncryptionAsync(ssdRoot, config, password, ct)` that accepts the `PortableConfig` object directly. `PrepViewModel.FinalizeAsync` uses this; no plaintext-then-encrypt dance. Eliminates the Network-Mode-blocks-finalize bug as a side effect.
+
+*Unlock API.* `SsdEncryption.TryUnlockPortableConfig` grows an additional out-param (or sibling `TryUnlockPortableConfigWithMaterial`) returning the `UnlockMaterial` alongside the decrypted `PortableConfig`. Callers pass that straight to `ConfigStore.UnlockSession`.
+
+*Serialized save queue.* `ConfigStore` owns a `SemaphoreSlim(1,1)`; all saves drain sequentially. No more `.tmp` races.
+
+*Shutdown drain.* `MainWindow.OnClosing` calls `await ConfigStore.FlushAsync(TimeSpan.FromSeconds(5))` **before** `LockSession()`. Bounded so a stuck save can't hang app close — log and proceed on timeout. Prevents queued-save-after-key-zero → silent edit loss.
+
+*Migration (upgrade from broken v1.2.x).* Every post-unlock save before this fix silently landed in plaintext while the encrypted blob went stale, so the plaintext on disk **may hold the user's most recent edits**. On first unlock after this ships, detect stale plaintext beside the encrypted blob and compare `File.GetLastWriteTimeUtc`:
+- Plaintext newer → modal dialog: *"Found unsaved edits from before the security fix. Load them, re-encrypt, then delete the plaintext?"* Default Yes. Loads plaintext, merges over the just-unlocked config, saves via `ConfigStore` (re-encrypt), deletes plaintext.
+- Encrypted newer → modal dialog: *"Found a plaintext config from before the security fix. Delete it?"* Default Yes.
+- Never silently delete. Stephen sees the prompt every time.
+
+*Fail-closed guard.* `ConfigStore` enforces: Network Mode + Require API Key + would-write-plaintext → throw `InvalidOperationException`. Semantics unchanged from today; only the chokepoint moves.
 
 **Affected files:**
-- `shared/PortableConfig.cs` — deprecate direct `SaveAsync` callers; keep load paths.
-- `shared/SsdEncryption.cs` — add symmetric save + in-memory encrypt overload.
-- New: `shared/Services/IConfigStore.cs`, `shared/Services/ConfigStore.cs`.
-- `runner/MainWindow.xaml.cs` — route all saves through `IConfigStore`; introduce serialized save queue; cache unlock key/derived key.
+- `shared/PortableConfig.cs` — deprecate direct `SaveAsync` callers; keep load + serialize helpers.
+- `shared/SsdEncryption.cs` — add `SaveEncryptedConfigAsync`, in-memory encrypt overload, `TryUnlockPortableConfigWithMaterial`.
+- **New:** `shared/Services/IConfigStore.cs`, `shared/Services/ConfigStore.cs`, `shared/Services/UnlockMaterial.cs`.
+- `runner/MainWindow.xaml.cs` — route all saves through `IConfigStore`; capture `UnlockMaterial` on unlock; `OnClosing` calls `FlushAsync` then `LockSession`.
 - `runner/Services/DocumentOperationsService.cs:130-133` — use `IConfigStore`.
 - `prep-app/Services/ModelService.cs` — use `IConfigStore`.
+- `prep-app/Services/ReadinessService.cs:92,98` — use `IConfigStore`.
 - `shared/ViewModels/PrepViewModel.cs:1212-1226` — encrypt from memory; no plaintext intermediate.
-- `tests/PortableConfigSaveGuardTests.cs:73-96` — rewrite around encrypted persistence (current tests codify the insecure plaintext-after-encryption behaviour).
-- New tests: finalize-with-encryption + Network Mode + API key combo; post-unlock edit round-trip; save concurrency on encrypted drive.
+- `tests/PortableConfigSaveGuardTests.cs:73-96` — rewrite. Preserve the "Network Mode + unencrypted + API key → refuse" axis; replace the plaintext-after-encryption axis with encrypted-round-trip semantics.
+- **New tests:** real-crypto fixtures (no mocks). Post-unlock edit round-trip on encrypted drive; concurrent save serialization; finalize + Network Mode + API key; migration with plaintext-newer-than-encrypted; migration with encrypted-newer-than-plaintext; flush-on-close drains queued save.
 
 **Staging:**
-- **Stage 1 — plan (Opus):** Lock the `IConfigStore` contract, key-caching strategy, and migration plan for existing encrypted SSDs in the field.
-- **Stage 2 — shared lib:** `IConfigStore`, symmetric encrypted save, in-memory encrypt overload. Unit tests.
-- **Stage 3 — Runner wiring:** Route Runner saves through `IConfigStore` + serialized queue. Session key caching.
-- **Stage 4 — Prep finalize:** Encrypt-from-memory finalize path. Rewrite guard tests. End-to-end test that exercises encrypted + Network Mode + API key.
+- **Stage 1 — plan (Opus). DONE 2026-04-19.**
+- **Stage 2 — shared lib (Sonnet 4.6):** `IConfigStore` + `ConfigStore` + `UnlockMaterial`, symmetric encrypted save with two-file atomic commit, in-memory encrypt overload, `TryUnlockPortableConfigWithMaterial`. Real-crypto unit tests. No wiring yet.
+- **Stage 3 — Runner wiring (Sonnet 4.6):** route Runner saves through store; capture `UnlockMaterial` on unlock; `OnClosing` flush+lock. Integration test with real encrypted-drive fixture.
+- **Stage 4 — Prep finalize + migration + guard rewrite (Sonnet 4.6):** encrypt-from-memory finalize; modal migration prompt with mtime-aware branches; guard test rewrite. End-to-end test: finalize + Network Mode + API key.
 
 **⚠ Security / data safety:**
-- Do NOT keep a plaintext copy on disk during any transitional step. In-memory only until encrypted payload is written.
-- Key caching: only in-process memory, cleared on window close / app exit. Never written to disk or logs.
-- Existing SSDs in the field may have a stale plaintext `portable-config.json` from previous Runner sessions. Migration path: on first unlock after this ships, detect stale plaintext, warn the user, offer to delete it. Don't silently delete — Stephen should see the prompt.
-- Test plan must explicitly cover the migration case (encrypted drive + stale plaintext present → expected behaviour).
+- No plaintext on disk at any transitional step. In-memory only until encrypted payload is written.
+- Key bytes: in-process only; zeroed via `CryptographicOperations.ZeroMemory` on `LockSession`; never logged, never serialized. Process-kill leaves key in memory pages until OS reclaim — inherent.
+- Two-file atomic commit for encrypted blob + state file. Roll back first rename if second fails.
+- Shutdown flush bounded at 5s — prefer lost edit on stuck save over hung app close; log the timeout.
+- Migration prompt is **always** modal and **always** user-confirmed. Never silently delete or silently overwrite. Plaintext-newer branch is the one that matters for Stephen's field drive.
 
 ---
 

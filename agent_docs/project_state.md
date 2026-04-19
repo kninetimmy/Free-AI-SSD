@@ -1,18 +1,24 @@
 # Project State
 
-Last updated: 2026-04-19 (retarget rollup to v1.2.6 — v1.2.5 already tagged on the docs-framework commit without X1-Redux fix)
+Last updated: 2026-04-19 (X9 Stage 1 plan locked — Opus + advisor pass; Stage 2 code unblocked; X1-Redux log wait parked)
 
 Last live-tested release: **v1.2.4**. **v1.2.5** tagged on `74629a4` (docs-framework restructure + X8 rollup) but not field-tested. Next tag target: **v1.2.6** (X1-Redux fix, once the diagnostic round-trips).
 
 ## In flight
 
-- **X1-Redux phase 1 — diagnostic-only branch `diag/x1-redux-send-hang`**
-  (not a PR, never to merge). Instruments `Send_Click`, `SendStreamingAsync`,
-  `StopTts`, and the token callback; twin heartbeats (500ms bg `Task.Run` +
-  500ms `DispatcherTimer`) write to `%TEMP%\freeai-x1redux-diagnostic.log`.
-  Pushed; **awaiting Stephen to repro on the SSD and return the log.** Gap
-  pattern between `[watchdog-bg]` vs `[ui-hb]` pings will discriminate
-  UI-thread deadlock vs process-level hang vs HTTP-stream-never-ends.
+- **X9 Stage 2 — shared lib for encrypted config lifecycle.** Stage 1 plan
+  locked 2026-04-19 (see `project_backlog.md` → X9). Next: implement
+  `IConfigStore` + `ConfigStore` + `UnlockMaterial`, symmetric
+  `SaveEncryptedConfigAsync` with two-file atomic commit,
+  in-memory `EnableConfigEncryptionAsync` overload, and
+  `TryUnlockPortableConfigWithMaterial`. Real-crypto unit tests only — no
+  mocks on the encrypt/decrypt path.
+
+- **X1-Redux phase 1 — diagnostic branch `diag/x1-redux-send-hang`.**
+  **Parked** awaiting Stephen's SSD repro log. Branch never merges. When the
+  log arrives: gap pattern between `[watchdog-bg]` vs `[ui-hb]` pings
+  discriminates UI-thread deadlock vs process-level hang vs
+  HTTP-stream-never-ends. Fix will retarget v1.2.6.
 
 ## Recently shipped
 
