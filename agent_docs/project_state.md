@@ -1,8 +1,8 @@
 # Project State
 
-Last updated: 2026-04-18 (Codex deep-review intake — 6 backlog items added; X1-Redux phase 1 still awaiting SSD log)
+Last updated: 2026-04-19 (retarget rollup to v1.2.6 — v1.2.5 already tagged on the docs-framework commit without X1-Redux fix)
 
-Last live-tested release: **v1.2.4**. Next tag target: **v1.2.5** (rolls up X8 + X1-Redux fix once the diagnostic round-trips).
+Last live-tested release: **v1.2.4**. **v1.2.5** tagged on `74629a4` (docs-framework restructure + X8 rollup) but not field-tested. Next tag target: **v1.2.6** (X1-Redux fix, once the diagnostic round-trips).
 
 ## In flight
 
@@ -15,6 +15,12 @@ Last live-tested release: **v1.2.4**. Next tag target: **v1.2.5** (rolls up X8 +
   UI-thread deadlock vs process-level hang vs HTTP-stream-never-ends.
 
 ## Recently shipped
+
+- **v1.2.5 tagged on `74629a4`** — rolls up X8 (commit `fa34828`) and the
+  docs-framework restructure. Not field-tested; X1-Redux fix deferred to v1.2.6.
+
+- **Codex deep-review intake docs — PR #140 merged** as commit `bfac019`.
+  Adds X9–X13 + H2 to `project_backlog.md` and renumbers the priority queue.
 
 - **Docs framework restructure — PR #139 merged** as commit `74629a4`.
   `CLAUDE.md` slimmed to a pointer file;
@@ -39,10 +45,10 @@ Last live-tested release: **v1.2.4**. Next tag target: **v1.2.5** (rolls up X8 +
 
 ## Next up
 
-**Blocking v1.2.5 tag:** Track B (X1-Redux) log from SSD. Fix lands as a
+**Blocking v1.2.6 tag:** Track B (X1-Redux) log from SSD. Fix lands as a
 follow-up PR once the log identifies the stall point.
 
-**After v1.2.5 tag — Codex deep-review remediation queue (triaged 2026-04-18):**
+**After v1.2.6 tag — Codex deep-review remediation queue (triaged 2026-04-18):**
 X9 (encrypted config lifecycle — Critical, Opus plan), X10 (document
 replacement + rebuild), X11 (companion keyboard PTT + first-run validation),
 X12 (download verify-before-move), X13 (chat/STT surface real failures),
