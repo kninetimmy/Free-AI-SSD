@@ -254,17 +254,15 @@ public sealed class PttVoicePipelineService : IPttVoicePipelineService
         }
         finally
         {
-            // Wait briefly for TTS to finish speaking the last sentence
             if (ttsSpeaker is not null)
             {
-                try
-                {
-                    // Give TTS a reasonable time to finish
-                    var waitCts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-                    while (_tts?.IsSpeaking == true && !waitCts.Token.IsCancellationRequested)
-                        await Task.Delay(100, waitCts.Token);
-                }
-                catch (OperationCanceledException) { }
+                // Completion resolves when the sentence queue drains and every
+                // queued SpeakAsync has returned. SpeakAsync itself returns only
+                // after PlaybackStopped fires, so this is the event-driven signal
+                // that speech is fully finished. Cancel() in the catch blocks
+                // above also completes this task.
+                try { await ttsSpeaker.Completion; }
+                catch { /* Cancel()/Dispose surface as TaskCanceled; ignore */ }
                 ttsSpeaker.Dispose();
             }
 
