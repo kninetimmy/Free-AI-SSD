@@ -31,8 +31,11 @@
     <Compile Include="..\runner\Services\ITtsProvider.cs" Link="Runner\ITtsProvider.cs" />
     <Compile Include="..\runner\Services\IRunnerLocalApiService.cs" Link="Runner\IRunnerLocalApiService.cs" />
     <Compile Include="..\runner\Services\IDocumentOperationsService.cs" Link="Runner\IDocumentOperationsService.cs" />
+    <Compile Include="..\runner\Services\IPttVoicePipelineService.cs" Link="Runner\IPttVoicePipelineService.cs" />
     <Compile Include="..\runner\Services\DocumentOperationsService.cs" Link="Runner\DocumentOperationsService.cs" />
     <Compile Include="..\runner\Services\RunnerLocalApiService.cs" Link="Runner\RunnerLocalApiService.cs" />
+    <Compile Include="..\runner\Services\PttVoicePipelineService.cs" Link="Runner\PttVoicePipelineService.cs" />
+    <Compile Include="..\runner\Services\StreamingTtsSpeaker.cs" Link="Runner\StreamingTtsSpeaker.cs" />
     <Compile Include="..\runner-cli\RunnerApiClient.cs" Link="RunnerCli\RunnerApiClient.cs" />
     <Compile Include="..\runner-cli\Repl.cs" Link="RunnerCli\Repl.cs" />
   </ItemGroup>
