@@ -27,7 +27,17 @@ public interface ISpeechToTextService : IDisposable
     Task<string> TranscribeAudioAsync(byte[] audioData);
 
     /// <summary>
+    /// Transcribes a PCM audio buffer (16kHz, 16-bit, mono) to text with cancellation support.
+    /// </summary>
+    Task<string> TranscribeAudioAsync(byte[] audioData, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Transcribes audio from a stream (16kHz, 16-bit, mono PCM).
     /// </summary>
     Task<string> TranscribeStreamAsync(Stream audioStream);
+
+    /// <summary>
+    /// Transcribes audio from a stream (16kHz, 16-bit, mono PCM) with cancellation support.
+    /// </summary>
+    Task<string> TranscribeStreamAsync(Stream audioStream, CancellationToken cancellationToken);
 }

@@ -177,7 +177,13 @@ public sealed class PttVoicePipelineService : IPttVoicePipelineService
         string transcription;
         try
         {
-            transcription = await _stt.TranscribeAudioAsync(audioData);
+            transcription = await _stt.TranscribeAudioAsync(audioData, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            Log("Transcription cancelled.");
+            SetState(PttState.Idle);
+            return;
         }
         catch (Exception ex)
         {

@@ -661,7 +661,10 @@ public sealed class RunnerLocalApiServiceTests
             return Task.CompletedTask;
         }
 
-        public async Task<string> TranscribeAudioAsync(byte[] audioData)
+        public Task<string> TranscribeAudioAsync(byte[] audioData)
+            => TranscribeAudioAsync(audioData, CancellationToken.None);
+
+        public async Task<string> TranscribeAudioAsync(byte[] audioData, CancellationToken cancellationToken)
         {
             if (!_isModelLoaded)
             {
@@ -679,7 +682,7 @@ public sealed class RunnerLocalApiServiceTests
             {
                 if (DelayTranscriptionMs > 0)
                 {
-                    await Task.Delay(DelayTranscriptionMs);
+                    await Task.Delay(DelayTranscriptionMs, cancellationToken);
                 }
 
                 return TranscriptionToReturn;
@@ -691,6 +694,7 @@ public sealed class RunnerLocalApiServiceTests
         }
 
         public Task<string> TranscribeStreamAsync(Stream audioStream) => Task.FromResult(TranscriptionToReturn);
+        public Task<string> TranscribeStreamAsync(Stream audioStream, CancellationToken cancellationToken) => Task.FromResult(TranscriptionToReturn);
         public void SetModelLoaded(bool isLoaded) => _isModelLoaded = isLoaded;
 
         public void Dispose() { }
