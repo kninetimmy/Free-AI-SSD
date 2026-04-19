@@ -15,7 +15,7 @@ public sealed class WhisperSpeechToTextService : ISpeechToTextService
 
     public async Task InitializeAsync(string ssdRoot, PortableConfig config)
     {
-        Dispose();
+        ReleaseModel();
 
         var modelPath = WhisperModelManager.GetModelPath(ssdRoot, config.WhisperModelSize);
         if (!File.Exists(modelPath))
@@ -43,7 +43,7 @@ public sealed class WhisperSpeechToTextService : ISpeechToTextService
         }
         catch (Exception ex)
         {
-            Dispose();
+            ReleaseModel();
             if (ex is OutOfMemoryException)
             {
                 LogMessage?.Invoke("Out of memory loading Whisper model. Try a smaller model size.");
@@ -148,12 +148,17 @@ public sealed class WhisperSpeechToTextService : ISpeechToTextService
         return ms;
     }
 
-    public void Dispose()
+    private void ReleaseModel()
     {
         _processor?.Dispose();
         _processor = null;
         _factory?.Dispose();
         _factory = null;
+    }
+
+    public void Dispose()
+    {
+        ReleaseModel();
         _transcriptionGate.Dispose();
     }
 }

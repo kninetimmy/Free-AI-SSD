@@ -11,6 +11,7 @@
     <PackageReference Include="Moq" Version="4.20.72" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="Whisper.net" Version="1.7.4" />
     <PackageReference Include="coverlet.collector" Version="6.0.2">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -36,6 +37,8 @@
     <Compile Include="..\runner\Services\RunnerLocalApiService.cs" Link="Runner\RunnerLocalApiService.cs" />
     <Compile Include="..\runner\Services\PttVoicePipelineService.cs" Link="Runner\PttVoicePipelineService.cs" />
     <Compile Include="..\runner\Services\StreamingTtsSpeaker.cs" Link="Runner\StreamingTtsSpeaker.cs" />
+    <Compile Include="..\runner\Services\WhisperSpeechToTextService.cs" Link="Runner\WhisperSpeechToTextService.cs" />
+    <Compile Include="..\runner\Services\WhisperModelManager.cs" Link="Runner\WhisperModelManager.cs" />
     <Compile Include="..\runner-cli\RunnerApiClient.cs" Link="RunnerCli\RunnerApiClient.cs" />
     <Compile Include="..\runner-cli\Repl.cs" Link="RunnerCli\Repl.cs" />
   </ItemGroup>
