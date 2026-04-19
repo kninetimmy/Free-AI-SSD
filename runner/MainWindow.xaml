@@ -237,7 +237,7 @@
         <Border x:Name="TopControlsCard" Grid.Row="0" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
             <StackPanel Orientation="Horizontal">
                 <Button x:Name="StartOllamaButton" Content="Start Ollama"
-                        Style="{StaticResource TactilePrimaryButton}"
+                        Style="{StaticResource TactileMagentaButton}"
                         Click="Start_Click"
                         ToolTip="Launch the local Ollama server from this SSD."/>
                 <Button x:Name="UnlockDriveButton" Content="Unlock Drive"
@@ -246,8 +246,8 @@
                         Click="UnlockDrive_Click"
                         Visibility="Collapsed"
                         ToolTip="Decrypt the portable config with your passphrase."/>
-                <Button Content="Stop Ollama"
-                        Style="{StaticResource TactileMagentaButton}"
+                <Button x:Name="StopOllamaButton" Content="Stop Ollama"
+                        Style="{StaticResource GhostSecondaryButton}"
                         Margin="10,0,0,0"
                         Click="Stop_Click"
                         ToolTip="Stop the running Ollama server process."/>

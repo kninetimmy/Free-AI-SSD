@@ -112,6 +112,7 @@ public partial class MainWindow : System.Windows.Window
             StatusText.Text = "Stopped";
             OllamaStatusLed.State = LedState.Idle;
             UpdateOllamaOfflineEmptyState();
+            UpdateOllamaRunStopButtonStyles();
         });
         _modelService.LogMessage += msg => AppendLog(msg);
         _docService.LogMessage += msg => AppendLog(msg);
@@ -158,6 +159,7 @@ public partial class MainWindow : System.Windows.Window
         Loaded += OnWindowLoaded;
         SizeChanged += OnWindowSizeChanged;
         UpdateOllamaOfflineEmptyState();
+        UpdateOllamaRunStopButtonStyles();
     }
 
     private async void OnWindowLoaded(object sender, System.Windows.RoutedEventArgs e)
@@ -404,6 +406,7 @@ public partial class MainWindow : System.Windows.Window
         StatusText.Text = $"Running on {_ollamaService.CurrentHost}";
         OllamaStatusLed.State = LedState.Ok;
         UpdateOllamaOfflineEmptyState();
+        UpdateOllamaRunStopButtonStyles();
         await StartLocalApiIfEnabledAsync();
         await Task.Delay(1000);
     }
@@ -417,7 +420,21 @@ public partial class MainWindow : System.Windows.Window
             StatusText.Text = "Stopped";
             OllamaStatusLed.State = LedState.Idle;
             UpdateOllamaOfflineEmptyState();
+            UpdateOllamaRunStopButtonStyles();
         }
+    }
+
+    // Swap Start/Stop style emphasis so only the applicable action wears the
+    // loud magenta CTA treatment. Stopped: Start=Magenta, Stop=Ghost.
+    // Running: Start=Ghost, Stop=Magenta.
+    private void UpdateOllamaRunStopButtonStyles()
+    {
+        if (StartOllamaButton is null || StopOllamaButton is null) return;
+        var running = _ollamaService.IsRunning;
+        var magenta = (System.Windows.Style)FindResource("TactileMagentaButton");
+        var ghost = (System.Windows.Style)FindResource("GhostSecondaryButton");
+        StartOllamaButton.Style = running ? ghost : magenta;
+        StopOllamaButton.Style = running ? magenta : ghost;
     }
 
     private async Task StartLocalApiIfEnabledAsync()
