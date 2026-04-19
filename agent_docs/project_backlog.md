@@ -61,18 +61,19 @@ the style to match.
 
 **Codex deep-review findings (intake 2026-04-18 — slot between X1-Redux and feature queue):**
 5. **X9** — encrypted config persistence lifecycle (Critical; Opus planning)
-6. **X10** — document replacement + rebuild consistency (High)
+6. **X10** — document replacement + rebuild consistency (High) *(expanded 2026-04-19 RAG audit: + SQLite WAL/busy_timeout)*
 7. **X11** — companion keyboard PTT + first-run validation (High)
 8. **X12** — download verify-before-move (Medium, security-adjacent)
-9. **X13** — chat/STT surface real failures (Medium)
+9. **X13** — chat/STT surface real failures (Medium) *(expanded 2026-04-19 RAG audit: + RAG retrieval-failure variant)*
 10. **H2** — repo hardening pass (housekeeping batch)
 
-**After hardening batch ships:**
-11. **F3** — PrepApp 3-tab restructure (Opus planning) — also folds in the "Add File button disabled" tooltip hint
-12. **F4** — profile FTUE in PrepApp + companion install target selector (multi-stage, Opus planning)
-13. **B2** — build LAN discovery (multi-stage, Opus planning; can run in parallel with F4)
-14. **F2** — live model list fetch (smaller feature)
-15. **R1 Stage 2** — `/api/documents` + `/api/documents/reindex` server endpoints + `/docs` / `/reindex` CLI commands (follow-up to R1 Stage 1)
+**After hardening batch ships — reordered 2026-04-19 (RAG audit; see decision):**
+11. **X21** — embedding provenance + compat gating (Sonnet, small, preventative — slots before F3 per decision 2026-04-19)
+12. **F3** — PrepApp 3-tab restructure (Opus planning) — also folds in the "Add File button disabled" tooltip hint
+13. **F4** — profile FTUE in PrepApp + companion install target selector (multi-stage, Opus planning)
+14. **B2** — build LAN discovery (multi-stage, Opus planning; can run in parallel with F4)
+15. **F2** — live model list fetch (smaller feature)
+16. **R1 Stage 2** — `/api/documents` + `/api/documents/reindex` server endpoints + `/docs` / `/reindex` CLI commands (follow-up to R1 Stage 1)
 
 **v1.3.x territory:**
 16. **X4** — Bundle a real web chat UI (static SPA served from Runner's Kestrel, reusing existing `/api/chat` endpoints)
@@ -86,7 +87,17 @@ the style to match.
 
 **Field-test surface from v1.2.5 walkthrough (2026-04-19):**
 - **X14** — 50 MB upload limit silently rejects files with no user-facing hint (140 MB PDF case). Small UX fix.
-- **X15** — revisit RAG file-size and chunk-size caps so large DCS airframe manuals (Chuck's Guides, 120-160 MB, 800-900 pages) ingest cleanly. Investigation + tuning pass — paired follow-up to X14. Not near-term; slot after F3 once the v1.2.x patch stream clears.
+- **X15** — revisit RAG file-size and chunk-size caps so large DCS airframe manuals (Chuck's Guides, 120-160 MB, 800-900 pages) ingest cleanly. Investigation + tuning pass — paired follow-up to X14. Not near-term; slot after F3 once the v1.2.x patch stream clears. *(rescoped 2026-04-19 RAG audit into 4 stages — see X15 entry)*
+
+**RAG audit backlog (2026-04-19 plan session — slot into v1.3.x after F3; full plan at `C:\Users\Kninetimmy\.claude\plans\okay-i-want-to-glowing-galaxy.md`):**
+- **X18** — ingest observability (Sonnet, quick; surfaces FailedChunks, textless pages, parse errors in UI)
+- **X15 (expanded)** — streaming + batched ingest + background job (Opus)
+- **X19** — hybrid retrieval: dense + FTS5 lexical + neighbor expansion (Opus; eval harness first)
+- **X20** — section-aware chunking + richer metadata (Opus; depends on X21 schema)
+- **X22** — prompt packing + grounding enforcement (Sonnet)
+- **X23** — representative test fixtures (Sonnet; public-domain PDFs)
+- **X17** — textless-page diagnostic only (Sonnet; full OCR deferred per decision 2026-04-19)
+- **X10-Redux** — stable document GUID (deferred; revisit only if X10 path-capture insufficient)
 
 **Also outstanding:** README update for F1 (USB SSD detection fix). Small, can be bundled with any doc PR — or folded into H1 below.
 
@@ -707,7 +718,7 @@ Could be implemented via a `DataTrigger` binding on `IsRunning` or via visibilit
 
 ### X9 — Encrypted config persistence lifecycle
 
-**Status:** Stage 3 shipped 2026-04-19. **Critical.** Stage 4 unblocked.
+**Status:** **DONE. All 4 stages shipped. Final PR #147 (`b75e42a`) merged 2026-04-19.**
 **Scope:** Multi-concern; single cohesive fix across shared lib + Runner + Prep.
 **Model:** Opus 4.7 for planning, Sonnet 4.6 for implementation stages
 
@@ -772,7 +783,7 @@ sealed record UnlockMaterial(byte[] DerivedKey, byte[] Salt, int Iterations, str
 - **Stage 1 — plan (Opus). DONE 2026-04-19.**
 - **Stage 2 — shared lib. DONE 2026-04-19 (PR #144, `49ce6a0`).** `IConfigStore` + `ConfigStore` + `UnlockMaterial`, symmetric encrypted save with two-file atomic commit, in-memory encrypt overload, `TryUnlockPortableConfigWithMaterial`. 10 real-crypto tests. No wiring yet.
 - **Stage 3 — Runner wiring. DONE 2026-04-19.** `IConfigStore` wired into `MainWindow` (unlock captures `UnlockMaterial`, all save sites, `OnClosing` flush+lock) and `DocumentOperationsService`. `DocumentLibraryWorkflowTests` updated. 1 new integration test (`RunnerWiring_UnlockSaveLockReUnlock_RoundTrips`). Suite 393/393. Runtime smoke test pending field validation.
-- **Stage 4 — Prep finalize + migration + guard rewrite (Sonnet 4.6):** encrypt-from-memory finalize; modal migration prompt with mtime-aware branches; guard test rewrite. End-to-end test: finalize + Network Mode + API key.
+- **Stage 4 — Prep finalize + migration + guard rewrite. DONE 2026-04-19 (PR #147, `b75e42a`).** In-memory finalize; `TryMigratePlaintextAsync` (Branch A = absorb + confirmation modal, Branch B = silent delete + log); 7 new real-crypto guard tests. UX note: Branch B is silent per design — only Branch A shows the "Settings Recovery" dialog. 400/400 pass.
 
 **⚠ Security / data safety:**
 - No plaintext on disk at any transitional step. In-memory only until encrypted payload is written.
@@ -815,6 +826,10 @@ sealed record UnlockMaterial(byte[] DerivedKey, byte[] Salt, int Iterations, str
 - Don't change `StoredRelativePath` naming scheme — it's baseline for tests and existing SSDs. Fix the cleanup, not the key.
 - `DocumentFileEntry` has no "previous stored path" field. Capture locally inside the replace loop; don't mutate the entry until after cleanup succeeds.
 - Rebuild from stored means the embedding model must be compatible with what generated the existing stored files. If a user changes models, rebuild may still need to re-embed from scratch — confirm behaviour matches user expectations.
+
+**Expansion 2026-04-19 (RAG audit fallout):**
+- **SQLite PRAGMAs on `VectorIndex` connection:** `journal_mode=WAL`, `busy_timeout=5000`, `synchronous=NORMAL`. Same code path as rebuild work; lands in the same PR. `VectorIndex.cs:44` currently uses a bare `new SqliteConnection($"Data Source={_dbPath}")` — no journal mode, no busy timeout. Eliminates the concurrent-reader/rebuild file-lock class of failures (see field log) independent of the rebuild-from-stored fix itself.
+- **Stable document GUID spun out as X10-Redux** (not this PR) — see decision 2026-04-19. X10 ships capture-old-path + WAL + rebuild-from-stored as the principled fix for the current symptoms. Identity-layer upgrade revisited only if path-capture proves insufficient in field use.
 
 ---
 
@@ -908,6 +923,9 @@ sealed record UnlockMaterial(byte[] DerivedKey, byte[] Salt, int Iterations, str
 - `runner-cli/RunnerApiClient.cs` — surface server error responses as CLI errors.
 - `tests/RunnerLocalApiServiceTests.cs`, `ChatServiceTests.cs` (new), `WhisperSpeechToTextServiceTests.cs` — regression tests proving backend failure propagates end-to-end, not empty success.
 
+**Expansion 2026-04-19 (RAG audit fallout):**
+- Add a `ChatResult.RagRetrievalFailed(innerError)` variant distinct from "no hits above threshold." `ChatService.cs:159-165` currently catches the retrieval exception, logs `"RAG retrieval skipped: {ex.Message}"`, and returns an ungrounded answer with `usedContext=false` — indistinguishable from the threshold case. UI renders a visible warning banner ("Answering without document context — retrieval failed: …") on the failure variant. LAN API response carries a header or JSON field (e.g. `X-RAG-Status: retrieval-failed` vs `retrieval-empty`) so API consumers can react differently.
+
 **⚠ Watch for:**
 - Existing tests may assume empty string = failure. Update, don't preserve — the whole point is distinguishing empty vs failure.
 - Don't leak backend URLs, auth headers, or stack traces into user-facing error text. Log rich details; show concise messages.
@@ -975,22 +993,22 @@ sealed record UnlockMaterial(byte[] DerivedKey, byte[] Salt, int Iterations, str
 - Chuck's Guides and similar DCS airframe manuals routinely run 120-160 MB and 800-900 pages per jet. Current caps — 50 MB file size, 10k chunk size — reject these outright at the drop target (see X14 log line). Workaround today would be splitting manuals by hand, which defeats the "drop the whole manual in" UX the library is supposed to offer.
 - This is a primary use case for the project (DCS pilot reference lookup), not an edge case — the current limit turns the most valuable documents away.
 
-**What to investigate when this comes up (not now):**
-- Where the 50 MB limit lives and what assumptions ride on it (PDF parser memory footprint, embedding job duration, per-doc chunk count headroom, index file size on the SSD).
-- Where the 10k chunk cap lives and whether it's per-document or global. An 800-page manual at ~500 tokens/chunk is 3-5k chunks — within cap — but aggressive splitting could push it over.
-- Embedding throughput at scale: does indexing a 150 MB PDF finish in a reasonable wall-clock time on the target hardware, or does it need a progress UI + background queue first?
-- Index storage growth: how does a library of ~10 such manuals affect SSD free-space planning?
-- Retrieval quality: do larger documents benefit from larger chunks (more context per hit) or smaller (more precise hits)? May want to expose chunk size as a library-level setting rather than a global.
+**Staging (rescoped 2026-04-19 RAG audit — addresses audit High #3 "slow/memory-heavy/foreground-bound ingest"):**
 
-**Likely deliverable shape:**
-- Raise file cap to something like 250 MB (covers Chuck's Guides + headroom).
+- **Stage 1 — Investigation + targets.** Benchmark current ingest on a 150 MB / 800-page Chuck's Guide: wall-clock, peak RSS, chunk count, failure rate. Decide raised caps (`MaxDocumentSizeMB`, per-doc chunk count headroom). Output: concrete numeric targets. Also decides which later stages actually ship vs can be dropped.
+- **Stage 2 — Streaming pipeline.** Replace whole-document materialization (`ParsedDocument` → `textItems` → `results` in `DocumentIngestor.cs:96-159`) with a producer/consumer pipeline via `System.Threading.Channels.Channel<T>`: parse page → chunk page → embed chunks → persist, each stage streaming. Drops peak RSS roughly proportional to pages-in-flight × chunk size.
+- **Stage 3 — Batched embeddings + retry/backoff.** Probe Ollama `/api/embed` for batch input support; if available, send N chunks per request (configurable). `EmbeddingClient.cs:14-32` currently sends one HTTP request per chunk — even at concurrency 4 this is throughput-bound. Add exponential backoff on transient HTTP failures. Single-item path preserved as fallback if batch rejected.
+- **Stage 4 — Background job model.** Move ingest off the WPF UI thread through an `IIngestJobService` with `IProgress<IngestProgress>`. UI posts a job, shows progress; cancellation cooperative. Retire any remaining `.Wait()` / `.Result` in WPF handlers. Fixes the "feels hung before useful progress shows" symptom the audit called out.
+
+**Deliverable shape (informed by Stage 1 data):**
+- Raise file cap (likely ~250 MB — covers Chuck's Guides + headroom).
 - Raise chunk cap to whatever the largest expected manual needs + margin, or remove and rely on natural embedding-time bounds.
 - Possibly expose chunk-size/overlap as tunables in PrepApp library settings.
 - Update X14's rejection message to match the new cap (coordinate so messages don't drift).
 
 **Watch for:**
-- PDF parser OOM on very large files — may need streamed parsing rather than load-all.
-- Embedding job cancellation + progress visibility (today's UX assumes ~seconds; a 150 MB manual is minutes).
+- PDF parser OOM on very large files — streaming-parse in Stage 2 should fix this; verify.
+- Cancellation + progress visibility (today's UX assumes ~seconds; a 150 MB manual is minutes).
 - Storage on the SSD itself — remember the product ships *from* the SSD, so index bloat eats user capacity.
 
 **Affected files (expected — verify when the time comes):**
@@ -1020,3 +1038,180 @@ resource dictionary.
 unlock dialog window.
 
 **Exit criterion:** Unlock dialog matches Runner's dark theme visually.
+
+---
+
+### X17 — Textless-page diagnostic (RAG audit C1, scoped down)
+
+**Status:** Backlog 2026-04-19 (RAG audit triage). **Low.**
+**Scope:** Stage 1 only at this time; full OCR deferred per decision 2026-04-19.
+**Model:** Sonnet 4.6.
+
+**Driver:** Audit flagged "multimodal PDF ingest" (OCR + table extraction + image handling) as Critical #1. Product workload is text-layer DCS manuals with embedded diagrams, not scans. X17 keeps only the diagnostic so we get field data if that assumption breaks.
+
+**Fix (Stage 1):**
+- `DocumentParser.cs` flags per-page when extracted text is below a threshold (suggest <20 non-whitespace chars). Carry the flag through `ParsedSegment` / `IngestProgress`.
+- Surface in X18's post-ingest summary: "3 of 42 pages in `foo.pdf` had no extractable text."
+- No OCR, no behavioral change — silently-empty chunks become visibly-empty-and-flagged chunks.
+
+**Affected files:**
+- `shared/Documents/DocumentParser.cs`
+- `shared/Documents/DocumentModels.cs` — add `IsTextless` on `ParsedSegment` or equivalent.
+- `shared/Documents/DocumentIngestor.cs` — count textless pages into `IndexingProgress`.
+- `runner/MainWindow.xaml.cs` — render count in X18 summary.
+- `tests/DocumentParserTests.cs` — synthetic near-empty page fixture.
+
+**Deferred indefinitely (not queued):** OCR engine integration (Tesseract.NET / bundled external / Windows.Media.OCR), table extraction via PdfPig layout analysis, image extraction, vision-model captioning. Revisit only if Stage 1 data shows scanned PDFs in active field use.
+
+**Exit criterion:** A PDF with one or more image-only pages ingests with a visible "N textless pages" count in the post-ingest summary.
+
+---
+
+### X18 — Ingest observability
+
+**Status:** Backlog 2026-04-19 (RAG audit triage). **Medium.**
+**Scope:** Two stages; small.
+**Model:** Sonnet 4.6.
+
+**Symptom:** `DocumentIngestor` populates `IndexingProgress.FailedChunks` (`DocumentIngestor.cs:176`) but `MainWindow.xaml.cs:1002, 1045, 1069` never reads it. Partial-failure ingests show `"Indexing 5/10: example.pdf"` with no hint that N chunks failed. Parse failures caught at `DocumentIngestor.cs:82-84` are logged and swallowed; the UI has no surface for them either.
+
+**Fix:**
+- **Stage 1 — Surface ingest outcomes.** After every ingest, render an `IngestResult` summary (panel or modal): files imported, files skipped with reasons, textless pages detected (X17 feed), failed chunks, partial-ingest warnings. Reuses data already produced by `IndexingProgress` — purely a rendering + collection gap.
+- **Stage 2 — Configurable failure threshold.** Expose `MaxEmbeddingFailureRatioBeforeAbort` in `PortableConfig` (currently hard-coded `0.50d` at `DocumentIngestor.cs:5`). Default stays 0.50; users can tighten for safety-critical libraries.
+
+**Affected files:**
+- `shared/Documents/DocumentIngestor.cs` — aggregate outcomes into an `IngestResult` returned from `IngestFilesAsync` / `RebuildIndexAsync`.
+- `shared/PortableConfig.cs` — add `MaxEmbeddingFailureRatioBeforeAbort`.
+- `runner/MainWindow.xaml(.cs)` — post-ingest summary panel.
+- `tests/DocumentIngestorFailureHandlingTests.cs` — assert `IngestResult` shape on partial failure.
+
+**Exit criterion:** Partial-ingest run (embedding handler failing 3/10 chunks on a file) shows a visible post-ingest warning naming the file and failure count. Tightened threshold aborts earlier as configured.
+
+---
+
+### X19 — Hybrid retrieval: dense + lexical + neighbor expansion
+
+**Status:** Backlog 2026-04-19 (RAG audit triage). **High (v1.3.x capability).**
+**Scope:** Three stages. Opus planning at kickoff (retrieval architecture choice).
+**Model:** Opus.
+
+**Driver:** Audit High #1. Retrieval is dense-vector brute-force only (`VectorIndex.cs:9-22` — deliberate: ANN rejected for portable/no-native-deps). No BM25/FTS5 fallback, no neighbor expansion, top-K=5. Exact facts in repetitive sections, appendices, captions, and tables are easy to miss even when present. ANN index stays rejected; the other audit points (lexical fallback, expansion) are real for this product.
+
+**Staging:**
+- **Stage 1 — Evaluation harness.** Small benchmark of real document questions with known correct chunks. Run current retrieval → capture baseline recall@5 / recall@20. Every later stage gates on this metric not regressing. No production code change; pure test/tooling asset.
+- **Stage 2 — Lexical fallback via SQLite FTS5.** Add a `chunks_fts` virtual table populated alongside vector writes. Merge dense top-K with lexical top-K using reciprocal rank fusion. No new NuGet dependency — FTS5 ships with `Microsoft.Data.Sqlite`. Does add a new DB object in the schema; flag at kickoff.
+- **Stage 3 — Parent/adjacent expansion.** When a chunk is in top hits, also pull `chunk_index ± 1` neighbors (same file/page) so the LLM sees surrounding context. Depends on X20's richer metadata for clean range logic.
+
+**Explicitly dropped:** Cross-encoder reranker. Adds dependency for speculative gain against the CLAUDE.md "don't gold-plate" rule. Revisit only if Stages 2+3 don't clear the recall bar against the eval harness.
+
+**Affected files:**
+- `shared/Documents/VectorIndex.cs` — FTS5 virtual table, fusion logic.
+- `shared/Documents/RagPromptBuilder.cs` — consume expanded chunk set.
+- `runner/Services/ChatService.cs` — pass expansion flag.
+- `tests/` — eval harness as a first-class test class.
+
+**Exit criterion:** Eval harness recall@5 improves vs. baseline by a chosen delta. Integration tests cover dense-only / lexical-only / fused paths.
+
+---
+
+### X20 — Section-aware chunking + richer metadata
+
+**Status:** Backlog 2026-04-19 (RAG audit triage). **High (v1.3.x capability). Depends on X21.**
+**Scope:** Three stages. Opus planning at kickoff.
+**Model:** Opus.
+
+**Driver:** Audit High #2. Chunker (`DocumentChunker.cs:5-47`) splits text in fixed character windows inside each page; chunk metadata (`DocumentModels.cs:41-53`) stores only page, chunk index, file name, stored path, sha256 — no section titles, heading path, character offsets, or content type. Retrieval precision and citation quality suffer vs. what's achievable.
+
+**Staging:**
+- **Stage 1 — Metadata schema expansion.** Coordinate with X21's schema bump. Chunk row gains: `section`, `heading_path`, `char_offset_start`, `char_offset_end`, `content_type` (text / table / image_ref — tables/images populated only if future work adds them). Migration: existing rows get nulls; reindex is the upgrade path.
+- **Stage 2 — Section-aware chunker.** Parse headings from PDF text flow using PdfPig's font-size signals (size-jump heuristic marks heading boundaries) and markdown `#` levels. Respect heading boundaries + paragraph breaks over fixed character windows. Plain text / CSV / JSON fall back to the current fixed-size chunker.
+- **Stage 3 — Citation builder upgrade.** `CitationBuilder.BuildDistinct()` extended: `[filename p.42]` becomes `[filename §Engines p.42]` when section metadata present. UI SourcesList + CLI footer pick up the richer string automatically.
+
+**Affected files:**
+- `shared/Documents/DocumentModels.cs` — `DocumentChunk` fields.
+- `shared/Documents/VectorIndex.cs` — schema + upsert.
+- `shared/Documents/DocumentChunker.cs` — section-aware strategy.
+- `shared/Documents/DocumentParser.cs` — expose font-size / heading signal.
+- `shared/Documents/CitationBuilder.cs` — richer citation format.
+- `tests/` — fixture with known section structure; assertions on chunk section attribution.
+
+**Exit criterion:** A manual-style PDF with `## Engines` heading produces chunks attributed to that section; citations render with `§Engines`.
+
+---
+
+### X21 — Embedding provenance + compat gating
+
+**Status:** Backlog 2026-04-19 (RAG audit triage). **High; slots before F3 per decision 2026-04-19.**
+**Scope:** Three stages. Small but foundational.
+**Model:** Sonnet 4.6.
+
+**Driver:** Audit High #4. Neither manifest nor chunk rows record the embedding model, vector dimension, parser version, or chunker version (`DocumentModels.cs`, `VectorIndex.cs:72-87`). On dimension mismatch at query time, `VectorIndex.DotProductSimd` (`:480-481`) returns 0 silently — mismatched chunks score zero, visible hits quietly drop, no error surfaced. Any change to the embedding model (via config edit) risks silent corruption of existing indexes.
+
+**Staging:**
+- **Stage 1 — Persist provenance.** Add columns to `chunks` and fields to manifest: `embedding_model`, `embedding_dimension`, `parser_version`, `chunker_version`. Populate at write time. Schema migration: existing rows get `"unknown"` with a recorded schema version bump.
+- **Stage 2 — Gate at query + ingest.** On query, verify running embedding config matches chunk rows; if mismatch, refuse and emit a clear error (not a silent zero score). On ingest into an existing library, refuse writes if config differs from recorded provenance; prompt controlled reindex. Ends the silent-zero-score failure mode.
+- **Stage 3 — PrepApp reindex flow.** Model change → PrepApp warns "your library was indexed with model X, you've switched to Y — reindex required" with a one-click reindex action (uses X10's safe rebuild-from-stored path).
+
+**Affected files:**
+- `shared/Documents/DocumentModels.cs` — manifest + chunk fields.
+- `shared/Documents/VectorIndex.cs` — schema, migration, query-time check.
+- `shared/Documents/DocumentIngestor.cs` — write-time check.
+- `shared/PortableConfig.cs` — expose current model / dim as the source of truth for comparison.
+- `prep-app/` — PrepApp reindex prompt + action.
+- `tests/` — intentional model mismatch returns clear error instead of zero-score silent failure.
+
+**⚠ Watch for:**
+- X20 Stage 1 shares the schema bump — sequence so X21 Stage 1 lands first and X20 extends, or plan a single combined migration.
+
+**Exit criterion:** Test with an embedding model swap returns a clear `EmbeddingModelMismatch` error at query time. PrepApp surfaces the reindex prompt on model change.
+
+---
+
+### X22 — Prompt packing + grounding enforcement
+
+**Status:** Backlog 2026-04-19 (RAG audit triage). **Medium.**
+**Scope:** Two stages.
+**Model:** Sonnet 4.6.
+
+**Driver:** Audit Medium #2. `ChatService.cs:145` truncates context to a fixed 4500 characters; not token-aware — under-uses large-context models, over-fills small ones. Grounding instruction in `RagPromptBuilder.cs:24-26` is a soft ask: *"Use the following reference context when answering. If context is insufficient, say so."* Citations built by `CitationBuilder` are post-hoc rather than required inline.
+
+**Staging:**
+- **Stage 1 — Token-aware budget.** Replace `maxContextChars=4500` with `maxContextTokens` derived from the active model's context window minus reserved output. Tokenizer choice is a flag-ahead dependency (`Tiktoken` or equivalent) per global CLAUDE.md — surface at kickoff before adding.
+- **Stage 2 — Stronger grounding.** Upgrade instruction block: require inline citations for factual claims using the existing citation strings, require "not in provided context" when evidence absent. Pair with a retrieval-quality check (X19) so strict grounding doesn't mask a retrieval regression as a model refusal.
+
+**Affected files:**
+- `shared/Documents/RagPromptBuilder.cs` — token-aware budget + stronger instruction block.
+- `runner/Services/ChatService.cs` — token budget wiring; model-window lookup.
+- `shared/` — possible new `Tiktoken` or equivalent dependency (flag at kickoff).
+- `tests/RagPipelineIntegrationTests.cs` — asserts inline citation presence on grounded answer.
+
+**Exit criterion:** Token-budgeted context fills available window without exceeding it; grounded answer on a test question includes inline citations; unsupported question elicits explicit "not in provided context" rather than hallucinated detail.
+
+---
+
+### X23 — Representative test fixtures
+
+**Status:** Backlog 2026-04-19 (RAG audit triage). **Medium.**
+**Scope:** One-shot.
+**Model:** Sonnet 4.6.
+
+**Driver:** Audit Medium #3. Tests use synthetic text files (`.txt`/`.md`/`.json`/`.csv`) and tiny PDFs built in temp dirs. No real-world PDFs, no re-ingest scenario, no rebuild scenario. Regressions in parse / chunk / index behavior on actual documents won't be caught until field use.
+
+**Fix:**
+- Add PDFs to `tests/fixtures/` — **public-domain only**, a few MB max each:
+  - text-layer PDF (exercises normal path)
+  - scan-only PDF (exercises X17 textless-page diagnostic)
+  - updated-document re-ingest scenario (exercises X10 replacement cleanup)
+  - rebuild-with-missing-original scenario (exercises X10 rebuild-from-stored)
+- Integration tests in `tests/RagPipelineIntegrationTests.cs` exercise each path end-to-end against a real local Ollama if `FREEAI_TEST_OLLAMA_HOST` env var is set, else skip with a visible message. Honors the "integration tests must hit a real command — mock-only tests hid regressions" feedback memory.
+
+**Affected files:**
+- `tests/fixtures/` — new directory with public-domain PDFs.
+- `tests/RagPipelineIntegrationTests.cs` — new fixture-driven cases.
+- `tests/DocumentParserTests.cs` — real-PDF cases.
+
+**⚠ Watch for:**
+- Licensing: public-domain only. No "this looked free" fixtures. Document the source of each file in a `tests/fixtures/README.md`.
+- Fixture size: keep each file small (a few MB max) so the repo doesn't bloat.
+
+**Exit criterion:** Integration suite exercises text-layer / scan-only / re-ingest / rebuild-after-move scenarios against real fixtures. Skipped gracefully when no Ollama host is configured.

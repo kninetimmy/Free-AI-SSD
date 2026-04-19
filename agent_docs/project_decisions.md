@@ -103,6 +103,18 @@ gains a "re-open encrypted drive" workflow, these call sites must be revisited.
 
 ---
 
+## 2026-04-19 — Migration must use LoadWithValidationAsync, not LoadAsync
+
+`TryMigratePlaintextAsync` uses `PortableConfig.LoadWithValidationAsync` (not the
+convenience `LoadAsync`) before absorbing a newer plaintext into the encrypted blob.
+A corrupt or malformed plaintext returns `isValid = false`; migration bails immediately
+and preserves the plaintext rather than overwriting the valid encrypted blob with a
+default (empty) config. Security invariant: when the plaintext cannot be validated,
+the encrypted blob remains authoritative and untouched. Gemini critical finding on
+PR #147 (`b75e42a`).
+
+---
+
 ## 2026-04-19 — OnClosing drain uses GetAwaiter().GetResult(), not cancel-and-retry
 
 `MainWindow.OnClosing` blocks the UI thread with
@@ -112,3 +124,74 @@ pattern easy to get subtly wrong (callbacks fire after the window is gone).
 Safe here because `SsdEncryption.SaveEncryptedConfigAsync` uses
 `ConfigureAwait(false)` throughout — no UI `SynchronizationContext` captured,
 no deadlock risk on the block. Established PR #146 (`542559b`).
+
+---
+
+## 2026-04-19 — RAG audit: X17 multimodal scoped to Stage 1 diagnostic only
+
+Third-party RAG audit flagged "multimodal PDF ingest" (OCR for scanned pages, table
+extraction, image handling) as its #1 Critical finding. Stated product workload is
+text-layer PDFs with embedded diagrams (DCS airframe manuals — Chuck's Guides and
+similar). Scanned PDFs are not part of the near-term use case.
+
+X17 keeps **Stage 1 only**: a textless-page diagnostic that flags per-page when the
+extracted text layer is effectively empty, surfaced via the ingest summary (X18). No
+OCR engine integration, no table extraction, no image handling at this time. Full OCR
+path revisited only if Stage 1 diagnostics show scanned PDFs in active use, or if
+embedded-image information is confirmed to carry content that the text layer omits.
+Keeps us out of an OCR-engine decision (Tesseract.NET bundled vs external-binary vs
+Windows-only) that would churn the portable/macOS deployment story for speculative gain.
+Established 2026-04-19 RAG audit triage plan session.
+
+---
+
+## 2026-04-19 — X21 embedding provenance slots before F3, reordering the queue
+
+Pre-audit, `project_state.md` queued F3 (PrepApp 3-tab restructure) as the first item
+after the H2 hardening batch. Post-audit, X21 (embedding provenance + compat gating,
+Sonnet-scale, ~2-3 days) slots in **before F3** between H2 and F3.
+
+Rationale: without provenance gating, a change to the embedding model silently scores
+mismatched chunks as zero (`VectorIndex.DotProductSimd` returns 0 on length mismatch —
+no error thrown, no log). Every downstream RAG item (X15 streaming ingest, X18
+observability, X19 hybrid retrieval, X20 section-aware chunking) touches the index; if
+any of those triggers an embedding-model swap during development, the corruption is
+invisible. X21 adds `embedding_model` / `embedding_dimension` / `parser_version` /
+`chunker_version` to the chunk schema and manifest, validates at query + ingest time,
+and surfaces mismatches as a clear reindex prompt. Small cost; preventative; unblocks
+everything RAG-shaped that follows. Established 2026-04-19 RAG audit triage plan
+session.
+
+---
+
+## 2026-04-19 — RAG audit fallout: 7 separate X-items, not a single umbrella
+
+RAG audit produced 9 findings. Three absorbed as scope expansions on existing backlog
+items (X10 + X13 + X15). Remaining six map to seven new X-items (X17 textless
+diagnostic, X18 ingest observability, X19 hybrid retrieval, X20 section-aware chunking
++ metadata, X21 provenance, X22 prompt packing + grounding, X23 realistic test
+fixtures).
+
+An umbrella "RAG quality overhaul" item in the X9 multi-stage shape was considered and
+rejected. Echoes the 2026-04-18 "ship each fix as its own PR + release" decision:
+narrower items are easier to reorder, pause, or drop mid-flight as field priorities
+shift. A ~10-stage umbrella locked into a single sequence would fight that flexibility.
+Established 2026-04-19 RAG audit triage plan session.
+
+---
+
+## 2026-04-19 — X10 ships path-capture first; stable document GUID spins out as X10-Redux
+
+RAG audit argued the root cause of orphaned vectors on re-ingest is path-based chunk
+keying, and proposed a stable `document_id GUID` on chunks + manifest entries as the
+principled fix. Current X10 scope (capture the old `StoredRelativePath` before
+overwrite, delete old vectors + old stored file via that captured path) is kept for the
+first PR. Stable-document-GUID upgrade spins out as **X10-Redux**, revisited only if
+the path-capture approach shows field issues.
+
+Rationale: path-capture is a smaller blast-radius change that fits the existing X10 PR
+shape (already covers rebuild-from-stored, per-file transactionality, SQLite WAL /
+busy_timeout). Introducing a new identity layer with schema migration in the same PR
+inflates review surface and delays the field-log `vectors.db` lock fix. If path-capture
++ WAL cleanly resolves the symptoms, the identity-layer work may never be needed.
+Established 2026-04-19 RAG audit triage plan session.
