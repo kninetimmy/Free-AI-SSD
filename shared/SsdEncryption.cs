@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using FreeAiSsd.Shared.Services;
 
 namespace FreeAiSsd.Shared;
 
@@ -193,6 +194,292 @@ public static class SsdEncryption
         // Delete the plaintext config now that encryption is complete.
         File.Delete(plainConfigPath);
     }
+
+    /// <summary>
+    /// In-memory finalize overload: derives a fresh key from <paramref name="password"/>,
+    /// encrypts <paramref name="config"/>, and writes the encrypted blob + state file
+    /// in a single two-file atomic commit. No plaintext config file is ever touched on
+    /// disk. Returns the resulting <see cref="UnlockMaterial"/> so callers can hand it
+    /// straight to <see cref="IConfigStore.UnlockSession"/> without a second derive.
+    /// </summary>
+    public static async Task<UnlockMaterial> EnableConfigEncryptionAsync(
+        string ssdRoot,
+        PortableConfig config,
+        string password,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            throw new ArgumentException("Password is required.", nameof(password));
+        }
+
+        var salt = RandomNumberGenerator.GetBytes(SaltBytes);
+        var key = DeriveKey(password, salt, Pbkdf2Iterations);
+        var material = new UnlockMaterial(key, salt, Pbkdf2Iterations, SchemeName);
+
+        await SaveEncryptedConfigAsync(ssdRoot, config, material, ct).ConfigureAwait(false);
+
+        return material;
+    }
+
+    /// <summary>
+    /// Encrypts <paramref name="config"/> with the cached key in <paramref name="material"/>
+    /// and commits the encrypted blob + state file atomically. Uses a fresh 12-byte nonce
+    /// per call (AES-GCM nonce reuse would be catastrophic). On failure after the blob has
+    /// been written, restores the prior blob from backup so blob/state never drift.
+    /// </summary>
+    public static async Task SaveEncryptedConfigAsync(
+        string ssdRoot,
+        PortableConfig config,
+        UnlockMaterial material,
+        CancellationToken ct = default)
+    {
+        if (material is null) throw new ArgumentNullException(nameof(material));
+        if (material.DerivedKey is null || material.DerivedKey.Length != KeyBytes)
+        {
+            throw new ArgumentException("UnlockMaterial is missing a valid 256-bit key.", nameof(material));
+        }
+
+        var configDir = Path.Combine(ssdRoot, SsdLayout.Config);
+        Directory.CreateDirectory(configDir);
+
+        var encryptedPath = Path.Combine(configDir, EncryptedConfigFileName);
+        var statePath = Path.Combine(configDir, StateFileName);
+        var encryptedTmp = encryptedPath + ".tmp";
+        var stateTmp = statePath + ".tmp";
+        var encryptedBak = encryptedPath + ".bak";
+        var stateBak = statePath + ".bak";
+
+        // Serialize config to plaintext bytes (matches PortableConfig's JSON shape).
+        var plaintext = JsonSerializer.SerializeToUtf8Bytes(config, PortableConfigJsonOptions());
+
+        // Encrypt with a fresh nonce.
+        var nonce = RandomNumberGenerator.GetBytes(NonceBytes);
+        var ciphertext = new byte[plaintext.Length];
+        var tag = new byte[TagBytes];
+        using (var aes = new AesGcm(material.DerivedKey, TagBytes))
+        {
+            aes.Encrypt(nonce, plaintext, ciphertext, tag);
+        }
+
+        var encryptedConfig = new EncryptedConfig
+        {
+            Version = 1,
+            Scheme = material.Scheme,
+            Iterations = material.Iterations,
+            Salt = Convert.ToBase64String(material.Salt),
+            Nonce = Convert.ToBase64String(nonce),
+            Tag = Convert.ToBase64String(tag),
+            Ciphertext = Convert.ToBase64String(ciphertext),
+            CreatedAtUtc = DateTime.UtcNow
+        };
+
+        var state = new EncryptionState
+        {
+            Enabled = true,
+            Scheme = material.Scheme,
+            Iterations = material.Iterations,
+            EncryptedConfigFile = EncryptedConfigFileName,
+            UpdatedAtUtc = DateTime.UtcNow
+        };
+
+        // Stage both tmp files before touching destinations.
+        await File.WriteAllTextAsync(encryptedTmp, JsonSerializer.Serialize(encryptedConfig, JsonOptions()), ct)
+            .ConfigureAwait(false);
+        await File.WriteAllTextAsync(stateTmp, JsonSerializer.Serialize(state, JsonOptions()), ct)
+            .ConfigureAwait(false);
+
+        // Clean stale backups from a prior crashed save.
+        SafeDelete(encryptedBak);
+        SafeDelete(stateBak);
+
+        var blobExisted = File.Exists(encryptedPath);
+        var stateExisted = File.Exists(statePath);
+
+        // Commit blob first. File.Replace is atomic on NTFS and writes a backup
+        // we can use to roll back if the state rename fails.
+        try
+        {
+            if (blobExisted)
+            {
+                File.Replace(encryptedTmp, encryptedPath, encryptedBak);
+            }
+            else
+            {
+                File.Move(encryptedTmp, encryptedPath);
+            }
+        }
+        catch
+        {
+            SafeDelete(encryptedTmp);
+            throw;
+        }
+
+        // Commit state. If this fails, restore the prior blob so encrypted+state
+        // cannot diverge (the whole point of the two-file atomic commit).
+        try
+        {
+            if (stateExisted)
+            {
+                File.Replace(stateTmp, statePath, stateBak);
+            }
+            else
+            {
+                File.Move(stateTmp, statePath);
+            }
+        }
+        catch
+        {
+            // Roll back the blob rename. File.Replace is atomic on NTFS — a crash
+            // mid-rollback cannot leave us with no blob + stale state.
+            try
+            {
+                if (blobExisted && File.Exists(encryptedBak))
+                {
+                    File.Replace(encryptedBak, encryptedPath, null);
+                }
+                else if (!blobExisted)
+                {
+                    // First-time save: no prior blob to restore; just remove the half.
+                    SafeDelete(encryptedPath);
+                }
+            }
+            catch
+            {
+                // Best-effort rollback; surface the original state-rename failure.
+            }
+
+            SafeDelete(stateTmp);
+            throw;
+        }
+
+        // Both replaces succeeded — clean up backup files.
+        SafeDelete(encryptedBak);
+        SafeDelete(stateBak);
+    }
+
+    /// <summary>
+    /// Decrypts the portable config like <see cref="TryUnlockPortableConfig"/> and also
+    /// returns the cached <see cref="UnlockMaterial"/> (derived key + salt + iters + scheme)
+    /// so the unlocked session can re-encrypt subsequent saves without re-deriving.
+    /// </summary>
+    public static bool TryUnlockPortableConfigWithMaterial(
+        string ssdRoot,
+        string password,
+        out PortableConfig? config,
+        out UnlockMaterial? material,
+        out string error)
+    {
+        config = null;
+        material = null;
+        error = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            error = "Password is required.";
+            return false;
+        }
+
+        var statePath = Path.Combine(ssdRoot, SsdLayout.Config, StateFileName);
+        var encryptedPath = Path.Combine(ssdRoot, SsdLayout.Config, EncryptedConfigFileName);
+        if (!File.Exists(statePath) || !File.Exists(encryptedPath))
+        {
+            error = "Encrypted drive metadata is missing.";
+            return false;
+        }
+
+        EncryptionState? state;
+        EncryptedConfig? encrypted;
+        try
+        {
+            state = JsonSerializer.Deserialize<EncryptionState>(File.ReadAllText(statePath), JsonOptions());
+            encrypted = JsonSerializer.Deserialize<EncryptedConfig>(File.ReadAllText(encryptedPath), JsonOptions());
+        }
+        catch
+        {
+            error = "Encrypted drive metadata is unreadable.";
+            return false;
+        }
+
+        if (state?.Enabled != true || encrypted is null)
+        {
+            error = "Encrypted drive metadata is invalid.";
+            return false;
+        }
+
+        if (encrypted.Iterations <= 0 || string.IsNullOrWhiteSpace(encrypted.Salt))
+        {
+            error = "Encryption parameters are missing.";
+            return false;
+        }
+
+        byte[]? key = null;
+        try
+        {
+            var salt = Convert.FromBase64String(encrypted.Salt);
+            var nonce = Convert.FromBase64String(encrypted.Nonce);
+            var tag = Convert.FromBase64String(encrypted.Tag);
+            var ciphertext = Convert.FromBase64String(encrypted.Ciphertext);
+            key = DeriveKey(password, salt, encrypted.Iterations);
+
+            var plaintext = new byte[ciphertext.Length];
+            using (var aes = new AesGcm(key, TagBytes))
+            {
+                aes.Decrypt(nonce, ciphertext, tag, plaintext);
+            }
+
+            var loaded = JsonSerializer.Deserialize<PortableConfig>(plaintext, JsonOptions());
+            if (loaded is null)
+            {
+                CryptographicOperations.ZeroMemory(key);
+                error = "Decrypted config is empty.";
+                return false;
+            }
+
+            config = loaded;
+            material = new UnlockMaterial(key, salt, encrypted.Iterations, encrypted.Scheme ?? SchemeName);
+            return true;
+        }
+        catch (CryptographicException)
+        {
+            if (key is not null) CryptographicOperations.ZeroMemory(key);
+            error = "Incorrect password.";
+            return false;
+        }
+        catch (Exception)
+        {
+            if (key is not null) CryptographicOperations.ZeroMemory(key);
+            error = "Failed to decrypt portable config.";
+            return false;
+        }
+    }
+
+    private static void SafeDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // Best effort — caller paths are tmp/bak cleanup, not correctness-critical.
+        }
+    }
+
+    /// <summary>
+    /// JSON options matching <see cref="PortableConfig"/>'s own serializer so the
+    /// symmetric encrypted-save round-trip produces byte-for-byte the same plaintext
+    /// that <see cref="PortableConfig.SaveAsync"/> would have written.
+    /// </summary>
+    private static JsonSerializerOptions PortableConfigJsonOptions() => new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Converters = { new JsonStringEnumConverter() }
+    };
 
     /// <summary>
     /// Attempts to decrypt the portable config using the provided password.
