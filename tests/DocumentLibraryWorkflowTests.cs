@@ -1,6 +1,7 @@
 using FreeAiSsd.Runner.Services;
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Documents;
+using FreeAiSsd.Shared.Services;
 
 namespace FreeAiSsd.Tests;
 
@@ -101,7 +102,7 @@ public sealed class DocumentLibraryWorkflowTests : IDisposable
         var manager = new DocumentLibraryManager(ssdRoot);
         var embeddingClient = new EmbeddingClient(new HttpClient(new StubEmbeddingHandler()));
         var ingestor = new DocumentIngestor(manager, embeddingClient);
-        var service = new DocumentOperationsService(manager, ingestor);
+        var service = new DocumentOperationsService(manager, ingestor, new ConfigStore());
         config = new PortableConfig();
         return (service, manager);
     }

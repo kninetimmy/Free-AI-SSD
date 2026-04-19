@@ -6,6 +6,7 @@ using System.Threading;
 using System.Windows.Threading;
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Documents;
+using FreeAiSsd.Shared.Services;
 using FreeAiSsd.Shared.UI.Theme;
 using FreeAiSsd.Runner.Services;
 using Forms = System.Windows.Forms;
@@ -38,6 +39,7 @@ public partial class MainWindow : System.Windows.Window
     private readonly IAudioCaptureService _audioCaptureService;
     private readonly IRunnerLocalApiService _localApiService;
     private readonly ITtsProvider _ttsProvider;
+    private readonly IConfigStore _configStore;
     private ITextToSpeechService? _ttsService;
 
     private PortableConfig? _config;
@@ -86,7 +88,8 @@ public partial class MainWindow : System.Windows.Window
         IHotasInputService hotasService,
         PttVoicePipelineService pttPipeline,
         IRunnerLocalApiService localApiService,
-        ITtsProvider ttsProvider)
+        ITtsProvider ttsProvider,
+        IConfigStore configStore)
     {
         InitializeComponent();
 
@@ -97,6 +100,7 @@ public partial class MainWindow : System.Windows.Window
         _docService = docService;
         _chatService = chatService;
         _dcsImportService = dcsImportService;
+        _configStore = configStore;
         _sttService = sttService;
         _audioCaptureService = audioCaptureService;
         _hotasService = hotasService;
@@ -287,8 +291,7 @@ public partial class MainWindow : System.Windows.Window
         _config.ActiveProfile = profile;
         ProfileDefaults.Apply(_config, profile);
 
-        var configPath = Path.Combine(_ssdRoot, "config", "portable-config.json");
-        await _config.SaveAsync(configPath);
+        await _configStore.SaveAsync(_ssdRoot, _config, CancellationToken.None);
 
         RefreshProfileVisibility();
         AppendLog($"Profile set to {profile}.");
@@ -316,8 +319,7 @@ public partial class MainWindow : System.Windows.Window
         _config.ActiveProfile = profile;
         ProfileDefaults.Apply(_config, profile);
 
-        var configPath = Path.Combine(_ssdRoot, "config", "portable-config.json");
-        await _config.SaveAsync(configPath);
+        await _configStore.SaveAsync(_ssdRoot, _config, CancellationToken.None);
 
         RefreshProfileVisibility();
         AppendLog($"Profile set to {profile}.");
@@ -353,13 +355,16 @@ public partial class MainWindow : System.Windows.Window
             return false;
         }
 
-        if (!SsdEncryption.TryUnlockPortableConfig(_ssdRoot, dialog.Password, out var unlockedConfig, out var error) || unlockedConfig is null)
+        if (!SsdEncryption.TryUnlockPortableConfigWithMaterial(
+                _ssdRoot, dialog.Password, out var unlockedConfig, out var unlockMaterial, out var error)
+            || unlockedConfig is null || unlockMaterial is null)
         {
             StatusText.Text = "Unlock failed";
             AppendLog($"Unlock failed: {error}");
             return false;
         }
 
+        _configStore.UnlockSession(unlockMaterial);
         _config = unlockedConfig;
         _isUnlocked = true;
         UpdateEncryptionUiState();
@@ -2084,8 +2089,7 @@ public partial class MainWindow : System.Windows.Window
     private void SaveConfigAsync()
     {
         if (_config is null) return;
-        var configPath = Path.Combine(_ssdRoot, "config", "portable-config.json");
-        _ = _config.SaveAsync(configPath).ContinueWith(t =>
+        _ = _configStore.SaveAsync(_ssdRoot, _config, CancellationToken.None).ContinueWith(t =>
         {
             if (t.Exception is null) return;
             var ex = t.Exception.GetBaseException();
@@ -2106,6 +2110,15 @@ public partial class MainWindow : System.Windows.Window
                 }
             });
         }, TaskScheduler.Default);
+    }
+
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        // Drain any queued saves before zeroing the key. Bounded at 5s so a stuck
+        // save can't hang app close — FlushAsync logs the timeout and returns.
+        _configStore.FlushAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+        _configStore.LockSession();
+        base.OnClosing(e);
     }
 
     // TODO (phase-a-default-hardening, Task 1 UI confirmation):

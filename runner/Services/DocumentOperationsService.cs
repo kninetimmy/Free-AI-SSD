@@ -1,5 +1,6 @@
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Documents;
+using FreeAiSsd.Shared.Services;
 
 namespace FreeAiSsd.Runner.Services;
 
@@ -7,11 +8,16 @@ public sealed class DocumentOperationsService : IDocumentOperationsService
 {
     private readonly DocumentLibraryManager _libraryManager;
     private readonly DocumentIngestor _documentIngestor;
+    private readonly IConfigStore _configStore;
 
-    public DocumentOperationsService(DocumentLibraryManager libraryManager, DocumentIngestor documentIngestor)
+    public DocumentOperationsService(
+        DocumentLibraryManager libraryManager,
+        DocumentIngestor documentIngestor,
+        IConfigStore configStore)
     {
         _libraryManager = libraryManager;
         _documentIngestor = documentIngestor;
+        _configStore = configStore;
     }
 
     public event Action<string>? LogMessage;
@@ -129,7 +135,6 @@ public sealed class DocumentOperationsService : IDocumentOperationsService
 
     public async Task SaveConfigAsync(PortableConfig config, string ssdRoot)
     {
-        var configPath = Path.Combine(ssdRoot, "config", "portable-config.json");
-        await config.SaveAsync(configPath);
+        await _configStore.SaveAsync(ssdRoot, config, CancellationToken.None);
     }
 }

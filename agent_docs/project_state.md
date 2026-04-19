@@ -1,21 +1,29 @@
 # Project State
 
-Last updated: 2026-04-19 (X9 Stage 2 shared lib shipped — Stage 3 Runner wiring is the next PR)
+Last updated: 2026-04-19 (X9 Stage 3 Runner wiring shipped — Stage 4 Prep finalize is next)
 
 Last live-tested release: **v1.2.5** (field-tested 2026-04-19 — chat, TTS, library creation, PTT all healthy; the v1.2.4 X1-Redux / X6 / X8 symptoms did not reproduce). Next tag target: **v1.2.6** (X9 Stages 2-4, encrypted config lifecycle).
 
 ## In flight
 
-- **X9 Stage 3 — Runner wiring for encrypted config.** Stage 2 shipped
-  (PR #144, `49ce6a0`) — shared-lib `IConfigStore` + `ConfigStore` +
-  `UnlockMaterial`, symmetric `SaveEncryptedConfigAsync`, in-memory
-  finalize overload, `TryUnlockPortableConfigWithMaterial`. Nothing is
-  wired to the store yet. Stage 3 routes `MainWindow.SaveConfigAsync` +
-  `DocumentOperationsService` through `IConfigStore`, captures
-  `UnlockMaterial` on unlock, adds `OnClosing` flush+lock. Plan calls
-  for Sonnet 4.6 implementation with an Opus advisor pass.
+- **X9 Stage 4 — Prep finalize + migration + guard rewrite.** Stage 3
+  shipped. Stage 4 encrypts-from-memory at Prep finalize, adds the
+  modal migration prompt (mtime-aware branches for plaintext-newer and
+  encrypted-newer), and rewrites the config guard. End-to-end test:
+  finalize + Network Mode + API key.
 
 ## Recently shipped
+
+- **X9 Stage 3 — Runner wiring shipped.** `IConfigStore` chokepoint
+  wired into `MainWindow` and `DocumentOperationsService`.
+  `TryUnlockPortableConfigWithMaterial` now captures `UnlockMaterial`
+  on unlock; `ConfigStore.UnlockSession` caches the derived key.
+  `OnClosing` blocks on `FlushAsync(5s)` then `LockSession()`. All
+  fire-and-forget saves surface `NetworkModeEncryptionRequiredMessage`
+  via a `MessageBox` instead of swallowing. 1 new integration test
+  (`RunnerWiring_UnlockSaveLockReUnlock_RoundTrips`) — full suite
+  393/393 green. Runtime smoke test pending field validation (WPF can't
+  be tested headlessly).
 
 - **X9 Stage 2 — shared lib shipped — PR #144 merged** as commit `49ce6a0`.
   `IConfigStore` / `ConfigStore` / `UnlockMaterial` added, plus three new
@@ -46,9 +54,9 @@ Last live-tested release: **v1.2.5** (field-tested 2026-04-19 — chat, TTS, lib
 
 ## Next up
 
-**Blocking v1.2.6 tag:** X9 Stages 3-4 — encrypted config lifecycle.
-Stage 3 (Runner wiring) is the immediate next PR; plan is approved and
-lives at `C:\Users\Kninetimmy\.claude\plans\okay-i-want-to-lexical-wren.md`.
+**Blocking v1.2.6 tag:** X9 Stage 4 — Prep finalize + migration + guard
+rewrite. Stage 3 shipped; Stage 4 is the final piece of the encrypted
+config lifecycle.
 
 **After X9 ships — remaining Codex deep-review queue:**
 X10 (document replacement + rebuild — now also covers `vectors.db`
@@ -70,6 +78,14 @@ then re-evaluate F2 / F4 stage 1 / B2 / R1 Stage 2 / X6 / X7 / F5.
 See `project_backlog.md` for full item details.
 
 ## Last session
+
+2026-04-19 (X9 Stage 3 — Runner wiring) — **Stage 3 implemented and
+PR'd.** Wired `IConfigStore` into `MainWindow` (unlock capture,
+`OnClosing` flush+lock, all save sites) and `DocumentOperationsService`
+(constructor + `SaveConfigAsync`). `DocumentLibraryWorkflowTests` updated
+to pass `new ConfigStore()`. 1 new integration test. Suite 393/393 green.
+Advisor passes flagged `ConfigureAwait(false)` safety (verified), docs
+update, and Codex review needed. No runtime smoke — field test validates.
 
 2026-04-19 (X9 Stage 2 — shared lib shipped) — **Stage 2 implemented
 and merged as PR #144 (`49ce6a0`).** Added `IConfigStore` /
