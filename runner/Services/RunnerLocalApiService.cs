@@ -623,7 +623,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         await _sttTranscribeGate.WaitAsync(ct);
         try
         {
-            return await _sttService.TranscribeAudioAsync(audioData);
+            return await _sttService.TranscribeAudioAsync(audioData, ct);
         }
         finally
         {

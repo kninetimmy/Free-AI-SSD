@@ -64,7 +64,9 @@ public class PttVoicePipelineServiceTests
         public bool IsModelLoaded => true;
         public Task InitializeAsync(string ssdRoot, PortableConfig config) => Task.CompletedTask;
         public Task<string> TranscribeAudioAsync(byte[] audioData) => Task.FromResult("what's the weather");
+        public Task<string> TranscribeAudioAsync(byte[] audioData, CancellationToken cancellationToken) => Task.FromResult("what's the weather");
         public Task<string> TranscribeStreamAsync(Stream audioStream) => Task.FromResult(string.Empty);
+        public Task<string> TranscribeStreamAsync(Stream audioStream, CancellationToken cancellationToken) => Task.FromResult(string.Empty);
         public void Dispose() { }
     }
 
