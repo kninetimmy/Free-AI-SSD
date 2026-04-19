@@ -56,8 +56,8 @@ the style to match.
 **Shipped post-v1.2.4 (rolls into v1.2.5):**
 4a. **X8** — shipped 2026-04-18 (PR #138, merged commit `fa34828`). Initial fix (`591a39b`) split model teardown from `Dispose()` so the shared semaphore survived re-init; follow-up (`9c3a054`) folded in the three races Gemini + Codex flagged — single `_lifecycleGate` serializes Init / Transcribe / Dispose, `_shutdownCts` drains in-flight `ProcessAsync` on window close, and `CancellationToken` is now threaded through `ISpeechToTextService` into PTT + network API callers.
 
-**Blocking v1.2.5 tag:**
-4b. **X1-Redux** — hang regression still present after PR #136; phase 1 diagnostic branch `diag/x1-redux-send-hang` pushed 2026-04-18, awaiting repro log from SSD. **NEW 2026-04-18.**
+**Dormant (could not reproduce on 2026-04-19 v1.2.5 field test):**
+4b. **X1-Redux** — hang regression from v1.2.4 did not reproduce across 10+ varied prompts on `main` at commit `54b276a`. Chat, TTS, library creation, and PTT all healthy. Diag branch `diag/x1-redux-send-hang` stays on remote unmerged, ready if the hang returns. No longer blocking v1.2.6 tag. **Status updated 2026-04-19.**
 
 **Codex deep-review findings (intake 2026-04-18 — slot between X1-Redux and feature queue):**
 5. **X9** — encrypted config persistence lifecycle (Critical; Opus planning)
@@ -80,9 +80,12 @@ the style to match.
 18. **X5** — GPU/CPU compute indicator (read-only first, selector later)
 
 **Field-test surface from v1.2.4 walkthrough (2026-04-18):**
-- **X6** — "Create Library" click hangs UI, crashes, library created on reopen (separate hang from X1).
+- **X6** — "Create Library" click hangs UI, crashes, library created on reopen (separate hang from X1). *Did not reproduce on 2026-04-19 v1.2.5 field test; leave open until retested on fresh SSD.*
 - **X7** — DCS bindings scan finds aircraft but reports "no custom bindings" against real `.diff.lua` files on disk.
 - **F5** — No in-app TTS settings UI (backend selector + voice-model picker). Blocks field-testing Piper/SAPI/disabled paths.
+
+**Field-test surface from v1.2.5 walkthrough (2026-04-19):**
+- **X14** — 50 MB upload limit silently rejects files with no user-facing hint (140 MB PDF case). Small UX fix.
 
 **Also outstanding:** README update for F1 (USB SSD detection fix). Small, can be bundled with any doc PR — or folded into H1 below.
 
@@ -499,7 +502,7 @@ Could be implemented via a `DataTrigger` binding on `IsRunning` or via visibilit
 
 ### X1-Redux — Voice/TTS pipeline hang still present after PR #136
 
-**Status:** phase 1 diagnostic branch pushed 2026-04-18 as `diag/x1-redux-send-hang` (never-merge). Awaiting Stephen to reproduce the hang on the SSD and return `%TEMP%\freeai-x1redux-diagnostic.log`. **Blocks v1.2.4 tag.**
+**Status:** **Dormant as of 2026-04-19 v1.2.5 field test** — hang did not reproduce across 10+ varied prompts on `main` at `54b276a`; chat / TTS / library creation / PTT all healthy. Diag branch `diag/x1-redux-send-hang` stays on remote unmerged, ready to rebuild if the hang returns. No longer blocking v1.2.6. Prior status: phase 1 diagnostic branch pushed 2026-04-18, awaited repro log that never produced a repro.
 **Scope:** Diagnose first, then fix (two-phase, B3-Redux style)
 **Model:** Sonnet 4.6 for phase 1 (diagnostic); re-triage for phase 2 once cause is known
 
@@ -788,6 +791,7 @@ sealed record UnlockMaterial(byte[] DerivedKey, byte[] Salt, int Iterations, str
 **Symptom:**
 - Re-ingesting a changed document leaves stale chunks in the vector DB and stale stored files in the library folder.
 - "Rebuild index" silently drops any document whose original source file has been moved or deleted, even though the SSD still has the stored library copy.
+- **Field log 2026-04-19** (`G:\logs\runner-20260419.log:381`): *"Rebuild failed: The process cannot access the file 'vectors.db' because it is being used by another process."* Observed mid-session with Ollama running — suggests rebuild path doesn't coordinate with concurrent readers or a prior failed attempt leaked the file handle. Reproduce and fix as part of X10.
 
 **Root cause (verified 2026-04-18):**
 - Stored filenames are `{sha[..12]}_{fileName}` (`shared/Documents/DocumentIngestor.cs:70`). When content changes, the SHA prefix changes, producing a new `StoredRelativePath`.
@@ -933,3 +937,29 @@ sealed record UnlockMaterial(byte[] DerivedKey, byte[] Salt, int Iterations, str
 **Affected files:** as listed above.
 
 **Exit criterion:** One PR, one commit per logical grouping (build.ps1 fix; platform guards; workflow pinning; docs refresh; test cleanup). CA1416 warnings clean; README reflects live state; no new test failures.
+
+---
+
+### X14 — 50 MB upload limit silently rejects files with no user hint
+
+**Status:** triaged 2026-04-19 (v1.2.5 field test). **Low (UX).**
+**Scope:** One-shot UX nit.
+**Model:** Sonnet 4.6 (trivial — design tiny enough to skip Opus).
+
+**Symptom (2026-04-19 field log):**
+- User dragged a 140.8 MB DCS Hornet guide PDF into the library. Log records `[WARN] Rejected oversized file (140.8 MB exceeds 50 MB limit): C:\Users\Kninetimmy\Downloads\DCS FA-18C Hornet Guide.pdf` (`G:\logs\runner-20260419.log:377`) but the UI gave no visible explanation — user would reasonably assume drop-target malfunction.
+
+**Fix options (pick one at implementation time, not now):**
+- Toast / modal on the drop target when a file is rejected, naming the limit and the actual size.
+- Pre-drop hint in the library "add files" affordance showing the 50 MB cap.
+- Both (toast on rejection + static hint in the empty state).
+
+**Watch for:**
+- Don't raise the limit without a downstream plan — 50 MB is paired with chunking / embedding throughput assumptions. This is a messaging fix, not a cap change.
+- Check if PrepApp's staging path has the same silent-rejection gap before shipping — likely does.
+
+**Affected files (expected):**
+- `runner/MainWindow.xaml(.cs)` or whatever handles the library drop target.
+- Whatever validator emits the current `WARN` log line — surface the same text via a user-visible channel.
+
+**Exit criterion:** rejected file shows a visible, actionable message naming the limit. No silent failure path.

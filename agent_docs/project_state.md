@@ -1,8 +1,8 @@
 # Project State
 
-Last updated: 2026-04-19 (X9 Stage 1 plan locked — Opus + advisor pass; Stage 2 code unblocked; X1-Redux log wait parked)
+Last updated: 2026-04-19 (v1.2.5 field-tested — X1-Redux dormant, could not reproduce across 10+ prompts; X9 Stage 2 now the active blocker for v1.2.6)
 
-Last live-tested release: **v1.2.4**. **v1.2.5** tagged on `74629a4` (docs-framework restructure + X8 rollup) but not field-tested. Next tag target: **v1.2.6** (X1-Redux fix, once the diagnostic round-trips).
+Last live-tested release: **v1.2.5** (field-tested 2026-04-19 — chat, TTS, library creation, PTT all healthy; the v1.2.4 X1-Redux / X6 / X8 symptoms did not reproduce). Next tag target: **v1.2.6** (X9 Stages 2-4, encrypted config lifecycle).
 
 ## In flight
 
@@ -14,13 +14,17 @@ Last live-tested release: **v1.2.4**. **v1.2.5** tagged on `74629a4` (docs-frame
   `TryUnlockPortableConfigWithMaterial`. Real-crypto unit tests only — no
   mocks on the encrypt/decrypt path.
 
-- **X1-Redux phase 1 — diagnostic branch `diag/x1-redux-send-hang`.**
-  **Parked** awaiting Stephen's SSD repro log. Branch never merges. When the
-  log arrives: gap pattern between `[watchdog-bg]` vs `[ui-hb]` pings
-  discriminates UI-thread deadlock vs process-level hang vs
-  HTTP-stream-never-ends. Fix will retarget v1.2.6.
-
 ## Recently shipped
+
+- **v1.2.5 field test — 2026-04-19.** Stephen ran `main` (commit
+  `54b276a`) on the SSD; chat, TTS, library creation, and PTT all
+  healthy. The three v1.2.4 symptoms (X1-Redux text-Send hang, X6
+  Create Library hang, X8 Whisper crash) did **not** reproduce across
+  10+ varied prompts. Runner log at `G:\logs\runner-20260419.log`
+  surfaced three side-finds: RAG silently 404s (known — `nomic-embed-text`
+  not pulled on Stephen's Ollama), `vectors.db` rebuild failed with a
+  file-lock error (rolled into X10 scope), and a 140 MB PDF upload
+  was silently rejected against the 50 MB limit (triaged as X14).
 
 - **X9 Stage 1 plan locked — PR #142 merged** as commit `54b276a`.
   Locks `IConfigStore` contract, `UnlockMaterial` shape, two-file
@@ -65,17 +69,20 @@ Last live-tested release: **v1.2.4**. **v1.2.5** tagged on `74629a4` (docs-frame
 
 ## Next up
 
-**Blocking v1.2.6 tag:** Track B (X1-Redux) log from SSD. Fix lands
-as a follow-up PR once the log identifies the stall point.
-
-**Running parallel (X1-Redux parked):** X9 Stage 2 code — shared lib
-for encrypted config lifecycle. Spec lives in `project_backlog.md` → X9.
+**Blocking v1.2.6 tag:** X9 Stages 2-4 — encrypted config lifecycle.
+Stage 2 (shared lib) is the immediate next PR; plan is approved and
+lives at `C:\Users\Kninetimmy\.claude\plans\okay-i-want-to-lexical-wren.md`.
 
 **After X9 ships — remaining Codex deep-review queue:**
-X10 (document replacement + rebuild), X11 (companion keyboard PTT +
-first-run validation), X12 (download verify-before-move), X13
+X10 (document replacement + rebuild — now also covers `vectors.db`
+file lock observed in 2026-04-19 field log), X11 (companion keyboard
+PTT + first-run validation), X12 (download verify-before-move), X13
 (chat/STT surface real failures), H2 (hardening batch). Each ships
 as its own PR + patch release per the v1.2.x cadence decision.
+
+**Dormant (could not reproduce — keep on the radar):** X1-Redux.
+Diag branch `diag/x1-redux-send-hang` stays on remote, unmerged,
+ready to rebuild if the hang ever returns.
 
 **After hardening queue:** F3 PrepApp 3-tab restructure (Opus plan first),
 then re-evaluate F2 / F4 stage 1 / B2 / R1 Stage 2 / X6 / X7 / F5.
@@ -86,6 +93,18 @@ then re-evaluate F2 / F4 stage 1 / B2 / R1 Stage 2 / X6 / X7 / F5.
 See `project_backlog.md` for full item details.
 
 ## Last session
+
+2026-04-19 (v1.2.5 field test + doc PR) — **Field test cleared X1-Redux
+off the blocker list.** Stephen ran `main` at `54b276a` on the SSD,
+exercised chat via example prompts and custom prompts across 10+
+varied inputs, TTS played and cleaned up normally, Create Library
+completed in ~60 ms, and PTT pipeline cancelled without crashing
+Runner. None of the v1.2.4 symptoms (X1-Redux text-Send hang / X6
+library-create hang / X8 Whisper crash) reproduced. Doc PR flushed
+dashboard to match: X1-Redux moved from "in flight, parked" to
+"dormant," X10 scope grew to cover the `vectors.db` file-lock error
+seen in the field log, new X14 item filed for 50 MB upload silent
+rejection. v1.2.6 tag now gated on X9 Stages 2-4 alone.
 
 2026-04-19 (doc flush + X9 Stage 1 plan lock) — **Docs-only session, three PRs.**
 PR #140 (`bfac019`) flushed the dirty Codex-intake backlog edits from
