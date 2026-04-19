@@ -342,7 +342,7 @@ public partial class MainWindow : System.Windows.Window
         UnlockDriveButton.IsEnabled = _isEncryptedDrive && !_isUnlocked;
     }
 
-    private bool TryUnlockEncryptedDrive()
+    private async Task<bool> TryUnlockEncryptedDriveAsync()
     {
         if (!_isEncryptedDrive) return true;
         if (_isUnlocked && _config is not null) return true;
@@ -365,7 +365,23 @@ public partial class MainWindow : System.Windows.Window
         }
 
         _configStore.UnlockSession(unlockMaterial);
-        _config = unlockedConfig;
+
+        var migration = await SsdEncryption.TryMigratePlaintextAsync(_ssdRoot, unlockMaterial, _logger);
+        if (migration.WasPlaintextNewer && migration.MergedConfig is not null)
+        {
+            _config = migration.MergedConfig;
+            AppendLog("[Migration] Newer unencrypted settings found — merged into encrypted configuration.");
+            System.Windows.MessageBox.Show(
+                "Newer settings were found in an unencrypted file from your last session. They've been merged into your encrypted configuration and the unencrypted file has been removed.",
+                "Settings Recovery",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Information);
+        }
+        else
+        {
+            _config = unlockedConfig;
+        }
+
         _isUnlocked = true;
         UpdateEncryptionUiState();
         PopulateModelCombo();
@@ -380,7 +396,7 @@ public partial class MainWindow : System.Windows.Window
 
     private async void Start_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        if (_isEncryptedDrive && !TryUnlockEncryptedDrive()) return;
+        if (_isEncryptedDrive && !await TryUnlockEncryptedDriveAsync()) return;
         if (_config is null || _ollamaService.IsRunning) return;
 
         var trust = _ollamaService.ValidateTrust(_ssdRoot);
@@ -1320,7 +1336,7 @@ public partial class MainWindow : System.Windows.Window
 
     private void UnlockDrive_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        TryUnlockEncryptedDrive();
+        _ = TryUnlockEncryptedDriveAsync();
     }
 
     // ─────────────────────────────────────────────────────────────────────────

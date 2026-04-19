@@ -14,16 +14,14 @@ Last live-tested release: **v1.2.5** (field-tested 2026-04-19 — chat, TTS, lib
 
 ## Recently shipped
 
-- **X9 Stage 3 — Runner wiring shipped.** `IConfigStore` chokepoint
-  wired into `MainWindow` and `DocumentOperationsService`.
-  `TryUnlockPortableConfigWithMaterial` now captures `UnlockMaterial`
-  on unlock; `ConfigStore.UnlockSession` caches the derived key.
-  `OnClosing` blocks on `FlushAsync(5s)` then `LockSession()`. All
-  fire-and-forget saves surface `NetworkModeEncryptionRequiredMessage`
-  via a `MessageBox` instead of swallowing. 1 new integration test
-  (`RunnerWiring_UnlockSaveLockReUnlock_RoundTrips`) — full suite
-  393/393 green. Runtime smoke test pending field validation (WPF can't
-  be tested headlessly).
+- **X9 Stage 3 — Runner wiring shipped — PR #146 merged** as commit `542559b`.
+  `IConfigStore` chokepoint wired into `MainWindow` and `DocumentOperationsService`.
+  `TryUnlockPortableConfigWithMaterial` captures `UnlockMaterial` on unlock;
+  `ConfigStore.UnlockSession` caches the derived key. `OnClosing` blocks on
+  `FlushAsync(5s)` then `LockSession()`. Fire-and-forget saves surface
+  `NetworkModeEncryptionRequiredMessage` via `MessageBox`. 1 new integration
+  test — full suite 393/393 green. Field-tested 2026-04-19: PTT toggle
+  persisted across unlock → edit → close → reopen cycle.
 
 - **X9 Stage 2 — shared lib shipped — PR #144 merged** as commit `49ce6a0`.
   `IConfigStore` / `ConfigStore` / `UnlockMaterial` added, plus three new
@@ -79,39 +77,20 @@ See `project_backlog.md` for full item details.
 
 ## Last session
 
-2026-04-19 (X9 Stage 3 — Runner wiring) — **Stage 3 implemented and
-PR'd.** Wired `IConfigStore` into `MainWindow` (unlock capture,
-`OnClosing` flush+lock, all save sites) and `DocumentOperationsService`
-(constructor + `SaveConfigAsync`). `DocumentLibraryWorkflowTests` updated
-to pass `new ConfigStore()`. 1 new integration test. Suite 393/393 green.
-Advisor passes flagged `ConfigureAwait(false)` safety (verified), docs
-update, and Codex review needed. No runtime smoke — field test validates.
+2026-04-19 (X9 Stage 3 — Runner wiring) — **Stage 3 implemented,
+field-tested, and merged as PR #146 (`542559b`).** Wired `IConfigStore`
+into `MainWindow` (unlock capture, `OnClosing` flush+lock, all save
+sites) and `DocumentOperationsService`. Field test confirmed PTT toggle
+persisted across unlock → edit → close → reopen on encrypted drive.
+Unlock dialog light-theme bug noted for backlog (X16).
 
 2026-04-19 (X9 Stage 2 — shared lib shipped) — **Stage 2 implemented
 and merged as PR #144 (`49ce6a0`).** Added `IConfigStore` /
 `ConfigStore` / `UnlockMaterial` + three symmetric-crypto members on
-`SsdEncryption`. Advisor pass on the implementation caught two real
-issues that got fixed before merge: rollback used Delete+Move instead
-of `File.Replace` (a crash mid-rollback could have left stale-state +
-no-blob), and `TryUnlockPortableConfigWithMaterial` didn't zero the
-derived key on wrong-password / decrypt-exception branches. Also filed
-backlog X15 (revisit RAG file-size + 10k chunk caps — Chuck's Guides
-run 120-160 MB and the current 50 MB cap rejects them). Model choice
-for Stages 3-4 settled on Sonnet 4.6 + Opus advisor per the Stage 1
-plan; saved a persistent feedback memory so Sonnet uses a lower
-advisor-call threshold on this project.
-
-2026-04-19 (v1.2.5 field test + doc PR) — **Field test cleared X1-Redux
-off the blocker list.** Stephen ran `main` at `54b276a` on the SSD,
-exercised chat via example prompts and custom prompts across 10+
-varied inputs, TTS played and cleaned up normally, Create Library
-completed in ~60 ms, and PTT pipeline cancelled without crashing
-Runner. None of the v1.2.4 symptoms (X1-Redux text-Send hang / X6
-library-create hang / X8 Whisper crash) reproduced. Doc PR flushed
-dashboard to match: X1-Redux moved from "in flight, parked" to
-"dormant," X10 scope grew to cover the `vectors.db` file-lock error
-seen in the field log, new X14 item filed for 50 MB upload silent
-rejection.
+`SsdEncryption`. Advisor pass caught two issues before merge: rollback
+used Delete+Move instead of `File.Replace`, and
+`TryUnlockPortableConfigWithMaterial` didn't zero the derived key on
+failure paths. Filed backlog X15 (RAG file-size cap revisit).
 
 ## Open questions
 

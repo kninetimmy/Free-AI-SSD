@@ -49,6 +49,7 @@ Namespaces:
 
 ### Runner services (`runner/Services/`)
 DI-registered services:
+- `ConfigStore` (`IConfigStore`) — config save chokepoint; serializes saves via `SemaphoreSlim(1,1)`, caches `UnlockMaterial`, zeroes key on `LockSession()`
 - `OllamaLifecycleService` — process start/stop
 - `ChatService` — RAG-augmented streaming via Ollama `/api/generate`
 - `DocumentOperationsService` — CRUD, ingestion, index rebuild
@@ -78,6 +79,7 @@ ViewModels inherit `BaseViewModel` from shared. UI logic lives in ViewModels, no
 - **Path traversal** blocked by `PathGuards` (throw, don't swallow)
 - **Shell injection** prevented via `ProcessRunner.ArgumentList` (never string concat)
 - **Fail-closed** write guard on encrypted drives (`PrepDriveWriteGuard`)
+- **Config writes** route exclusively through `ConfigStore`; plaintext write on an encrypted drive throws `InvalidOperationException` (fail-closed)
 
 Do not weaken these controls. New process launches go through `ProcessRunner`; new file operations go through `PathGuards`.
 

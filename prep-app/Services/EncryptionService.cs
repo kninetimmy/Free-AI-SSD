@@ -10,4 +10,7 @@ public sealed class EncryptionService : IEncryptionService
 
     public async Task EnableConfigEncryptionAsync(string root, string configPath, string passphrase)
         => await SsdEncryption.EnableConfigEncryptionAsync(root, configPath, passphrase);
+
+    public async Task<UnlockMaterial> EnableConfigEncryptionAsync(string root, PortableConfig config, string passphrase, CancellationToken ct = default)
+        => await SsdEncryption.EnableConfigEncryptionAsync(root, config, passphrase, ct);
 }

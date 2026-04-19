@@ -85,3 +85,30 @@ Rationale: narrower PRs are easier to revisit as context for future
 work — "fewer things that each one has". Applies to the v1.2.x patch
 stream; bundled PRs remain fine for multi-stage features (F3/F4/B2
 etc.).
+
+---
+
+## 2026-04-19 — PrepApp ModelService / ReadinessService bypass IConfigStore intentionally
+
+`ModelService` and `ReadinessService` in PrepViewModel write directly to
+`portable-config.json` via `PortableConfig.SaveAsync` / `config.SaveAsync`
+rather than routing through `IConfigStore`. This is intentional: both services
+run exclusively in the pre-finalize phase of the one-way PrepApp setup flow.
+Finalize (`EnableConfigEncryptionAsync`) is the terminal step; it deletes the
+plaintext file. Post-finalize, `portable-config.json` does not exist and
+PrepApp model operations would fail to load config anyway — the PrepApp is not
+designed for post-finalize re-entry. Routing these writes through `IConfigStore`
+was considered for X9 Stage 4 and explicitly excluded. If the PrepApp ever
+gains a "re-open encrypted drive" workflow, these call sites must be revisited.
+
+---
+
+## 2026-04-19 — OnClosing drain uses GetAwaiter().GetResult(), not cancel-and-retry
+
+`MainWindow.OnClosing` blocks the UI thread with
+`ConfigStore.FlushAsync(5s).GetAwaiter().GetResult()` before `LockSession()`.
+Async cancel-and-retry was rejected: WPF shutdown sequencing makes that
+pattern easy to get subtly wrong (callbacks fire after the window is gone).
+Safe here because `SsdEncryption.SaveEncryptedConfigAsync` uses
+`ConfigureAwait(false)` throughout — no UI `SynchronizationContext` captured,
+no deadlock risk on the block. Established PR #146 (`542559b`).
