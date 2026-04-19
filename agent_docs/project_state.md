@@ -22,6 +22,20 @@ Last live-tested release: **v1.2.4**. **v1.2.5** tagged on `74629a4` (docs-frame
 
 ## Recently shipped
 
+- **X9 Stage 1 plan locked — PR #142 merged** as commit `54b276a`.
+  Locks `IConfigStore` contract, `UnlockMaterial` shape, two-file
+  atomic commit for encrypted blob + state file, bounded
+  `FlushAsync(5s)` on close, and mtime-aware migration for existing
+  field drives. Stage 2 code is unblocked. Advisor pass surfaced the
+  plaintext-newer-than-encrypted migration branch (matters for
+  Stephen's drive — all his post-unlock edits have been landing in
+  plaintext).
+
+- **Rollup retargeted to v1.2.6 — PR #141 merged** as commit
+  `f58481b`. v1.2.5 already tagged on the docs-framework commit
+  without the X1-Redux fix; dashboard corrected to retarget the
+  rollup at v1.2.6.
+
 - **v1.2.5 tagged on `74629a4`** — rolls up X8 (commit `fa34828`) and the
   docs-framework restructure. Not field-tested; X1-Redux fix deferred to v1.2.6.
 
@@ -51,15 +65,17 @@ Last live-tested release: **v1.2.4**. **v1.2.5** tagged on `74629a4` (docs-frame
 
 ## Next up
 
-**Blocking v1.2.6 tag:** Track B (X1-Redux) log from SSD. Fix lands as a
-follow-up PR once the log identifies the stall point.
+**Blocking v1.2.6 tag:** Track B (X1-Redux) log from SSD. Fix lands
+as a follow-up PR once the log identifies the stall point.
 
-**After v1.2.6 tag — Codex deep-review remediation queue (triaged 2026-04-18):**
-X9 (encrypted config lifecycle — Critical, Opus plan), X10 (document
-replacement + rebuild), X11 (companion keyboard PTT + first-run validation),
-X12 (download verify-before-move), X13 (chat/STT surface real failures),
-H2 (hardening batch). Each ships as its own PR + patch release per the
-v1.2.x cadence decision.
+**Running parallel (X1-Redux parked):** X9 Stage 2 code — shared lib
+for encrypted config lifecycle. Spec lives in `project_backlog.md` → X9.
+
+**After X9 ships — remaining Codex deep-review queue:**
+X10 (document replacement + rebuild), X11 (companion keyboard PTT +
+first-run validation), X12 (download verify-before-move), X13
+(chat/STT surface real failures), H2 (hardening batch). Each ships
+as its own PR + patch release per the v1.2.x cadence decision.
 
 **After hardening queue:** F3 PrepApp 3-tab restructure (Opus plan first),
 then re-evaluate F2 / F4 stage 1 / B2 / R1 Stage 2 / X6 / X7 / F5.
@@ -71,6 +87,17 @@ See `project_backlog.md` for full item details.
 
 ## Last session
 
+2026-04-19 (doc flush + X9 Stage 1 plan lock) — **Docs-only session, three PRs.**
+PR #140 (`bfac019`) flushed the dirty Codex-intake backlog edits from
+the prior session. PR #141 (`f58481b`) caught that v1.2.5 was already
+tagged on `74629a4` without the X1-Redux fix — dashboard corrected
+and rollup retargeted at v1.2.6. PR #142 (`54b276a`) locked the X9
+Stage 1 plan after an Opus + advisor pass; advisor caught three real
+gaps (two-file atomic commit, drain-on-shutdown, migration must
+handle plaintext-newer-than-encrypted — Stephen's actual case).
+X1-Redux log wait explicitly parked so X9 Stage 2 becomes the
+active work.
+
 2026-04-18 (Codex deep-review intake) — **Session housekeeping, no code changes.**
 Stephen pasted a large Codex deep-review report. Verified every Critical /
 High / Medium finding against live source — all confirmed real (encrypted
@@ -81,14 +108,6 @@ config `SaveAsync` always-plaintext + finalize bootstrap fail-closed;
 sample checked. Routed findings into backlog as X9 (Critical, Opus plan),
 X10, X11, X12, X13, H2. Priority order in `project_backlog.md` updated to
 slot the queue between X1-Redux and F3.
-
-2026-04-18 (wrap-up + K9 framework extraction) — **Session housekeeping, no code changes.**
-Ran `/check-init` — Yellow: flagged `project_state.md` at 87 lines
-(approaching 100-line budget) and a stale "in flight" item for the
-docs restructure (already merged as `74629a4` / PR #139). Confirmed
-K9-Claude-Framework is now its own repo at
-`github.com/kninetimmy/K9-Claude-Framework`, portable install path
-sorted.
 
 ## Open questions
 
