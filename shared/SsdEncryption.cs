@@ -487,10 +487,14 @@ public static class SsdEncryption
         if (plaintextMtime > encryptedMtime)
         {
             // Branch A: plaintext is newer — absorb into encrypted, then delete.
-            PortableConfig? plaintextConfig = null;
             try
             {
-                plaintextConfig = await PortableConfig.LoadAsync(plaintextPath).ConfigureAwait(false);
+                var (plaintextConfig, isValid) = await PortableConfig.LoadWithValidationAsync(plaintextPath).ConfigureAwait(false);
+                if (!isValid)
+                {
+                    logger?.Warn("[Migration] Plaintext config found but is corrupt — skipping migration, plaintext preserved.");
+                    return new PlaintextMigrationResult(false, null);
+                }
                 await SaveEncryptedConfigAsync(ssdRoot, plaintextConfig, material, ct).ConfigureAwait(false);
                 SafeDelete(plaintextPath);
                 logger?.Info("[Migration] Plaintext config was newer — merged into encrypted blob, plaintext deleted.");

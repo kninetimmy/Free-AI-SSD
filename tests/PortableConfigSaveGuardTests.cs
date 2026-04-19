@@ -323,6 +323,42 @@ public sealed class PortableConfigSaveGuardTests
     }
 
     [Fact]
+    public async Task Migration_CorruptPlaintext_SkipsMigrationAndPreservesPlaintext()
+    {
+        // A corrupt plaintext (newer mtime) must not overwrite the valid encrypted blob.
+        var root = CreateTempRoot();
+        try
+        {
+            SsdLayout.EnsureStructure(root);
+            var configDir = Path.Combine(root, SsdLayout.Config);
+            var plaintextPath = Path.Combine(configDir, "portable-config.json");
+
+            var liveConfig = new PortableConfig { NetworkApiKey = "live-key" };
+            var material = await SsdEncryption.EnableConfigEncryptionAsync(root, liveConfig, "pw-corrupt");
+
+            // Write a corrupt plaintext that is newer.
+            await File.WriteAllTextAsync(plaintextPath, "{ this is not valid json !!! }");
+            var encMtime = File.GetLastWriteTimeUtc(Path.Combine(configDir, SsdEncryption.EncryptedConfigFileName));
+            File.SetLastWriteTimeUtc(plaintextPath, encMtime.AddSeconds(10));
+
+            var result = await SsdEncryption.TryMigratePlaintextAsync(root, material);
+
+            Assert.False(result.WasPlaintextNewer);
+            Assert.Null(result.MergedConfig);
+            // Corrupt plaintext preserved (not silently deleted).
+            Assert.True(File.Exists(plaintextPath));
+            // Encrypted blob still contains the original live key.
+            Assert.True(SsdEncryption.TryUnlockPortableConfigWithMaterial(
+                root, "pw-corrupt", out var unlocked, out _, out _));
+            Assert.Equal("live-key", unlocked!.NetworkApiKey);
+        }
+        finally
+        {
+            CleanupTempRoot(root);
+        }
+    }
+
+    [Fact]
     public async Task Migration_NoPlaintext_ReturnsNoMigration()
     {
         var root = CreateTempRoot();

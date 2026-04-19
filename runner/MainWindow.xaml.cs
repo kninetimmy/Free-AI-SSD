@@ -347,51 +347,60 @@ public partial class MainWindow : System.Windows.Window
         if (!_isEncryptedDrive) return true;
         if (_isUnlocked && _config is not null) return true;
 
-        var dialog = new UnlockDriveDialog { Owner = this };
-        if (dialog.ShowDialog() != true)
+        UnlockDriveButton.IsEnabled = false;
+        try
         {
-            StatusText.Text = "Encrypted drive locked";
-            AppendLog("Unlock cancelled.");
-            return false;
-        }
+            var dialog = new UnlockDriveDialog { Owner = this };
+            if (dialog.ShowDialog() != true)
+            {
+                StatusText.Text = "Encrypted drive locked";
+                AppendLog("Unlock cancelled.");
+                return false;
+            }
 
-        if (!SsdEncryption.TryUnlockPortableConfigWithMaterial(
-                _ssdRoot, dialog.Password, out var unlockedConfig, out var unlockMaterial, out var error)
-            || unlockedConfig is null || unlockMaterial is null)
+            if (!SsdEncryption.TryUnlockPortableConfigWithMaterial(
+                    _ssdRoot, dialog.Password, out var unlockedConfig, out var unlockMaterial, out var error)
+                || unlockedConfig is null || unlockMaterial is null)
+            {
+                StatusText.Text = "Unlock failed";
+                AppendLog($"Unlock failed: {error}");
+                return false;
+            }
+
+            _configStore.UnlockSession(unlockMaterial);
+
+            var migration = await SsdEncryption.TryMigratePlaintextAsync(_ssdRoot, unlockMaterial, _logger);
+            if (migration.WasPlaintextNewer && migration.MergedConfig is not null)
+            {
+                _config = migration.MergedConfig;
+                AppendLog("[Migration] Newer unencrypted settings found — merged into encrypted configuration.");
+                System.Windows.MessageBox.Show(
+                    "Newer settings were found in an unencrypted file from your last session. They've been merged into your encrypted configuration and the unencrypted file has been removed.",
+                    "Settings Recovery",
+                    System.Windows.MessageBoxButton.OK,
+                    System.Windows.MessageBoxImage.Information);
+            }
+            else
+            {
+                _config = unlockedConfig;
+            }
+
+            _isUnlocked = true;
+            PopulateModelCombo();
+            RefreshLibraryUi();
+            InitializeTts();
+            InitializePtt();
+            StatusText.Text = "Unlocked and ready";
+            AppendLog("SSD unlocked successfully.");
+            _ = SaveEncryptionUnlockStateAsync();
+            return true;
+        }
+        finally
         {
-            StatusText.Text = "Unlock failed";
-            AppendLog($"Unlock failed: {error}");
-            return false;
+            // Re-enables button on cancel/failure; keeps it disabled on success
+            // because _isUnlocked is true and UpdateEncryptionUiState sets IsEnabled = false.
+            UpdateEncryptionUiState();
         }
-
-        _configStore.UnlockSession(unlockMaterial);
-
-        var migration = await SsdEncryption.TryMigratePlaintextAsync(_ssdRoot, unlockMaterial, _logger);
-        if (migration.WasPlaintextNewer && migration.MergedConfig is not null)
-        {
-            _config = migration.MergedConfig;
-            AppendLog("[Migration] Newer unencrypted settings found — merged into encrypted configuration.");
-            System.Windows.MessageBox.Show(
-                "Newer settings were found in an unencrypted file from your last session. They've been merged into your encrypted configuration and the unencrypted file has been removed.",
-                "Settings Recovery",
-                System.Windows.MessageBoxButton.OK,
-                System.Windows.MessageBoxImage.Information);
-        }
-        else
-        {
-            _config = unlockedConfig;
-        }
-
-        _isUnlocked = true;
-        UpdateEncryptionUiState();
-        PopulateModelCombo();
-        RefreshLibraryUi();
-        InitializeTts();
-        InitializePtt();
-        StatusText.Text = "Unlocked and ready";
-        AppendLog("SSD unlocked successfully.");
-        _ = SaveEncryptionUnlockStateAsync();
-        return true;
     }
 
     private async void Start_Click(object sender, System.Windows.RoutedEventArgs e)
