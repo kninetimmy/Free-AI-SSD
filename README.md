@@ -135,10 +135,11 @@ Load first aid guides, plant identification references, equipment specs, surviva
 **Phase 1 — Prepare (online, once):**
 
 1. Open `FreeAiSsd.PrepApp.exe`
-2. Select your target external SSD
-3. Add or select models in **Model Manager** and pull them
-4. Run **Check SSD Readiness** until checks pass
-5. Click **Finalize SSD**
+2. On **Drive Setup**, select your target external SSD and enter a volume label
+3. Click **Format & Prepare Drive** (optional — skip if the drive is already formatted the way you want). PrepApp will prompt for admin elevation, re-confirm, then format the volume and lay out the canonical directory structure. If Windows asks to relaunch as admin, accept — the elevated window auto-resumes with your label pre-filled and asks you to confirm once more before formatting.
+4. On **Model Manager**, add or select models and pull them
+5. Run **Check SSD Readiness** until checks pass
+6. Click **Finalize SSD**
 
 **Phase 2 — Run (offline, anywhere):**
 
@@ -635,7 +636,7 @@ dotnet test FreeAiSsd.sln -c Release
 
 ### Test Coverage
 
-311 tests across 17 test files. 1 Windows-specific path test expected to fail on Linux.
+375 tests across the test project. 1 Windows-specific path test expected to fail on Linux. Per-component counts below are directional — they lag the latest test additions but indicate which subsystems carry coverage.
 
 | Area | Tests | Status |
 |---|---|---|
@@ -670,6 +671,10 @@ Signing is disabled by default in CI (`MAC_SIGNING_ENABLED=false`). Supported vi
 
 ### Recent Changes
 
+- **2026-04-18**: Runner Ollama Start/Stop buttons swap styles by state — Start shows the magenta CTA when Ollama is stopped; Stop shows it while Ollama is running. Styles also update if `ollama.exe` dies out-of-band, so the visible CTA always matches the actual process state (released as v1.2.3).
+- **2026-04-18**: Runner window wrapped in a vertical `ScrollViewer` so the DCS bindings card is reachable on shorter displays; the response text box keeps its own bounded scrollbar for long replies (released as v1.2.2).
+- **2026-04-18**: PrepApp **Format & Prepare Drive** now survives UAC — clicking Format in the non-elevated window relaunches elevated with an auto-resume banner, re-selects the same drive, pre-fills the volume label, and requires one explicit confirm dialog before formatting. The format step itself runs through `Format-Volume` under `ProcessRunner.ArgumentList` (no string concat). A real-ProcessRunner VHD integration test covers the format path so mock-only regressions can't recur.
+- **2026-04-18**: "Format & Prepare Drive" now actually formats the drive — the button used to only ensure the folder structure. PrepApp now invokes `Format-Volume` (NTFS) with the user-supplied volume label before laying out the SSD directory structure.
 - **2026-04-17**: All PrepApp dialogs now match the neumorphic dark theme — error, warning, info, and confirmation prompts use a shared `ThemedMessageDialog` primitive instead of raw system `MessageBox` popups. The drive-erase confirmation replaced the "type ERASE" text box with a checkbox-gated Proceed button, and the fixed-drive warning collapsed from two sequential popups into one. Long dialog messages now scroll rather than pushing buttons off-screen.
 - **2026-04-17**: Fix WMI `ManagementObjectCollection` and `ManagementObject` disposal leaks in drive inspection and GPU/RAM detection — COM handles now properly released on all WMI query paths
 - **2026-04-17**: Fix drive selection missing USB SSDs — Windows classifies some external SSDs as `DriveType.Fixed`; prep-app now uses WMI `Win32_DiskDrive.InterfaceType` to detect USB connection regardless of OS drive type

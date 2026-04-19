@@ -12,9 +12,12 @@
    GitHub Releases and extract it:
      - Stable:       Free-AI-SSD-win.zip                  (Windows target only)
      - Beta (xplat): Free-AI-SSD-beta-crossplatform.zip   (Windows + macOS)
-3) Run FreeAiSsd.PrepApp.exe. Select your SSD. Open Model Manager, pull one
-   model (e.g. phi3 or llama3.1:8b). Click "Check SSD Readiness", then
-   "Finalize SSD".
+3) Run FreeAiSsd.PrepApp.exe. Select your SSD. On Drive Setup, enter a
+   volume label and (optionally) click "Format & Prepare Drive" to wipe
+   and relabel — Windows will prompt for admin; accept, confirm once more
+   in the elevated window, and the drive is formatted for you. Then on
+   Model Manager, pull one model (e.g. phi3 or llama3.1:8b). Click
+   "Check SSD Readiness", then "Finalize SSD".
 4) Unplug. Plug into the machine you actually want to use it on.
      - Windows: <SSD>\windows\runner\FreeAiSsd.Runner.exe
      - macOS:   <SSD>/mac/Runner.app    (beta bundle only; unsigned)
@@ -44,7 +47,11 @@ Everything below is optional and layered on top of that baseline.
  Already covered in the 5-step quick start. A few notes:
 
  - Filesystem: exFAT is the only filesystem Windows and macOS both read/write
-   natively. If you only care about Windows, NTFS is fine.
+   natively. If you only care about Windows, NTFS is fine. PrepApp's
+   "Format & Prepare Drive" button formats to NTFS with your chosen volume
+   label — use it if you want PrepApp to handle formatting end-to-end
+   (requires admin; PrepApp will relaunch elevated and auto-resume your
+   selection + label, then ask you to confirm once more before wiping).
  - Ollama is staged onto the SSD by PrepApp and bound to loopback only
    (127.0.0.1). No network surface by default.
  - Models live at <SSD>/models/. Pull more any time via PrepApp's Model
