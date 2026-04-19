@@ -1,97 +1,68 @@
 # Project State
 
-Last updated: 2026-04-19 (X9 Stage 3 Runner wiring shipped — Stage 4 Prep finalize is next)
+Last updated: 2026-04-19 (RAG audit triage plan — X17-X23 scoped, X21 slots before F3)
 
-Last live-tested release: **v1.2.5** (field-tested 2026-04-19 — chat, TTS, library creation, PTT all healthy; the v1.2.4 X1-Redux / X6 / X8 symptoms did not reproduce). Next tag target: **v1.2.6** (X9 Stages 2-4, encrypted config lifecycle).
+Last live-tested release: **v1.2.5** (field-tested 2026-04-19 — chat, TTS, library creation, PTT all healthy; the v1.2.4 X1-Redux / X6 / X8 symptoms did not reproduce). Next tag target: **v1.2.6** (X9 Stages 2-4, encrypted config lifecycle — **X9 complete**).
 
 ## In flight
 
-- **X9 Stage 4 — Prep finalize + migration + guard rewrite.** Stage 3
-  shipped. Stage 4 encrypts-from-memory at Prep finalize, adds the
-  modal migration prompt (mtime-aware branches for plaintext-newer and
-  encrypted-newer), and rewrites the config guard. End-to-end test:
-  finalize + Network Mode + API key.
+Between tasks.
 
 ## Recently shipped
 
-- **X9 Stage 3 — Runner wiring shipped — PR #146 merged** as commit `542559b`.
-  `IConfigStore` chokepoint wired into `MainWindow` and `DocumentOperationsService`.
-  `TryUnlockPortableConfigWithMaterial` captures `UnlockMaterial` on unlock;
-  `ConfigStore.UnlockSession` caches the derived key. `OnClosing` blocks on
-  `FlushAsync(5s)` then `LockSession()`. Fire-and-forget saves surface
-  `NetworkModeEncryptionRequiredMessage` via `MessageBox`. 1 new integration
-  test — full suite 393/393 green. Field-tested 2026-04-19: PTT toggle
-  persisted across unlock → edit → close → reopen cycle.
-
-- **X9 Stage 2 — shared lib shipped — PR #144 merged** as commit `49ce6a0`.
-  `IConfigStore` / `ConfigStore` / `UnlockMaterial` added, plus three new
-  `SsdEncryption` members: symmetric `SaveEncryptedConfigAsync` with
-  two-file atomic commit + `File.Replace`-based rollback, in-memory
-  `EnableConfigEncryptionAsync` overload, and `TryUnlockPortableConfigWithMaterial`
-  (zeros the derived key on every failure path). 10 new real-crypto
-  tests — full suite 392/392 green on `main`. Nothing wired to the new
-  store yet; Stages 3-4 land that.
-
-- **v1.2.5 field test — 2026-04-19.** Stephen ran `main` (commit
-  `54b276a`) on the SSD; chat, TTS, library creation, and PTT all
-  healthy. The three v1.2.4 symptoms (X1-Redux text-Send hang, X6
-  Create Library hang, X8 Whisper crash) did **not** reproduce across
-  10+ varied prompts. Runner log at `G:\logs\runner-20260419.log`
-  surfaced three side-finds: RAG silently 404s (known — `nomic-embed-text`
-  not pulled on Stephen's Ollama), `vectors.db` rebuild failed with a
-  file-lock error (rolled into X10 scope), and a 140 MB PDF upload
-  was silently rejected against the 50 MB limit (triaged as X14).
-
-- **X9 Stage 1 plan locked — PR #142 merged** as commit `54b276a`.
-  Locks `IConfigStore` contract, `UnlockMaterial` shape, two-file
-  atomic commit for encrypted blob + state file, bounded
-  `FlushAsync(5s)` on close, and mtime-aware migration for existing
-  field drives. Advisor pass surfaced the plaintext-newer-than-encrypted
-  migration branch (matters for Stephen's drive — all his post-unlock
-  edits have been landing in plaintext).
+- **X9 Stage 4 — Prep finalize + migration + guard rewrite shipped — PR #147 merged**
+  as `36c9a7a` + `b75e42a`. In-memory finalize (no plaintext intermediate);
+  `TryMigratePlaintextAsync` with mtime-aware Branch A (absorb + "Settings Recovery"
+  confirmation) / Branch B (silent delete + log); 7 new real-crypto guard tests —
+  400/400. Two post-review fixes: in-memory finalize now deletes pre-existing plaintext
+  (advisor catch, vacuous test replaced with seeded version); `LoadWithValidationAsync`
+  guards migration from corrupt plaintext overwriting encrypted blob; `UnlockDriveButton`
+  disabled across async unlock/migrate span (both Gemini findings). X9 is **complete**.
 
 ## Next up
 
-**Blocking v1.2.6 tag:** X9 Stage 4 — Prep finalize + migration + guard
-rewrite. Stage 3 shipped; Stage 4 is the final piece of the encrypted
-config lifecycle.
+**v1.2.6 tag unblocked** — X9 complete. Tag when ready.
 
-**After X9 ships — remaining Codex deep-review queue:**
-X10 (document replacement + rebuild — now also covers `vectors.db`
-file lock observed in 2026-04-19 field log), X11 (companion keyboard
-PTT + first-run validation), X12 (download verify-before-move), X13
-(chat/STT surface real failures), H2 (hardening batch). Each ships
-as its own PR + patch release per the v1.2.x cadence decision.
+**Codex deep-review queue:** X10 (expanded — now also covers SQLite WAL/busy_timeout +
+rebuild-from-stored per RAG audit), X11, X12, X13 (expanded — now also covers RAG
+retrieval-failure result), H2. Each ships as its own PR + patch release.
 
-**Dormant (could not reproduce — keep on the radar):** X1-Redux.
-Diag branch `diag/x1-redux-send-hang` stays on remote, unmerged,
-ready to rebuild if the hang ever returns.
+**After hardening queue — reordered 2026-04-19:** **X21** (embedding provenance +
+compat gating, Sonnet, small) slots in **before F3**. Then F3 PrepApp 3-tab restructure,
+then F4 / B2 / F2 / R1 Stage 2.
 
-**After hardening queue:** F3 PrepApp 3-tab restructure (Opus plan first),
-then re-evaluate F2 / F4 stage 1 / B2 / R1 Stage 2 / X6 / X7 / F5.
+**RAG audit backlog (2026-04-19 plan session):** X17-X23 added covering audit findings;
+X10/X13/X15 scope expansions recorded in backlog. Full staged plan in
+`C:\Users\Kninetimmy\.claude\plans\okay-i-want-to-glowing-galaxy.md`. v1.3.x sequence:
+X18 → X15 (expanded) → X19 → X20 → X22 → X23. X17 reduced to Stage 1 textless-page
+diagnostic only (full OCR deferred — workload is text-layer PDFs).
 
-**v1.3.x territory:** X4 (bundled web chat UI), Runner tab restructure, X5
-(GPU/CPU indicator).
+**Dormant (could not reproduce):** X1-Redux. Diag branch `diag/x1-redux-send-hang`
+stays on remote, unmerged, ready to rebuild if the hang returns.
+
+**v1.3.x territory:** X4 (bundled web chat UI), Runner tab restructure, X5 (GPU/CPU
+indicator) — slot around the RAG audit queue.
 
 See `project_backlog.md` for full item details.
 
 ## Last session
 
-2026-04-19 (X9 Stage 3 — Runner wiring) — **Stage 3 implemented,
-field-tested, and merged as PR #146 (`542559b`).** Wired `IConfigStore`
-into `MainWindow` (unlock capture, `OnClosing` flush+lock, all save
-sites) and `DocumentOperationsService`. Field test confirmed PTT toggle
-persisted across unlock → edit → close → reopen on encrypted drive.
-Unlock dialog light-theme bug noted for backlog (X16).
+2026-04-19 (RAG audit triage plan) — third-party audit
+(`C:\Users\Kninetimmy\Documents\ssd md files\RAG_Issues_With_Prop_Fixes.md`) reviewed and
+mapped onto backlog. Verified 9 findings against current code (3 parallel Explore agents).
+4 decisions locked via AskUserQuestion: X17 multimodal scoped down to Stage 1 diagnostic
+only; X21 provenance slots before F3 (reorders roadmap); 7 new X-items (no umbrella);
+X10 stable-doc-ID spun out as X10-Redux for later. Plan saved; no code changed. Two
+audit findings flagged as goal-mismatch: "no ANN index" (deliberate portable constraint)
+and "multimodal PDF Critical" (workload is text-layer manuals, not scans).
 
-2026-04-19 (X9 Stage 2 — shared lib shipped) — **Stage 2 implemented
-and merged as PR #144 (`49ce6a0`).** Added `IConfigStore` /
-`ConfigStore` / `UnlockMaterial` + three symmetric-crypto members on
-`SsdEncryption`. Advisor pass caught two issues before merge: rollback
-used Delete+Move instead of `File.Replace`, and
-`TryUnlockPortableConfigWithMaterial` didn't zero the derived key on
-failure paths. Filed backlog X15 (RAG file-size cap revisit).
+2026-04-19 (X9 Stage 4 — finalize + migration + guard rewrite) — **Stage 4 implemented
+and merged as PR #147 (`b75e42a`).** In-memory finalize, mtime-aware
+`TryMigratePlaintextAsync`, 7 new guard tests. Advisor catch: in-memory overload didn't
+clean up pre-existing plaintext — fixed; seeded test replaced the vacuous one. Gemini:
+corrupt plaintext could overwrite valid encrypted blob (`LoadWithValidationAsync` fix);
+re-entrancy on unlock button (`try/finally` disable). X9 complete.
 
 ## Open questions
 
-_None right now. X8 merge-scope resolved by folding the race findings into PR #138._
+_None._
