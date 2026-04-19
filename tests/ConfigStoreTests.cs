@@ -294,6 +294,56 @@ public sealed class ConfigStoreTests
         finally { CleanupTempRoot(root); }
     }
 
+    /// <summary>
+    /// Stage 3 integration test: simulates the Runner wiring path.
+    /// TryUnlockPortableConfigWithMaterial → UnlockSession → SaveAsync → LockSession
+    /// → re-unlock confirms the edit persisted and the key is zeroed after lock.
+    /// </summary>
+    [Fact]
+    public async Task RunnerWiring_UnlockSaveLockReUnlock_RoundTrips()
+    {
+        var root = CreateTempRoot();
+        try
+        {
+            SsdLayout.EnsureStructure(root);
+
+            // Seed an encrypted drive.
+            var initial = new PortableConfig { OllamaPort = 11434 };
+            await SsdEncryption.EnableConfigEncryptionAsync(root, initial, "runner-stage3-pw");
+
+            // Simulate Runner unlock: TryUnlockPortableConfigWithMaterial → UnlockSession.
+            var ok = SsdEncryption.TryUnlockPortableConfigWithMaterial(
+                root, "runner-stage3-pw", out var unlocked, out var material, out var error);
+            Assert.True(ok, error);
+            Assert.NotNull(unlocked);
+            Assert.NotNull(material);
+
+            var store = new ConfigStore();
+            store.UnlockSession(material!);
+            Assert.True(store.IsSessionUnlocked);
+
+            // Simulate a Runner save (post-unlock config edit).
+            var edited = new PortableConfig { OllamaPort = 22222, RetrievalTopK = 7 };
+            await store.SaveAsync(root, edited, CancellationToken.None);
+
+            // Simulate OnClosing: flush then lock.
+            await store.FlushAsync(TimeSpan.FromSeconds(5));
+            store.LockSession();
+            Assert.False(store.IsSessionUnlocked);
+
+            // Key must be zeroed in place.
+            Assert.All(material!.DerivedKey, b => Assert.Equal(0, b));
+
+            // Re-unlock and verify the edit persisted.
+            var ok2 = SsdEncryption.TryUnlockPortableConfigWithMaterial(
+                root, "runner-stage3-pw", out var reUnlocked, out _, out var error2);
+            Assert.True(ok2, error2);
+            Assert.Equal(22222, reUnlocked!.OllamaPort);
+            Assert.Equal(7, reUnlocked.RetrievalTopK);
+        }
+        finally { CleanupTempRoot(root); }
+    }
+
     private static string CreateTempRoot()
     {
         var root = Path.Combine(Path.GetTempPath(), "free-ai-ssd-tests", Guid.NewGuid().ToString("N"));

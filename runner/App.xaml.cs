@@ -5,6 +5,7 @@ using FreeAiSsd.Runner.Services;
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Client;
 using FreeAiSsd.Shared.Documents;
+using FreeAiSsd.Shared.Services;
 using FreeAiSsd.Shared.UI.Theme;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -36,6 +37,10 @@ public partial class App : System.Windows.Application
             sp.GetRequiredService<DocumentLibraryManager>(),
             sp.GetRequiredService<EmbeddingClient>(),
             sp.GetRequiredService<SsdLogger>()));
+
+        // Config store — single chokepoint for all config saves, encrypted or plain.
+        collection.AddSingleton<IConfigStore>(sp =>
+            new ConfigStore(sp.GetRequiredService<SsdLogger>()));
 
         // Runner services
         collection.AddSingleton<IOllamaLifecycleService, OllamaLifecycleService>();

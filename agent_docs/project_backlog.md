@@ -707,7 +707,7 @@ Could be implemented via a `DataTrigger` binding on `IsRunning` or via visibilit
 
 ### X9 — Encrypted config persistence lifecycle
 
-**Status:** Stage 2 shipped 2026-04-19 (PR #144, `49ce6a0`). **Critical.** Stage 3 unblocked.
+**Status:** Stage 3 shipped 2026-04-19. **Critical.** Stage 4 unblocked.
 **Scope:** Multi-concern; single cohesive fix across shared lib + Runner + Prep.
 **Model:** Opus 4.7 for planning, Sonnet 4.6 for implementation stages
 
@@ -771,7 +771,7 @@ sealed record UnlockMaterial(byte[] DerivedKey, byte[] Salt, int Iterations, str
 **Staging:**
 - **Stage 1 — plan (Opus). DONE 2026-04-19.**
 - **Stage 2 — shared lib. DONE 2026-04-19 (PR #144, `49ce6a0`).** `IConfigStore` + `ConfigStore` + `UnlockMaterial`, symmetric encrypted save with two-file atomic commit, in-memory encrypt overload, `TryUnlockPortableConfigWithMaterial`. 10 real-crypto tests. No wiring yet.
-- **Stage 3 — Runner wiring (Sonnet 4.6):** route Runner saves through store; capture `UnlockMaterial` on unlock; `OnClosing` flush+lock. Integration test with real encrypted-drive fixture.
+- **Stage 3 — Runner wiring. DONE 2026-04-19.** `IConfigStore` wired into `MainWindow` (unlock captures `UnlockMaterial`, all save sites, `OnClosing` flush+lock) and `DocumentOperationsService`. `DocumentLibraryWorkflowTests` updated. 1 new integration test (`RunnerWiring_UnlockSaveLockReUnlock_RoundTrips`). Suite 393/393. Runtime smoke test pending field validation.
 - **Stage 4 — Prep finalize + migration + guard rewrite (Sonnet 4.6):** encrypt-from-memory finalize; modal migration prompt with mtime-aware branches; guard test rewrite. End-to-end test: finalize + Network Mode + API key.
 
 **⚠ Security / data safety:**
