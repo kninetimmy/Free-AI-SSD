@@ -219,6 +219,9 @@ public static class SsdEncryption
 
         await SaveEncryptedConfigAsync(ssdRoot, config, material, ct).ConfigureAwait(false);
 
+        // Delete any pre-existing plaintext — mirrors the file-path overload's post-condition.
+        SafeDelete(Path.Combine(ssdRoot, SsdLayout.Config, "portable-config.json"));
+
         return material;
     }
 
@@ -451,6 +454,65 @@ public static class SsdEncryption
             if (key is not null) CryptographicOperations.ZeroMemory(key);
             error = "Failed to decrypt portable config.";
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Checks for a stale plaintext config alongside an encrypted blob and migrates or
+    /// removes it. Called immediately after a successful unlock so the drive never
+    /// accumulates plaintext secrets from the pre-Stage-4 bug.
+    ///
+    /// Branch A (plaintext newer): loads plaintext, saves it as encrypted, deletes
+    /// plaintext only after the encrypted save succeeds.
+    /// Branch B (encrypted newer or equal): deletes the stale plaintext silently and logs.
+    /// </summary>
+    public static async Task<PlaintextMigrationResult> TryMigratePlaintextAsync(
+        string ssdRoot,
+        UnlockMaterial material,
+        SsdLogger? logger = null,
+        CancellationToken ct = default)
+    {
+        var configDir = Path.Combine(ssdRoot, SsdLayout.Config);
+        var plaintextPath = Path.Combine(configDir, "portable-config.json");
+        var encryptedPath = Path.Combine(configDir, EncryptedConfigFileName);
+
+        if (!File.Exists(plaintextPath))
+            return new PlaintextMigrationResult(false, null);
+
+        var plaintextMtime = File.GetLastWriteTimeUtc(plaintextPath);
+        var encryptedMtime = File.Exists(encryptedPath)
+            ? File.GetLastWriteTimeUtc(encryptedPath)
+            : DateTime.MinValue;
+
+        if (plaintextMtime > encryptedMtime)
+        {
+            // Branch A: plaintext is newer — absorb into encrypted, then delete.
+            try
+            {
+                var (plaintextConfig, isValid) = await PortableConfig.LoadWithValidationAsync(plaintextPath).ConfigureAwait(false);
+                if (!isValid)
+                {
+                    logger?.Warn("[Migration] Plaintext config found but is corrupt — skipping migration, plaintext preserved.");
+                    return new PlaintextMigrationResult(false, null);
+                }
+                await SaveEncryptedConfigAsync(ssdRoot, plaintextConfig, material, ct).ConfigureAwait(false);
+                SafeDelete(plaintextPath);
+                logger?.Info("[Migration] Plaintext config was newer — merged into encrypted blob, plaintext deleted.");
+                return new PlaintextMigrationResult(true, plaintextConfig);
+            }
+            catch (Exception ex)
+            {
+                // Do not delete plaintext if the encrypted save failed — keep both intact.
+                logger?.Warn($"[Migration] Failed to absorb plaintext into encrypted blob: {ex.Message}. Plaintext preserved.");
+                return new PlaintextMigrationResult(false, null);
+            }
+        }
+        else
+        {
+            // Branch B: encrypted is authoritative — discard stale plaintext.
+            SafeDelete(plaintextPath);
+            logger?.Info("[Migration] Stale plaintext removed — encrypted is authoritative.");
+            return new PlaintextMigrationResult(false, null);
         }
     }
 

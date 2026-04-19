@@ -1000,3 +1000,23 @@ sealed record UnlockMaterial(byte[] DerivedKey, byte[] Salt, int Iterations, str
 - `agent_docs/project_arch.md` RAG section — update limits + rationale.
 
 **Exit criterion:** Chuck's Guide-sized manuals (120-160 MB, 800-900 pages) ingest cleanly, index in acceptable time with a visible progress indicator, and retrieve quality hits during chat. X14's rejection messaging reflects the new cap.
+
+---
+
+### X16 — Unlock dialog dark theme
+
+**Status:** Logged 2026-04-19. **Low (UI polish).**
+**Scope:** Runner only. Small.
+
+**Symptom:** The "Unlock Encrypted SSD" password dialog renders in the OS
+system light theme (white background, grey Cancel/Unlock buttons, light title
+bar) while the rest of Runner uses the neumorphic dark theme. Screenshot
+captured 2026-04-19.
+
+**Root cause:** Dialog window likely doesn't inherit the app's dark theme
+resource dictionary.
+
+**Fix:** Apply the same dark-theme resource merge the main window uses to the
+unlock dialog window.
+
+**Exit criterion:** Unlock dialog matches Runner's dark theme visually.

@@ -1221,8 +1221,7 @@ public class PrepViewModel : BaseViewModel
 
                 config.IsEncrypted = true;
                 config.EncryptionScheme = SsdEncryption.SchemeName;
-                await _modelService.SaveConfigAsync(configPath, config);
-                await _encryptionService.EnableConfigEncryptionAsync(root, configPath, passphrase);
+                await _encryptionService.EnableConfigEncryptionAsync(root, config, passphrase);
                 AppendLog("Drive encryption enabled. Runner will now require unlock before use.");
             }
 
