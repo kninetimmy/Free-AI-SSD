@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-04-19 (X21b — PrepApp reindex prompt — PR #158 merged)
+Last updated: 2026-04-20 (X11 — companion PTT + first-run — PR #159 open, CI green)
 
 Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
@@ -8,7 +8,7 @@ Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
 ## In flight
 
-Between tasks. X21 (all stages) complete.
+**X11 — PR #159 open, CI green.** Three companion fixes: `WH_KEYBOARD_LL` replaces `RegisterHotKey` for real PTT hold tracking; startup gate prevents falling through to bindings/health-loop on cancelled first-run; HOTAS null-device guard; API key `PasswordBox` + `ServerRequiresApiKey`. `bed0f02`/`c754fd4`/`2b668bb`. Awaiting merge confirmation.
 
 ## Recently shipped
 
@@ -22,7 +22,7 @@ Between tasks. X21 (all stages) complete.
 
 ## Next up
 
-**Codex deep-review queue after X10:** X11, X12, X13 (expanded — now also covers RAG retrieval-failure result), H2. Each ships as its own PR + patch release.
+**Merge first:** X11 PR #159 (open, CI green — next session). Then X12, X13 (expanded — also covers RAG retrieval-failure result), H2. Each ships as its own PR + patch release.
 
 **After hardening queue:** F3 PrepApp 3-tab restructure (X21 complete — no longer blocking F3), then F4 / B2 / F2 / R1 Stage 2.
 
@@ -36,9 +36,9 @@ See `project_backlog.md` for full item details.
 
 ## Last session
 
-2026-04-19 (X21b — PrepApp reindex prompt — PR #158) — `ScanProvenanceMismatches` added to `DocumentLibraryManager`; `CheckAndPromptLibraryReindexAsync` added to `PrepViewModel` (fires once per drive root per session, guards encrypted/busy/no-config, per-library dialog + per-library rebuild, no Ollama download). 7 new TDD tests. 423 pass, 1 skip. `92625a9`, PR #158 merged.
+2026-04-20 (X11 — companion PTT + first-run — PR #159) — `KeyboardPttHotkey` rewritten: `RegisterHotKey` → `WH_KEYBOARD_LL` for real key-up/key-down; `_pressed` debounce prevents auto-repeat spam; hook-install failure surfaced to tray. `CompanionRuntime.Start()` gated: second `IsComplete()` check after first-run dialog sets tray "Needs Setup" and returns early; `StartLive()` extracted so health loop never double-starts. HOTAS null-device guard blocks `_hotas.Start` on bad binding. `SettingsWindow`: `TextBox` → `PasswordBox`, blank = no key, "Clear key" button, `ServerRequiresApiKey` checkbox. `PttBindingParser` extracted to `shared/Models/` for testability. 8 new tests. 431 pass, 1 skip. `bed0f02`/`c754fd4`/`2b668bb`. PR #159 open, CI green.
 
-2026-04-19 (X21 Stages 1–2 — embedding provenance + compat gate — PR #157) — Implemented embedding provenance schema (M2 migration): `embedding_model`, `embedding_dimension`, `parser_version`, `chunker_version` added to `chunks` table via non-destructive `ALTER TABLE`; existing rows backfilled with dimension from `LENGTH(embedding)/4` (Option B — no forced reindex on upgrade). `VectorIndex.CheckProvenance()` added: throws `EmbeddingModelMismatchException` on dimension mismatch, warns on model-name drift from `'unknown'`. `DocumentIngestor` populates all four fields on new chunks and calls `CheckProvenance` before `UpsertFileChunks`. `ChatService` surfaces mismatch as a distinct `[Error]` log. `DocumentLibraryManifest` gains `LastEmbeddingModel`/`LastEmbeddingDimension` hint fields. 5 new TDD provenance tests (416 pass, 1 skip). `449ec2e`, PR #157 merged.
+2026-04-19 (X21b — PrepApp reindex prompt — PR #158) — `ScanProvenanceMismatches` added to `DocumentLibraryManager`; `CheckAndPromptLibraryReindexAsync` added to `PrepViewModel` (fires once per drive root per session, guards encrypted/busy/no-config, per-library dialog + per-library rebuild, no Ollama download). 7 new TDD tests. 423 pass, 1 skip. `92625a9`, PR #158 merged.
 
 ## Open questions
 
