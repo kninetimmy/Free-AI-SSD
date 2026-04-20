@@ -850,7 +850,7 @@ keeps the contract visible.
 
 ### X11 — Companion keyboard PTT + first-run validation
 
-**Status:** in-progress 2026-04-18. PR #159 open 2026-04-20, CI green. Awaiting merge.
+**Status:** shipped 2026-04-20. PR #159 merged `329bcf2e`.
 **Scope:** One-shot; three related companion defects in a single PR.
 **Model:** Sonnet 4.6
 
@@ -870,7 +870,7 @@ keeps the contract visible.
 - Replace `RegisterHotKey`-based approach with a low-level keyboard hook (`SetWindowsHookEx` with `WH_KEYBOARD_LL`) that delivers real `WM_KEYDOWN` / `WM_KEYUP` events. Fire `_onPress` on down, `_onRelease` on up. Log registration failure; surface to UI.
 - In `CompanionRuntime.Start`: if config is incomplete after `OpenSettings()` returns (user cancelled or saved incomplete data), show a clear error and either block startup (tray icon with "Configure to continue" state) or exit cleanly. Do not start `InitializeBindings` / health loop against invalid config.
 - Validate HOTAS binding before starting the poll — refuse to start with null device or button-0-default fallback. Surface the invalid-binding state to the user.
-- Replace the API key `TextBox` with a `PasswordBox`. Add an explicit "Replace key" / "Clear key" flow; blank textbox means "no key," not "keep existing."
+- Replace the API key `TextBox` with a `PasswordBox`. Add an explicit "Replace key" / "Clear key" flow; blank `PasswordBox` preserves the existing key unless the user explicitly clears it or enters a replacement.
 - Make `CompanionConfig.IsComplete()` conditional: if the Runner's server has Network Mode off or auth disabled, an API key is not required. Detect via health probe at first-run setup, or let the user explicitly mark "server does not require a key."
 
 **Affected files:**
