@@ -62,6 +62,24 @@ public sealed class DocumentIngestor
             var fileName = Path.GetFileName(sourcePath);
             var sha = DocumentHasher.ComputeSha256(sourcePath);
             var current = manifest.Files.FirstOrDefault(f => string.Equals(f.SourceOriginalPath, sourcePath, StringComparison.OrdinalIgnoreCase));
+
+            // Rename detection: same sha at a new path → update manifest, skip re-embed.
+            // Only when exactly one manifest entry matches the sha (>1 = duplicates, fall through to new entry).
+            if (!rebuildIndex && current is null)
+            {
+                var shaMatches = manifest.Files
+                    .Where(f => string.Equals(f.Sha256, sha, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (shaMatches.Count == 1)
+                {
+                    shaMatches[0].SourceOriginalPath = sourcePath;
+                    shaMatches[0].FileName = fileName;
+                    shaMatches[0].LastModifiedUtc = File.GetLastWriteTimeUtc(sourcePath);
+                    await _libraryManager.SaveManifestAsync(manifest);
+                    continue;
+                }
+            }
+
             if (!rebuildIndex && current is not null && string.Equals(current.Sha256, sha, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
@@ -184,6 +202,17 @@ public sealed class DocumentIngestor
                         $"(total={totalChunks}, succeeded={embeddedChunks}, failed={failedChunkCount}, ratio={failureRatio:P1}, threshold={MaxEmbeddingFailureRatioBeforeAbort:P0}).";
                     _logger?.Error(error);
                     throw new InvalidOperationException(error);
+                }
+
+                // Delete-on-replace: when sha changed the storedRelativePath changes too.
+                // Purge old chunks and stored copy before inserting the new ones.
+                // Crash window: if the process dies here the manifest still references the old
+                // StoredRelativePath; the next ingest will re-trigger cleanup.
+                if (current is not null && !string.Equals(current.StoredRelativePath, storedRelativePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    var oldStoredAbsPath = Path.Combine(_libraryManager.GetLibraryPath(manifest.Id), current.StoredRelativePath.Replace('/', Path.DirectorySeparatorChar));
+                    vectorIndex.RemoveFile(manifest.Id, current.StoredRelativePath);
+                    TryDeleteStoredFile(oldStoredAbsPath);
                 }
 
                 vectorIndex.UpsertFileChunks(manifest.Id, storedRelativePath, chunks);
