@@ -195,3 +195,13 @@ busy_timeout). Introducing a new identity layer with schema migration in the sam
 inflates review surface and delays the field-log `vectors.db` lock fix. If path-capture
 + WAL cleanly resolves the symptoms, the identity-layer work may never be needed.
 Established 2026-04-19 RAG audit triage plan session.
+
+---
+
+## 2026-04-20 — shared/Io/ as home for shared IO utilities
+
+`shared/Io/FileOps.cs` (`FreeAiSsd.Shared.Io`) established as the location for
+shared filesystem helpers. All `File.Replace` calls in the shared library must route
+through `FileOps.ReplaceWithRetry` (5 attempts, 25 ms base backoff doubling,
+`IOException`/`UnauthorizedAccessException` only). New callers should not add bare
+`File.Replace` calls — extend `FileOps` instead.

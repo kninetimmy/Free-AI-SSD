@@ -42,6 +42,7 @@ FreeAiSsd.sln
 Namespaces:
 - **Config** — `PortableConfig` (atomic JSON writes, AES-256-GCM), `SsdLayout` (canonical path constants), `SsdEncryption`
 - **Documents** — `DcsBindingParser`, `DcsAircraftScanner`, `DcsBatchProcessor`; PDF ingestion via PdfPig; RAG vector index (SQLite, binary BLOBs, SIMD cosine similarity)
+- **Io** — `FileOps` (`ReplaceWithRetry` — shared atomic-replace helper used by Config and Documents save paths; see decisions 2026-04-20)
 - **Helpers** — `PathGuards` (traversal prevention), `ProcessRunner` (shell-injection-safe via `ArgumentList`), `DownloadManager` (resumable), `DriveInspector`
 - **Prereqs** — `PrereqResolver` (upstream version discovery + SHA-256 verification)
 - **UI/Theme** — Colors.xaml, Controls.xaml, Shadows.xaml, Typography.xaml (neumorphic dark theme, injected into both WPF hosts)
