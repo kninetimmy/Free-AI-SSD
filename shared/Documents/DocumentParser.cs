@@ -5,6 +5,7 @@ namespace FreeAiSsd.Shared.Documents;
 
 public static class DocumentParser
 {
+    public const string Version = "1";
     private static readonly HashSet<string> Supported = new(StringComparer.OrdinalIgnoreCase)
     {
         ".pdf", ".txt", ".md", ".json", ".csv"

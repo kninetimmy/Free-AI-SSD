@@ -25,6 +25,10 @@ public sealed class DocumentLibraryManifest
     public DateTime? LastIndexedUtc { get; set; }
     public List<string> WatchedFolders { get; set; } = new();
     public List<DocumentFileEntry> Files { get; set; } = new();
+    /// <summary>Embedding model used for the last ingest. Hint for UI; chunks table is authoritative.</summary>
+    public string? LastEmbeddingModel { get; set; }
+    /// <summary>Embedding dimension used for the last ingest. Hint for UI; chunks table is authoritative.</summary>
+    public int? LastEmbeddingDimension { get; set; }
 }
 
 public sealed class DocumentFileEntry
@@ -50,6 +54,10 @@ public sealed class DocumentChunk
     public string Sha256 { get; set; } = string.Empty;
     [JsonIgnore]
     public float[] Embedding { get; set; } = Array.Empty<float>();
+    public string EmbeddingModel { get; set; } = string.Empty;
+    public int EmbeddingDimension { get; set; }
+    public string ParserVersion { get; set; } = string.Empty;
+    public string ChunkerVersion { get; set; } = string.Empty;
 }
 
 public sealed class RetrievalResult
