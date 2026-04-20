@@ -1,6 +1,5 @@
 using Microsoft.Data.Sqlite;
 using System.Numerics;
-using System.Text.Json;
 
 namespace FreeAiSsd.Shared.Documents;
 
@@ -39,10 +38,26 @@ public sealed class VectorIndex
         EnsureSchema(logger);
     }
 
+    internal SqliteConnection OpenConnection()
+    {
+        var conn = new SqliteConnection($"Data Source={_dbPath}");
+        conn.Open();
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "PRAGMA journal_mode=WAL";
+            cmd.ExecuteScalar();
+        }
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = "PRAGMA busy_timeout=5000";
+            cmd.ExecuteNonQuery();
+        }
+        return conn;
+    }
+
     private void EnsureSchema(SsdLogger? logger)
     {
-        using var conn = new SqliteConnection($"Data Source={_dbPath}");
-        conn.Open();
+        using var conn = OpenConnection();
 
         // Detect whether the table already exists and uses the old TEXT schema.
         var tableExists = false;
@@ -302,8 +317,7 @@ CREATE INDEX IF NOT EXISTS idx_chunks_sha ON chunks(sha256);
 
     public void UpsertFileChunks(string libraryId, string storedRelativePath, IReadOnlyList<DocumentChunk> chunks)
     {
-        using var conn = new SqliteConnection($"Data Source={_dbPath}");
-        conn.Open();
+        using var conn = OpenConnection();
         using var tx = conn.BeginTransaction();
 
         var delete = conn.CreateCommand();
@@ -339,8 +353,7 @@ VALUES ($libraryId,$source,$stored,$page,$idx,$text,$len,$sha,$emb)";
 
     public void RemoveFile(string libraryId, string storedRelativePath)
     {
-        using var conn = new SqliteConnection($"Data Source={_dbPath}");
-        conn.Open();
+        using var conn = OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM chunks WHERE library_id=$libraryId AND stored_relative_path=$path";
         cmd.Parameters.AddWithValue("$libraryId", libraryId);
@@ -371,8 +384,7 @@ VALUES ($libraryId,$source,$stored,$page,$idx,$text,$len,$sha,$emb)";
         // Normalize the query vector so dot product equals cosine similarity.
         var query = EmbeddingSerializer.Normalize(queryEmbedding);
 
-        using var conn = new SqliteConnection($"Data Source={_dbPath}");
-        conn.Open();
+        using var conn = OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT source_file_name,stored_relative_path,page,chunk_index,text,text_length,sha256,embedding FROM chunks WHERE library_id=$libraryId";
         cmd.Parameters.AddWithValue("$libraryId", libraryId);
@@ -461,8 +473,7 @@ VALUES ($libraryId,$source,$stored,$page,$idx,$text,$len,$sha,$emb)";
     /// </summary>
     public int GetChunkCount(string libraryId)
     {
-        using var conn = new SqliteConnection($"Data Source={_dbPath}");
-        conn.Open();
+        using var conn = OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT COUNT(*) FROM chunks WHERE library_id=$libraryId";
         cmd.Parameters.AddWithValue("$libraryId", libraryId);
