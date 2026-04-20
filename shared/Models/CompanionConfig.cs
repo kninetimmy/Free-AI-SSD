@@ -13,6 +13,7 @@ public sealed class CompanionConfig
     public bool AutoReconnect { get; set; } = true;
     public bool PttActivationSoundEnabled { get; set; } = true;
     public bool PttOverlayEnabled { get; set; } = true;
+    public bool ServerRequiresApiKey { get; set; } = true;
     public int SchemaVersion { get; set; } = 1;
 
     public static CompanionConfig Load(string path)
@@ -45,7 +46,7 @@ public sealed class CompanionConfig
            && HostPort > 0
            && HostPort <= 65535
            && !string.IsNullOrWhiteSpace(PttBinding)
-           && !string.IsNullOrWhiteSpace(ApiKey);
+           && (!ServerRequiresApiKey || !string.IsNullOrWhiteSpace(ApiKey));
 
     private static JsonSerializerOptions JsonOptions()
         => new()
