@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using FreeAiSsd.Shared.Io;
 
 namespace FreeAiSsd.Shared;
 
@@ -311,7 +312,7 @@ public sealed class PortableConfig
 
         if (File.Exists(path))
         {
-            File.Replace(tempPath, path, null);
+            FileOps.ReplaceWithRetry(tempPath, path, null);
         }
         else
         {

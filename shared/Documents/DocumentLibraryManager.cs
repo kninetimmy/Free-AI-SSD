@@ -1,4 +1,5 @@
 using System.Text.Json;
+using FreeAiSsd.Shared.Io;
 
 namespace FreeAiSsd.Shared.Documents;
 
@@ -45,7 +46,7 @@ public sealed class DocumentLibraryManager
         await File.WriteAllTextAsync(tempPath, json);
         if (File.Exists(RegistryPath))
         {
-            File.Replace(tempPath, RegistryPath, null);
+            FileOps.ReplaceWithRetry(tempPath, RegistryPath, null);
         }
         else
         {
@@ -133,7 +134,7 @@ public sealed class DocumentLibraryManager
         await File.WriteAllTextAsync(tempPath, json);
         if (File.Exists(path))
         {
-            File.Replace(tempPath, path, null);
+            FileOps.ReplaceWithRetry(tempPath, path, null);
         }
         else
         {
