@@ -796,7 +796,7 @@ sealed record UnlockMaterial(byte[] DerivedKey, byte[] Salt, int Iterations, str
 
 ### X10 — Document replacement + rebuild consistency
 
-**Status:** Stages 1+2 DONE 2026-04-19 (PR #150 `b6536b3`, PR #151 `a430ab0`); Stage 3 (rebuild-from-stored fallback + gating) queued. High.
+**Status:** Stages 1–4 DONE 2026-04-19 (PR #150 `b6536b3`, PR #151 `a430ab0`, PR #152 `af77abc`, Stage 4 review direct-in-conversation); v1.2.7 tagged on `af77abc`, win-x64 release dispatched (run 24646703518). CLOSED.
 **Scope:** One cohesive fix; transactional replace + rebuild-from-stored.
 **Model:** Sonnet 4.6
 
@@ -1229,3 +1229,69 @@ unlock dialog window.
 - Fixture size: keep each file small (a few MB max) so the repo doesn't bloat.
 
 **Exit criterion:** Integration suite exercises text-layer / scan-only / re-ingest / rebuild-after-move scenarios against real fixtures. Skipped gracefully when no Ollama host is configured.
+
+---
+
+### X24 — Citation staleness after rename
+
+**Status:** Backlog 2026-04-19 (X10 Stage 4 deep-review Yellow #1). **Low-medium.**
+**Scope:** One-shot.
+**Model:** Sonnet 4.6.
+
+**Symptom:** After Stage 2 rename detection updates a manifest entry's `SourceOriginalPath`/`FileName`, the `chunks` table still holds the old `source_file_name`. `CitationBuilder.cs:8-9` renders `chunk.SourceFileName` into user-visible citations, so post-rename answers cite by the old filename until the document is re-embedded.
+
+**Root cause:** `DocumentIngestor.cs:66-83` rename path updates the manifest only; no corresponding UPDATE on the `chunks` table. Retrieval still works (stored_relative_path is unchanged — sha didn't change), but citations are cosmetically wrong.
+
+**Fix:**
+- Add `VectorIndex.UpdateFileName(libraryId, storedRelativePath, newName)` — parameterized UPDATE on `chunks.source_file_name`.
+- Call it from the single-sha rename branch in `DocumentIngestor.cs` right after the manifest entry is updated.
+
+**Affected files:**
+- `shared/Documents/VectorIndex.cs` — new helper.
+- `shared/Documents/DocumentIngestor.cs` — invoke from rename branch.
+- `tests/DocumentReplacementTests.cs` — extend `RenameWithSameContent_UpdatesPathAndSkipsReEmbed` to assert `chunks.source_file_name` matches new name.
+
+**⚠ Watch for:**
+- Parameterize the UPDATE (security invariant).
+- Don't touch chunks on the `>1 sha match` fallthrough — that path creates new chunks via normal ingest.
+
+**Exit criterion:** Renamed documents cite by their current filename in RAG answers, not their old one.
+
+---
+
+### X25 — Extend File.Replace retry to remaining call sites
+
+**Status:** Backlog 2026-04-20 (filed out of PR #153). **Low.**
+**Scope:** One-shot.
+**Model:** Sonnet 4.6.
+
+**Symptom:** PR #153 wrapped the three `File.Replace` calls in
+`SsdEncryption.SaveEncryptedConfigAsync` with a retry helper to absorb
+Windows Defender/indexer sharing-violation flakes. Two other
+`File.Replace` call sites carry the same latent flake risk and remain
+unprotected:
+- `shared/PortableConfig.cs:314` — plaintext-config save.
+- `shared/Documents/DocumentLibraryManager.cs:48, 136` — registry +
+  library-manifest saves.
+
+**Fix:** Promote `ReplaceWithRetry` (currently private in
+`SsdEncryption.cs`) to a shared helper — e.g. `shared/Io/FileOps.cs` —
+and route the three call sites through it. Preserve the exact retry
+policy (5 attempts, 25 ms base backoff doubling, only
+`IOException` / `UnauthorizedAccessException`).
+
+**Affected files:**
+- `shared/Io/FileOps.cs` (new) or move the helper out of `shared/SsdEncryption.cs`.
+- `shared/PortableConfig.cs`, `shared/Documents/DocumentLibraryManager.cs`
+  — call the shared helper.
+- `tests/` — optional light regression test if a reasonable seam exists;
+  the original CI flake is hard to reproduce deterministically.
+
+**⚠ Watch for:**
+- Don't expand scope into a general retry framework. This is narrowly
+  `File.Replace`-specific.
+- Keep the retry policy identical — deviating makes one of the two
+  versions silently stale.
+
+**Exit criterion:** All four `File.Replace` call sites in the repo use
+the same retry helper.
