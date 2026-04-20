@@ -1,34 +1,37 @@
 # Project State
 
-Last updated: 2026-04-19 (v1.2.6 released; X10 plan locked, queued for Sonnet)
+Last updated: 2026-04-19 (X10 Stage 1 merged — SQLite WAL + busy_timeout, PR #150)
 
 Last released: **v1.2.6** (2026-04-19 — X9 Stages 2-4, encrypted config lifecycle). Last field-tested: v1.2.5. Next tag target: **v1.2.7** (X10 — document replacement + rebuild consistency + SQLite hardening).
 
 ## In flight
 
-**X10 — Stage 1 (SQLite WAL + busy_timeout) queued for Sonnet.** Plan locked at `C:\Users\Kninetimmy\.claude\plans\x10-doc-replace-rebuild.md`. 3 impl PRs + review → v1.2.7.
+Nothing — between X10 stages. Stage 2 (delete-on-replace + rename detection) is next.
 
 ## Recently shipped
+
+- **X10 Stage 1 — SQLite WAL + busy_timeout — PR #150 merged** as `b6536b3` / `f7cf41f`.
+  `VectorIndex.OpenConnection()` helper sets `PRAGMA journal_mode=WAL` +
+  `PRAGMA busy_timeout=5000` on every connection. All 5 bare `SqliteConnection` sites
+  replaced. 3 new tests (WAL mode, busy_timeout value, writer-vs-writer contention).
+  403/403. Fixes Stephen's v1.2.5 field-log lock error.
 
 - **v1.2.6 released 2026-04-19** — Windows-only build via workflow dispatch.
   `Free-AI-SSD-win.zip` 319 MB, sha256 `01ca7f04…c62606`. Closes X9 (encrypted
   config lifecycle) across all 4 stages. Release:
   https://github.com/kninetimmy/Free-AI-SSD/releases/tag/v1.2.6
 
-- **X9 Stage 4 — Prep finalize + migration + guard rewrite shipped — PR #147 merged**
-  as `36c9a7a` + `b75e42a`. In-memory finalize (no plaintext intermediate);
-  `TryMigratePlaintextAsync` with mtime-aware Branch A (absorb + "Settings Recovery"
-  confirmation) / Branch B (silent delete + log); 7 new real-crypto guard tests —
-  400/400. Two post-review fixes: in-memory finalize now deletes pre-existing plaintext
-  (advisor catch, vacuous test replaced with seeded version); `LoadWithValidationAsync`
-  guards migration from corrupt plaintext overwriting encrypted blob; `UnlockDriveButton`
-  disabled across async unlock/migrate span (both Gemini findings). X9 is **complete**.
-
 ## Next up
 
-**X10 first** (plan locked 2026-04-19) — Stage 1 SQLite hardening ships alone as v1.2.7
-to address Stephen's field-log lock error; Stages 2 (delete-on-replace) and 3
-(rebuild-from-stored) follow. Plan: `C:\Users\Kninetimmy\.claude\plans\x10-doc-replace-rebuild.md`.
+**X10 Stage 2** (delete-on-replace + rename detection) is next. Medium risk — changes
+manifest-matching semantics; deep-review pass on this stage specifically.
+Plan: `C:\Users\Kninetimmy\.claude\plans\x10-doc-replace-rebuild.md`.
+
+**X10 Stage 3** (rebuild-from-stored fallback + gating) follows. Stage 3.5 provenance
+gate is dead code until X21 lands.
+
+**After X10 — Codex review + v1.2.7 tag:** run Codex deep-review on merged state, address
+findings, tag.
 
 **Codex deep-review queue after X10:** X11, X12, X13 (expanded — now also covers RAG
 retrieval-failure result), H2. Each ships as its own PR + patch release.
@@ -53,22 +56,18 @@ See `project_backlog.md` for full item details.
 
 ## Last session
 
-2026-04-19 (v1.2.6 release + X10 plan) — PR #148 (`2b88aef`) merged; v1.2.6
-released Windows-only via workflow dispatch (`Free-AI-SSD-win.zip` 319 MB,
-sha256 `01ca7f04…c62606`). X10 plan written to
-`C:\Users\Kninetimmy\.claude\plans\x10-doc-replace-rebuild.md`: 3 impl stages
-(SQLite WAL → delete-on-replace + rename detection → rebuild-from-stored
-gated on X21) + Codex review → v1.2.7. Decisions locked: path-primary +
-sha256-assisted rename detection (X10-Redux GUID deferred); WAL + busy_timeout
-on every SqliteConnection open; rebuild-from-stored dead-code until X21
-provenance lands. No code changes. User switching to Sonnet to implement.
+2026-04-19 (X10 Stage 1 — SQLite WAL + busy_timeout) — PR #150 (`b6536b3`) merged, CI
+green. `VectorIndex.OpenConnection()` centralizes all 5 connection opens; WAL and 5 s
+busy_timeout on every connection. Advisor catch: original test #3 used a reader (unblocked
+in WAL mode) — fixed to writer-vs-writer contention. 403/403.
 
-2026-04-19 (X9 Stage 4 — finalize + migration + guard rewrite) — **Stage 4 implemented
-and merged as PR #147 (`b75e42a`).** In-memory finalize, mtime-aware
-`TryMigratePlaintextAsync`, 7 new guard tests. Advisor catch: in-memory overload didn't
-clean up pre-existing plaintext — fixed; seeded test replaced the vacuous one. Gemini:
-corrupt plaintext could overwrite valid encrypted blob (`LoadWithValidationAsync` fix);
-re-entrancy on unlock button (`try/finally` disable). X9 complete.
+2026-04-19 (v1.2.6 release + X10 plan) — PR #148 (`2b88aef`) merged; v1.2.6 released
+Windows-only via workflow dispatch (`Free-AI-SSD-win.zip` 319 MB, sha256 `01ca7f04…c62606`).
+X10 plan written to `C:\Users\Kninetimmy\.claude\plans\x10-doc-replace-rebuild.md`: 3 impl
+stages (SQLite WAL → delete-on-replace + rename detection → rebuild-from-stored gated on
+X21) + Codex review → v1.2.7. Decisions locked: path-primary + sha256-assisted rename
+detection; WAL + busy_timeout on every SqliteConnection open; rebuild-from-stored dead-code
+until X21 provenance lands. No code changes.
 
 ## Open questions
 

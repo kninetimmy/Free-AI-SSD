@@ -796,7 +796,7 @@ sealed record UnlockMaterial(byte[] DerivedKey, byte[] Salt, int Iterations, str
 
 ### X10 — Document replacement + rebuild consistency
 
-**Status:** **plan locked 2026-04-19 — queued for Sonnet, staged in 3 PRs.** High.
+**Status:** Stage 1 DONE 2026-04-19 (PR #150, `b6536b3`); Stage 2 (delete-on-replace + rename detection) and Stage 3 (rebuild-from-stored) queued. High.
 **Scope:** One cohesive fix; transactional replace + rebuild-from-stored.
 **Model:** Sonnet 4.6
 
