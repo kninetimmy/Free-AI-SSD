@@ -33,6 +33,7 @@ if (!(Test-Path $cliPublishDir)) {
 }
 
 Write-Host "[4/4] Syncing runner + CLI publish output to prep-app runner-publish..."
+if (Test-Path $stagedRunnerDir) { Remove-Item $stagedRunnerDir -Recurse -Force }
 New-Item -ItemType Directory -Path $stagedRunnerDir -Force | Out-Null
 Copy-Item (Join-Path $publishDir "*") $stagedRunnerDir -Recurse -Force
 Copy-Item (Join-Path $cliPublishDir "FreeAiSsd.RunnerCli*") $stagedRunnerDir -Force
