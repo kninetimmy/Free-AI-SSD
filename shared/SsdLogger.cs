@@ -8,6 +8,7 @@ namespace FreeAiSsd.Shared;
 public sealed class SsdLogger
 {
     private readonly string _logFilePath;
+    private readonly object _sync = new();
 
     /// <summary>
     /// Creates a logger for a specific component, initializing the log file
@@ -40,6 +41,9 @@ public sealed class SsdLogger
     private void Write(string level, string message)
     {
         var line = $"{DateTime.UtcNow:o} [{level}] {message}{Environment.NewLine}";
-        File.AppendAllText(_logFilePath, line);
+        lock (_sync)
+        {
+            File.AppendAllText(_logFilePath, line);
+        }
     }
 }
