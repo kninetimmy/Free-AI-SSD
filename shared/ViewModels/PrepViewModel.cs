@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using FreeAiSsd.Shared.Documents;
 using FreeAiSsd.Shared.Models;
 using FreeAiSsd.Shared.Mvvm;
 using FreeAiSsd.Shared.Services;
@@ -51,6 +52,8 @@ public class PrepViewModel : BaseViewModel
     private string? _autoResumeFormatRoot;
     private string _autoResumeFormatLabel = string.Empty;
     private bool _isElevated;
+
+    private readonly HashSet<string> _provenanceCheckedRoots = new(StringComparer.OrdinalIgnoreCase);
 
     public PrepViewModel(
         IDriveService driveService,
@@ -429,6 +432,93 @@ public class PrepViewModel : BaseViewModel
         OnPropertyChanged(nameof(HasDriveSelected));
         RaiseAllCommandsCanExecuteChanged();
         _ = RefreshModelStatusesAsync();
+        _ = CheckAndPromptLibraryReindexAsync();
+    }
+
+    private async Task CheckAndPromptLibraryReindexAsync()
+    {
+        if (_isModelOperationRunning) return;
+        if (_isSelectedDriveEncrypted) return;
+        if (_selectedDrive is null) return;
+
+        var root = _selectedDrive.RootPath;
+        if (!_provenanceCheckedRoots.Add(root)) return;
+
+        PortableConfig config;
+        try { config = await _modelService.LoadConfigAsync(GetConfigPath(root)); }
+        catch { return; }
+
+        var currentModel = config.EmbeddingModelName;
+        if (string.IsNullOrWhiteSpace(currentModel)) return;
+
+        var libraryManager = new DocumentLibraryManager(root);
+        var mismatches = libraryManager.ScanProvenanceMismatches(currentModel);
+        if (mismatches.Count == 0) return;
+
+        var lines = string.Join("\n", mismatches.Select(m => $"- {m.Name} ({m.LastEmbeddingModel})"));
+        var message = $"The following document libraries were indexed with a different embedding model:\n\n{lines}\n\nCurrent model: '{currentModel}'. Reindex all affected libraries now?";
+        const string title = "Embedding Model Changed — Reindex Required";
+
+        bool confirm;
+        if (_uiSyncContext is null || SynchronizationContext.Current == _uiSyncContext)
+        {
+            confirm = _dialogService.Confirm(message, title);
+        }
+        else
+        {
+            var tcs = new TaskCompletionSource<bool>();
+            _uiSyncContext.Post(_ => tcs.SetResult(_dialogService.Confirm(message, title)), null);
+            confirm = await tcs.Task;
+        }
+
+        if (!confirm)
+        {
+            AppendLog("Reindex skipped. Document search results may be incorrect until libraries are reindexed.");
+            return;
+        }
+
+        var ollamaDir = Path.Combine(root, SsdLayout.Ollama);
+        var ollamaExe = _ollamaPackageService.ResolveOllamaExe(ollamaDir);
+        if (ollamaExe is null)
+        {
+            AppendLog("Reindex aborted: Ollama executable not found on this drive. Run Finalize first.");
+            return;
+        }
+
+        var modelsRoot = Path.Combine(root, SsdLayout.Models);
+        SetModelOperationState(true, "Reindexing document libraries...");
+        IOllamaServerHandle? serverHandle = null;
+        try
+        {
+            serverHandle = await _ollamaPackageService.StartTemporaryServerAsync(ollamaExe, modelsRoot, AppendLog, CancellationToken.None);
+            var ingestor = new DocumentIngestor(libraryManager, new EmbeddingClient());
+
+            foreach (var manifest in mismatches)
+            {
+                AppendLog($"Reindexing '{manifest.Name}'...");
+                try
+                {
+                    await ingestor.RebuildIndexAsync(manifest, serverHandle.Host, config, cancellationToken: CancellationToken.None);
+                    AppendLog($"Reindexed '{manifest.Name}' successfully.");
+                }
+                catch (Exception ex)
+                {
+                    AppendLog($"Reindex failed for '{manifest.Name}': {ex.Message}");
+                }
+            }
+            SetModelOperationState(false, "Reindex complete");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Reindex operation failed: {ex.Message}");
+            SetModelOperationState(false, "Reindex failed");
+        }
+        finally
+        {
+            serverHandle?.Dispose();
+            if (_isModelOperationRunning)
+                SetModelOperationState(false);
+        }
     }
 
     private void RefreshEncryptionState()

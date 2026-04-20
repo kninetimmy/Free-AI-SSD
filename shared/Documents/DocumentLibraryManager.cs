@@ -151,6 +151,21 @@ public sealed class DocumentLibraryManager
         await SaveRegistryAsync(registry);
     }
 
+    public IReadOnlyList<DocumentLibraryManifest> ScanProvenanceMismatches(string currentModel)
+    {
+        var registry = LoadRegistry();
+        var mismatches = new List<DocumentLibraryManifest>();
+        foreach (var entry in registry.Libraries)
+        {
+            var manifest = LoadManifest(entry.Id);
+            if (string.IsNullOrEmpty(manifest.LastEmbeddingModel)) continue;
+            if (string.Equals(manifest.LastEmbeddingModel, "unknown", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!string.Equals(manifest.LastEmbeddingModel, currentModel, StringComparison.OrdinalIgnoreCase))
+                mismatches.Add(manifest);
+        }
+        return mismatches;
+    }
+
     private static JsonSerializerOptions JsonOptions() => new()
     {
         WriteIndented = true,
