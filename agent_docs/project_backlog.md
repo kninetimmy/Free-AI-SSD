@@ -796,7 +796,7 @@ sealed record UnlockMaterial(byte[] DerivedKey, byte[] Salt, int Iterations, str
 
 ### X10 — Document replacement + rebuild consistency
 
-**Status:** Stage 1 DONE 2026-04-19 (PR #150, `b6536b3`); Stage 2 (delete-on-replace + rename detection) and Stage 3 (rebuild-from-stored) queued. High.
+**Status:** Stages 1+2 DONE 2026-04-19 (PR #150 `b6536b3`, PR #151 `a430ab0`); Stage 3 (rebuild-from-stored fallback + gating) queued. High.
 **Scope:** One cohesive fix; transactional replace + rebuild-from-stored.
 **Model:** Sonnet 4.6
 
@@ -837,6 +837,13 @@ decisions: path-primary + sha256-assisted rename detection (X10-Redux
 GUID deferred); WAL + busy_timeout on every SQLite open;
 rebuild-from-stored gated on X21 provenance (dead code until X21 lands).
 3 implementation PRs + review → v1.2.7.
+
+**Stage 3.5 explicitly deferred to X21 (2026-04-19 implementation decision)** —
+provenance gate (`vectors.db.old` snapshot + skip-re-embed when model matches
+stored `embedding_model_id`+`version`) requires X21's schema columns to be
+meaningful. Skipped the snapshot for simplicity; X21 adds the schema, then the
+gate activates. Stub test in `DocumentRebuildTests.cs` (`Skip = "Depends on X21"`)
+keeps the contract visible.
 
 ---
 
