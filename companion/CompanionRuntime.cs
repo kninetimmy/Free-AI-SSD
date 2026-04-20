@@ -30,6 +30,7 @@ internal sealed class CompanionRuntime : IDisposable
     private CompanionConfig _config = new();
     private KeyboardPttHotkey? _hotkey;
     private PttOverlayWindow? _overlay;
+    private bool _healthLoopStarted;
 
     public CompanionRuntime(IAudioCaptureService audio, IHotasInputService hotas, CompanionLog log)
     {
@@ -66,9 +67,25 @@ internal sealed class CompanionRuntime : IDisposable
             OpenSettings();
         }
 
+        if (!_config.IsComplete())
+        {
+            _tray.ShowBalloonTip(3000, "Setup required", "Open Settings from the tray to complete setup.", ToolTipIcon.Warning);
+            SetState("Needs Setup");
+            return;
+        }
+
+        StartLive();
+    }
+
+    private void StartLive()
+    {
         InitializeBindings();
         ApplyOverlayVisibility();
-        _ = Task.Run(HealthLoopAsync);
+        if (!_healthLoopStarted)
+        {
+            _healthLoopStarted = true;
+            _ = Task.Run(HealthLoopAsync);
+        }
     }
 
     private ContextMenuStrip BuildMenu()
@@ -89,12 +106,27 @@ internal sealed class CompanionRuntime : IDisposable
         if (_config.PttBinding.StartsWith("key:", StringComparison.OrdinalIgnoreCase))
         {
             _hotkey = new KeyboardPttHotkey(_config.PttBinding, OnPttPressed, OnPttReleased, _log);
-            _hotkey.Start();
-            _log.Write($"Using keyboard fallback binding: {_config.PttBinding}");
+            if (!_hotkey.Start())
+            {
+                SetState("PTT unavailable");
+                _tray.ShowBalloonTip(3000, "PTT error", "Keyboard hook failed to install. PTT will not work.", ToolTipIcon.Warning);
+            }
+            else
+            {
+                _log.Write($"Using keyboard fallback binding: {_config.PttBinding}");
+            }
             return;
         }
 
-        ParseHotasBinding(_config.PttBinding, out var deviceName, out var buttonIndex);
+        PttBindingParser.ParseHotas(_config.PttBinding, out var deviceName, out var buttonIndex);
+        if (deviceName is null)
+        {
+            _log.Write($"Invalid PTT binding: '{_config.PttBinding}'. Expected format: device|button.");
+            SetState("Bad Binding");
+            _tray.ShowBalloonTip(3000, "PTT error", $"Invalid PTT binding: '{_config.PttBinding}'.", ToolTipIcon.Warning);
+            return;
+        }
+
         _hotas.Start(deviceName, buttonIndex);
     }
 
@@ -343,9 +375,16 @@ internal sealed class CompanionRuntime : IDisposable
         {
             _config = window.Config;
             _config.Save(_configPath);
-            InitializeBindings();
-            ApplyOverlayVisibility();
-            _ = ProbeHealthAsync();
+            if (_config.IsComplete())
+            {
+                StartLive();
+                _ = ProbeHealthAsync();
+            }
+            else
+            {
+                SetState("Needs Setup");
+                _tray.ShowBalloonTip(3000, "Setup incomplete", "Configuration is incomplete. Open Settings to finish.", ToolTipIcon.Warning);
+            }
         }
     }
 
@@ -456,19 +495,6 @@ internal sealed class CompanionRuntime : IDisposable
     }
 
     private static JsonSerializerOptions JsonOptions() => new() { PropertyNameCaseInsensitive = true };
-
-    private static void ParseHotasBinding(string binding, out string? deviceName, out int buttonIndex)
-    {
-        deviceName = null;
-        buttonIndex = 0;
-        var segments = (binding ?? string.Empty).Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (segments.Length >= 2 && int.TryParse(segments[1], out var idx))
-        {
-            deviceName = segments[0];
-            buttonIndex = idx;
-        }
-    }
-
 
     private static async Task<byte[]> ReadBoundedAsync(Stream stream, long maxBytes, CancellationToken ct)
     {
