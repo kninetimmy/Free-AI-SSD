@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-04-20 (X11 — companion PTT + first-run — PR #159 open, CI green)
+Last updated: 2026-04-20 (X11 — PR #159 merged)
 
 Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
@@ -8,9 +8,11 @@ Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
 ## In flight
 
-**X11 — PR #159 open, CI green.** Three companion fixes: `WH_KEYBOARD_LL` replaces `RegisterHotKey` for real PTT hold tracking; startup gate prevents falling through to bindings/health-loop on cancelled first-run; HOTAS null-device guard; API key `PasswordBox` + `ServerRequiresApiKey`. `bed0f02`/`c754fd4`/`2b668bb`. Awaiting merge confirmation.
+Between tasks. X11 complete.
 
 ## Recently shipped
+
+- **PR #159 — X11 — merged `329bcf2e` (2026-04-20).** Four companion fixes: `WH_KEYBOARD_LL` replaces `RegisterHotKey` for real PTT hold tracking; startup gate prevents falling through on cancelled first-run; HOTAS null-device guard; API key `PasswordBox` + `ServerRequiresApiKey`. `PttBindingParser` extracted to shared for testability. 8 new tests (431 pass, 1 skip). `bed0f02`/`c754fd4`/`2b668bb`/`4cffe19`.
 
 - **PR #158 — X21b — merged `92625a9` (2026-04-19).** `DocumentLibraryManager.ScanProvenanceMismatches` scans all library manifests and returns those with a known, non-"unknown" `LastEmbeddingModel` that differs from the current config model (case-insensitive). `PrepViewModel.CheckAndPromptLibraryReindexAsync` fires once per drive root per session on drive selection; guards encrypted/busy/no-config; posts per-library confirmation dialog to UI thread; on confirm resolves existing Ollama exe (no download), starts temp server, runs `RebuildIndexAsync` per library, catches per-library failures independently. 7 new TDD tests (423 pass, 1 skip).
 
@@ -22,7 +24,7 @@ Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
 ## Next up
 
-**Merge first:** X11 PR #159 (open, CI green — next session). Then X12, X13 (expanded — also covers RAG retrieval-failure result), H2. Each ships as its own PR + patch release.
+**X12, X13** (expanded — also covers RAG retrieval-failure result), H2. Each ships as its own PR + patch release.
 
 **After hardening queue:** F3 PrepApp 3-tab restructure (X21 complete — no longer blocking F3), then F4 / B2 / F2 / R1 Stage 2.
 
@@ -36,9 +38,9 @@ See `project_backlog.md` for full item details.
 
 ## Last session
 
-2026-04-20 (X11 — companion PTT + first-run — PR #159) — `KeyboardPttHotkey` rewritten: `RegisterHotKey` → `WH_KEYBOARD_LL` for real key-up/key-down; `_pressed` debounce prevents auto-repeat spam; hook-install failure surfaced to tray. `CompanionRuntime.Start()` gated: second `IsComplete()` check after first-run dialog sets tray "Needs Setup" and returns early; `StartLive()` extracted so health loop never double-starts. HOTAS null-device guard blocks `_hotas.Start` on bad binding. `SettingsWindow`: `TextBox` → `PasswordBox`, blank = no key, "Clear key" button, `ServerRequiresApiKey` checkbox. `PttBindingParser` extracted to `shared/Models/` for testability. 8 new tests. 431 pass, 1 skip. `bed0f02`/`c754fd4`/`2b668bb`. PR #159 open, CI green.
+2026-04-20 (X11 — review + merge) — Reviewed Codex's PR #159 and Gemini's inline comment. Gemini's regression flag (API key cleared on save) was a false positive — `ResolveApiKeyForSave` falls through to preserve the existing key when the PasswordBox is blank and no explicit clear was requested. Merged `329bcf2e`. X11 complete.
 
-2026-04-19 (X21b — PrepApp reindex prompt — PR #158) — `ScanProvenanceMismatches` added to `DocumentLibraryManager`; `CheckAndPromptLibraryReindexAsync` added to `PrepViewModel` (fires once per drive root per session, guards encrypted/busy/no-config, per-library dialog + per-library rebuild, no Ollama download). 7 new TDD tests. 423 pass, 1 skip. `92625a9`, PR #158 merged.
+2026-04-20 (X11 — PR #159 review follow-up) — Reviewed the open PR, found two concrete regressions, fixed them in `4cffe19`, pushed the branch, and posted a PR comment. `CompanionConfig.ResolveApiKeyForSave` now preserves the existing key unless clear/replace is explicit; `CompanionRuntime` now tears down bindings, overlay, recording, and health-loop activity when config becomes incomplete. Verification: companion build green; targeted tests 15/15; GitHub Actions `Build and Package` green.
 
 ## Open questions
 
