@@ -95,15 +95,20 @@ CREATE TABLE IF NOT EXISTS chunks (
     text TEXT NOT NULL,
     text_length INTEGER NOT NULL,
     sha256 TEXT NOT NULL,
-    embedding BLOB NOT NULL
+    embedding BLOB NOT NULL,
+    embedding_model TEXT NOT NULL DEFAULT 'unknown',
+    embedding_dimension INTEGER NOT NULL DEFAULT 0,
+    parser_version TEXT NOT NULL DEFAULT 'unknown',
+    chunker_version TEXT NOT NULL DEFAULT 'unknown'
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_library ON chunks(library_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_sha ON chunks(sha256);
 ";
             cmd.ExecuteNonQuery();
 
-            // Fresh database — mark embeddings as normalized from the start.
+            // Fresh database — mark embeddings as normalized and schema current.
             SetMeta(conn, "embeddings_normalized", "1");
+            SetMeta(conn, "schema_version", "2");
             return;
         }
 
@@ -117,6 +122,53 @@ CREATE INDEX IF NOT EXISTS idx_chunks_sha ON chunks(sha256);
         {
             NormalizeExistingEmbeddings(conn, logger);
         }
+
+        // Add provenance columns if not yet present (M2 migration).
+        if (GetMeta(conn, "schema_version") != "2")
+        {
+            MigrateAddProvenance(conn, logger);
+        }
+    }
+
+    /// <summary>
+    /// Adds embedding provenance columns (M2 migration). Backfills embedding_dimension
+    /// from blob length so existing libraries close the silent-zero-score failure mode
+    /// without requiring a forced reindex.
+    /// </summary>
+    private static void MigrateAddProvenance(SqliteConnection conn, SsdLogger? logger)
+    {
+        logger?.Info("VectorIndex: applying M2 migration — adding provenance columns...");
+
+        using (var alter = conn.CreateCommand())
+        {
+            alter.CommandText = "ALTER TABLE chunks ADD COLUMN embedding_model TEXT NOT NULL DEFAULT 'unknown'";
+            alter.ExecuteNonQuery();
+        }
+        using (var alter = conn.CreateCommand())
+        {
+            alter.CommandText = "ALTER TABLE chunks ADD COLUMN embedding_dimension INTEGER NOT NULL DEFAULT 0";
+            alter.ExecuteNonQuery();
+        }
+        using (var alter = conn.CreateCommand())
+        {
+            alter.CommandText = "ALTER TABLE chunks ADD COLUMN parser_version TEXT NOT NULL DEFAULT 'unknown'";
+            alter.ExecuteNonQuery();
+        }
+        using (var alter = conn.CreateCommand())
+        {
+            alter.CommandText = "ALTER TABLE chunks ADD COLUMN chunker_version TEXT NOT NULL DEFAULT 'unknown'";
+            alter.ExecuteNonQuery();
+        }
+
+        // Backfill dimension from blob length. Each float is 4 bytes.
+        using (var backfill = conn.CreateCommand())
+        {
+            backfill.CommandText = "UPDATE chunks SET embedding_dimension = LENGTH(embedding) / 4 WHERE embedding_dimension = 0";
+            backfill.ExecuteNonQuery();
+        }
+
+        SetMeta(conn, "schema_version", "2");
+        logger?.Info("VectorIndex: M2 migration complete.");
     }
 
     #region Meta helpers
@@ -334,8 +386,10 @@ CREATE INDEX IF NOT EXISTS idx_chunks_sha ON chunks(sha256);
 
             var ins = conn.CreateCommand();
             ins.Transaction = tx;
-            ins.CommandText = @"INSERT INTO chunks (library_id, source_file_name, stored_relative_path, page, chunk_index, text, text_length, sha256, embedding)
-VALUES ($libraryId,$source,$stored,$page,$idx,$text,$len,$sha,$emb)";
+            ins.CommandText = @"INSERT INTO chunks
+(library_id, source_file_name, stored_relative_path, page, chunk_index, text, text_length, sha256, embedding,
+ embedding_model, embedding_dimension, parser_version, chunker_version)
+VALUES ($libraryId,$source,$stored,$page,$idx,$text,$len,$sha,$emb,$model,$dim,$pv,$cv)";
             ins.Parameters.AddWithValue("$libraryId", c.LibraryId);
             ins.Parameters.AddWithValue("$source", c.SourceFileName);
             ins.Parameters.AddWithValue("$stored", c.StoredRelativePath);
@@ -345,6 +399,10 @@ VALUES ($libraryId,$source,$stored,$page,$idx,$text,$len,$sha,$emb)";
             ins.Parameters.AddWithValue("$len", c.TextLength);
             ins.Parameters.AddWithValue("$sha", c.Sha256);
             ins.Parameters.AddWithValue("$emb", EmbeddingSerializer.ToBlob(normalized));
+            ins.Parameters.AddWithValue("$model", string.IsNullOrEmpty(c.EmbeddingModel) ? "unknown" : c.EmbeddingModel);
+            ins.Parameters.AddWithValue("$dim", c.EmbeddingDimension > 0 ? c.EmbeddingDimension : normalized.Length);
+            ins.Parameters.AddWithValue("$pv", string.IsNullOrEmpty(c.ParserVersion) ? "unknown" : c.ParserVersion);
+            ins.Parameters.AddWithValue("$cv", string.IsNullOrEmpty(c.ChunkerVersion) ? "unknown" : c.ChunkerVersion);
             ins.ExecuteNonQuery();
         }
 
@@ -370,6 +428,33 @@ VALUES ($libraryId,$source,$stored,$page,$idx,$text,$len,$sha,$emb)";
         cmd.Parameters.AddWithValue("$libraryId", libraryId);
         cmd.Parameters.AddWithValue("$path", storedRelativePath);
         cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Verifies that the requested embedding dimension matches the stored provenance for
+    /// a library. Throws <see cref="EmbeddingModelMismatchException"/> on dimension mismatch
+    /// (silent-zero-score failure mode). Logs a warning when the model name differs from
+    /// what was stored but dimension matches — a recoverable semantic drift, not corruption.
+    /// No-op when the library has no chunks yet.
+    /// </summary>
+    public void CheckProvenance(string libraryId, string model, int requestedDimension, SsdLogger? logger = null)
+    {
+        using var conn = OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT DISTINCT embedding_dimension, embedding_model FROM chunks WHERE library_id=$libraryId AND embedding_dimension != 0";
+        cmd.Parameters.AddWithValue("$libraryId", libraryId);
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var storedDim = reader.GetInt32(0);
+            var storedModel = reader.GetString(1);
+
+            if (storedDim != requestedDimension)
+                throw new EmbeddingModelMismatchException(libraryId, storedDim, requestedDimension);
+
+            if (storedModel != "unknown" && storedModel != model)
+                logger?.Warn($"VectorIndex: library '{libraryId}' was indexed with model '{storedModel}', current model is '{model}'. Semantic consistency not guaranteed.");
+        }
     }
 
     /// <summary>

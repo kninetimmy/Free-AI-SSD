@@ -154,7 +154,11 @@ public sealed class DocumentIngestor
                             Text = item.Text,
                             TextLength = item.Text.Length,
                             Sha256 = sha,
-                            Embedding = embedding
+                            Embedding = embedding,
+                            EmbeddingModel = config.EmbeddingModelName,
+                            EmbeddingDimension = embedding.Length,
+                            ParserVersion = DocumentParser.Version,
+                            ChunkerVersion = DocumentChunker.Version,
                         };
                         var completed = Interlocked.Increment(ref embeddedChunks);
                         progress?.Invoke(new IndexingProgress
@@ -219,7 +223,11 @@ public sealed class DocumentIngestor
                     TryDeleteStoredFile(oldStoredAbsPath);
                 }
 
+                vectorIndex.CheckProvenance(manifest.Id, config.EmbeddingModelName, chunks[0].EmbeddingDimension, _logger);
                 vectorIndex.UpsertFileChunks(manifest.Id, storedRelativePath, chunks);
+
+                manifest.LastEmbeddingModel = config.EmbeddingModelName;
+                manifest.LastEmbeddingDimension = chunks[0].EmbeddingDimension;
 
                 if (current is null)
                 {
@@ -424,7 +432,11 @@ public sealed class DocumentIngestor
                     Text = item.Text,
                     TextLength = item.Text.Length,
                     Sha256 = entry.Sha256,
-                    Embedding = embedding
+                    Embedding = embedding,
+                    EmbeddingModel = config.EmbeddingModelName,
+                    EmbeddingDimension = embedding.Length,
+                    ParserVersion = DocumentParser.Version,
+                    ChunkerVersion = DocumentChunker.Version,
                 };
             }
             catch (OperationCanceledException)
@@ -455,6 +467,7 @@ public sealed class DocumentIngestor
         }
 
         var chunks = results.Where(r => r is not null).Select(r => r!).ToList();
+        vectorIndex.CheckProvenance(manifest.Id, config.EmbeddingModelName, chunks[0].EmbeddingDimension, _logger);
         vectorIndex.UpsertFileChunks(manifest.Id, entry.StoredRelativePath, chunks);
     }
 

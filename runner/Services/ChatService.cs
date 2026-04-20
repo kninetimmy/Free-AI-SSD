@@ -140,6 +140,7 @@ public sealed class ChatService : IChatService
                 var index = new VectorIndex(_libraryManager.GetIndexPath(manifest.Id));
                 var embedder = new EmbeddingClient(_http);
                 var queryEmbedding = await embedder.EmbedAsync(host, config.EmbeddingModelName, userPrompt);
+                index.CheckProvenance(manifest.Id, config.EmbeddingModelName, queryEmbedding.Length, _logger);
                 var results = index.Search(manifest.Id, queryEmbedding, config.RetrievalTopK,
                     config.MinimumSimilarityThreshold, _logger);
                 var rag = RagPromptBuilder.Build(userPrompt, results, maxContextChars: 4500, librarySearched: true);
@@ -155,6 +156,10 @@ public sealed class ChatService : IChatService
                     promptToSend = rag.Prompt;
                     LogMessage?.Invoke("No documents met the similarity threshold.");
                 }
+            }
+            catch (EmbeddingModelMismatchException ex)
+            {
+                LogMessage?.Invoke($"[Error] {ex.Message}");
             }
             catch (Exception ex)
             {

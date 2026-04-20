@@ -100,10 +100,11 @@ public sealed class DocumentRebuildTests : IDisposable
         Assert.Equal(chunksBefore, chunksAfter);
     }
 
-    [Fact(Skip = "Depends on X21 — provenance gate requires embedding_model_id + model_version columns in chunks table.")]
+    [Fact(Skip = "X21b — rebuild-from-stored skip-re-embed gate requires X21b PrepApp integration.")]
     public Task RebuildIndexAsync_ProvenanceMatches_SkipsReEmbed()
     {
-        // Real test lands with X21. Placeholder keeps the contract visible.
+        // Real test lands with X21b. Placeholder keeps the contract visible.
+        // Provenance columns (embedding_model, embedding_dimension, parser_version, chunker_version) land in X21.
         return Task.CompletedTask;
     }
 

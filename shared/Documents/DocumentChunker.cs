@@ -2,6 +2,7 @@ namespace FreeAiSsd.Shared.Documents;
 
 public static class DocumentChunker
 {
+    public const string Version = "1";
     public static List<string> ChunkText(string text, int chunkSize, int overlap)
     {
         if (string.IsNullOrWhiteSpace(text))
