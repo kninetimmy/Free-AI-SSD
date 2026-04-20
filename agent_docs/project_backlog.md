@@ -68,7 +68,8 @@ the style to match.
 10. **H2** — repo hardening pass (housekeeping batch)
 
 **After hardening batch ships — reordered 2026-04-19 (RAG audit; see decision):**
-11. **X21** — embedding provenance + compat gating (Sonnet, small, preventative — slots before F3 per decision 2026-04-19)
+11. **X21** — embedding provenance + compat gating — **done** (PR #157, `449ec2e`)
+11a. **X21b** — PrepApp reindex prompt (Sonnet — slots before F3)
 12. **F3** — PrepApp 3-tab restructure (Opus planning) — also folds in the "Add File button disabled" tooltip hint
 13. **F4** — profile FTUE in PrepApp + companion install target selector (multi-stage, Opus planning)
 14. **B2** — build LAN discovery (multi-stage, Opus planning; can run in parallel with F4)
@@ -1155,7 +1156,7 @@ unlock dialog window.
 
 ### X21 — Embedding provenance + compat gating
 
-**Status:** Backlog 2026-04-19 (RAG audit triage). **High; slots before F3 per decision 2026-04-19.**
+**Status:** Done — PR #157 (`449ec2e`), merged 2026-04-19. Stages 1–2 shipped; Stage 3 is X21b.
 **Scope:** Three stages. Small but foundational.
 **Model:** Sonnet 4.6.
 
@@ -1181,13 +1182,15 @@ unlock dialog window.
 
 ### X21b — PrepApp reindex prompt on model change
 
-**Status:** Backlog 2026-04-19 (split from X21 Stage 3). **Medium; follows X21.**
+**Status:** Backlog 2026-04-19 (split from X21 Stage 3). **Medium; follows X21 (now done).**
 **Scope:** Single stage. UI-only — consumes X21's `EmbeddingModelMismatch` signal.
 **Model:** Sonnet 4.6.
 
 **Driver:** When the user changes the embedding model in config, PrepApp should detect the mismatch (via X21's provenance gate) and surface a one-click reindex action rather than silently producing zero-score results.
 
 **Scope:** PrepApp detects mismatch on model config change → warning dialog "Library was indexed with model X; switched to Y — reindex required" → one-click reindex using X10's rebuild-from-stored path.
+
+**⚠ Implementation note (from X21 shipping):** The rebuild path (`RebuildIndexAsync`) must clear existing chunks for the library before re-embedding, or accept a `force` flag that bypasses `CheckProvenance`. Without this, the rebuild will immediately throw `EmbeddingModelMismatchException` on the first chunk write into a library that still has old-model rows.
 
 **Affected files:**
 - `prep-app/` — model change handler, reindex prompt, reindex action wired to `DocumentOperationsService.RebuildIndexAsync`.

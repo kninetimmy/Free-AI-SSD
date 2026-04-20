@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-04-19 (v1.2.9 released — run 24654381970)
+Last updated: 2026-04-19 (X21 Stages 1–2 — embedding provenance — PR #157 merged)
 
 Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
@@ -8,7 +8,7 @@ Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
 ## In flight
 
-Nothing — between tasks.
+Between tasks.
 
 ## Recently shipped
 
@@ -20,7 +20,7 @@ Nothing — between tasks.
 
 ## Next up
 
-**X21 — embedding provenance + compat gating** (Sonnet, small). Next feature item; slots before F3.
+**X21b — PrepApp reindex prompt** (Sonnet). One-click reindex gate: PrepApp prompts user when `CheckProvenance` would throw; rebuild path must clear existing chunks for the library before re-embed (or accept a `force` flag to bypass the gate). Slots before F3.
 
 **Codex deep-review queue after X10:** X11, X12, X13 (expanded — now also covers RAG retrieval-failure result), H2. Each ships as its own PR + patch release.
 
@@ -36,9 +36,9 @@ See `project_backlog.md` for full item details.
 
 ## Last session
 
-2026-04-20 (X24 + X25 bundle — PR #155) — Planned and executed X24+X25 as v1.2.9 patch on Sonnet 4.6. X25 first: promoted private `ReplaceWithRetry` from `SsdEncryption.cs` to new `shared/Io/FileOps.cs` (`2f7dcd8`); routes `PortableConfig.cs` and `DocumentLibraryManager.cs` call sites through the shared helper. X24 test-first: wrote failing `source_file_name` assertion, added `VectorIndex.UpdateFileName` (parameterized UPDATE), called from single-sha rename branch in `DocumentIngestor` (`53ecdf9`). Also deleted two stray agents (project-manager, tech-lead-architect) to restore the intended seven. PR #155 green + merged; v1.2.9 not yet tagged.
+2026-04-19 (X21 Stages 1–2 — embedding provenance + compat gate — PR #157) — Implemented embedding provenance schema (M2 migration): `embedding_model`, `embedding_dimension`, `parser_version`, `chunker_version` added to `chunks` table via non-destructive `ALTER TABLE`; existing rows backfilled with dimension from `LENGTH(embedding)/4` (Option B — no forced reindex on upgrade). `VectorIndex.CheckProvenance()` added: throws `EmbeddingModelMismatchException` on dimension mismatch, warns on model-name drift from `'unknown'`. `DocumentIngestor` populates all four fields on new chunks and calls `CheckProvenance` before `UpsertFileChunks`. `ChatService` surfaces mismatch as a distinct `[Error]` log. `DocumentLibraryManifest` gains `LastEmbeddingModel`/`LastEmbeddingDimension` hint fields. 5 new TDD provenance tests (416 pass, 1 skip). `449ec2e`, PR #157 merged.
 
-2026-04-20 (CI File.Replace flake fix + v1.2.8 release) — `Build and Package` on `af77abc` failed with `IOException` at `SsdEncryption.cs:327` during `ConfigStore_SerializesConcurrentSaves` — Windows Defender/indexer sharing-violation flake. Fixed in PR #153 (`4d269a7`) by adding a private `ReplaceWithRetry` helper. 5/5 flaky test passes, 409/0 full suite. Dispatched v1.2.8 (run 24650221521) — succeeded, artifact published.
+2026-04-19 (v1.2.9 dispatch + README refresh + X21 plan — PR #156) — Dispatched Build and Package on `e385fff`; green, artifact published (run 24654381970), v1.2.9 live. Discussed X21: agreed to split Stage 3 (PrepApp reindex prompt) into X21b; Stages 1–2 ship first. Refreshed README roadmap: RAG Document Library added as Phase 2 (was absent), example bindings demoted ⏳→🗓️ Phase 6, Setup Profiles → Phase 7, v1.2.5–v1.2.9 entries added to Recent Changes. Caught up two missed X25 docs (shared/Io/ namespace + FileOps decision). PR #156 green + merged (`2cdeb46`).
 
 ## Open questions
 

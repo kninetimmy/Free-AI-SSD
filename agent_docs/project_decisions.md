@@ -205,3 +205,18 @@ shared filesystem helpers. All `File.Replace` calls in the shared library must r
 through `FileOps.ReplaceWithRetry` (5 attempts, 25 ms base backoff doubling,
 `IOException`/`UnauthorizedAccessException` only). New callers should not add bare
 `File.Replace` calls — extend `FileOps` instead.
+
+---
+
+## 2026-04-19 — X21 embedding provenance: Option B migration (backfill from blob, no forced reindex)
+
+When migrating existing v1.2.9 libraries to schema M2, existing rows receive
+`embedding_model = 'unknown'` and `embedding_dimension` backfilled from
+`LENGTH(embedding)/4`. The gate hard-refuses only on dimension mismatch;
+model-name drift from `'unknown'` logs a warning only.
+
+Forcing a full reindex on upgrade was rejected — users with large libraries
+(800-page PDFs) should not have to re-embed just to upgrade. Option B is
+reversible: if field data shows model-drift false-negatives causing real
+problems, a stricter gate can be added in X21b or a follow-on item without
+changing the schema. Established PR #157 (`449ec2e`).
