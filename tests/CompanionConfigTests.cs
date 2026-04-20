@@ -120,6 +120,30 @@ public sealed class CompanionConfigTests
         }
     }
 
+    // codex
+    [Fact]
+    public void ResolveApiKeyForSave_PreservesExistingKey_WhenNoReplacementOrClearRequested()
+    {
+        var resolved = CompanionConfig.ResolveApiKeyForSave("secret", "", clearRequested: false);
+        Assert.Equal("secret", resolved);
+    }
+
+    // codex
+    [Fact]
+    public void ResolveApiKeyForSave_ClearsExistingKey_WhenExplicitlyRequested()
+    {
+        var resolved = CompanionConfig.ResolveApiKeyForSave("secret", "", clearRequested: true);
+        Assert.Equal(string.Empty, resolved);
+    }
+
+    // codex
+    [Fact]
+    public void ResolveApiKeyForSave_UsesEnteredReplacementKey_WhenProvided()
+    {
+        var resolved = CompanionConfig.ResolveApiKeyForSave("secret", " rotated ", clearRequested: true);
+        Assert.Equal("rotated", resolved);
+    }
+
     [Fact]
     public void ServerRequiresApiKey_DefaultsTrue()
     {

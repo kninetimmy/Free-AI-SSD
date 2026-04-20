@@ -31,6 +31,8 @@ internal sealed class CompanionRuntime : IDisposable
     private KeyboardPttHotkey? _hotkey;
     private PttOverlayWindow? _overlay;
     private bool _healthLoopStarted;
+    // codex
+    private volatile bool _liveModeEnabled;
 
     public CompanionRuntime(IAudioCaptureService audio, IHotasInputService hotas, CompanionLog log)
     {
@@ -70,6 +72,8 @@ internal sealed class CompanionRuntime : IDisposable
         if (!_config.IsComplete())
         {
             _tray.ShowBalloonTip(3000, "Setup required", "Open Settings from the tray to complete setup.", ToolTipIcon.Warning);
+            // codex
+            StopLive();
             SetState("Needs Setup");
             return;
         }
@@ -79,6 +83,8 @@ internal sealed class CompanionRuntime : IDisposable
 
     private void StartLive()
     {
+        // codex
+        _liveModeEnabled = true;
         InitializeBindings();
         ApplyOverlayVisibility();
         if (!_healthLoopStarted)
@@ -86,6 +92,28 @@ internal sealed class CompanionRuntime : IDisposable
             _healthLoopStarted = true;
             _ = Task.Run(HealthLoopAsync);
         }
+    }
+
+    // codex
+    private void StopLive()
+    {
+        _liveModeEnabled = false;
+        _hotas.Stop();
+        _hotkey?.Dispose();
+        _hotkey = null;
+        if (_audio.IsRecording)
+        {
+            try
+            {
+                _audio.StopRecording();
+            }
+            catch (Exception ex)
+            {
+                _log.Write($"Failed to stop recording during live teardown: {ex.Message}");
+            }
+        }
+
+        HideOverlay();
     }
 
     private ContextMenuStrip BuildMenu()
@@ -136,14 +164,22 @@ internal sealed class CompanionRuntime : IDisposable
         {
             try
             {
-                await ProbeHealthAsync();
+                // codex
+                if (_liveModeEnabled && _config.IsComplete())
+                {
+                    await ProbeHealthAsync();
+                }
             }
             catch (Exception ex)
             {
                 _log.Write($"Health probe error: {ex.Message}");
             }
 
-            await Task.Delay(_config.AutoReconnect ? TimeSpan.FromSeconds(5) : TimeSpan.FromMinutes(5), _cts.Token)
+            // codex
+            var delay = !_liveModeEnabled || !_config.IsComplete()
+                ? TimeSpan.FromSeconds(1)
+                : (_config.AutoReconnect ? TimeSpan.FromSeconds(5) : TimeSpan.FromMinutes(5));
+            await Task.Delay(delay, _cts.Token)
                 .ContinueWith(_ => { }, TaskScheduler.Default);
         }
     }
@@ -382,6 +418,8 @@ internal sealed class CompanionRuntime : IDisposable
             }
             else
             {
+                // codex
+                StopLive();
                 SetState("Needs Setup");
                 _tray.ShowBalloonTip(3000, "Setup incomplete", "Configuration is incomplete. Open Settings to finish.", ToolTipIcon.Warning);
             }

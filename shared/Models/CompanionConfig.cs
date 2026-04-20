@@ -48,6 +48,23 @@ public sealed class CompanionConfig
            && !string.IsNullOrWhiteSpace(PttBinding)
            && (!ServerRequiresApiKey || !string.IsNullOrWhiteSpace(ApiKey));
 
+    // codex
+    internal static string ResolveApiKeyForSave(string? existingApiKey, string? enteredApiKey, bool clearRequested)
+    {
+        var typedApiKey = enteredApiKey?.Trim() ?? string.Empty;
+        if (!string.IsNullOrEmpty(typedApiKey))
+        {
+            return typedApiKey;
+        }
+
+        if (clearRequested)
+        {
+            return string.Empty;
+        }
+
+        return existingApiKey?.Trim() ?? string.Empty;
+    }
+
     private static JsonSerializerOptions JsonOptions()
         => new()
         {
