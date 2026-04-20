@@ -61,7 +61,7 @@ the style to match.
 
 **Codex deep-review findings (intake 2026-04-18 — slot between X1-Redux and feature queue):**
 5. **X9** — encrypted config persistence lifecycle (Critical; Opus planning)
-6. **X10** — document replacement + rebuild consistency (High) *(expanded 2026-04-19 RAG audit: + SQLite WAL/busy_timeout)*
+6. **X10** — document replacement + rebuild consistency (High) *(plan locked 2026-04-19; queued for Sonnet — see plan doc)*
 7. **X11** — companion keyboard PTT + first-run validation (High)
 8. **X12** — download verify-before-move (Medium, security-adjacent)
 9. **X13** — chat/STT surface real failures (Medium) *(expanded 2026-04-19 RAG audit: + RAG retrieval-failure variant)*
@@ -796,7 +796,7 @@ sealed record UnlockMaterial(byte[] DerivedKey, byte[] Salt, int Iterations, str
 
 ### X10 — Document replacement + rebuild consistency
 
-**Status:** triaged 2026-04-18 (Codex deep-review intake). **High.**
+**Status:** **plan locked 2026-04-19 — queued for Sonnet, staged in 3 PRs.** High.
 **Scope:** One cohesive fix; transactional replace + rebuild-from-stored.
 **Model:** Sonnet 4.6
 
@@ -830,6 +830,13 @@ sealed record UnlockMaterial(byte[] DerivedKey, byte[] Salt, int Iterations, str
 **Expansion 2026-04-19 (RAG audit fallout):**
 - **SQLite PRAGMAs on `VectorIndex` connection:** `journal_mode=WAL`, `busy_timeout=5000`, `synchronous=NORMAL`. Same code path as rebuild work; lands in the same PR. `VectorIndex.cs:44` currently uses a bare `new SqliteConnection($"Data Source={_dbPath}")` — no journal mode, no busy timeout. Eliminates the concurrent-reader/rebuild file-lock class of failures (see field log) independent of the rebuild-from-stored fix itself.
 - **Stable document GUID spun out as X10-Redux** (not this PR) — see decision 2026-04-19. X10 ships capture-old-path + WAL + rebuild-from-stored as the principled fix for the current symptoms. Identity-layer upgrade revisited only if path-capture proves insufficient in field use.
+
+**2026-04-19 plan lock** — full staged plan at
+`C:\Users\Kninetimmy\.claude\plans\x10-doc-replace-rebuild.md`. Locked
+decisions: path-primary + sha256-assisted rename detection (X10-Redux
+GUID deferred); WAL + busy_timeout on every SQLite open;
+rebuild-from-stored gated on X21 provenance (dead code until X21 lands).
+3 implementation PRs + review → v1.2.7.
 
 ---
 
