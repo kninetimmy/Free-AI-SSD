@@ -64,7 +64,7 @@ the style to match.
 6. **X10** — document replacement + rebuild consistency (High) *(plan locked 2026-04-19; queued for Sonnet — see plan doc)*
 7. **X11** — companion keyboard PTT + first-run validation (High)
 8. **X12** — download verify-before-move (Medium, security-adjacent)
-9. **X13** — chat/STT surface real failures (Medium) *(expanded 2026-04-19 RAG audit: + RAG retrieval-failure variant)*
+9. **X13** — chat/STT surface real failures (Medium) *(expanded 2026-04-19 RAG audit: + RAG retrieval-failure variant)* — **done** (PR pending, `feat/x13-surface-chat-stt-failures`)
 10. **H2** — repo hardening pass (housekeeping batch)
 
 **After hardening batch ships — reordered 2026-04-19 (RAG audit; see decision):**
@@ -914,7 +914,7 @@ keeps the contract visible.
 
 ### X13 — Chat/STT surface real failures
 
-**Status:** triaged 2026-04-18 (Codex deep-review intake). **Medium.**
+**Status:** **done** — implementation complete 2026-04-20, PR pending (`feat/x13-surface-chat-stt-failures`). 449 tests pass (+12 new).
 **Scope:** One-shot; two services, one PR.
 **Model:** Sonnet 4.6
 

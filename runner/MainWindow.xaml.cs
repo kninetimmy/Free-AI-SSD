@@ -510,15 +510,23 @@ public partial class MainWindow : System.Windows.Window
             SendButton.IsEnabled = false;
             try
             {
-                var response = await _chatService.SendPromptAsync(model, PromptText.Text, host, _config);
-                ResponseText.Text = response.ResponseText;
-                if (response.Sources is not null)
+                var result = await _chatService.SendPromptAsync(model, PromptText.Text, host, _config);
+                switch (result)
                 {
-                    SourcesList.ItemsSource = response.Sources;
+                    case ChatResult.Success s:
+                        ResponseText.Text = s.Response.ResponseText;
+                        if (s.Response.Sources is not null) SourcesList.ItemsSource = s.Response.Sources;
+                        SpeakResponseAsync(s.Response.ResponseText);
+                        break;
+                    case ChatResult.RagRetrievalFailed r:
+                        ResponseText.Text = r.Response.ResponseText;
+                        AppendLog($"Warning: answered without document context — {r.RagError}");
+                        SpeakResponseAsync(r.Response.ResponseText);
+                        break;
+                    case ChatResult.Failure f:
+                        AppendLog($"Error: {f.ErrorMessage}");
+                        break;
                 }
-
-                // Speak the complete response
-                SpeakResponseAsync(response.ResponseText);
             }
             finally
             {
@@ -543,7 +551,7 @@ public partial class MainWindow : System.Windows.Window
 
         try
         {
-            var response = await _chatService.SendPromptStreamingAsync(
+            var streamResult = await _chatService.SendPromptStreamingAsync(
                 model, PromptText.Text, host, _config!,
                 async token =>
                 {
@@ -552,40 +560,57 @@ public partial class MainWindow : System.Windows.Window
                 },
                 ct);
 
-            // Signal end of stream so any buffered trailing text is spoken
             ttsSpeaker?.Finish();
 
-            // Store the final assembled text (handles cancellation partial text)
-            ResponseText.Text = response.ResponseText;
-            if (response.Sources is not null)
+            switch (streamResult)
             {
-                SourcesList.ItemsSource = response.Sources;
+                case ChatResult.Success s:
+                    ResponseText.Text = s.Response.ResponseText;
+                    if (s.Response.Sources is not null) SourcesList.ItemsSource = s.Response.Sources;
+                    break;
+                case ChatResult.RagRetrievalFailed r:
+                    ResponseText.Text = r.Response.ResponseText;
+                    AppendLog($"Warning: answered without document context — {r.RagError}");
+                    if (r.Response.Sources is not null) SourcesList.ItemsSource = r.Response.Sources;
+                    break;
+                case ChatResult.Failure f:
+                    ttsSpeaker?.Cancel();
+                    AppendLog($"Error: {f.ErrorMessage}");
+                    if (string.IsNullOrEmpty(ResponseText.Text))
+                    {
+                        AppendLog("Falling back to non-streaming mode.");
+                        try
+                        {
+                            var fallback = await _chatService.SendPromptAsync(model, PromptText.Text, host, _config!);
+                            switch (fallback)
+                            {
+                                case ChatResult.Success fs:
+                                    ResponseText.Text = fs.Response.ResponseText;
+                                    if (fs.Response.Sources is not null) SourcesList.ItemsSource = fs.Response.Sources;
+                                    SpeakResponseAsync(fs.Response.ResponseText);
+                                    break;
+                                case ChatResult.RagRetrievalFailed fr:
+                                    ResponseText.Text = fr.Response.ResponseText;
+                                    AppendLog($"Warning: answered without document context — {fr.RagError}");
+                                    SpeakResponseAsync(fr.Response.ResponseText);
+                                    break;
+                                case ChatResult.Failure ff:
+                                    AppendLog($"Fallback also failed: {ff.ErrorMessage}");
+                                    break;
+                            }
+                        }
+                        catch (Exception fallbackEx)
+                        {
+                            AppendLog($"Fallback also failed: {fallbackEx.Message}");
+                        }
+                    }
+                    break;
             }
         }
         catch (Exception ex)
         {
             ttsSpeaker?.Cancel();
             AppendLog($"Streaming error: {ex.Message}");
-            // Fall back to non-streaming
-            if (string.IsNullOrEmpty(ResponseText.Text))
-            {
-                AppendLog("Falling back to non-streaming mode.");
-                try
-                {
-                    var fallback = await _chatService.SendPromptAsync(model, PromptText.Text, host, _config!);
-                    ResponseText.Text = fallback.ResponseText;
-                    if (fallback.Sources is not null)
-                    {
-                        SourcesList.ItemsSource = fallback.Sources;
-                    }
-
-                    SpeakResponseAsync(fallback.ResponseText);
-                }
-                catch (Exception fallbackEx)
-                {
-                    AppendLog($"Fallback also failed: {fallbackEx.Message}");
-                }
-            }
         }
         finally
         {
@@ -1289,7 +1314,16 @@ public partial class MainWindow : System.Windows.Window
 
         try
         {
-            var text = await _sttService.TranscribeAudioAsync(audioData);
+            var sttResult = await _sttService.TranscribeAudioAsync(audioData);
+
+            if (sttResult is TranscriptionResult.Failure sttFailure)
+            {
+                AppendLog($"Transcription failed: {sttFailure.ErrorMessage}");
+                SetVoiceStatus(null);
+                return;
+            }
+
+            var text = ((TranscriptionResult.Success)sttResult).Text;
 
             if (string.IsNullOrWhiteSpace(text))
             {

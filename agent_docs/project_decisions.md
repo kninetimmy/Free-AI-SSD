@@ -244,3 +244,23 @@ Run /wrap-up on the feature branch before merging the PR so doc updates
 land in the same commit and no separate solo doc push is needed after merge.
 Merge commit SHA will be absent from the state doc entry — the PR number is
 sufficient for git traceability. First applied on PR #161 (X12).
+
+---
+
+## 2026-04-20 — ChatResult / TranscriptionResult discriminated unions; RagRetrievalFailed as first-class variant
+
+`IChatService` and `ISpeechToTextService` return sealed abstract record unions
+(`ChatResult` and `TranscriptionResult`) instead of raw payloads. All callers
+must switch exhaustively — the compiler rejects unhandled cases. This eliminates
+silent empty-string returns masking transport and model failures.
+
+`ChatResult` has three variants: `Success(ChatResponse)`,
+`RagRetrievalFailed(ChatResponse, string RagError)`, and `Failure(string ErrorMessage)`.
+`RagRetrievalFailed` is distinct from "no hits above threshold" (which is `Success`
+with `usedContext=false`). The LAN API surfaces the distinction via
+`X-RAG-Status: retrieval-failed` vs `success` response header. The streaming
+endpoint emits in-stream `{type:"error"}` / `{type:"rag-warning"}` NDJSON events
+(headers are already committed after `{type:"start"}`).
+
+`OperationCanceledException` is not caught and returned as `Failure` — it rethrows,
+letting callers observe cancellation naturally. Established X13 (PR forthcoming).

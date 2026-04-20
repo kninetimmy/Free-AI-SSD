@@ -76,19 +76,19 @@ public sealed class WhisperSpeechToTextService : ISpeechToTextService
         }
     }
 
-    public Task<string> TranscribeAudioAsync(byte[] audioData)
+    public Task<TranscriptionResult> TranscribeAudioAsync(byte[] audioData)
         => TranscribeAudioAsync(audioData, CancellationToken.None);
 
-    public async Task<string> TranscribeAudioAsync(byte[] audioData, CancellationToken cancellationToken)
+    public async Task<TranscriptionResult> TranscribeAudioAsync(byte[] audioData, CancellationToken cancellationToken)
     {
         using var stream = new MemoryStream(audioData);
         return await TranscribeStreamAsync(stream, cancellationToken);
     }
 
-    public Task<string> TranscribeStreamAsync(Stream audioStream)
+    public Task<TranscriptionResult> TranscribeStreamAsync(Stream audioStream)
         => TranscribeStreamAsync(audioStream, CancellationToken.None);
 
-    public async Task<string> TranscribeStreamAsync(Stream audioStream, CancellationToken cancellationToken)
+    public async Task<TranscriptionResult> TranscribeStreamAsync(Stream audioStream, CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
 
@@ -118,7 +118,7 @@ public sealed class WhisperSpeechToTextService : ISpeechToTextService
 
             var result = string.Join(" ", segments);
             LogMessage?.Invoke($"Transcribed: {result}");
-            return result;
+            return new TranscriptionResult.Success(result);
         }
         catch (OperationCanceledException)
         {
@@ -127,7 +127,7 @@ public sealed class WhisperSpeechToTextService : ISpeechToTextService
         catch (Exception ex)
         {
             LogMessage?.Invoke($"Transcription failed: {ex.Message}");
-            return string.Empty;
+            return new TranscriptionResult.Failure($"Transcription failed: {ex.Message}");
         }
         finally
         {

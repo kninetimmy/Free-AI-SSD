@@ -63,10 +63,10 @@ public class PttVoicePipelineServiceTests
         public event Action<string>? LogMessage;
         public bool IsModelLoaded => true;
         public Task InitializeAsync(string ssdRoot, PortableConfig config) => Task.CompletedTask;
-        public Task<string> TranscribeAudioAsync(byte[] audioData) => Task.FromResult("what's the weather");
-        public Task<string> TranscribeAudioAsync(byte[] audioData, CancellationToken cancellationToken) => Task.FromResult("what's the weather");
-        public Task<string> TranscribeStreamAsync(Stream audioStream) => Task.FromResult(string.Empty);
-        public Task<string> TranscribeStreamAsync(Stream audioStream, CancellationToken cancellationToken) => Task.FromResult(string.Empty);
+        public Task<TranscriptionResult> TranscribeAudioAsync(byte[] audioData) => Task.FromResult<TranscriptionResult>(new TranscriptionResult.Success("what's the weather"));
+        public Task<TranscriptionResult> TranscribeAudioAsync(byte[] audioData, CancellationToken cancellationToken) => Task.FromResult<TranscriptionResult>(new TranscriptionResult.Success("what's the weather"));
+        public Task<TranscriptionResult> TranscribeStreamAsync(Stream audioStream) => Task.FromResult<TranscriptionResult>(new TranscriptionResult.Success(string.Empty));
+        public Task<TranscriptionResult> TranscribeStreamAsync(Stream audioStream, CancellationToken cancellationToken) => Task.FromResult<TranscriptionResult>(new TranscriptionResult.Success(string.Empty));
         public void Dispose() { }
     }
 
@@ -76,16 +76,16 @@ public class PttVoicePipelineServiceTests
         public event Action<string>? LogMessage;
         public StubChat(string[] tokensToEmit) => _tokens = tokensToEmit;
 
-        public Task<ChatResponse> SendPromptAsync(string model, string userPrompt, string host, PortableConfig config)
-            => Task.FromResult(new ChatResponse(string.Concat(_tokens), null, false));
+        public Task<ChatResult> SendPromptAsync(string model, string userPrompt, string host, PortableConfig config)
+            => Task.FromResult<ChatResult>(new ChatResult.Success(new ChatResponse(string.Concat(_tokens), null, false)));
 
-        public async Task<ChatResponse> SendPromptStreamingAsync(
+        public async Task<ChatResult> SendPromptStreamingAsync(
             string model, string userPrompt, string host, PortableConfig config,
             Func<string, Task> onToken, CancellationToken cancellationToken = default)
         {
             foreach (var t in _tokens)
                 await onToken(t);
-            return new ChatResponse(string.Concat(_tokens), null, false);
+            return new ChatResult.Success(new ChatResponse(string.Concat(_tokens), null, false));
         }
     }
 

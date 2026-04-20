@@ -131,7 +131,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             return Results.Ok(new { models });
         });
 
-        api.MapPost("/chat", async (ChatRequest request, CancellationToken ct) =>
+        api.MapPost("/chat", async (HttpContext context, ChatRequest request, CancellationToken ct) =>
         {
             var error = ValidateChatRequest(request);
             if (error is not null)
@@ -139,11 +139,16 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
                 return Results.BadRequest(new ErrorResponse(error));
             }
 
-            var response = await _chatService.SendPromptAsync(request.Model.Trim(), request.Prompt.Trim(), ollamaHost, config);
-            return Results.Ok(new ChatResultResponse(
-                response.ResponseText,
-                response.Sources ?? new List<string>(),
-                response.UsedRagContext));
+            var result = await _chatService.SendPromptAsync(request.Model.Trim(), request.Prompt.Trim(), ollamaHost, config);
+            return result switch
+            {
+                ChatResult.Success s => SetRagStatusHeader(context, "success",
+                    Results.Ok(new ChatResultResponse(s.Response.ResponseText, s.Response.Sources ?? new List<string>(), s.Response.UsedRagContext))),
+                ChatResult.RagRetrievalFailed r => SetRagStatusHeader(context, "retrieval-failed",
+                    Results.Ok(new ChatResultResponse(r.Response.ResponseText, r.Response.Sources ?? new List<string>(), r.Response.UsedRagContext))),
+                ChatResult.Failure f => Results.Problem(detail: f.ErrorMessage, statusCode: StatusCodes.Status503ServiceUnavailable),
+                _ => throw new System.Diagnostics.UnreachableException()
+            };
         });
 
         api.MapPost("/chat/stream", async (HttpContext context, ChatRequest request, CancellationToken ct) =>
@@ -167,7 +172,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
                 sources = Array.Empty<string>()
             }, ct);
 
-            var streamResponse = await _chatService.SendPromptStreamingAsync(
+            var streamResult = await _chatService.SendPromptStreamingAsync(
                 request.Model.Trim(),
                 request.Prompt.Trim(),
                 ollamaHost,
@@ -175,13 +180,31 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
                 onToken: token => WriteNdjsonAsync(context.Response, new { type = "token", token }, ct),
                 cancellationToken: ct);
 
-            await WriteNdjsonAsync(context.Response, new
+            switch (streamResult)
             {
-                type = "complete",
-                usedRagContext = streamResponse.UsedRagContext,
-                sources = streamResponse.Sources ?? new List<string>(),
-                responseText = streamResponse.ResponseText
-            }, ct);
+                case ChatResult.Success s:
+                    await WriteNdjsonAsync(context.Response, new
+                    {
+                        type = "complete",
+                        usedRagContext = s.Response.UsedRagContext,
+                        sources = s.Response.Sources ?? new List<string>(),
+                        responseText = s.Response.ResponseText
+                    }, ct);
+                    break;
+                case ChatResult.RagRetrievalFailed r:
+                    await WriteNdjsonAsync(context.Response, new { type = "rag-warning", message = r.RagError }, ct);
+                    await WriteNdjsonAsync(context.Response, new
+                    {
+                        type = "complete",
+                        usedRagContext = r.Response.UsedRagContext,
+                        sources = r.Response.Sources ?? new List<string>(),
+                        responseText = r.Response.ResponseText
+                    }, ct);
+                    break;
+                case ChatResult.Failure f:
+                    await WriteNdjsonAsync(context.Response, new { type = "error", message = f.ErrorMessage }, ct);
+                    break;
+            }
         });
 
         api.MapPost("/tts/speak", async (TtsSpeakRequest request, CancellationToken ct) =>
@@ -240,8 +263,13 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             try
             {
                 await EnsureSttInitializedAsync(config, ct);
-                var transcription = await TranscribeAudioSerializedAsync(parseResult.PcmAudio!, ct);
-                return Results.Ok(new SttTranscribeResponse(transcription));
+                var transcriptionResult = await TranscribeAudioSerializedAsync(parseResult.PcmAudio!, ct);
+                return transcriptionResult switch
+                {
+                    TranscriptionResult.Success s => Results.Ok(new SttTranscribeResponse(s.Text)),
+                    TranscriptionResult.Failure f => Results.Problem(detail: f.ErrorMessage, statusCode: StatusCodes.Status500InternalServerError),
+                    _ => throw new System.Diagnostics.UnreachableException()
+                };
             }
             catch (SttUnavailableException ex)
             {
@@ -283,7 +311,14 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             try
             {
                 await EnsureSttInitializedAsync(config, ct);
-                var transcription = await TranscribeAudioSerializedAsync(parseResult.PcmAudio!, ct);
+                var transcriptionResult = await TranscribeAudioSerializedAsync(parseResult.PcmAudio!, ct);
+                if (transcriptionResult is TranscriptionResult.Failure sttFailure)
+                {
+                    _logger?.Error($"STT transcription failed for /api/voice/query: {sttFailure.ErrorMessage}");
+                    return Results.Problem(detail: sttFailure.ErrorMessage, statusCode: StatusCodes.Status500InternalServerError);
+                }
+                var transcription = ((TranscriptionResult.Success)transcriptionResult).Text;
+
                 var voiceResult = await ExecuteVoiceQueryAsync(
                     transcription,
                     options,
@@ -292,6 +327,11 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
                     ct);
 
                 return Results.Ok(voiceResult);
+            }
+            catch (ChatServiceFailureException ex)
+            {
+                _logger?.Error($"Chat service failed for /api/voice/query: {ex.Message}");
+                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
             }
             catch (InvalidOperationException ex)
             {
@@ -403,7 +443,17 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             throw new InvalidOperationException("'model' is required when sending transcription to chat.");
         }
 
-        var chat = await _chatService.SendPromptAsync(options.Model.Trim(), trimmedTranscription, ollamaHost, config);
+        var chatResult = await _chatService.SendPromptAsync(options.Model.Trim(), trimmedTranscription, ollamaHost, config);
+        if (chatResult is ChatResult.Failure chatFailure)
+        {
+            throw new ChatServiceFailureException(chatFailure.ErrorMessage);
+        }
+        var chat = chatResult switch
+        {
+            ChatResult.Success s => s.Response,
+            ChatResult.RagRetrievalFailed r => r.Response,
+            _ => throw new System.Diagnostics.UnreachableException()
+        };
 
         var ttsTriggered = false;
         string? audioBase64 = null;
@@ -618,7 +668,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         }
     }
 
-    private async Task<string> TranscribeAudioSerializedAsync(byte[] audioData, CancellationToken ct)
+    private async Task<TranscriptionResult> TranscribeAudioSerializedAsync(byte[] audioData, CancellationToken ct)
     {
         await _sttTranscribeGate.WaitAsync(ct);
         try
@@ -631,12 +681,23 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         }
     }
 
+    private static IResult SetRagStatusHeader(HttpContext context, string status, IResult result)
+    {
+        context.Response.Headers["X-RAG-Status"] = status;
+        return result;
+    }
+
     private sealed class SttUnavailableException : Exception
     {
         public SttUnavailableException(string message, Exception innerException)
             : base(message, innerException)
         {
         }
+    }
+
+    private sealed class ChatServiceFailureException : Exception
+    {
+        public ChatServiceFailureException(string message) : base(message) { }
     }
 
     private static ParsedAudioUpload TryParseWavToPcm(byte[] wavData)

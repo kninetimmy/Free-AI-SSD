@@ -60,7 +60,8 @@ public sealed class RunnerApiClient : IDisposable
             new ChatRequest(model, prompt),
             JsonOptions,
             ct);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+            throw new HttpRequestException(await ReadErrorBodyAsync(response), null, response.StatusCode);
         return (await response.Content.ReadFromJsonAsync<ChatResponse>(JsonOptions, ct))
             ?? throw new InvalidOperationException("Empty chat response.");
     }
@@ -114,6 +115,19 @@ public sealed class RunnerApiClient : IDisposable
         }
     }
 
+    private async Task<string> ReadErrorBodyAsync(HttpResponseMessage response)
+    {
+        try
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("detail", out var detail))
+                return detail.GetString() ?? response.ReasonPhrase ?? "Unknown error";
+        }
+        catch { }
+        return response.ReasonPhrase ?? "Unknown error";
+    }
+
     private Uri Combine(string path) => new(_baseUri, path);
 
     public void Dispose()
@@ -146,5 +160,6 @@ public sealed class RunnerApiClient : IDisposable
         string? Token = null,
         bool UsedRagContext = false,
         IReadOnlyList<string>? Sources = null,
-        string? ResponseText = null);
+        string? ResponseText = null,
+        string? Message = null);
 }

@@ -52,9 +52,9 @@ Namespaces:
 DI-registered services:
 - `ConfigStore` (`IConfigStore`) — config save chokepoint; serializes saves via `SemaphoreSlim(1,1)`, caches `UnlockMaterial`, zeroes key on `LockSession()`
 - `OllamaLifecycleService` — process start/stop
-- `ChatService` — RAG-augmented streaming via Ollama `/api/generate`
+- `ChatService` — RAG-augmented streaming via Ollama `/api/generate`; returns `ChatResult` discriminated union (Success / RagRetrievalFailed / Failure)
 - `DocumentOperationsService` — CRUD, ingestion, index rebuild
-- `WhisperSpeechToTextService` — STT (Tiny/Base/Small/Medium ggml models)
+- `WhisperSpeechToTextService` — STT (Tiny/Base/Small/Medium ggml models); returns `TranscriptionResult` discriminated union (Success / Failure)
 - `SystemTextToSpeechService` / `PiperTextToSpeechService` — Windows SAPI or neural TTS
 - `HotasInputService` — DirectInput joystick polling (SharpDX)
 - `PttVoicePipelineService` — full PTT → record → transcribe → send → TTS loop

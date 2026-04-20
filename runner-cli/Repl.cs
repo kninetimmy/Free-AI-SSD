@@ -258,6 +258,14 @@ public sealed class Repl
                         _output.Write(evt.ResponseText);
                     }
                     break;
+                case "rag-warning":
+                    _output.WriteLine();
+                    _output.WriteLine($"[Warning: answered without document context — {evt.Message}]");
+                    break;
+                case "error":
+                    _output.WriteLine();
+                    _output.WriteLine($"[Error: {evt.Message}]");
+                    break;
             }
         }
 

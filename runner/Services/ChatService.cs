@@ -22,10 +22,10 @@ public sealed class ChatService : IChatService
 
     public event Action<string>? LogMessage;
 
-    public async Task<ChatResponse> SendPromptAsync(
+    public async Task<ChatResult> SendPromptAsync(
         string model, string userPrompt, string host, PortableConfig config)
     {
-        var (promptToSend, sources, usedContext) = await PrepareRagContextAsync(userPrompt, host, config);
+        var (promptToSend, sources, usedContext, ragError) = await PrepareRagContextAsync(userPrompt, host, config);
 
         var request = new
         {
@@ -41,20 +41,23 @@ public sealed class ChatService : IChatService
 
             var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
             var text = doc.RootElement.GetProperty("response").GetString() ?? string.Empty;
-            return new ChatResponse(text, sources, usedContext);
+            var chatResponse = new ChatResponse(text, sources, usedContext);
+            return ragError is not null
+                ? new ChatResult.RagRetrievalFailed(chatResponse, ragError)
+                : new ChatResult.Success(chatResponse);
         }
         catch (Exception ex)
         {
             LogMessage?.Invoke($"Generate failed: {ex.Message}");
-            return new ChatResponse(string.Empty, null, false);
+            return new ChatResult.Failure(SanitizeError(ex));
         }
     }
 
-    public async Task<ChatResponse> SendPromptStreamingAsync(
+    public async Task<ChatResult> SendPromptStreamingAsync(
         string model, string userPrompt, string host, PortableConfig config,
         Func<string, Task> onToken, CancellationToken cancellationToken = default)
     {
-        var (promptToSend, sources, usedContext) = await PrepareRagContextAsync(userPrompt, host, config);
+        var (promptToSend, sources, usedContext, ragError) = await PrepareRagContextAsync(userPrompt, host, config);
 
         var request = new
         {
@@ -105,27 +108,29 @@ public sealed class ChatService : IChatService
                 }
             }
 
-            return new ChatResponse(assembled.ToString(), sources, usedContext);
+            var chatResponse = new ChatResponse(assembled.ToString(), sources, usedContext);
+            return ragError is not null
+                ? new ChatResult.RagRetrievalFailed(chatResponse, ragError)
+                : new ChatResult.Success(chatResponse);
         }
         catch (OperationCanceledException)
         {
             LogMessage?.Invoke("Generation cancelled by user.");
-            return new ChatResponse(assembled.ToString(), sources, usedContext);
+            return new ChatResult.Success(new ChatResponse(assembled.ToString(), sources, usedContext));
         }
         catch (Exception ex)
         {
             LogMessage?.Invoke($"Streaming failed: {ex.Message}");
-            // Return whatever was received so far
             var partial = assembled.ToString();
             if (partial.Length > 0)
             {
                 await onToken($"\n\n[Error: {ex.Message}]");
             }
-            return new ChatResponse(partial, sources, usedContext);
+            return new ChatResult.Failure(SanitizeError(ex));
         }
     }
 
-    private async Task<(string Prompt, List<string>? Sources, bool UsedContext)> PrepareRagContextAsync(
+    private async Task<(string Prompt, List<string>? Sources, bool UsedContext, string? RagError)> PrepareRagContextAsync(
         string userPrompt, string host, PortableConfig config)
     {
         var promptToSend = userPrompt;
@@ -159,14 +164,25 @@ public sealed class ChatService : IChatService
             }
             catch (EmbeddingModelMismatchException ex)
             {
-                LogMessage?.Invoke($"[Error] {ex.Message}");
+                LogMessage?.Invoke($"[Error] RAG retrieval failed: {ex.Message}");
+                return (promptToSend, null, false, ex.Message);
             }
             catch (Exception ex)
             {
-                LogMessage?.Invoke($"RAG retrieval skipped: {ex.Message}");
+                LogMessage?.Invoke($"RAG retrieval failed: {ex.Message}");
+                return (promptToSend, null, false, ex.Message);
             }
         }
 
-        return (promptToSend, sources, usedContext);
+        return (promptToSend, sources, usedContext, null);
     }
+
+    private static string SanitizeError(Exception ex) => ex switch
+    {
+        HttpRequestException { InnerException: System.Net.Sockets.SocketException } =>
+            "Chat service unreachable — is Ollama running?",
+        HttpRequestException => $"Chat request failed: {ex.Message}",
+        TaskCanceledException => "Chat request timed out.",
+        _ => "Chat service error."
+    };
 }
