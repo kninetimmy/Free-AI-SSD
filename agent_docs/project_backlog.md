@@ -949,7 +949,7 @@ keeps the contract visible.
 
 ### H2 — Repo hardening batch (Codex deep-review low-severity sweep)
 
-**Status:** triaged 2026-04-18 (Codex deep-review intake). **Low.**
+**Status:** implementation complete 2026-04-20. PR pending on `chore/h2-repo-hardening`. **Low.**
 **Scope:** One-shot housekeeping batch. Slot between bug fixes, not mid-feature.
 **Model:** Sonnet 4.6 (mechanical)
 

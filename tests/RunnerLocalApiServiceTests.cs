@@ -279,8 +279,8 @@ public sealed class RunnerLocalApiServiceTests
         var second = http.PostAsync($"{fixture.BaseUrl}/api/stt/transcribe", CreateWavUploadContent());
         await Task.WhenAll(first, second);
 
-        Assert.Equal(HttpStatusCode.OK, first.Result.StatusCode);
-        Assert.Equal(HttpStatusCode.OK, second.Result.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await first).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await second).StatusCode);
         Assert.Equal(2, fixture.Stt.TranscribeCallCount);
         Assert.Equal(1, fixture.Stt.MaxConcurrentTranscribe);
         await fixture.DisposeAsync();

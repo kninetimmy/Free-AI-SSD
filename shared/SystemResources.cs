@@ -1,4 +1,5 @@
 using System.Management;
+using System.Runtime.Versioning;
 
 namespace FreeAiSsd.Shared;
 
@@ -14,6 +15,7 @@ public static class SystemResources
     /// Returns the total physical RAM in GB (rounded), or null if unavailable.
     /// Uses WMI query against Win32_ComputerSystem.TotalPhysicalMemory.
     /// </summary>
+    [SupportedOSPlatform("windows")]
     public static int? GetTotalSystemRamGb()
     {
         try
@@ -46,6 +48,7 @@ public static class SystemResources
     /// Note: Win32_VideoController.AdapterRAM is capped at 4 GB (32-bit field),
     /// so high-end GPUs may report inaccurate values.
     /// </summary>
+    [SupportedOSPlatform("windows")]
     public static int? GetGpuVramGb()
     {
         try

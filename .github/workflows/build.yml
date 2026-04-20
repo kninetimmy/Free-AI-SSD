@@ -52,8 +52,8 @@ jobs:
   windows-build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
         with:
           global-json-file: global.json
       - run: dotnet restore FreeAiSsd.sln
@@ -103,7 +103,7 @@ jobs:
       - name: Cache offline Windows prerequisites
         if: github.event_name == 'workflow_dispatch'
         id: cache-windows-prereqs
-        uses: actions/cache@v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: out/windows/tools/prereqs
           key: windows-prereqs-v2-${{ runner.os }}-${{ steps.prereq-cache-key.outputs.date }}
@@ -113,7 +113,7 @@ jobs:
       - name: Cache macOS Ollama archive
         if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
         id: cache-mac-ollama
-        uses: actions/cache@v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: out/mac/tools/ollama
           key: mac-ollama-v2-${{ runner.os }}-${{ steps.prereq-cache-key.outputs.date }}
@@ -136,7 +136,7 @@ jobs:
         run: |
           dotnet run --project tools/FreeAiSsd.PrereqFetch/FreeAiSsd.PrereqFetch.csproj -c Release -- --kind windows --out out/windows/tools/prereqs
           if (-not $?) { throw "Windows prereq resolve/fetch step failed." }
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: windows-build-output
           path: |
@@ -152,7 +152,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - name: Build Runner.app bundle
         run: |
           mkdir -p out/Runner.app/Contents/MacOS out/Runner.app/Contents/Resources
@@ -199,7 +199,7 @@ jobs:
         run: |
           ditto -c -k --keepParent out/Runner.app out/Runner.app.zip
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: mac-runner-artifact
           path: out/Runner.app.zip
@@ -230,12 +230,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: windows-build-output
           path: in/windows
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
         with:
           name: mac-runner-artifact
@@ -304,11 +304,11 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
         shell: pwsh
         run: Compress-Archive -Path out_beta/* -DestinationPath dist/Free-AI-SSD-beta-crossplatform.zip -Force
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: Free-AI-SSD-win
           path: dist/Free-AI-SSD-win.zip
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
         with:
           name: Free-AI-SSD-beta-crossplatform
