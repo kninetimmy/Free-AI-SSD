@@ -1161,23 +1161,38 @@ unlock dialog window.
 
 **Driver:** Audit High #4. Neither manifest nor chunk rows record the embedding model, vector dimension, parser version, or chunker version (`DocumentModels.cs`, `VectorIndex.cs:72-87`). On dimension mismatch at query time, `VectorIndex.DotProductSimd` (`:480-481`) returns 0 silently — mismatched chunks score zero, visible hits quietly drop, no error surfaced. Any change to the embedding model (via config edit) risks silent corruption of existing indexes.
 
-**Staging:**
+**Staging (Stage 3 split out as X21b — 2026-04-19):**
 - **Stage 1 — Persist provenance.** Add columns to `chunks` and fields to manifest: `embedding_model`, `embedding_dimension`, `parser_version`, `chunker_version`. Populate at write time. Schema migration: existing rows get `"unknown"` with a recorded schema version bump.
 - **Stage 2 — Gate at query + ingest.** On query, verify running embedding config matches chunk rows; if mismatch, refuse and emit a clear error (not a silent zero score). On ingest into an existing library, refuse writes if config differs from recorded provenance; prompt controlled reindex. Ends the silent-zero-score failure mode.
-- **Stage 3 — PrepApp reindex flow.** Model change → PrepApp warns "your library was indexed with model X, you've switched to Y — reindex required" with a one-click reindex action (uses X10's safe rebuild-from-stored path).
 
-**Affected files:**
+**Affected files (Stages 1–2):**
 - `shared/Documents/DocumentModels.cs` — manifest + chunk fields.
 - `shared/Documents/VectorIndex.cs` — schema, migration, query-time check.
 - `shared/Documents/DocumentIngestor.cs` — write-time check.
 - `shared/PortableConfig.cs` — expose current model / dim as the source of truth for comparison.
-- `prep-app/` — PrepApp reindex prompt + action.
 - `tests/` — intentional model mismatch returns clear error instead of zero-score silent failure.
 
 **⚠ Watch for:**
 - X20 Stage 1 shares the schema bump — sequence so X21 Stage 1 lands first and X20 extends, or plan a single combined migration.
 
-**Exit criterion:** Test with an embedding model swap returns a clear `EmbeddingModelMismatch` error at query time. PrepApp surfaces the reindex prompt on model change.
+**Exit criterion:** Test with an embedding model swap returns a clear `EmbeddingModelMismatch` error at query time.
+
+---
+
+### X21b — PrepApp reindex prompt on model change
+
+**Status:** Backlog 2026-04-19 (split from X21 Stage 3). **Medium; follows X21.**
+**Scope:** Single stage. UI-only — consumes X21's `EmbeddingModelMismatch` signal.
+**Model:** Sonnet 4.6.
+
+**Driver:** When the user changes the embedding model in config, PrepApp should detect the mismatch (via X21's provenance gate) and surface a one-click reindex action rather than silently producing zero-score results.
+
+**Scope:** PrepApp detects mismatch on model config change → warning dialog "Library was indexed with model X; switched to Y — reindex required" → one-click reindex using X10's rebuild-from-stored path.
+
+**Affected files:**
+- `prep-app/` — model change handler, reindex prompt, reindex action wired to `DocumentOperationsService.RebuildIndexAsync`.
+
+**Exit criterion:** Changing the embedding model in PrepApp config triggers the warning dialog; confirming triggers a full reindex and clears the mismatch.
 
 ---
 
@@ -1234,7 +1249,7 @@ unlock dialog window.
 
 ### X24 — Citation staleness after rename
 
-**Status:** Backlog 2026-04-19 (X10 Stage 4 deep-review Yellow #1). **Low-medium.**
+**Status:** Shipped — PR #155 (`53ecdf9`), v1.2.9.
 **Scope:** One-shot.
 **Model:** Sonnet 4.6.
 
@@ -1261,7 +1276,7 @@ unlock dialog window.
 
 ### X25 — Extend File.Replace retry to remaining call sites
 
-**Status:** Backlog 2026-04-20 (filed out of PR #153). **Low.**
+**Status:** Shipped — PR #155 (`2f7dcd8`), v1.2.9.
 **Scope:** One-shot.
 **Model:** Sonnet 4.6.
 

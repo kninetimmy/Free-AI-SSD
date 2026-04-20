@@ -475,17 +475,18 @@ The Companion tray app exposes the same two cues under identical key names (`ptt
 | Phase | Scope | Status |
 |---|---|---|
 | Phase 1 | DCS Bindings Parser (diff.lua → per-aircraft RAG docs) | ✅ Complete |
-| Phase 2 | Example bindings files shipped in-repo for tests / demos | ⏳ In progress |
+| Phase 2 | RAG Document Library — PDF, TXT, and Markdown ingestion; vector search; inline citations | ✅ Complete |
 | Phase 3 | Voice Pipeline — Whisper.cpp STT + TTS (SAPI + Piper) | ✅ Complete |
 | Phase 4 | HOTAS Push-to-Talk (DirectInput, VR-friendly) | ✅ Complete |
 | Phase 5 | Network Mode — two-PC setup (LAN API + Companion tray) | ✅ Complete (v2) |
-| Phase 6 | Setup Profiles / Copilot Personas (general vs. flight sim) | 🗓️ Planned |
+| Phase 6 | Example bindings files shipped in-repo for tests / demos | 🗓️ Planned |
+| Phase 7 | Setup Profiles / Copilot Personas (general vs. flight sim) | 🗓️ Planned |
 
 ### IL-2 Sturmovik and War Thunder Bindings Parsers
 
 Bindings import currently supports DCS World only. IL-2 and War Thunder parsers are planned, pending example binding files.
 
-### Setup Profiles / Copilot Personas (Phase 6)
+### Setup Profiles / Copilot Personas (Phase 7)
 
 Mode selection at install time: **general use** or **flight sim mode**. Flight sim mode pulls Whisper, TTS, and the bindings importer. Base install stays lightweight for users who don't need sim tooling. Personas will ship with curated system prompts (e.g. "DCS copilot", "ham radio reference") and default model/embedding choices.
 
@@ -671,6 +672,10 @@ Signing is disabled by default in CI (`MAC_SIGNING_ENABLED=false`). Supported vi
 
 ### Recent Changes
 
+- **2026-04-19**: Rename a document in the library — citations immediately reflect the new filename with no re-index needed; the vector index updates in-place on the rename path (v1.2.9, X24).
+- **2026-04-19**: Document replace + rebuild reliability hardened across three stages (v1.2.7/v1.2.8, X10): SQLite WAL mode and busy-timeout on all vector-index connections eliminate file-lock failures under concurrent use; replace now detects renames by SHA-256 and deletes the old entry rather than leaving orphan chunks; rebuild can restart from stored embeddings instead of re-generating from scratch, so a large library survives an interrupted reindex.
+- **2026-04-18**: Encrypted config saves serialized through a `ConfigStore` chokepoint — concurrent saves can no longer race or corrupt the config file; session key is zeroed on lock (v1.2.6, X9).
+- **2026-04-18**: Voice pipeline lifecycle hardened — PTT loop, Whisper init/dispose, and window close are now guarded by a single `_lifecycleGate`; shutdown drains any in-flight transcription and cancels gracefully (v1.2.5, X8).
 - **2026-04-18**: Runner Ollama Start/Stop buttons swap styles by state — Start shows the magenta CTA when Ollama is stopped; Stop shows it while Ollama is running. Styles also update if `ollama.exe` dies out-of-band, so the visible CTA always matches the actual process state (released as v1.2.3).
 - **2026-04-18**: Runner window wrapped in a vertical `ScrollViewer` so the DCS bindings card is reachable on shorter displays; the response text box keeps its own bounded scrollbar for long replies (released as v1.2.2).
 - **2026-04-18**: PrepApp **Format & Prepare Drive** now survives UAC — clicking Format in the non-elevated window relaunches elevated with an auto-resume banner, re-selects the same drive, pre-fills the volume label, and requires one explicit confirm dialog before formatting. The format step itself runs through `Format-Volume` under `ProcessRunner.ArgumentList` (no string concat). A real-ProcessRunner VHD integration test covers the format path so mock-only regressions can't recur.
