@@ -92,13 +92,23 @@ public sealed class DownloadManager
 
         // Close the file stream before moving to avoid sharing violations.
         destination.Close();
-        File.Move(tempPath, request.DestinationPath, overwrite: true);
 
-        // If a SHA-256 hash was provided, verify the downloaded file's integrity.
+        // Verify integrity against the temp file before promoting it to the destination.
+        // On mismatch the temp is deleted and the exception propagates — destination stays absent.
         if (!string.IsNullOrWhiteSpace(request.Sha256))
         {
-            VerifySha256(request.DestinationPath, request.Sha256!);
+            try
+            {
+                VerifySha256(tempPath, request.Sha256!);
+            }
+            catch
+            {
+                File.Delete(tempPath);
+                throw;
+            }
         }
+
+        File.Move(tempPath, request.DestinationPath, overwrite: true);
     }
 
     /// <summary>

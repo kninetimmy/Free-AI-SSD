@@ -234,3 +234,13 @@ Forcing a full reindex on upgrade was rejected — users with large libraries
 reversible: if field data shows model-drift false-negatives causing real
 problems, a stricter gate can be added in X21b or a follow-on item without
 changing the schema. Established PR #157 (`449ec2e`).
+
+
+---
+
+## 2026-04-20 — wrap-up runs on feature branch before merging
+
+Run /wrap-up on the feature branch before merging the PR so doc updates
+land in the same commit and no separate solo doc push is needed after merge.
+Merge commit SHA will be absent from the state doc entry — the PR number is
+sufficient for git traceability. First applied on PR #161 (X12).

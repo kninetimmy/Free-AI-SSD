@@ -889,7 +889,7 @@ keeps the contract visible.
 
 ### X12 — DownloadManager verify-before-move
 
-**Status:** triaged 2026-04-18 (Codex deep-review intake). **Medium (security-adjacent).**
+**Status:** PR #161 open 2026-04-20, CI green — pending merge. **Medium (security-adjacent).**
 **Scope:** One-shot.
 **Model:** Sonnet 4.6
 

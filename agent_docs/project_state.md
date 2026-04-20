@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-04-20 (X11 — PR #159 merged)
+Last updated: 2026-04-20 (X12 — PR #161 open)
 
 Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
@@ -8,7 +8,7 @@ Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
 ## In flight
 
-Between tasks. X11 complete.
+**PR #161 — X12** — `fix/x12-download-verify-before-move`. CI green, pending merge.
 
 ## Recently shipped
 
@@ -18,13 +18,9 @@ Between tasks. X11 complete.
 
 - **v1.2.9 released 2026-04-19** — `e385fff`. `Free-AI-SSD-win.zip` published (run 24654381970). Contains X24 (citation staleness fix) + X25 (shared `FileOps.ReplaceWithRetry`). Release: https://github.com/kninetimmy/Free-AI-SSD/releases/tag/v1.2.9
 
-- **PR #155 — X24 + X25 — merged `e385fff` (2026-04-20).** `2f7dcd8` (X25): promoted private `ReplaceWithRetry` from `SsdEncryption.cs` to new `shared/Io/FileOps.cs`; all four `File.Replace` call sites now use the shared retry helper. `53ecdf9` (X24): added `VectorIndex.UpdateFileName` (parameterized UPDATE) and called it from the single-sha rename branch in `DocumentIngestor` — citations show current filename immediately after rename, no re-embed needed. Test written failing-first. 411/0/1.
-
-- **v1.2.8 released 2026-04-20** — `4d269a7` + prior `af77abc`. `Free-AI-SSD-win.zip` published (run 24650221521). Contains X10 Stages 1–3 + CI `File.Replace` retry hardening (PR #153). Release: https://github.com/kninetimmy/Free-AI-SSD/releases/tag/v1.2.8
-
 ## Next up
 
-**X12, X13** (expanded — also covers RAG retrieval-failure result), H2. Each ships as its own PR + patch release.
+**X13** (expanded — also covers RAG retrieval-failure result), **H2**. Each ships as its own PR + patch release.
 
 **After hardening queue:** F3 PrepApp 3-tab restructure (X21 complete — no longer blocking F3), then F4 / B2 / F2 / R1 Stage 2.
 
@@ -38,9 +34,9 @@ See `project_backlog.md` for full item details.
 
 ## Last session
 
-2026-04-20 (X11 — review + merge) — Reviewed Codex's PR #159 and Gemini's inline comment. Gemini's regression flag (API key cleared on save) was a false positive — `ResolveApiKeyForSave` falls through to preserve the existing key when the PasswordBox is blank and no explicit clear was requested. Merged `329bcf2e`. X11 complete.
+2026-04-20 (X12 — implement + PR #161) — Planned and implemented X12 (`shared/DownloadManager.cs:94-101`): SHA-256 verification now runs against the `.part` temp file before `File.Move`; on mismatch temp is deleted and destination stays absent. 3 new tests in `DownloadManagerTests.cs` (437 pass, 1 skip). PR #161 open, CI green. Also established new workflow: /wrap-up runs on the feature branch before merging so doc updates ship in the same PR.
 
-2026-04-20 (X11 — PR #159 review follow-up) — Reviewed the open PR, found two concrete regressions, fixed them in `4cffe19`, pushed the branch, and posted a PR comment. `CompanionConfig.ResolveApiKeyForSave` now preserves the existing key unless clear/replace is explicit; `CompanionRuntime` now tears down bindings, overlay, recording, and health-loop activity when config becomes incomplete. Verification: companion build green; targeted tests 15/15; GitHub Actions `Build and Package` green.
+2026-04-20 (X11 — review + merge) — Reviewed Codex's PR #159 and Gemini's inline comment. Gemini's regression flag (API key cleared on save) was a false positive — `ResolveApiKeyForSave` falls through to preserve the existing key when the PasswordBox is blank and no explicit clear was requested. Merged `329bcf2e`. X11 complete.
 
 ## Open questions
 
