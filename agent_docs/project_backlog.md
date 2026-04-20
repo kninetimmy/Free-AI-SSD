@@ -69,7 +69,7 @@ the style to match.
 
 **After hardening batch ships — reordered 2026-04-19 (RAG audit; see decision):**
 11. **X21** — embedding provenance + compat gating — **done** (PR #157, `449ec2e`)
-11a. **X21b** — PrepApp reindex prompt (Sonnet — slots before F3)
+11a. **X21b** — PrepApp reindex prompt — **done** (PR #158, `92625a9`)
 12. **F3** — PrepApp 3-tab restructure (Opus planning) — also folds in the "Add File button disabled" tooltip hint
 13. **F4** — profile FTUE in PrepApp + companion install target selector (multi-stage, Opus planning)
 14. **B2** — build LAN discovery (multi-stage, Opus planning; can run in parallel with F4)
@@ -1182,7 +1182,7 @@ unlock dialog window.
 
 ### X21b — PrepApp reindex prompt on model change
 
-**Status:** Backlog 2026-04-19 (split from X21 Stage 3). **Medium; follows X21 (now done).**
+**Status:** Done — PR #158 (`92625a9`), merged 2026-04-19.
 **Scope:** Single stage. UI-only — consumes X21's `EmbeddingModelMismatch` signal.
 **Model:** Sonnet 4.6.
 

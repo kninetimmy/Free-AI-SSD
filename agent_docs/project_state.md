@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-04-19 (X21 Stages 1–2 — embedding provenance — PR #157 merged)
+Last updated: 2026-04-19 (X21b — PrepApp reindex prompt — PR #158 merged)
 
 Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
@@ -8,9 +8,11 @@ Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
 ## In flight
 
-Between tasks.
+Between tasks. X21 (all stages) complete.
 
 ## Recently shipped
+
+- **PR #158 — X21b — merged `92625a9` (2026-04-19).** `DocumentLibraryManager.ScanProvenanceMismatches` scans all library manifests and returns those with a known, non-"unknown" `LastEmbeddingModel` that differs from the current config model (case-insensitive). `PrepViewModel.CheckAndPromptLibraryReindexAsync` fires once per drive root per session on drive selection; guards encrypted/busy/no-config; posts per-library confirmation dialog to UI thread; on confirm resolves existing Ollama exe (no download), starts temp server, runs `RebuildIndexAsync` per library, catches per-library failures independently. 7 new TDD tests (423 pass, 1 skip).
 
 - **v1.2.9 released 2026-04-19** — `e385fff`. `Free-AI-SSD-win.zip` published (run 24654381970). Contains X24 (citation staleness fix) + X25 (shared `FileOps.ReplaceWithRetry`). Release: https://github.com/kninetimmy/Free-AI-SSD/releases/tag/v1.2.9
 
@@ -19,8 +21,6 @@ Between tasks.
 - **v1.2.8 released 2026-04-20** — `4d269a7` + prior `af77abc`. `Free-AI-SSD-win.zip` published (run 24650221521). Contains X10 Stages 1–3 + CI `File.Replace` retry hardening (PR #153). Release: https://github.com/kninetimmy/Free-AI-SSD/releases/tag/v1.2.8
 
 ## Next up
-
-**X21b — PrepApp reindex prompt** (Sonnet). One-click reindex gate: PrepApp prompts user when `CheckProvenance` would throw; rebuild path must clear existing chunks for the library before re-embed (or accept a `force` flag to bypass the gate). Slots before F3.
 
 **Codex deep-review queue after X10:** X11, X12, X13 (expanded — now also covers RAG retrieval-failure result), H2. Each ships as its own PR + patch release.
 
@@ -35,6 +35,8 @@ Between tasks.
 See `project_backlog.md` for full item details.
 
 ## Last session
+
+2026-04-19 (X21b — PrepApp reindex prompt — PR #158) — `ScanProvenanceMismatches` added to `DocumentLibraryManager`; `CheckAndPromptLibraryReindexAsync` added to `PrepViewModel` (fires once per drive root per session, guards encrypted/busy/no-config, per-library dialog + per-library rebuild, no Ollama download). 7 new TDD tests. 423 pass, 1 skip. `92625a9`, PR #158 merged.
 
 2026-04-19 (X21 Stages 1–2 — embedding provenance + compat gate — PR #157) — Implemented embedding provenance schema (M2 migration): `embedding_model`, `embedding_dimension`, `parser_version`, `chunker_version` added to `chunks` table via non-destructive `ALTER TABLE`; existing rows backfilled with dimension from `LENGTH(embedding)/4` (Option B — no forced reindex on upgrade). `VectorIndex.CheckProvenance()` added: throws `EmbeddingModelMismatchException` on dimension mismatch, warns on model-name drift from `'unknown'`. `DocumentIngestor` populates all four fields on new chunks and calls `CheckProvenance` before `UpsertFileChunks`. `ChatService` surfaces mismatch as a distinct `[Error]` log. `DocumentLibraryManifest` gains `LastEmbeddingModel`/`LastEmbeddingDimension` hint fields. 5 new TDD provenance tests (416 pass, 1 skip). `449ec2e`, PR #157 merged.
 
