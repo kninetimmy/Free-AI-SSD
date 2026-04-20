@@ -1,14 +1,19 @@
 # Project State
 
-Last updated: 2026-04-19 (RAG audit triage plan — X17-X23 scoped, X21 slots before F3)
+Last updated: 2026-04-19 (v1.2.6 released; X10 plan locked, queued for Sonnet)
 
-Last live-tested release: **v1.2.5** (field-tested 2026-04-19 — chat, TTS, library creation, PTT all healthy; the v1.2.4 X1-Redux / X6 / X8 symptoms did not reproduce). Next tag target: **v1.2.6** (X9 Stages 2-4, encrypted config lifecycle — **X9 complete**).
+Last released: **v1.2.6** (2026-04-19 — X9 Stages 2-4, encrypted config lifecycle). Last field-tested: v1.2.5. Next tag target: **v1.2.7** (X10 — document replacement + rebuild consistency + SQLite hardening).
 
 ## In flight
 
-Between tasks.
+**X10 — Stage 1 (SQLite WAL + busy_timeout) queued for Sonnet.** Plan locked at `C:\Users\Kninetimmy\.claude\plans\x10-doc-replace-rebuild.md`. 3 impl PRs + review → v1.2.7.
 
 ## Recently shipped
+
+- **v1.2.6 released 2026-04-19** — Windows-only build via workflow dispatch.
+  `Free-AI-SSD-win.zip` 319 MB, sha256 `01ca7f04…c62606`. Closes X9 (encrypted
+  config lifecycle) across all 4 stages. Release:
+  https://github.com/kninetimmy/Free-AI-SSD/releases/tag/v1.2.6
 
 - **X9 Stage 4 — Prep finalize + migration + guard rewrite shipped — PR #147 merged**
   as `36c9a7a` + `b75e42a`. In-memory finalize (no plaintext intermediate);
@@ -21,10 +26,11 @@ Between tasks.
 
 ## Next up
 
-**v1.2.6 tag unblocked** — X9 complete. Tag when ready.
+**X10 first** (plan locked 2026-04-19) — Stage 1 SQLite hardening ships alone as v1.2.7
+to address Stephen's field-log lock error; Stages 2 (delete-on-replace) and 3
+(rebuild-from-stored) follow. Plan: `C:\Users\Kninetimmy\.claude\plans\x10-doc-replace-rebuild.md`.
 
-**Codex deep-review queue:** X10 (expanded — now also covers SQLite WAL/busy_timeout +
-rebuild-from-stored per RAG audit), X11, X12, X13 (expanded — now also covers RAG
+**Codex deep-review queue after X10:** X11, X12, X13 (expanded — now also covers RAG
 retrieval-failure result), H2. Each ships as its own PR + patch release.
 
 **After hardening queue — reordered 2026-04-19:** **X21** (embedding provenance +
@@ -47,14 +53,15 @@ See `project_backlog.md` for full item details.
 
 ## Last session
 
-2026-04-19 (RAG audit triage plan) — third-party audit
-(`C:\Users\Kninetimmy\Documents\ssd md files\RAG_Issues_With_Prop_Fixes.md`) reviewed and
-mapped onto backlog. Verified 9 findings against current code (3 parallel Explore agents).
-4 decisions locked via AskUserQuestion: X17 multimodal scoped down to Stage 1 diagnostic
-only; X21 provenance slots before F3 (reorders roadmap); 7 new X-items (no umbrella);
-X10 stable-doc-ID spun out as X10-Redux for later. Plan saved; no code changed. Two
-audit findings flagged as goal-mismatch: "no ANN index" (deliberate portable constraint)
-and "multimodal PDF Critical" (workload is text-layer manuals, not scans).
+2026-04-19 (v1.2.6 release + X10 plan) — PR #148 (`2b88aef`) merged; v1.2.6
+released Windows-only via workflow dispatch (`Free-AI-SSD-win.zip` 319 MB,
+sha256 `01ca7f04…c62606`). X10 plan written to
+`C:\Users\Kninetimmy\.claude\plans\x10-doc-replace-rebuild.md`: 3 impl stages
+(SQLite WAL → delete-on-replace + rename detection → rebuild-from-stored
+gated on X21) + Codex review → v1.2.7. Decisions locked: path-primary +
+sha256-assisted rename detection (X10-Redux GUID deferred); WAL + busy_timeout
+on every SqliteConnection open; rebuild-from-stored dead-code until X21
+provenance lands. No code changes. User switching to Sonnet to implement.
 
 2026-04-19 (X9 Stage 4 — finalize + migration + guard rewrite) — **Stage 4 implemented
 and merged as PR #147 (`b75e42a`).** In-memory finalize, mtime-aware
