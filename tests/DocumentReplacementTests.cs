@@ -90,6 +90,9 @@ public sealed class DocumentReplacementTests : IDisposable
 
         // DB chunk count for the stored path is unchanged.
         Assert.Equal(chunksAfterFirst, CountChunksForPath(manager.GetIndexPath(manifest.Id), manifest.Id, storedRelPathAfterFirst));
+
+        // Chunks must cite the new filename, not the original.
+        Assert.Equal("renamed.txt", GetSourceFileNameForPath(manager.GetIndexPath(manifest.Id), manifest.Id, storedRelPathAfterFirst));
     }
 
     [Fact]
@@ -205,6 +208,18 @@ public sealed class DocumentReplacementTests : IDisposable
         while (text.Length < approxLength)
             text += words;
         return text;
+    }
+
+    private static string? GetSourceFileNameForPath(string indexPath, string libraryId, string storedRelativePath)
+    {
+        var dbPath = Path.Combine(indexPath, "vectors.db");
+        using var conn = new SqliteConnection($"Data Source={dbPath}");
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT source_file_name FROM chunks WHERE library_id=$lib AND stored_relative_path=$path LIMIT 1";
+        cmd.Parameters.AddWithValue("$lib", libraryId);
+        cmd.Parameters.AddWithValue("$path", storedRelativePath);
+        return cmd.ExecuteScalar() as string;
     }
 
     private static int CountChunksForPath(string indexPath, string libraryId, string storedRelativePath)

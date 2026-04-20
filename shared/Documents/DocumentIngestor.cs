@@ -74,9 +74,11 @@ public sealed class DocumentIngestor
                     .ToList();
                 if (shaMatches.Count == 1)
                 {
-                    shaMatches[0].SourceOriginalPath = sourcePath;
-                    shaMatches[0].FileName = fileName;
-                    shaMatches[0].LastModifiedUtc = File.GetLastWriteTimeUtc(sourcePath);
+                    var renamed = shaMatches[0];
+                    renamed.SourceOriginalPath = sourcePath;
+                    renamed.FileName = fileName;
+                    renamed.LastModifiedUtc = File.GetLastWriteTimeUtc(sourcePath);
+                    vectorIndex.UpdateFileName(manifest.Id, renamed.StoredRelativePath, fileName);
                     await _libraryManager.SaveManifestAsync(manifest);
                     continue;
                 }

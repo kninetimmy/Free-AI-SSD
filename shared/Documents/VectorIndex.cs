@@ -361,6 +361,17 @@ VALUES ($libraryId,$source,$stored,$page,$idx,$text,$len,$sha,$emb)";
         cmd.ExecuteNonQuery();
     }
 
+    public void UpdateFileName(string libraryId, string storedRelativePath, string newName)
+    {
+        using var conn = OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE chunks SET source_file_name=$name WHERE library_id=$libraryId AND stored_relative_path=$path";
+        cmd.Parameters.AddWithValue("$name", newName);
+        cmd.Parameters.AddWithValue("$libraryId", libraryId);
+        cmd.Parameters.AddWithValue("$path", storedRelativePath);
+        cmd.ExecuteNonQuery();
+    }
+
     /// <summary>
     /// Searches for the most similar chunks without applying a similarity threshold.
     /// Preserved for backward compatibility — callers that don't need threshold filtering
