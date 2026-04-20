@@ -2,6 +2,12 @@ using FreeAiSsd.Shared;
 
 namespace FreeAiSsd.Runner.Services;
 
+public abstract record TranscriptionResult
+{
+    public sealed record Success(string Text) : TranscriptionResult;
+    public sealed record Failure(string ErrorMessage) : TranscriptionResult;
+}
+
 /// <summary>
 /// Provides speech-to-text transcription using a local Whisper model.
 /// </summary>
@@ -23,21 +29,20 @@ public interface ISpeechToTextService : IDisposable
     /// Transcribes a PCM audio buffer (16kHz, 16-bit, mono) to text.
     /// </summary>
     /// <param name="audioData">Raw PCM audio bytes.</param>
-    /// <returns>The transcribed text, or empty string on failure.</returns>
-    Task<string> TranscribeAudioAsync(byte[] audioData);
+    Task<TranscriptionResult> TranscribeAudioAsync(byte[] audioData);
 
     /// <summary>
     /// Transcribes a PCM audio buffer (16kHz, 16-bit, mono) to text with cancellation support.
     /// </summary>
-    Task<string> TranscribeAudioAsync(byte[] audioData, CancellationToken cancellationToken);
+    Task<TranscriptionResult> TranscribeAudioAsync(byte[] audioData, CancellationToken cancellationToken);
 
     /// <summary>
     /// Transcribes audio from a stream (16kHz, 16-bit, mono PCM).
     /// </summary>
-    Task<string> TranscribeStreamAsync(Stream audioStream);
+    Task<TranscriptionResult> TranscribeStreamAsync(Stream audioStream);
 
     /// <summary>
     /// Transcribes audio from a stream (16kHz, 16-bit, mono PCM) with cancellation support.
     /// </summary>
-    Task<string> TranscribeStreamAsync(Stream audioStream, CancellationToken cancellationToken);
+    Task<TranscriptionResult> TranscribeStreamAsync(Stream audioStream, CancellationToken cancellationToken);
 }

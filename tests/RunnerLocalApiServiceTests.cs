@@ -486,6 +486,71 @@ public sealed class RunnerLocalApiServiceTests
         await fixture.DisposeAsync();
     }
 
+    [Fact]
+    public async Task ChatEndpoint_WhenServiceFails_Returns503()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: false);
+        fixture.Chat.ResultOverride = new ChatResult.Failure("Chat service unreachable — is Ollama running?");
+
+        using var http = new HttpClient();
+        var response = await http.PostAsJsonAsync($"{fixture.BaseUrl}/api/chat", new { model = "phi3", prompt = "status" });
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Contains("Ollama", json.GetProperty("detail").GetString(), StringComparison.OrdinalIgnoreCase);
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ChatEndpoint_WhenRagRetrievalFails_Returns200WithRagHeader()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: false);
+        var degradedResponse = new ChatResponse("I don't have context for that.", null, false);
+        fixture.Chat.ResultOverride = new ChatResult.RagRetrievalFailed(degradedResponse, "embedding model not found");
+
+        using var http = new HttpClient();
+        var response = await http.PostAsJsonAsync($"{fixture.BaseUrl}/api/chat", new { model = "phi3", prompt = "status" });
+
+        response.EnsureSuccessStatusCode();
+        Assert.Equal("retrieval-failed", response.Headers.GetValues("X-RAG-Status").FirstOrDefault());
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("I don't have context for that.", json.GetProperty("responseText").GetString());
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task SttTranscribe_WhenTranscriptionResultIsFailure_Returns500()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: false, allowRemoteStt: true);
+        fixture.Stt.TranscriptionResultOverride = new TranscriptionResult.Failure("Transcription failed: processor crashed");
+
+        using var http = new HttpClient();
+        var response = await http.PostAsync($"{fixture.BaseUrl}/api/stt/transcribe", CreateWavUploadContent());
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task VoiceQuery_WhenChatServiceFails_Returns503()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: false, allowRemoteStt: true, allowVoiceQuery: true, voiceAutoSendToChat: true);
+        fixture.Stt.TranscriptionToReturn = "check weather";
+        fixture.Chat.ResultOverride = new ChatResult.Failure("Chat service unreachable — is Ollama running?");
+
+        using var http = new HttpClient();
+        var response = await http.PostAsync($"{fixture.BaseUrl}/api/voice/query", CreateWavUploadContent(model: "phi3", autoSendToChat: true, speakResponse: false));
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Contains("Ollama", json.GetProperty("detail").GetString(), StringComparison.OrdinalIgnoreCase);
+
+        await fixture.DisposeAsync();
+    }
+
     private sealed class RunnerLocalApiFixture : IAsyncDisposable
     {
         private readonly RunnerLocalApiService _service;
@@ -559,17 +624,18 @@ public sealed class RunnerLocalApiServiceTests
         public event Action<string>? LogMessage;
 
         public ChatResponse Response { get; set; } = new("ok", null, false);
+        public ChatResult? ResultOverride { get; set; }
         public int SendPromptCallCount { get; private set; }
         public bool EnforceConfigModelAllowList { get; set; }
 
-        public Task<ChatResponse> SendPromptAsync(string model, string userPrompt, string host, PortableConfig config)
+        public Task<ChatResult> SendPromptAsync(string model, string userPrompt, string host, PortableConfig config)
         {
             SendPromptCallCount++;
             if (EnforceConfigModelAllowList && !config.Models.Any(m => m.Status == ModelInstallStatus.Installed && string.Equals(m.Name, model, StringComparison.OrdinalIgnoreCase)))
             {
                 throw new InvalidOperationException($"Model '{model}' is not installed in config.");
             }
-            return Task.FromResult(Response);
+            return Task.FromResult(ResultOverride ?? (ChatResult)new ChatResult.Success(Response));
         }
 
         public List<string> StreamingTokens { get; set; } = new() { "tok" };
@@ -581,7 +647,7 @@ public sealed class RunnerLocalApiServiceTests
         private readonly TaskCompletionSource<bool> _allowTokenCallbacks = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource<bool> _streamCancellationObserved = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public async Task<ChatResponse> SendPromptStreamingAsync(string model, string userPrompt, string host, PortableConfig config, Func<string, Task> onToken, CancellationToken cancellationToken = default)
+        public async Task<ChatResult> SendPromptStreamingAsync(string model, string userPrompt, string host, PortableConfig config, Func<string, Task> onToken, CancellationToken cancellationToken = default)
         {
             var assembled = new StringBuilder();
 
@@ -616,7 +682,7 @@ public sealed class RunnerLocalApiServiceTests
                 throw;
             }
 
-            return Response with { ResponseText = assembled.ToString() };
+            return ResultOverride ?? (ChatResult)new ChatResult.Success(Response with { ResponseText = assembled.ToString() });
         }
 
         public Task WaitForTokenCallbackAttemptAsync(TimeSpan timeout)
@@ -643,6 +709,7 @@ public sealed class RunnerLocalApiServiceTests
 
         public bool IsModelLoaded => _isModelLoaded;
         public string TranscriptionToReturn { get; set; } = "transcribed";
+        public TranscriptionResult? TranscriptionResultOverride { get; set; }
         public bool FailInitialization { get; set; }
         public int DelayTranscriptionMs { get; set; }
         public int InitializeCallCount { get; private set; }
@@ -661,10 +728,10 @@ public sealed class RunnerLocalApiServiceTests
             return Task.CompletedTask;
         }
 
-        public Task<string> TranscribeAudioAsync(byte[] audioData)
+        public Task<TranscriptionResult> TranscribeAudioAsync(byte[] audioData)
             => TranscribeAudioAsync(audioData, CancellationToken.None);
 
-        public async Task<string> TranscribeAudioAsync(byte[] audioData, CancellationToken cancellationToken)
+        public async Task<TranscriptionResult> TranscribeAudioAsync(byte[] audioData, CancellationToken cancellationToken)
         {
             if (!_isModelLoaded)
             {
@@ -685,7 +752,7 @@ public sealed class RunnerLocalApiServiceTests
                     await Task.Delay(DelayTranscriptionMs, cancellationToken);
                 }
 
-                return TranscriptionToReturn;
+                return TranscriptionResultOverride ?? new TranscriptionResult.Success(TranscriptionToReturn);
             }
             finally
             {
@@ -693,8 +760,8 @@ public sealed class RunnerLocalApiServiceTests
             }
         }
 
-        public Task<string> TranscribeStreamAsync(Stream audioStream) => Task.FromResult(TranscriptionToReturn);
-        public Task<string> TranscribeStreamAsync(Stream audioStream, CancellationToken cancellationToken) => Task.FromResult(TranscriptionToReturn);
+        public Task<TranscriptionResult> TranscribeStreamAsync(Stream audioStream) => Task.FromResult<TranscriptionResult>(TranscriptionResultOverride ?? new TranscriptionResult.Success(TranscriptionToReturn));
+        public Task<TranscriptionResult> TranscribeStreamAsync(Stream audioStream, CancellationToken cancellationToken) => Task.FromResult<TranscriptionResult>(TranscriptionResultOverride ?? new TranscriptionResult.Success(TranscriptionToReturn));
         public void SetModelLoaded(bool isLoaded) => _isModelLoaded = isLoaded;
 
         public void Dispose() { }

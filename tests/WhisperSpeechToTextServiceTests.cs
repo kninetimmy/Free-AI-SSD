@@ -160,6 +160,37 @@ public class WhisperSpeechToTextServiceTests
         }
     }
 
+    [Fact]
+    public async Task TranscribeStreamAsync_WhenProcessorNull_ReturnsTranscriptionResultFailure()
+    {
+        // Service not initialized — _processor is null.
+        // The InvalidOperationException thrown inside the try block is caught
+        // by the general handler and returned as TranscriptionResult.Failure.
+        var svc = new WhisperSpeechToTextService();
+        try
+        {
+            using var stream = new MemoryStream(new byte[64]);
+            var result = await svc.TranscribeStreamAsync(stream, CancellationToken.None);
+
+            var failure = Assert.IsType<TranscriptionResult.Failure>(result);
+            Assert.Contains("not loaded", failure.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            svc.Dispose();
+        }
+    }
+
+    [Fact(Skip = "Requires Whisper runtime — verifies contract: silence returns Success(\"\"), not Failure")]
+    public async Task TranscribeAudioAsync_WhenNoSpeech_ReturnsSuccessWithEmptyText()
+    {
+        // If Whisper processes audio but detects no speech, segments is empty.
+        // Result must be TranscriptionResult.Success(""), not Failure.
+        // Empty Success is the "no speech" case; Failure means the processor crashed.
+        _ = Task.CompletedTask; // placeholder
+        await Task.CompletedTask;
+    }
+
     private static void InvokeReleaseModel(WhisperSpeechToTextService svc)
     {
         var method = typeof(WhisperSpeechToTextService)

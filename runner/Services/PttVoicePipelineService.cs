@@ -177,18 +177,19 @@ public sealed class PttVoicePipelineService : IPttVoicePipelineService
         string transcription;
         try
         {
-            transcription = await _stt.TranscribeAudioAsync(audioData, ct);
+            var sttResult = await _stt.TranscribeAudioAsync(audioData, ct);
+            if (sttResult is TranscriptionResult.Failure sttFailure)
+            {
+                Log($"Transcription failed: {sttFailure.ErrorMessage}");
+                SpeakFeedback("Sorry, didn't catch that.");
+                SetState(PttState.Idle);
+                return;
+            }
+            transcription = ((TranscriptionResult.Success)sttResult).Text;
         }
         catch (OperationCanceledException)
         {
             Log("Transcription cancelled.");
-            SetState(PttState.Idle);
-            return;
-        }
-        catch (Exception ex)
-        {
-            Log($"Transcription failed: {ex.Message}");
-            SpeakFeedback("Sorry, didn't catch that.");
             SetState(PttState.Idle);
             return;
         }
@@ -233,7 +234,7 @@ public sealed class PttVoicePipelineService : IPttVoicePipelineService
 
         try
         {
-            var response = await _chat.SendPromptStreamingAsync(
+            var chatResult = await _chat.SendPromptStreamingAsync(
                 model, transcription, host, _config,
                 token =>
                 {
@@ -244,8 +245,23 @@ public sealed class PttVoicePipelineService : IPttVoicePipelineService
                 ct);
 
             ttsSpeaker?.Finish();
-            ResponseComplete?.Invoke(response.ResponseText);
-            Log("Response complete.");
+            switch (chatResult)
+            {
+                case ChatResult.Success s:
+                    ResponseComplete?.Invoke(s.Response.ResponseText);
+                    Log("Response complete.");
+                    break;
+                case ChatResult.RagRetrievalFailed r:
+                    Log($"Warning: answered without document context — {r.RagError}");
+                    ResponseComplete?.Invoke(r.Response.ResponseText);
+                    Log("Response complete.");
+                    break;
+                case ChatResult.Failure f:
+                    ttsSpeaker?.Cancel();
+                    Log($"Chat error: {f.ErrorMessage}");
+                    SpeakFeedback("Sorry, there was an error processing your question.");
+                    break;
+            }
         }
         catch (OperationCanceledException)
         {
