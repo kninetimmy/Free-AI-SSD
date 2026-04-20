@@ -1,3 +1,5 @@
+using Microsoft.Data.Sqlite;
+
 namespace FreeAiSsd.Shared.Documents;
 
 public sealed class DocumentIngestor
@@ -318,11 +320,140 @@ public sealed class DocumentIngestor
         var db = Path.Combine(indexPath, "vectors.db");
         if (File.Exists(db))
         {
+            // Flush pooled SQLite connections before deletion; an open pool entry
+            // holds the OS file lock and causes "file is being used by another process".
+            // Safe because vectors.db is the only SQLite DB in this process.
+            SqliteConnection.ClearAllPools();
             File.Delete(db);
         }
 
-        var sourceFiles = manifest.Files.Select(f => f.SourceOriginalPath).Where(File.Exists).ToList();
+        var libraryPath = _libraryManager.GetLibraryPath(manifest.Id);
+        var sourceFiles = new List<string>();
+        var storedFallbacks = new List<(DocumentFileEntry Entry, string StoredAbsPath)>();
+        var toRemove = new List<DocumentFileEntry>();
+
+        foreach (var entry in manifest.Files)
+        {
+            var storedAbsPath = Path.Combine(libraryPath, entry.StoredRelativePath.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(entry.SourceOriginalPath))
+                sourceFiles.Add(entry.SourceOriginalPath);
+            else if (File.Exists(storedAbsPath))
+                storedFallbacks.Add((entry, storedAbsPath));
+            else
+            {
+                toRemove.Add(entry);
+                _logger?.Warn($"Dropping '{entry.FileName}' from manifest: source and stored copy both missing.");
+            }
+        }
+
+        foreach (var entry in toRemove)
+            manifest.Files.Remove(entry);
+        if (toRemove.Count > 0)
+            await _libraryManager.SaveManifestAsync(manifest);
+
+        if (storedFallbacks.Count > 0)
+        {
+            var vectorIndex = new VectorIndex(indexPath);
+            var perFileErrors = new List<Exception>();
+            foreach (var (entry, storedAbsPath) in storedFallbacks)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    await EmbedStoredCopyAsync(manifest, entry, storedAbsPath, host, config, vectorIndex, cancellationToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    perFileErrors.Add(ex);
+                }
+            }
+            if (perFileErrors.Count == 1) throw perFileErrors[0];
+            if (perFileErrors.Count > 1)
+                throw new AggregateException(
+                    $"Rebuild from stored copies completed with {perFileErrors.Count} failure(s); successful files were re-embedded.",
+                    perFileErrors);
+        }
+
         await IngestFilesAsync(manifest, sourceFiles, host, config, progress, rebuildIndex: true, cancellationToken: cancellationToken);
+    }
+
+    private async Task EmbedStoredCopyAsync(
+        DocumentLibraryManifest manifest,
+        DocumentFileEntry entry,
+        string parsePath,
+        string host,
+        PortableConfig config,
+        VectorIndex vectorIndex,
+        CancellationToken cancellationToken)
+    {
+        var parsed = DocumentParser.Parse(parsePath);
+        var textItems = new List<(string Text, int? Page)>();
+        foreach (var segment in parsed.Segments)
+        {
+            var texts = DocumentChunker.ChunkText(segment.Text, config.ChunkSize, config.ChunkOverlap);
+            foreach (var text in texts)
+                textItems.Add((text, segment.Page));
+        }
+
+        if (textItems.Count == 0)
+        {
+            _logger?.Warn($"Stored copy for '{entry.FileName}' yielded no chunks during rebuild — skipping.");
+            return;
+        }
+
+        var maxConcurrency = Math.Max(1, config.MaxEmbeddingConcurrency);
+        using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+        var results = new DocumentChunk?[textItems.Count];
+        var failedCount = 0;
+
+        var tasks = textItems.Select(async (item, i) =>
+        {
+            await semaphore.WaitAsync(cancellationToken);
+            try
+            {
+                var embedding = await _embeddingClient.EmbedAsync(host, config.EmbeddingModelName, item.Text, cancellationToken);
+                results[i] = new DocumentChunk
+                {
+                    LibraryId = manifest.Id,
+                    SourceFileName = entry.FileName,
+                    StoredRelativePath = entry.StoredRelativePath,
+                    Page = item.Page,
+                    ChunkIndex = i,
+                    Text = item.Text,
+                    TextLength = item.Text.Length,
+                    Sha256 = entry.Sha256,
+                    Embedding = embedding
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                Interlocked.Increment(ref failedCount);
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+
+        await Task.WhenAll(tasks);
+
+        var totalChunks = textItems.Count;
+        var failureRatio = totalChunks == 0 ? 0d : (double)failedCount / totalChunks;
+        if (failureRatio > MaxEmbeddingFailureRatioBeforeAbort)
+        {
+            var error =
+                $"Rebuild from stored copy failed for '{entry.FileName}': embedding failures exceeded threshold " +
+                $"(total={totalChunks}, failed={failedCount}, ratio={failureRatio:P1}, threshold={MaxEmbeddingFailureRatioBeforeAbort:P0}).";
+            _logger?.Error(error);
+            throw new InvalidOperationException(error);
+        }
+
+        var chunks = results.Where(r => r is not null).Select(r => r!).ToList();
+        vectorIndex.UpsertFileChunks(manifest.Id, entry.StoredRelativePath, chunks);
     }
 
     public async Task RemoveFileAsync(DocumentLibraryManifest manifest, string storedRelativePath)
