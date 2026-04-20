@@ -1,4 +1,5 @@
 using System.Management;
+using System.Runtime.Versioning;
 
 namespace FreeAiSsd.Shared;
 
@@ -32,6 +33,7 @@ public static class DriveInspector
     /// </summary>
     /// <param name="includeFixed">When true, internal/fixed drives are also listed (with extra safety warnings).</param>
     /// <returns>A list of candidate drives with metadata and warnings.</returns>
+    [SupportedOSPlatform("windows")]
     public static IReadOnlyList<DriveTarget> GetCandidateDrives(bool includeFixed = false)
     {
         var usbRoots = GetUsbConnectedRootPaths();
@@ -76,6 +78,7 @@ public static class DriveInspector
     /// connected via USB, regardless of how Windows classifies their DriveType.
     /// Returns an empty set if WMI is unavailable.
     /// </summary>
+    [SupportedOSPlatform("windows")]
     private static HashSet<string> GetUsbConnectedRootPaths()
     {
         var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

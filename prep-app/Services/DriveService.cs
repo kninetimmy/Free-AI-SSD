@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Services;
 
@@ -7,6 +8,7 @@ public sealed class DriveService : IDriveService
 {
     private const int OutputTailLines = 10;
 
+    [SupportedOSPlatform("windows")]
     public IReadOnlyList<DriveTarget> GetCandidateDrives(bool includeFixed)
         => DriveInspector.GetCandidateDrives(includeFixed);
 
