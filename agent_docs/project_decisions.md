@@ -208,6 +208,20 @@ through `FileOps.ReplaceWithRetry` (5 attempts, 25 ms base backoff doubling,
 
 ---
 
+## 2026-04-19 — X21b: reindex prompt triggers on drive selection, not config change
+
+PrepApp's embedding-mismatch reindex prompt fires on drive selection
+(`OnSelectedDriveChanged`), not on config edit. A per-session
+`HashSet<string> _provenanceCheckedRoots` (OrdinalIgnoreCase) prevents
+repeated dialog on repeated selection of the same root.
+
+`ResolveOllamaExe` (finds existing exe, no download) is used for the
+reindex path — not `EnsureOllamaReadyAsync`, which would silently
+download Ollama. If Ollama isn't installed on the drive, reindex aborts
+with a user-visible log message. Established PR #158 (`92625a9`).
+
+---
+
 ## 2026-04-19 — X21 embedding provenance: Option B migration (backfill from blob, no forced reindex)
 
 When migrating existing v1.2.9 libraries to schema M2, existing rows receive

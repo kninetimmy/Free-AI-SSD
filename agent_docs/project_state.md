@@ -24,7 +24,7 @@ Between tasks. X21 (all stages) complete.
 
 **Codex deep-review queue after X10:** X11, X12, X13 (expanded — now also covers RAG retrieval-failure result), H2. Each ships as its own PR + patch release.
 
-**After hardening queue:** X21 slots before F3 PrepApp 3-tab restructure, then F4 / B2 / F2 / R1 Stage 2.
+**After hardening queue:** F3 PrepApp 3-tab restructure (X21 complete — no longer blocking F3), then F4 / B2 / F2 / R1 Stage 2.
 
 **RAG audit backlog:** X17–X23 cover audit findings; X10/X13/X15 scope expansions recorded. Plan: `C:\Users\Kninetimmy\.claude\plans\okay-i-want-to-glowing-galaxy.md`. v1.3.x sequence: X18 → X15 (expanded) → X19 → X20 → X22 → X23. X17 reduced to Stage 1 textless-page diagnostic (full OCR deferred — workload is text-layer PDFs).
 
@@ -39,8 +39,6 @@ See `project_backlog.md` for full item details.
 2026-04-19 (X21b — PrepApp reindex prompt — PR #158) — `ScanProvenanceMismatches` added to `DocumentLibraryManager`; `CheckAndPromptLibraryReindexAsync` added to `PrepViewModel` (fires once per drive root per session, guards encrypted/busy/no-config, per-library dialog + per-library rebuild, no Ollama download). 7 new TDD tests. 423 pass, 1 skip. `92625a9`, PR #158 merged.
 
 2026-04-19 (X21 Stages 1–2 — embedding provenance + compat gate — PR #157) — Implemented embedding provenance schema (M2 migration): `embedding_model`, `embedding_dimension`, `parser_version`, `chunker_version` added to `chunks` table via non-destructive `ALTER TABLE`; existing rows backfilled with dimension from `LENGTH(embedding)/4` (Option B — no forced reindex on upgrade). `VectorIndex.CheckProvenance()` added: throws `EmbeddingModelMismatchException` on dimension mismatch, warns on model-name drift from `'unknown'`. `DocumentIngestor` populates all four fields on new chunks and calls `CheckProvenance` before `UpsertFileChunks`. `ChatService` surfaces mismatch as a distinct `[Error]` log. `DocumentLibraryManifest` gains `LastEmbeddingModel`/`LastEmbeddingDimension` hint fields. 5 new TDD provenance tests (416 pass, 1 skip). `449ec2e`, PR #157 merged.
-
-2026-04-19 (v1.2.9 dispatch + README refresh + X21 plan — PR #156) — Dispatched Build and Package on `e385fff`; green, artifact published (run 24654381970), v1.2.9 live. Discussed X21: agreed to split Stage 3 (PrepApp reindex prompt) into X21b; Stages 1–2 ship first. Refreshed README roadmap: RAG Document Library added as Phase 2 (was absent), example bindings demoted ⏳→🗓️ Phase 6, Setup Profiles → Phase 7, v1.2.5–v1.2.9 entries added to Recent Changes. Caught up two missed X25 docs (shared/Io/ namespace + FileOps decision). PR #156 green + merged (`2cdeb46`).
 
 ## Open questions
 
