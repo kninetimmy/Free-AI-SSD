@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using FreeAiSsd.Shared.Io;
 using FreeAiSsd.Shared.Services;
 
 namespace FreeAiSsd.Shared;
@@ -305,7 +306,7 @@ public static class SsdEncryption
         {
             if (blobExisted)
             {
-                ReplaceWithRetry(encryptedTmp, encryptedPath, encryptedBak);
+                FileOps.ReplaceWithRetry(encryptedTmp, encryptedPath, encryptedBak);
             }
             else
             {
@@ -324,7 +325,7 @@ public static class SsdEncryption
         {
             if (stateExisted)
             {
-                ReplaceWithRetry(stateTmp, statePath, stateBak);
+                FileOps.ReplaceWithRetry(stateTmp, statePath, stateBak);
             }
             else
             {
@@ -339,7 +340,7 @@ public static class SsdEncryption
             {
                 if (blobExisted && File.Exists(encryptedBak))
                 {
-                    ReplaceWithRetry(encryptedBak, encryptedPath, null);
+                    FileOps.ReplaceWithRetry(encryptedBak, encryptedPath, null);
                 }
                 else if (!blobExisted)
                 {
@@ -513,32 +514,6 @@ public static class SsdEncryption
             SafeDelete(plaintextPath);
             logger?.Info("[Migration] Stale plaintext removed — encrypted is authoritative.");
             return new PlaintextMigrationResult(false, null);
-        }
-    }
-
-    // Wraps File.Replace with a short retry. On Windows CI, Defender / the file
-    // indexer can briefly hold a handle on the freshly-written source (or the
-    // backup target) and cause a spurious sharing violation. File.Replace is a
-    // rename — on failure the filesystem state is unchanged, so retry is safe.
-    private static void ReplaceWithRetry(string source, string destination, string? backup)
-    {
-        const int maxAttempts = 5;
-        var delayMs = 25;
-        for (var attempt = 1; ; attempt++)
-        {
-            try
-            {
-                File.Replace(source, destination, backup);
-                return;
-            }
-            catch (IOException) when (attempt < maxAttempts)
-            {
-            }
-            catch (UnauthorizedAccessException) when (attempt < maxAttempts)
-            {
-            }
-            Thread.Sleep(delayMs);
-            delayMs *= 2;
         }
     }
 
