@@ -574,7 +574,7 @@ cache/                   — prep-time download cache
 | `companion/` | `net8.0-windows` | WPF Companion tray client (LAN second-PC use) |
 | `mac-runner/` | macOS (Swift) | Swift macOS Runner |
 | `tools/FreeAiSsd.PrereqFetch/` | `net8.0` | CI helper that pre-builds the offline prereq bundle via the shared `PrereqResolver` |
-| `tests/` | `net8.0` | xUnit test project (`FreeAiSsd.Tests`) |
+| `tests/` | `net10.0` | xUnit test project (`FreeAiSsd.Tests`) |
 | `docs/` | — | Documentation (includes `QUICKSTART.txt`) |
 
 ### Shared Library Components
@@ -637,7 +637,7 @@ dotnet test FreeAiSsd.sln -c Release
 
 ### Test Coverage
 
-375 tests across the test project. 1 Windows-specific path test expected to fail on Linux. Per-component counts below are directional — they lag the latest test additions but indicate which subsystems carry coverage.
+449 tests across the test project. 1 Windows-specific path test expected to fail on Linux. Per-component counts below are directional — they lag the latest test additions but indicate which subsystems carry coverage.
 
 | Area | Tests | Status |
 |---|---|---|
