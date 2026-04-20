@@ -2,6 +2,38 @@ using FreeAiSsd.Shared.Models;
 
 namespace FreeAiSsd.Tests;
 
+public sealed class PttBindingParserTests
+{
+    [Fact]
+    public void ParseHotas_ValidBinding_ExtractsDeviceAndButton()
+    {
+        PttBindingParser.ParseHotas("Throttle|2", out var device, out var button);
+        Assert.Equal("Throttle", device);
+        Assert.Equal(2, button);
+    }
+
+    [Fact]
+    public void ParseHotas_InvalidBinding_ReturnsNullDevice()
+    {
+        PttBindingParser.ParseHotas("badstuff", out var device, out _);
+        Assert.Null(device);
+    }
+
+    [Fact]
+    public void ParseHotas_EmptyBinding_ReturnsNullDevice()
+    {
+        PttBindingParser.ParseHotas("", out var device, out _);
+        Assert.Null(device);
+    }
+
+    [Fact]
+    public void ParseHotas_NullBinding_ReturnsNullDevice()
+    {
+        PttBindingParser.ParseHotas(null, out var device, out _);
+        Assert.Null(device);
+    }
+}
+
 public sealed class CompanionConfigTests
 {
     [Fact]
@@ -86,5 +118,76 @@ public sealed class CompanionConfigTests
         {
             File.Delete(path);
         }
+    }
+
+    // codex
+    [Fact]
+    public void ResolveApiKeyForSave_PreservesExistingKey_WhenNoReplacementOrClearRequested()
+    {
+        var resolved = CompanionConfig.ResolveApiKeyForSave("secret", "", clearRequested: false);
+        Assert.Equal("secret", resolved);
+    }
+
+    // codex
+    [Fact]
+    public void ResolveApiKeyForSave_ClearsExistingKey_WhenExplicitlyRequested()
+    {
+        var resolved = CompanionConfig.ResolveApiKeyForSave("secret", "", clearRequested: true);
+        Assert.Equal(string.Empty, resolved);
+    }
+
+    // codex
+    [Fact]
+    public void ResolveApiKeyForSave_UsesEnteredReplacementKey_WhenProvided()
+    {
+        var resolved = CompanionConfig.ResolveApiKeyForSave("secret", " rotated ", clearRequested: true);
+        Assert.Equal("rotated", resolved);
+    }
+
+    [Fact]
+    public void ServerRequiresApiKey_DefaultsTrue()
+    {
+        Assert.True(new CompanionConfig().ServerRequiresApiKey);
+    }
+
+    [Fact]
+    public void IsComplete_ReturnsFalse_WhenApiKeyRequiredAndBlank()
+    {
+        var config = new CompanionConfig
+        {
+            HostAddress = "192.168.1.1",
+            HostPort = 41555,
+            PttBinding = "key:F8",
+            ApiKey = "",
+            ServerRequiresApiKey = true,
+        };
+        Assert.False(config.IsComplete());
+    }
+
+    [Fact]
+    public void IsComplete_ReturnsTrue_WhenApiKeyNotRequired()
+    {
+        var config = new CompanionConfig
+        {
+            HostAddress = "192.168.1.1",
+            HostPort = 41555,
+            PttBinding = "key:F8",
+            ApiKey = "",
+            ServerRequiresApiKey = false,
+        };
+        Assert.True(config.IsComplete());
+    }
+
+    [Fact]
+    public void IsComplete_ReturnsFalse_WhenPttBindingBlank()
+    {
+        var config = new CompanionConfig
+        {
+            HostAddress = "192.168.1.1",
+            HostPort = 41555,
+            PttBinding = "",
+            ApiKey = "secret",
+        };
+        Assert.False(config.IsComplete());
     }
 }

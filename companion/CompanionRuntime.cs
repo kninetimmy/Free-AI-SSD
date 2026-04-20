@@ -30,6 +30,9 @@ internal sealed class CompanionRuntime : IDisposable
     private CompanionConfig _config = new();
     private KeyboardPttHotkey? _hotkey;
     private PttOverlayWindow? _overlay;
+    private bool _healthLoopStarted;
+    // codex
+    private volatile bool _liveModeEnabled;
 
     public CompanionRuntime(IAudioCaptureService audio, IHotasInputService hotas, CompanionLog log)
     {
@@ -66,9 +69,51 @@ internal sealed class CompanionRuntime : IDisposable
             OpenSettings();
         }
 
+        if (!_config.IsComplete())
+        {
+            _tray.ShowBalloonTip(3000, "Setup required", "Open Settings from the tray to complete setup.", ToolTipIcon.Warning);
+            // codex
+            StopLive();
+            SetState("Needs Setup");
+            return;
+        }
+
+        StartLive();
+    }
+
+    private void StartLive()
+    {
+        // codex
+        _liveModeEnabled = true;
         InitializeBindings();
         ApplyOverlayVisibility();
-        _ = Task.Run(HealthLoopAsync);
+        if (!_healthLoopStarted)
+        {
+            _healthLoopStarted = true;
+            _ = Task.Run(HealthLoopAsync);
+        }
+    }
+
+    // codex
+    private void StopLive()
+    {
+        _liveModeEnabled = false;
+        _hotas.Stop();
+        _hotkey?.Dispose();
+        _hotkey = null;
+        if (_audio.IsRecording)
+        {
+            try
+            {
+                _audio.StopRecording();
+            }
+            catch (Exception ex)
+            {
+                _log.Write($"Failed to stop recording during live teardown: {ex.Message}");
+            }
+        }
+
+        HideOverlay();
     }
 
     private ContextMenuStrip BuildMenu()
@@ -89,12 +134,27 @@ internal sealed class CompanionRuntime : IDisposable
         if (_config.PttBinding.StartsWith("key:", StringComparison.OrdinalIgnoreCase))
         {
             _hotkey = new KeyboardPttHotkey(_config.PttBinding, OnPttPressed, OnPttReleased, _log);
-            _hotkey.Start();
-            _log.Write($"Using keyboard fallback binding: {_config.PttBinding}");
+            if (!_hotkey.Start())
+            {
+                SetState("PTT unavailable");
+                _tray.ShowBalloonTip(3000, "PTT error", "Keyboard hook failed to install. PTT will not work.", ToolTipIcon.Warning);
+            }
+            else
+            {
+                _log.Write($"Using keyboard fallback binding: {_config.PttBinding}");
+            }
             return;
         }
 
-        ParseHotasBinding(_config.PttBinding, out var deviceName, out var buttonIndex);
+        PttBindingParser.ParseHotas(_config.PttBinding, out var deviceName, out var buttonIndex);
+        if (deviceName is null)
+        {
+            _log.Write($"Invalid PTT binding: '{_config.PttBinding}'. Expected format: device|button.");
+            SetState("Bad Binding");
+            _tray.ShowBalloonTip(3000, "PTT error", $"Invalid PTT binding: '{_config.PttBinding}'.", ToolTipIcon.Warning);
+            return;
+        }
+
         _hotas.Start(deviceName, buttonIndex);
     }
 
@@ -104,14 +164,22 @@ internal sealed class CompanionRuntime : IDisposable
         {
             try
             {
-                await ProbeHealthAsync();
+                // codex
+                if (_liveModeEnabled && _config.IsComplete())
+                {
+                    await ProbeHealthAsync();
+                }
             }
             catch (Exception ex)
             {
                 _log.Write($"Health probe error: {ex.Message}");
             }
 
-            await Task.Delay(_config.AutoReconnect ? TimeSpan.FromSeconds(5) : TimeSpan.FromMinutes(5), _cts.Token)
+            // codex
+            var delay = !_liveModeEnabled || !_config.IsComplete()
+                ? TimeSpan.FromSeconds(1)
+                : (_config.AutoReconnect ? TimeSpan.FromSeconds(5) : TimeSpan.FromMinutes(5));
+            await Task.Delay(delay, _cts.Token)
                 .ContinueWith(_ => { }, TaskScheduler.Default);
         }
     }
@@ -343,9 +411,18 @@ internal sealed class CompanionRuntime : IDisposable
         {
             _config = window.Config;
             _config.Save(_configPath);
-            InitializeBindings();
-            ApplyOverlayVisibility();
-            _ = ProbeHealthAsync();
+            if (_config.IsComplete())
+            {
+                StartLive();
+                _ = ProbeHealthAsync();
+            }
+            else
+            {
+                // codex
+                StopLive();
+                SetState("Needs Setup");
+                _tray.ShowBalloonTip(3000, "Setup incomplete", "Configuration is incomplete. Open Settings to finish.", ToolTipIcon.Warning);
+            }
         }
     }
 
@@ -456,19 +533,6 @@ internal sealed class CompanionRuntime : IDisposable
     }
 
     private static JsonSerializerOptions JsonOptions() => new() { PropertyNameCaseInsensitive = true };
-
-    private static void ParseHotasBinding(string binding, out string? deviceName, out int buttonIndex)
-    {
-        deviceName = null;
-        buttonIndex = 0;
-        var segments = (binding ?? string.Empty).Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (segments.Length >= 2 && int.TryParse(segments[1], out var idx))
-        {
-            deviceName = segments[0];
-            buttonIndex = idx;
-        }
-    }
-
 
     private static async Task<byte[]> ReadBoundedAsync(Stream stream, long maxBytes, CancellationToken ct)
     {

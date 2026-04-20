@@ -850,7 +850,7 @@ keeps the contract visible.
 
 ### X11 — Companion keyboard PTT + first-run validation
 
-**Status:** triaged 2026-04-18 (Codex deep-review intake). **High.**
+**Status:** in-progress 2026-04-18. PR #159 open 2026-04-20, CI green. Awaiting merge.
 **Scope:** One-shot; three related companion defects in a single PR.
 **Model:** Sonnet 4.6
 

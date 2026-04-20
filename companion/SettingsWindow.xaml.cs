@@ -9,6 +9,7 @@ public partial class SettingsWindow : Window
 {
     private readonly IAudioCaptureService? _audio;
     private bool _testingMic;
+    private bool _clearKey;
 
     public CompanionConfig Config { get; private set; }
 
@@ -24,8 +25,11 @@ public partial class SettingsWindow : Window
         _audio = audio;
         HostAddressText.Text = current.HostAddress;
         HostPortText.Text = current.HostPort.ToString();
-        ApiKeyText.Text = current.ApiKey;
-        ApiKeyText.IsEnabled = string.IsNullOrWhiteSpace(current.ApiKey);
+        // codex
+        ApiKeyHint.Text = string.IsNullOrWhiteSpace(current.ApiKey)
+            ? "No key set. Leave blank for none."
+            : "Key is set. Leave blank to keep it, click 'Clear key' to remove it, or enter a new one.";
+        ServerRequiresApiKeyCheck.IsChecked = !current.ServerRequiresApiKey;
         PttBindingText.Text = string.IsNullOrWhiteSpace(current.PttBinding) ? "key:F8" : current.PttBinding;
         InputDeviceCombo.ItemsSource = inputDevices;
         InputDeviceCombo.Text = current.InputDeviceName ?? string.Empty;
@@ -50,11 +54,14 @@ public partial class SettingsWindow : Window
             return;
         }
 
+        // codex
+        var newKey = CompanionConfig.ResolveApiKeyForSave(Config.ApiKey, ApiKeyBox.Password, _clearKey);
         Config = new CompanionConfig
         {
             HostAddress = host,
             HostPort = port,
-            ApiKey = string.IsNullOrWhiteSpace(ApiKeyText.Text) ? Config.ApiKey : ApiKeyText.Text.Trim(),
+            ApiKey = newKey,
+            ServerRequiresApiKey = !(ServerRequiresApiKeyCheck.IsChecked ?? false),
             PttBinding = PttBindingText.Text.Trim(),
             InputDeviceName = string.IsNullOrWhiteSpace(InputDeviceCombo.Text) ? null : InputDeviceCombo.Text.Trim(),
             OutputDeviceName = string.IsNullOrWhiteSpace(OutputDeviceText.Text) ? null : OutputDeviceText.Text.Trim(),
@@ -72,6 +79,33 @@ public partial class SettingsWindow : Window
     {
         DialogResult = false;
         Close();
+    }
+
+    private void ClearKey_Click(object sender, RoutedEventArgs e)
+    {
+        _clearKey = true;
+        ApiKeyBox.Clear();
+        ApiKeyHint.Text = "Key will be cleared on save.";
+    }
+
+    // codex
+    private void ApiKeyBox_PasswordChanged(object sender, RoutedEventArgs e)
+    {
+        if (!string.IsNullOrWhiteSpace(ApiKeyBox.Password))
+        {
+            ApiKeyHint.Text = "Entered key will be saved.";
+            return;
+        }
+
+        if (_clearKey)
+        {
+            ApiKeyHint.Text = "Key will be cleared on save.";
+            return;
+        }
+
+        ApiKeyHint.Text = string.IsNullOrWhiteSpace(Config.ApiKey)
+            ? "No key set. Leave blank for none."
+            : "Key is set. Leave blank to keep it, click 'Clear key' to remove it, or enter a new one.";
     }
 
     private async void TestMic_Click(object sender, RoutedEventArgs e)

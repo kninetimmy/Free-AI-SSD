@@ -13,6 +13,7 @@ public sealed class CompanionConfig
     public bool AutoReconnect { get; set; } = true;
     public bool PttActivationSoundEnabled { get; set; } = true;
     public bool PttOverlayEnabled { get; set; } = true;
+    public bool ServerRequiresApiKey { get; set; } = true;
     public int SchemaVersion { get; set; } = 1;
 
     public static CompanionConfig Load(string path)
@@ -45,7 +46,24 @@ public sealed class CompanionConfig
            && HostPort > 0
            && HostPort <= 65535
            && !string.IsNullOrWhiteSpace(PttBinding)
-           && !string.IsNullOrWhiteSpace(ApiKey);
+           && (!ServerRequiresApiKey || !string.IsNullOrWhiteSpace(ApiKey));
+
+    // codex
+    internal static string ResolveApiKeyForSave(string? existingApiKey, string? enteredApiKey, bool clearRequested)
+    {
+        var typedApiKey = enteredApiKey?.Trim() ?? string.Empty;
+        if (!string.IsNullOrEmpty(typedApiKey))
+        {
+            return typedApiKey;
+        }
+
+        if (clearRequested)
+        {
+            return string.Empty;
+        }
+
+        return existingApiKey?.Trim() ?? string.Empty;
+    }
 
     private static JsonSerializerOptions JsonOptions()
         => new()
