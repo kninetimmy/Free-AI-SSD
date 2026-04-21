@@ -64,14 +64,14 @@ the style to match.
 6. **X10** — document replacement + rebuild consistency (High) *(plan locked 2026-04-19; queued for Sonnet — see plan doc)*
 7. **X11** — companion keyboard PTT + first-run validation (High)
 8. **X12** — download verify-before-move (Medium, security-adjacent)
-9. **X13** — chat/STT surface real failures (Medium) *(expanded 2026-04-19 RAG audit: + RAG retrieval-failure variant)* — **done** (PR pending, `feat/x13-surface-chat-stt-failures`)
+9. **X13** — chat/STT surface real failures (Medium) *(expanded 2026-04-19 RAG audit: + RAG retrieval-failure variant)* — **done** (PR #162, `40f41fd`)
 10. **H2** — repo hardening pass (housekeeping batch)
 
 **After hardening batch ships — reordered 2026-04-19 (RAG audit; see decision):**
 11. **X21** — embedding provenance + compat gating — **done** (PR #157, `449ec2e`)
 11a. **X21b** — PrepApp reindex prompt — **done** (PR #158, `92625a9`)
-12. **F3** — PrepApp 2-tab restructure + UX simplification — **implementation complete 2026-04-21, PR pending** on `feat/f3-prepapp-3-tab-restructure`
-12a. **H3** — F3 manual PrepApp/FTUE smoke follow-up — deferred; run after PR/CI unless review finds a regression that pulls it forward
+12. **F3** — PrepApp 2-tab restructure + UX simplification — **done** (PR #164, `953fb1b`)
+12a. **H3** — F3 manual PrepApp/FTUE smoke follow-up — deferred; post-merge validation pass if we want one more Windows check before the next feature branch
 13. **F4** — profile FTUE in PrepApp + companion install target selector (multi-stage, Opus planning)
 14. **B2** — build LAN discovery (multi-stage, Opus planning; can run in parallel with F4)
 15. **F2** — live model list fetch (smaller feature)
@@ -258,8 +258,8 @@ No "list documents" or "reindex" endpoint exists today. See Stage 2.
 
 ### F3 — PrepApp 2-tab restructure + UX simplification
 
-**Status:** implementation complete 2026-04-21. Stage 1 committed (`26d9a14` — VM command consolidation); Stage 2 (PrepApp XAML rewrite) and Stage 3 (FTUE re-target, Runner tooltip, docs refresh) are complete in the current worktree. Follow-up merged-grid safety pass landed: configured/downloaded rows are no longer auto-selected, `Remove` now applies one action to all checked rows, and the dead standalone `VerifyCommand` path is gone. Full build + tests passed; branch is ready to push as a PR. Plan at `C:\Users\Kninetimmy\.claude\plans\im-in-plan-mode-elegant-lightning.md`.
-**Scope:** Multi-stage (3 stages). Working branch remains `feat/f3-prepapp-3-tab-restructure` as a legacy name; feature/PR naming should use the **2-tab** wording.
+**Status:** **done** — merged 2026-04-21 (PR #164, merge commit `953fb1b`). Stage 1 committed (`26d9a14` — VM command consolidation); Stages 2-3 shipped in the same PR. Follow-up merged-grid safety pass landed: configured/downloaded rows are no longer auto-selected, `Remove` now applies one action to all checked rows, and the dead standalone `VerifyCommand` path is gone. Full build + tests passed locally before merge, and PR CI cleared (`windows-build` green). Plan at `C:\Users\Kninetimmy\.claude\plans\im-in-plan-mode-elegant-lightning.md`.
+**Scope:** Multi-stage (3 stages). The working branch was `feat/f3-prepapp-3-tab-restructure` as a legacy name; feature/PR naming used the **2-tab** wording by ship time.
 **Model:** Sonnet 4.6 for all 3 stages (planning complete, mechanical implementation)
 
 **Locked design** (full detail in plan file):
@@ -283,17 +283,17 @@ No "list documents" or "reindex" endpoint exists today. See Stage 2.
 - **Stage 2 ✅** — XAML rewrite to 2 tabs with merged grid + verbage.
 - **Stage 3 ✅** — FTUE re-target + Runner tooltip + doc updates.
 
-**Deferred follow-up (not blocking this PR):** manual FTUE / PrepApp smoke on a real SSD with `FtueCompleted=false`. Captured as backlog item **H3** below.
+**Deferred follow-up (not blocking F3 completion):** manual FTUE / PrepApp smoke on a real SSD with `FtueCompleted=false`. Captured as backlog item **H3** below.
 
 ---
 
 ### H3 — F3 manual PrepApp / FTUE smoke follow-up
 
-**Status:** triaged 2026-04-21 (deferred; not blocking F3 PR)
+**Status:** triaged 2026-04-21 (deferred post-F3 merge; not required before the next feature branch)
 **Scope:** One-shot verification pass. No code unless a regression is found.
 **Model:** Sonnet 4.6
 
-**Intent:** Come back after the F3 PR is up and CI is green, then run the manual Windows PrepApp smoke that was deferred to keep F3 moving: FTUE tab targeting, merged-grid golden path, warning-strip visibility, and the disabled tooltip polish.
+**Intent:** Come back post-merge when we want the manual Windows PrepApp smoke that was deferred to keep F3 moving: FTUE tab targeting, merged-grid golden path, warning-strip visibility, and the disabled tooltip polish.
 
 **Checklist:**
 - Launch PrepApp with `FtueCompleted=false`; verify Step 1 targets `TargetDriveRow` on Drive, Steps 2-3 target `StarterModelsCard` / `DownloadButton` on Models.
@@ -936,7 +936,7 @@ keeps the contract visible.
 
 ### X13 — Chat/STT surface real failures
 
-**Status:** **done** — implementation complete 2026-04-20, PR pending (`feat/x13-surface-chat-stt-failures`). 449 tests pass (+12 new).
+**Status:** **done** — merged 2026-04-20 (PR #162, `40f41fd`). 449 tests pass (+12 new).
 **Scope:** One-shot; two services, one PR.
 **Model:** Sonnet 4.6
 
