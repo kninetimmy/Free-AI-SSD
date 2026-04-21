@@ -90,24 +90,12 @@ public partial class MainWindow : Window
         _viewModel.InstallVrCompanion = pref.InstallVrCompanion;
         _viewModel.CompanionHostAddress = pref.CompanionHostAddress;
         _viewModel.CompanionHostPort = pref.CompanionHostPort;
+        _viewModel.SelectedProfile = pref.SelectedProfile;
 
         _ftueCompleted = pref.FtueCompleted;
+        SyncProfileSelectionCards();
 
-        _viewModel.OnPrepTargetsChanged = () =>
-        {
-            // Fires on every keystroke while CompanionHostAddress is being
-            // edited (UpdateSourceTrigger=PropertyChanged). Use the cached
-            // _ftueCompleted instead of touching disk each time.
-            var current = PrepTargets.None;
-            if (_viewModel.PrepareWindows) current |= PrepTargets.Windows;
-            if (_viewModel.PrepareMac) current |= PrepTargets.Mac;
-            _prefStore!.SaveSettings(new PrepPreferenceSnapshot(
-                current,
-                _viewModel.InstallVrCompanion,
-                _viewModel.CompanionHostAddress,
-                _viewModel.CompanionHostPort,
-                _ftueCompleted));
-        };
+        _viewModel.OnPreferenceStateChanged = SaveCurrentPreferences;
 
         if (!_ftueCompleted)
         {
@@ -181,29 +169,32 @@ public partial class MainWindow : Window
     }
 
     // ─────────────────────────────────────────────────────────────
-    // FTUE (First-Time User Experience): 3-step spotlight tour.
+    // FTUE (First-Time User Experience): 4-step spotlight tour.
     // ─────────────────────────────────────────────────────────────
     private void StartFtue()
     {
         _ftueSteps = new (string, string, string)[]
         {
-            ("Step 1 of 3", "Pick your target drive",
-                "Choose the SSD where Ollama and models will be installed."),
-            ("Step 2 of 3", "Choose a starter model",
-                "Pick one or more models. Recommended picks are grouped by size."),
-            ("Step 3 of 3", "Download and verify",
-                "Click Download to pull and verify your chosen models.")
+            ("Step 1 of 4", "How the SSD fits your setup",
+                "PrepApp stages one SSD for either a single-PC install or a split AI-host plus VR-companion setup."),
+            ("Step 2 of 4", "Choose your default Runner profile",
+                "Pick Flight Sim for DCS bindings and HOTAS/PTT defaults, or General Assistant for the chat-first layout."),
+            ("Step 3 of 4", "Pick your target drive",
+                "Choose the SSD where the Runner payload, Ollama runtime, and models will be staged."),
+            ("Step 4 of 4", "Choose and download models",
+                "Pick one or more models, then click Download so the drive is ready before finalization.")
         };
         _ftueTargets = new FrameworkElement[]
         {
+            TwoMachineExplainerCard,
+            ProfileSelectionCard,
             TargetDriveRow,
-            StarterModelsCard,
-            DownloadButton
+            StarterModelsCard
         };
         // Which tab each spotlight target lives in.
-        // Step 1's TargetDriveRow now lives inside the Drive tab (index 1).
-        // Steps 2 and 3 live inside the Models tab (index 0).
-        _ftueTargetTabIndex = new[] { 1, 0, 0 };
+        // Steps 1-3 live inside the Drive tab (index 1). Step 4 lives
+        // inside the Models tab (index 0).
+        _ftueTargetTabIndex = new[] { 1, 1, 1, 0 };
 
         _ftueStepIndex = 0;
         FtueOverlay.Visibility = Visibility.Visible;
@@ -302,7 +293,7 @@ public partial class MainWindow : Window
         FtueOverlay.Visibility = Visibility.Collapsed;
         FtueSpotlight.Visibility = Visibility.Collapsed;
         _ftueCompleted = true;
-        _prefStore?.MarkFtueCompleted();
+        SaveCurrentPreferences();
     }
 
     private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e)
@@ -310,6 +301,84 @@ public partial class MainWindow : Window
         if (FtueOverlay.Visibility == Visibility.Visible)
         {
             PositionSpotlight();
+        }
+    }
+
+    private void SaveCurrentPreferences()
+    {
+        if (_prefStore is null)
+        {
+            return;
+        }
+
+        // Fires on every keystroke while CompanionHostAddress is being
+        // edited (UpdateSourceTrigger=PropertyChanged). Use the cached
+        // _ftueCompleted instead of touching disk each time.
+        var current = PrepTargets.None;
+        if (_viewModel.PrepareWindows) current |= PrepTargets.Windows;
+        if (_viewModel.PrepareMac) current |= PrepTargets.Mac;
+        _prefStore.SaveSettings(new PrepPreferenceSnapshot(
+            current,
+            _viewModel.SelectedProfile,
+            _viewModel.InstallVrCompanion,
+            _viewModel.CompanionHostAddress,
+            _viewModel.CompanionHostPort,
+            _ftueCompleted));
+    }
+
+    private void FlightSimProfileCard_Click(object sender, System.Windows.Input.MouseButtonEventArgs e) =>
+        SelectProfile(UserProfile.FlightSim);
+
+    private void GeneralAssistantProfileCard_Click(object sender, System.Windows.Input.MouseButtonEventArgs e) =>
+        SelectProfile(UserProfile.GeneralAssistant);
+
+    private void ProfileCard_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key is not (System.Windows.Input.Key.Space or System.Windows.Input.Key.Enter))
+        {
+            return;
+        }
+
+        if (sender == FlightSimProfileCard)
+        {
+            SelectProfile(UserProfile.FlightSim);
+        }
+        else if (sender == GeneralAssistantProfileCard)
+        {
+            SelectProfile(UserProfile.GeneralAssistant);
+        }
+    }
+
+    private void SelectProfile(UserProfile profile)
+    {
+        _viewModel.SelectedProfile = profile;
+        SyncProfileSelectionCards();
+    }
+
+    private void SyncProfileSelectionCards()
+    {
+        ApplyProfileCardState(FlightSimProfileCard, _viewModel.SelectedProfile == UserProfile.FlightSim);
+        ApplyProfileCardState(GeneralAssistantProfileCard, _viewModel.SelectedProfile == UserProfile.GeneralAssistant);
+    }
+
+    private static void ApplyProfileCardState(Border card, bool selected)
+    {
+        var resources = Application.Current.Resources;
+        if (selected)
+        {
+            card.BorderBrush = (System.Windows.Media.Brush)resources["FocusBorderGradientBrush"];
+            card.Effect = new System.Windows.Media.Effects.DropShadowEffect
+            {
+                Color = (System.Windows.Media.Color)resources["AccentCyanColor"],
+                ShadowDepth = 0,
+                BlurRadius = 20,
+                Opacity = 0.75
+            };
+        }
+        else
+        {
+            card.BorderBrush = (System.Windows.Media.Brush)resources["SurfaceBorderBrush"];
+            card.Effect = (System.Windows.Media.Effects.Effect)resources["RaisedDarkShadow"];
         }
     }
 }

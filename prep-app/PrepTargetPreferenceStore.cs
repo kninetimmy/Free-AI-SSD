@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Models;
 
 namespace FreeAiSsd.PrepApp;
@@ -26,7 +27,7 @@ public sealed class PrepTargetPreferenceStore
         try
         {
             var model = JsonSerializer.Deserialize<PrepAppSettings>(File.ReadAllText(_settingsPath));
-            if (model is null || model.SchemaVersion != 2)
+            if (model is null || model.SchemaVersion is < 2 or > 3)
             {
                 return PrepPreferenceSnapshot.Default;
             }
@@ -34,9 +35,13 @@ public sealed class PrepTargetPreferenceStore
             var targets = Enum.TryParse<PrepTargets>(model.PrepTargetsValue, out var parsed) && parsed != PrepTargets.None
                 ? parsed
                 : PrepTargets.Windows;
+            UserProfile? selectedProfile = Enum.TryParse<UserProfile>(model.SelectedProfileValue, out var parsedProfile)
+                ? parsedProfile
+                : null;
 
             return new PrepPreferenceSnapshot(
                 targets,
+                selectedProfile,
                 model.InstallVrCompanion,
                 model.CompanionHostAddress ?? string.Empty,
                 model.CompanionHostPort <= 0 ? 41555 : model.CompanionHostPort,
@@ -53,6 +58,7 @@ public sealed class PrepTargetPreferenceStore
         var existing = LoadSettings();
         SaveSettings(new PrepPreferenceSnapshot(
             targets,
+            existing.SelectedProfile,
             existing.InstallVrCompanion,
             existing.CompanionHostAddress,
             existing.CompanionHostPort,
@@ -65,6 +71,7 @@ public sealed class PrepTargetPreferenceStore
         var model = new PrepAppSettings
         {
             PrepTargetsValue = safeTargets.ToString(),
+            SelectedProfileValue = snapshot.SelectedProfile?.ToString(),
             InstallVrCompanion = snapshot.InstallVrCompanion,
             CompanionHostAddress = snapshot.CompanionHostAddress,
             CompanionHostPort = snapshot.CompanionHostPort <= 0 ? 41555 : snapshot.CompanionHostPort,
@@ -81,6 +88,7 @@ public sealed class PrepTargetPreferenceStore
         if (existing.FtueCompleted) return;
         SaveSettings(new PrepPreferenceSnapshot(
             existing.PrepTargets,
+            existing.SelectedProfile,
             existing.InstallVrCompanion,
             existing.CompanionHostAddress,
             existing.CompanionHostPort,
@@ -90,10 +98,13 @@ public sealed class PrepTargetPreferenceStore
     private sealed class PrepAppSettings
     {
         [JsonPropertyName("schemaVersion")]
-        public int SchemaVersion { get; init; } = 2;
+        public int SchemaVersion { get; init; } = 3;
 
         [JsonPropertyName("prepTargets")]
         public string PrepTargetsValue { get; init; } = nameof(PrepTargets.Windows);
+
+        [JsonPropertyName("selectedProfile")]
+        public string? SelectedProfileValue { get; init; }
 
         [JsonPropertyName("installVrCompanion")]
         public bool InstallVrCompanion { get; init; }
@@ -111,10 +122,11 @@ public sealed class PrepTargetPreferenceStore
 
 public readonly record struct PrepPreferenceSnapshot(
     PrepTargets PrepTargets,
+    UserProfile? SelectedProfile,
     bool InstallVrCompanion,
     string CompanionHostAddress,
     int CompanionHostPort,
     bool FtueCompleted)
 {
-    public static PrepPreferenceSnapshot Default => new(PrepTargets.Windows, false, string.Empty, 41555, false);
+    public static PrepPreferenceSnapshot Default => new(PrepTargets.Windows, null, false, string.Empty, 41555, false);
 }

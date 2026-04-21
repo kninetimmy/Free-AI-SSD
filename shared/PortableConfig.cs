@@ -55,9 +55,9 @@ public sealed class PortableConfig
     public string Version { get; set; } = "1.0";
 
     /// <summary>
-    /// Active user profile. Null means the user has not yet chosen a profile
-    /// (first-run dialog pending). Defaults are applied by <see cref="ProfileDefaults.Apply"/>
-    /// when the user makes their selection.
+    /// Active user profile. Null means the SSD predates PrepApp-owned profile setup
+    /// or the user has not finalized a profile choice yet. PrepApp writes this during
+    /// finalization and applies matching defaults via <see cref="ProfileDefaults.Apply"/>.
     /// </summary>
     public UserProfile? ActiveProfile { get; set; }
     /// <summary>Preferred TCP port for the local Ollama server (default: 11434).</summary>

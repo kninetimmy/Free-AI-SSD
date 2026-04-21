@@ -47,6 +47,7 @@ public class PrepViewModelTests
         _driveService.Setup(d => d.GetCandidateDrives(It.IsAny<bool>())).Returns(drives);
         _encryptionService.Setup(e => e.IsEncryptionEnabled(It.IsAny<string>())).Returns(encrypted);
         _modelService.Setup(m => m.LoadConfigAsync(It.IsAny<string>())).ReturnsAsync(new PortableConfig());
+        _modelService.Setup(m => m.SaveConfigAsync(It.IsAny<string>(), It.IsAny<PortableConfig>())).Returns(Task.CompletedTask);
         _modelService.Setup(m => m.DiscoverModelsOnDisk(It.IsAny<string>())).Returns(Array.Empty<string>());
         _modelService.Setup(m => m.GetSizingWarnings(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<int?>())).Returns(new List<string>());
         _driveService.Setup(d => d.GetFreeDiskSpaceGb(It.IsAny<string>())).Returns(100);
@@ -271,6 +272,88 @@ public class PrepViewModelTests
         Assert.False(vm.IsMacPrepAvailable);
         Assert.False(vm.PrepareMac);
         Assert.Equal("macOS Runner.app.zip not found", vm.MacPrepAvailabilityMessage);
+    }
+
+    [Fact]
+    public async Task FinalizeCommand_NoSelectedProfile_ShowsWarning_AndBlocks()
+    {
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+
+        vm.FinalizeCommand.Execute(null);
+        await WaitForCommandAsync(vm.FinalizeCommand);
+
+        _dialogService.Verify(
+            d => d.ShowWarning(
+                It.Is<string>(message => message.Contains("Choose a Runner profile before finishing setup.")),
+                "Profile required"),
+            Times.Once);
+        _artifactStagingService.Verify(a => a.StageRunnerAsync(It.IsAny<string>(), It.IsAny<Action<string>>()), Times.Never);
+        _modelService.Verify(m => m.SaveConfigAsync(It.IsAny<string>(), It.IsAny<PortableConfig>()), Times.Never);
+        Assert.Equal("Finalize blocked", vm.StatusText);
+        Assert.Equal(
+            "Choose a Runner profile before finishing setup. Flight Sim enables DCS bindings, HOTAS push-to-talk, and voice defaults; General Assistant keeps the runtime chat-first.",
+            vm.ProfileSelectionWarning);
+        Assert.Contains(vm.LogLines, l => l.Contains("no profile selected"));
+    }
+
+    [Fact]
+    public async Task FinalizeCommand_SelectedProfile_PersistsActiveProfile_AndProfileDefaults()
+    {
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        _ollamaPackageService
+            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
+        _prereqService
+            .Setup(s => s.StagePrerequisitesAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _artifactStagingService
+            .Setup(s => s.StageRunnerAsync(It.IsAny<string>(), It.IsAny<Action<string>>()))
+            .Returns(Task.CompletedTask);
+        _readinessService
+            .Setup(s => s.RunReadinessChecksAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ReadinessItem> { ReadinessItem.Pass("Runner payload") });
+
+        var config = new PortableConfig
+        {
+            Models =
+            {
+                new ModelConfigEntry { Name = "llama3.2:3b", Status = ModelInstallStatus.Installed }
+            }
+        };
+        _modelService.Setup(m => m.LoadConfigAsync(It.IsAny<string>())).ReturnsAsync(config);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.SelectedProfile = UserProfile.FlightSim;
+
+        vm.FinalizeCommand.Execute(null);
+        await WaitForCommandAsync(vm.FinalizeCommand);
+
+        _modelService.Verify(
+            m => m.SaveConfigAsync(
+                It.IsAny<string>(),
+                It.Is<PortableConfig>(saved =>
+                    saved.ActiveProfile == UserProfile.FlightSim &&
+                    saved.PttEnabled &&
+                    saved.TtsEnabled &&
+                    saved.AutoSendVoiceInput &&
+                    saved.PttActivationSoundEnabled &&
+                    saved.PttOverlayEnabled)),
+            Times.AtLeastOnce);
+        _artifactStagingService.Verify(a => a.StageRunnerAsync("E:\\", It.IsAny<Action<string>>()), Times.Once);
+        Assert.Equal(UserProfile.FlightSim, config.ActiveProfile);
+        Assert.True(config.PttEnabled);
+        Assert.True(config.TtsEnabled);
+        Assert.True(config.AutoSendVoiceInput);
+        Assert.True(config.PttActivationSoundEnabled);
+        Assert.True(config.PttOverlayEnabled);
+        Assert.Equal("Complete", vm.StatusText);
+        Assert.Equal(string.Empty, vm.ProfileSelectionWarning);
     }
 
     [Fact]

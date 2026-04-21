@@ -168,13 +168,6 @@ public partial class MainWindow : System.Windows.Window
 
     private async void OnWindowLoaded(object sender, System.Windows.RoutedEventArgs e)
     {
-        // Profile selection must happen before FTUE so the tour only highlights
-        // features that are relevant to the chosen profile.
-        if (_config is not null && _config.ActiveProfile is null)
-        {
-            await ShowProfileSelectionAsync(isRequired: true);
-        }
-
         // Read the tiny first-run JSON off the UI thread so a slow / contended
         // SSD can't stall the window's first paint.
         var statePath = Path.Combine(_ssdRoot, SsdLayout.Config, "runner-first-run.json");

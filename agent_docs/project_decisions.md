@@ -283,3 +283,34 @@ became unsafe and misleading — default-selected downloaded rows could trigger
 accidental re-downloads, and first-row-only Remove no longer matched the visual
 selection model. Explicit selection keeps the 2-tab PrepApp flow predictable for
 non-technical users.
+
+---
+
+## 2026-04-21 — Plan / prompt / execute handoffs include an explicit GPT-5.4 vs GPT-5.3 Codex recommendation
+
+When a backlog item is handled via a plan -> prompt -> execute loop, the prompt
+draft must explicitly call out which execution model is recommended (`gpt-5.4`
+vs `gpt-5.3 codex`) and give a short rationale.
+
+Rationale: model choice had been implicit during handoff. Making it explicit at
+prompt time reduces ambiguity when resuming in a fresh session and makes the
+saved execution prompt self-contained.
+
+---
+
+## 2026-04-21 â€” F4 Stage 1: PrepApp owns first-run profile selection; Runner no longer blocks on null ActiveProfile
+
+This entry supersedes the 2026-04-17 Profiles decision that required a first-run
+Runner profile dialog before the app could proceed.
+
+PrepApp's FTUE now owns the first profile choice. The four-step FTUE starts with
+the two-machine architecture explainer, includes an inline profile selector, and
+persists the local selection in `PrepTargetPreferenceStore` until finalization.
+
+Finalize writes `PortableConfig.ActiveProfile` and immediately applies
+`ProfileDefaults.Apply(config, profile)` before the final save / encryption path.
+Runner still allows mid-session profile switching via the in-window pills.
+
+Runner must remain backward-compatible with older SSDs where `ActiveProfile` is
+null. In that case it starts normally, keeps flight-sim-only UI hidden by default,
+and does not resurrect the old required modal.

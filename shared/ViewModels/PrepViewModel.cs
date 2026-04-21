@@ -43,6 +43,8 @@ public class PrepViewModel : BaseViewModel
     private bool _installVrCompanion;
     private string _companionHostAddress = string.Empty;
     private int _companionHostPort = 41555;
+    private UserProfile? _selectedProfile;
+    private string _profileSelectionWarning = string.Empty;
     private readonly SynchronizationContext? _uiSyncContext;
 
     // B3-Redux phase 2 state: filled from command-line args at startup
@@ -176,7 +178,7 @@ public class PrepViewModel : BaseViewModel
         set => SetProperty(ref _ollamaUrl, value);
     }
 
-    public Action? OnPrepTargetsChanged { get; set; }
+    public Action? OnPreferenceStateChanged { get; set; }
 
     public bool PrepareWindows
     {
@@ -184,7 +186,7 @@ public class PrepViewModel : BaseViewModel
         set
         {
             if (SetProperty(ref _prepareWindows, value))
-                OnPrepTargetsChanged?.Invoke();
+                OnPreferenceStateChanged?.Invoke();
         }
     }
 
@@ -195,7 +197,7 @@ public class PrepViewModel : BaseViewModel
         {
             if (!_isMacPrepAvailable) value = false;
             if (SetProperty(ref _prepareMac, value))
-                OnPrepTargetsChanged?.Invoke();
+                OnPreferenceStateChanged?.Invoke();
         }
     }
 
@@ -269,7 +271,7 @@ public class PrepViewModel : BaseViewModel
         set
         {
             if (SetProperty(ref _installVrCompanion, value))
-                OnPrepTargetsChanged?.Invoke();
+                OnPreferenceStateChanged?.Invoke();
         }
     }
 
@@ -279,7 +281,7 @@ public class PrepViewModel : BaseViewModel
         set
         {
             if (SetProperty(ref _companionHostAddress, value))
-                OnPrepTargetsChanged?.Invoke();
+                OnPreferenceStateChanged?.Invoke();
         }
     }
 
@@ -289,8 +291,31 @@ public class PrepViewModel : BaseViewModel
         set
         {
             if (SetProperty(ref _companionHostPort, value))
-                OnPrepTargetsChanged?.Invoke();
+                OnPreferenceStateChanged?.Invoke();
         }
+    }
+
+    public UserProfile? SelectedProfile
+    {
+        get => _selectedProfile;
+        set
+        {
+            if (SetProperty(ref _selectedProfile, value))
+            {
+                OnPropertyChanged(nameof(HasSelectedProfile));
+                if (_selectedProfile is not null)
+                    ProfileSelectionWarning = string.Empty;
+                OnPreferenceStateChanged?.Invoke();
+            }
+        }
+    }
+
+    public bool HasSelectedProfile => _selectedProfile is not null;
+
+    public string ProfileSelectionWarning
+    {
+        get => _profileSelectionWarning;
+        private set => SetProperty(ref _profileSelectionWarning, value);
     }
 
     public int? SystemRamGb
@@ -1168,6 +1193,10 @@ public class PrepViewModel : BaseViewModel
             AppendLog("Select a target drive first.");
             return;
         }
+        if (!TryGetFinalizeProfile(out var selectedProfile))
+        {
+            return;
+        }
         if (!EnsureWritable("Finalize SSD")) return;
 
         if (_selectedDrive.IsFixed)
@@ -1306,6 +1335,9 @@ public class PrepViewModel : BaseViewModel
                 return;
             }
 
+            config.ActiveProfile = selectedProfile;
+            ProfileDefaults.Apply(config, selectedProfile);
+
             if (_enableEncryption)
             {
                 var passphrase = _dialogService.PromptForEncryptionPassword();
@@ -1320,6 +1352,10 @@ public class PrepViewModel : BaseViewModel
                 config.EncryptionScheme = SsdEncryption.SchemeName;
                 await _encryptionService.EnableConfigEncryptionAsync(root, config, passphrase);
                 AppendLog("Drive encryption enabled. Runner will now require unlock before use.");
+            }
+            else
+            {
+                await _modelService.SaveConfigAsync(configPath, config);
             }
 
             ProgressValue = 100;
@@ -1519,6 +1555,25 @@ public class PrepViewModel : BaseViewModel
         IsModelOperationRunning = running;
         if (!string.IsNullOrWhiteSpace(status))
             StatusText = status;
+    }
+
+    private bool TryGetFinalizeProfile(out UserProfile selectedProfile)
+    {
+        if (_selectedProfile is UserProfile profile)
+        {
+            ProfileSelectionWarning = string.Empty;
+            selectedProfile = profile;
+            return true;
+        }
+
+        const string message =
+            "Choose a Runner profile before finishing setup. Flight Sim enables DCS bindings, HOTAS push-to-talk, and voice defaults; General Assistant keeps the runtime chat-first.";
+        ProfileSelectionWarning = message;
+        _dialogService.ShowWarning(message, "Profile required");
+        AppendLog("Finalize blocked: no profile selected.");
+        StatusText = "Finalize blocked";
+        selectedProfile = default;
+        return false;
     }
 
     private void AppendLog(string message)

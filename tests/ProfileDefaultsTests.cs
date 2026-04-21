@@ -29,6 +29,15 @@ public sealed class ProfileDefaultsTests
     }
 
     [Fact]
+    public void FlightSim_EnablesPttOverlayAndActivationSound()
+    {
+        var config = new PortableConfig();
+        ProfileDefaults.Apply(config, UserProfile.FlightSim);
+        Assert.True(config.PttOverlayEnabled);
+        Assert.True(config.PttActivationSoundEnabled);
+    }
+
+    [Fact]
     public void GeneralAssistant_DisablesPtt()
     {
         var config = new PortableConfig { PttEnabled = true };
@@ -50,6 +59,19 @@ public sealed class ProfileDefaultsTests
         var config = new PortableConfig();
         ProfileDefaults.Apply(config, UserProfile.GeneralAssistant);
         Assert.False(config.AutoSendVoiceInput);
+    }
+
+    [Fact]
+    public void GeneralAssistant_DisablesPttOverlayAndActivationSound()
+    {
+        var config = new PortableConfig
+        {
+            PttOverlayEnabled = true,
+            PttActivationSoundEnabled = true
+        };
+        ProfileDefaults.Apply(config, UserProfile.GeneralAssistant);
+        Assert.False(config.PttOverlayEnabled);
+        Assert.False(config.PttActivationSoundEnabled);
     }
 
     [Fact]
