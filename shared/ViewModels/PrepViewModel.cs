@@ -87,11 +87,9 @@ public class PrepViewModel : BaseViewModel
 
         RefreshDrivesCommand = new RelayCommand(RefreshDrives);
         AddModelCommand = new AsyncRelayCommand(AddModelAsync, () => CanMutateDrive && HasDriveSelected);
-        AddStarterModelsCommand = new AsyncRelayCommand(AddStarterModelsAsync, () => CanMutateDrive && HasDriveSelected);
         ClearStarterSelectionCommand = new RelayCommand(ClearStarterSelection);
         AddOrphanToConfigCommand = new AsyncRelayCommand(AddOrphanToConfigAsync, () => CanMutateDrive && HasDriveSelected);
-        PullInstallCommand = new AsyncRelayCommand(PullInstallAsync, () => CanMutateDrive && HasDriveSelected);
-        PullSelectedCommand = new AsyncRelayCommand(PullSelectedAsync, () => CanMutateDrive && HasDriveSelected);
+        DownloadCommand = new AsyncRelayCommand(DownloadAsync, () => CanMutateDrive && HasDriveSelected);
         VerifyCommand = new AsyncRelayCommand(VerifyAsync, () => CanMutateDrive && HasDriveSelected);
         RemoveCommand = new AsyncRelayCommand(RemoveAsync, () => CanMutateDrive && HasDriveSelected);
         CancelOperationCommand = new RelayCommand(CancelOperation, () => _isModelOperationRunning);
@@ -315,11 +313,9 @@ public class PrepViewModel : BaseViewModel
 
     public RelayCommand RefreshDrivesCommand { get; }
     public AsyncRelayCommand AddModelCommand { get; }
-    public AsyncRelayCommand AddStarterModelsCommand { get; }
     public RelayCommand ClearStarterSelectionCommand { get; }
     public AsyncRelayCommand AddOrphanToConfigCommand { get; }
-    public AsyncRelayCommand PullInstallCommand { get; }
-    public AsyncRelayCommand PullSelectedCommand { get; }
+    public AsyncRelayCommand DownloadCommand { get; }
     public AsyncRelayCommand VerifyCommand { get; }
     public AsyncRelayCommand RemoveCommand { get; }
     public RelayCommand CancelOperationCommand { get; }
@@ -599,34 +595,6 @@ public class PrepViewModel : BaseViewModel
         AppendLog($"Added model '{tag}' to config.");
     }
 
-    private async Task AddStarterModelsAsync()
-    {
-        var selectedRows = StarterModels.Where(r => r.IsSelected).ToList();
-        if (selectedRows.Count == 0)
-        {
-            AppendLog("Select one or more starter models first.");
-            return;
-        }
-        if (_selectedDrive is null)
-        {
-            AppendLog("Select a target drive first.");
-            return;
-        }
-        if (!EnsureWritable("Add starter models")) return;
-
-        var configPath = GetConfigPath(_selectedDrive.RootPath);
-        _driveService.EnsureSsdStructure(_selectedDrive.RootPath);
-        var config = await _modelService.LoadConfigAsync(configPath);
-        foreach (var row in selectedRows)
-        {
-            _modelService.UpsertModel(config.Models, row.Tag, ModelInstallStatus.NotInstalled);
-            AppendLog($"Added starter model '{row.Tag}' to config.");
-        }
-        await _modelService.SaveConfigAsync(configPath, config);
-        await RefreshModelStatusesAsync();
-        ClearStarterSelection();
-    }
-
     private void ClearStarterSelection()
     {
         foreach (var row in StarterModels)
@@ -663,25 +631,31 @@ public class PrepViewModel : BaseViewModel
     private IReadOnlyList<ModelGridRow> GetCheckedModelRows()
         => ModelRows.Where(r => r.IsSelected).ToList().AsReadOnly();
 
-    private async Task PullInstallAsync()
+    private async Task DownloadAsync()
     {
-        if (!EnsureWritable("Pull/install model")) return;
-
-        var selected = GetCheckedModelRows().Where(r => !r.IsOnDiskOnly).Select(r => r.Name).Take(1).ToList();
-        if (selected.Count == 0)
+        if (!EnsureWritable("Download models")) return;
+        if (_selectedDrive is null)
         {
-            StatusText = "No model checked — check a model in the model grid first";
-            AppendLog("Check a model in the model grid to pull/install.");
+            AppendLog("Select a target drive first.");
             return;
         }
 
-        if (!ConfirmSizingWarningsIfNeeded(selected)) return;
-        await PullModelsAsync(selected);
-    }
-
-    private async Task PullSelectedAsync()
-    {
-        if (!EnsureWritable("Pull selected models")) return;
+        // Auto-register any checked starter-model rows into the drive config
+        // so users don't need a separate "Add to config" step before download.
+        var checkedStarters = StarterModels.Where(r => r.IsSelected).ToList();
+        if (checkedStarters.Count > 0)
+        {
+            var configPath = GetConfigPath(_selectedDrive.RootPath);
+            _driveService.EnsureSsdStructure(_selectedDrive.RootPath);
+            var config = await _modelService.LoadConfigAsync(configPath);
+            foreach (var row in checkedStarters)
+            {
+                _modelService.UpsertModel(config.Models, row.Tag, ModelInstallStatus.NotInstalled);
+                AppendLog($"Added starter model '{row.Tag}' to config.");
+            }
+            await _modelService.SaveConfigAsync(configPath, config);
+            await RefreshModelStatusesAsync();
+        }
 
         var selected = GetCheckedModelRows()
             .Where(r => !r.IsOnDiskOnly)
@@ -690,13 +664,14 @@ public class PrepViewModel : BaseViewModel
             .ToList();
         if (selected.Count == 0)
         {
-            StatusText = "No models checked — check one or more models in the model grid first";
-            AppendLog("Check one or more configured models in the model grid for pull.");
+            StatusText = "No models checked — check one or more models to download";
+            AppendLog("Check one or more models to download.");
             return;
         }
 
         if (!ConfirmSizingWarningsIfNeeded(selected)) return;
         await PullModelsAsync(selected);
+        ClearStarterSelection();
     }
 
     private bool ConfirmSizingWarningsIfNeeded(IReadOnlyList<string> models)
@@ -1436,7 +1411,7 @@ public class PrepViewModel : BaseViewModel
         foreach (var discovered in discoveredOnDisk.Where(d => !configuredNames.Contains(d)).OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
         {
             var warnings = _modelService.GetSizingWarnings(discovered, freeDiskGb, _systemRamGb, _gpuVramGb);
-            rows.Add(new ModelGridRow(discovered, "OnDiskOnly", "Disk", warnings.Count == 0 ? "OK" : string.Join("; ", warnings), "—", "—", "—", true));
+            rows.Add(new ModelGridRow(discovered, "On drive only", "Disk", warnings.Count == 0 ? "OK" : string.Join("; ", warnings), "—", "—", "—", true));
         }
 
         return rows;
@@ -1475,10 +1450,8 @@ public class PrepViewModel : BaseViewModel
         OnPropertyChanged(nameof(CanMutateDrive));
         OnPropertyChanged(nameof(HasDriveSelected));
         AddModelCommand.RaiseCanExecuteChanged();
-        AddStarterModelsCommand.RaiseCanExecuteChanged();
         AddOrphanToConfigCommand.RaiseCanExecuteChanged();
-        PullInstallCommand.RaiseCanExecuteChanged();
-        PullSelectedCommand.RaiseCanExecuteChanged();
+        DownloadCommand.RaiseCanExecuteChanged();
         VerifyCommand.RaiseCanExecuteChanged();
         RemoveCommand.RaiseCanExecuteChanged();
         CancelOperationCommand.RaiseCanExecuteChanged();
@@ -1492,10 +1465,14 @@ public class PrepViewModel : BaseViewModel
 
     private static string DetermineConfiguredState(ModelConfigEntry model, bool onDisk)
     {
-        if (model.Status == ModelInstallStatus.Installed) return "Ready";
-        if ((model.Status == ModelInstallStatus.NotInstalled || model.Status == ModelInstallStatus.Failed) && !onDisk)
-            return "ConfiguredNotDownloaded";
-        return model.Status.ToString();
+        return model.Status switch
+        {
+            ModelInstallStatus.Installed => "Downloaded",
+            ModelInstallStatus.Downloading => "Downloading…",
+            ModelInstallStatus.Failed => "Failed — retry",
+            ModelInstallStatus.NotInstalled when !onDisk => "Not downloaded",
+            _ => "Not downloaded"
+        };
     }
 
     internal static string FormatSize(long sizeBytes)

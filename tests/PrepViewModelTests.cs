@@ -200,27 +200,27 @@ public class PrepViewModelTests
 
         Assert.Equal(2, vm.ModelRows.Count);
         var configRow = vm.ModelRows.First(r => r.Name == "llama3:latest");
-        Assert.Equal("Ready", configRow.Status);
+        Assert.Equal("Downloaded", configRow.Status);
         Assert.False(configRow.IsOnDiskOnly);
 
         var orphanRow = vm.ModelRows.First(r => r.Name == "orphan:model");
-        Assert.Equal("OnDiskOnly", orphanRow.Status);
+        Assert.Equal("On drive only", orphanRow.Status);
         Assert.True(orphanRow.IsOnDiskOnly);
     }
 
     [Fact]
-    public void DetermineConfiguredState_InstalledReturnsReady()
+    public void DetermineConfiguredState_InstalledReturnsDownloaded()
     {
         var model = new ModelConfigEntry { Name = "test", Status = ModelInstallStatus.Installed };
-        Assert.Equal("Ready", GetState(model, true));
-        Assert.Equal("Ready", GetState(model, false));
+        Assert.Equal("Downloaded", GetState(model, true));
+        Assert.Equal("Downloaded", GetState(model, false));
     }
 
     [Fact]
     public void DetermineConfiguredState_NotInstalledAndNotOnDisk()
     {
         var model = new ModelConfigEntry { Name = "test", Status = ModelInstallStatus.NotInstalled };
-        Assert.Equal("ConfiguredNotDownloaded", GetState(model, false));
+        Assert.Equal("Not downloaded", GetState(model, false));
     }
 
     [Fact]
