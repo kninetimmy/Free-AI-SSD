@@ -77,11 +77,11 @@ public partial class MainWindow : Window
         SizeChanged += OnWindowSizeChanged;
     }
 
-    private void OnWindowLoaded(object sender, RoutedEventArgs e)
+    private async void OnWindowLoaded(object sender, RoutedEventArgs e)
     {
         _viewModel.Initialize();
 
-        LoadStarterCatalog();
+        await LoadStarterCatalogAsync();
 
         _prefStore = new PrepTargetPreferenceStore();
         var pref = _prefStore.LoadSettings();
@@ -120,7 +120,7 @@ public partial class MainWindow : Window
         _ = _viewModel.TryAutoResumeFormatAsync();
     }
 
-    private void LoadStarterCatalog()
+    private async Task LoadStarterCatalogAsync()
     {
         var loadResult = StarterModelCatalogLoader.Load(AppContext.BaseDirectory);
         if (!string.IsNullOrWhiteSpace(loadResult.Warning))
@@ -134,30 +134,27 @@ public partial class MainWindow : Window
             StarterCatalogWarningText.Visibility = Visibility.Collapsed;
         }
 
-        var tierOrder = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["Small"] = 0,
-            ["Medium"] = 1,
-            ["Large"] = 2
-        };
+        var entries = loadResult.Catalog.Models
+            .Select(m => new StarterCatalogEntry(
+                m.Tag,
+                m.SizeTier,
+                // "Best at" = description + comma-joined use cases, mirroring
+                // the pre-merge Starter grid's Best-at + Use-cases columns.
+                string.IsNullOrWhiteSpace(m.Description)
+                    ? string.Join(", ", m.UseCases)
+                    : m.UseCases.Count == 0
+                        ? m.Description
+                        : $"{m.Description} ({string.Join(", ", m.UseCases)})"))
+            .ToList();
 
-        _viewModel.StarterModels.Clear();
-        foreach (var entry in loadResult.Catalog.Models
-                     .OrderBy(m => tierOrder.TryGetValue(m.SizeTier, out var order) ? order : int.MaxValue)
-                     .ThenBy(m => m.Tag, StringComparer.OrdinalIgnoreCase))
-        {
-            _viewModel.StarterModels.Add(new StarterModelRow(
-                entry.Tag,
-                entry.Params,
-                entry.SizeTier,
-                entry.Description,
-                string.Join(", ", entry.UseCases),
-                string.Empty));
-        }
+        await _viewModel.SetStarterCatalogAsync(entries);
 
-        var collectionView = new ListCollectionView(_viewModel.StarterModels);
-        collectionView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(StarterModelRow.SizeTier)));
-        StarterModelGrid.ItemsSource = collectionView;
+        // Group the merged grid by Tier so Small / Medium / Large / Custom
+        // show as visual sections (same affordance the pre-merge Starter
+        // grid offered, now applied to the unified ModelRows collection).
+        var collectionView = new ListCollectionView(_viewModel.ModelRows);
+        collectionView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(ModelGridRow.Tier)));
+        ModelStatusGrid.ItemsSource = collectionView;
     }
 
     private void LogLines_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -184,15 +181,6 @@ public partial class MainWindow : Window
     }
 
     // ─────────────────────────────────────────────────────────────
-    // Actionable empty-state handler: scrolls the Starter models
-    // grid into view inside the Model Manager tab.
-    // ─────────────────────────────────────────────────────────────
-    private void OnBrowseStarterModelsClick(object sender, RoutedEventArgs e)
-    {
-        StarterModelsCard?.BringIntoView();
-    }
-
-    // ─────────────────────────────────────────────────────────────
     // FTUE (First-Time User Experience): 3-step spotlight tour.
     // ─────────────────────────────────────────────────────────────
     private void StartFtue()
@@ -200,22 +188,22 @@ public partial class MainWindow : Window
         _ftueSteps = new (string, string, string)[]
         {
             ("Step 1 of 3", "Pick your target drive",
-                "Choose the drive where Ollama and models will be installed."),
+                "Choose the SSD where Ollama and models will be installed."),
             ("Step 2 of 3", "Choose a starter model",
-                "The Starter models card lists vetted picks grouped by size. Toggle one or more to add."),
-            ("Step 3 of 3", "Pull & verify",
-                "Use Pull/Install to download the models. Verify confirms the files are intact.")
+                "Pick one or more models. Recommended picks are grouped by size."),
+            ("Step 3 of 3", "Download and verify",
+                "Click Download to pull and verify your chosen models.")
         };
         _ftueTargets = new FrameworkElement[]
         {
             TargetDriveRow,
             StarterModelsCard,
-            PullInstallButton
+            DownloadButton
         };
-        // Which tab each spotlight target lives in. Step 1 sits outside
-        // the tab control (no switch needed, -1 means "don't touch").
-        // Steps 2 and 3 live inside the Model Manager tab (index 0).
-        _ftueTargetTabIndex = new[] { -1, 0, 0 };
+        // Which tab each spotlight target lives in.
+        // Step 1's TargetDriveRow now lives inside the Drive tab (index 1).
+        // Steps 2 and 3 live inside the Models tab (index 0).
+        _ftueTargetTabIndex = new[] { 1, 0, 0 };
 
         _ftueStepIndex = 0;
         FtueOverlay.Visibility = Visibility.Visible;

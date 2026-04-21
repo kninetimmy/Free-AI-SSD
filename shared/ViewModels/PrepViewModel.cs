@@ -54,6 +54,7 @@ public class PrepViewModel : BaseViewModel
     private bool _isElevated;
 
     private readonly HashSet<string> _provenanceCheckedRoots = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<StarterCatalogEntry> _starterCatalog = Array.Empty<StarterCatalogEntry>();
 
     public PrepViewModel(
         IDriveService driveService,
@@ -81,16 +82,14 @@ public class PrepViewModel : BaseViewModel
         _uiSyncContext = SynchronizationContext.Current;
 
         ModelRows = new ObservableCollection<ModelGridRow>();
-        StarterModels = new ObservableCollection<StarterModelRow>();
         ReadinessItems = new ObservableCollection<ReadinessItem>();
         LogLines = new ObservableCollection<string>();
 
         RefreshDrivesCommand = new RelayCommand(RefreshDrives);
         AddModelCommand = new AsyncRelayCommand(AddModelAsync, () => CanMutateDrive && HasDriveSelected);
-        ClearStarterSelectionCommand = new RelayCommand(ClearStarterSelection);
+        ClearSelectionCommand = new RelayCommand(ClearSelection);
         AddOrphanToConfigCommand = new AsyncRelayCommand(AddOrphanToConfigAsync, () => CanMutateDrive && HasDriveSelected);
         DownloadCommand = new AsyncRelayCommand(DownloadAsync, () => CanMutateDrive && HasDriveSelected);
-        VerifyCommand = new AsyncRelayCommand(VerifyAsync, () => CanMutateDrive && HasDriveSelected);
         RemoveCommand = new AsyncRelayCommand(RemoveAsync, () => CanMutateDrive && HasDriveSelected);
         CancelOperationCommand = new RelayCommand(CancelOperation, () => _isModelOperationRunning);
         FormatPrepareCommand = new AsyncRelayCommand(FormatPrepareAsync, () => CanMutateDrive && HasDriveSelected);
@@ -307,16 +306,14 @@ public class PrepViewModel : BaseViewModel
     }
 
     public ObservableCollection<ModelGridRow> ModelRows { get; }
-    public ObservableCollection<StarterModelRow> StarterModels { get; }
     public ObservableCollection<ReadinessItem> ReadinessItems { get; }
     public ObservableCollection<string> LogLines { get; }
 
     public RelayCommand RefreshDrivesCommand { get; }
     public AsyncRelayCommand AddModelCommand { get; }
-    public RelayCommand ClearStarterSelectionCommand { get; }
+    public RelayCommand ClearSelectionCommand { get; }
     public AsyncRelayCommand AddOrphanToConfigCommand { get; }
     public AsyncRelayCommand DownloadCommand { get; }
-    public AsyncRelayCommand VerifyCommand { get; }
     public AsyncRelayCommand RemoveCommand { get; }
     public RelayCommand CancelOperationCommand { get; }
     public AsyncRelayCommand FormatPrepareCommand { get; }
@@ -595,10 +592,22 @@ public class PrepViewModel : BaseViewModel
         AppendLog($"Added model '{tag}' to config.");
     }
 
-    private void ClearStarterSelection()
+    private void ClearSelection()
     {
-        foreach (var row in StarterModels)
+        foreach (var row in ModelRows)
             row.IsSelected = false;
+    }
+
+    /// <summary>
+    /// Seed the VM with the starter-catalog entries the PrepApp loaded
+    /// from JSON. Calling this triggers a grid refresh so recommended
+    /// rows appear immediately — even before the user has selected a
+    /// drive or added anything to config. Idempotent.
+    /// </summary>
+    public async Task SetStarterCatalogAsync(IEnumerable<StarterCatalogEntry> entries)
+    {
+        _starterCatalog = entries?.ToList() ?? new List<StarterCatalogEntry>();
+        await RefreshModelStatusesAsync();
     }
 
     private async Task AddOrphanToConfigAsync()
@@ -631,6 +640,12 @@ public class PrepViewModel : BaseViewModel
     private IReadOnlyList<ModelGridRow> GetCheckedModelRows()
         => ModelRows.Where(r => r.IsSelected).ToList().AsReadOnly();
 
+    private static bool IsStarterOnlyRecommendationRow(ModelGridRow row)
+        => string.Equals(row.Source, "Recommended", StringComparison.OrdinalIgnoreCase);
+
+    private static string DescribeRemoveSelection(IReadOnlyList<ModelGridRow> rows)
+        => rows.Count == 1 ? rows[0].Name : $"{rows.Count} selected models";
+
     private async Task DownloadAsync()
     {
         if (!EnsureWritable("Download models")) return;
@@ -640,38 +655,35 @@ public class PrepViewModel : BaseViewModel
             return;
         }
 
-        // Auto-register any checked starter-model rows into the drive config
-        // so users don't need a separate "Add to config" step before download.
-        var checkedStarters = StarterModels.Where(r => r.IsSelected).ToList();
-        if (checkedStarters.Count > 0)
-        {
-            var configPath = GetConfigPath(_selectedDrive.RootPath);
-            _driveService.EnsureSsdStructure(_selectedDrive.RootPath);
-            var config = await _modelService.LoadConfigAsync(configPath);
-            foreach (var row in checkedStarters)
-            {
-                _modelService.UpsertModel(config.Models, row.Tag, ModelInstallStatus.NotInstalled);
-                AppendLog($"Added starter model '{row.Tag}' to config.");
-            }
-            await _modelService.SaveConfigAsync(configPath, config);
-            await RefreshModelStatusesAsync();
-        }
-
-        var selected = GetCheckedModelRows()
-            .Where(r => !r.IsOnDiskOnly)
-            .Select(r => r.Name)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        if (selected.Count == 0)
+        var checkedRows = GetCheckedModelRows();
+        if (checkedRows.Count == 0)
         {
             StatusText = "No models checked — check one or more models to download";
             AppendLog("Check one or more models to download.");
             return;
         }
 
+        var selected = checkedRows
+            .Where(r => !r.IsPresentOnDrive)
+            .Select(r => r.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (selected.Count == 0)
+        {
+            StatusText = "All checked models are already on the drive";
+            AppendLog("All checked models are already on the drive — nothing to download.");
+            return;
+        }
+
+        var skippedCount = checkedRows.Count - selected.Count;
+        if (skippedCount > 0)
+            AppendLog($"Skipping {skippedCount} checked row(s) already on the drive.");
+
+        _driveService.EnsureSsdStructure(_selectedDrive.RootPath);
+
         if (!ConfirmSizingWarningsIfNeeded(selected)) return;
         await PullModelsAsync(selected);
-        ClearStarterSelection();
+        ClearSelection();
     }
 
     private bool ConfirmSizingWarningsIfNeeded(IReadOnlyList<string> models)
@@ -683,7 +695,7 @@ public class PrepViewModel : BaseViewModel
         {
             if (!_dialogService.ConfirmSizingWarnings(warnings))
             {
-                AppendLog("Pull cancelled after sizing warning.");
+                AppendLog("Download cancelled after sizing warning.");
                 return false;
             }
         }
@@ -702,12 +714,12 @@ public class PrepViewModel : BaseViewModel
             AppendLog("Select a target drive first.");
             return;
         }
-        if (!EnsureWritable("Pull model operation")) return;
+        if (!EnsureWritable("Download operation")) return;
 
         var root = _selectedDrive.RootPath;
         var configPath = GetConfigPath(root);
         _modelOperationCts = new CancellationTokenSource();
-        SetModelOperationState(true, "Pulling...");
+        SetModelOperationState(true, "Downloading...");
         ProgressIsIndeterminate = true;
 
         IOllamaServerHandle? serverHandle = null;
@@ -737,8 +749,8 @@ public class PrepViewModel : BaseViewModel
             {
                 _modelOperationCts.Token.ThrowIfCancellationRequested();
                 await _modelService.UpdateModelStatusAsync(configPath, model, ModelInstallStatus.Downloading);
-                StatusText = $"Pulling {model}...";
-                AppendLog($"Pulling {model}...");
+                StatusText = $"Downloading {model}...";
+                AppendLog($"Downloading {model}...");
 
                 try
                 {
@@ -746,25 +758,25 @@ public class PrepViewModel : BaseViewModel
                         ollamaExe, modelsRoot, model, AppendLog, _modelOperationCts.Token, serverHandle.Host);
 
                     await _modelService.UpdateModelStatusAsync(configPath, model, ModelInstallStatus.Installed, result.Sha256, result.SizeBytes, DateTime.UtcNow);
-                    AppendLog($"Installed {model} ({FormatSize(result.SizeBytes)}). Sha256 {result.Sha256[..8]}...");
+                    AppendLog($"Downloaded {model} ({FormatSize(result.SizeBytes)}). Sha256 {result.Sha256[..8]}...");
                 }
                 catch (OperationCanceledException)
                 {
                     await _modelService.UpdateModelStatusAsync(configPath, model, ModelInstallStatus.NotInstalled);
-                    AppendLog($"Pull cancelled for {model}.");
+                    AppendLog($"Download cancelled for {model}.");
                     throw;
                 }
                 catch (Exception ex)
                 {
                     await _modelService.UpdateModelStatusAsync(configPath, model, ModelInstallStatus.Failed);
-                    AppendLog($"Failed to install {model}: {ex.Message}");
+                    AppendLog($"Failed to download {model}: {ex.Message}");
                 }
             }
-            StatusText = "Model pull complete";
+            StatusText = "Download complete";
         }
         catch (OperationCanceledException)
         {
-            StatusText = "Model operation cancelled";
+            StatusText = "Download cancelled";
         }
         finally
         {
@@ -774,53 +786,6 @@ public class PrepViewModel : BaseViewModel
             _modelOperationCts?.Dispose();
             _modelOperationCts = null;
             await RefreshModelStatusesAsync();
-        }
-    }
-
-    private async Task VerifyAsync()
-    {
-        if (_isModelOperationRunning)
-        {
-            AppendLog("Cannot verify while another model operation is running.");
-            return;
-        }
-        if (_selectedDrive is null)
-        {
-            AppendLog("Select a target drive first.");
-            return;
-        }
-        if (!EnsureWritable("Verify model")) return;
-
-        var selected = GetCheckedModelRows().Where(r => !r.IsOnDiskOnly).Select(r => r.Name).Take(1).ToList();
-        if (selected.Count == 0)
-        {
-            AppendLog("Check a configured model row to verify.");
-            return;
-        }
-
-        var modelName = selected[0];
-        var configPath = GetConfigPath(_selectedDrive.RootPath);
-        var config = await _modelService.LoadConfigAsync(configPath);
-        var model = config.Models.FirstOrDefault(m => string.Equals(m.Name, modelName, StringComparison.OrdinalIgnoreCase));
-        if (model is null || string.IsNullOrWhiteSpace(model.Sha256))
-        {
-            AppendLog($"Cannot verify {modelName}: no stored hash in config.");
-            return;
-        }
-
-        SetModelOperationState(true, "Verifying model...");
-        try
-        {
-            var modelsRoot = Path.Combine(_selectedDrive.RootPath, SsdLayout.Models);
-            var ok = await _modelService.VerifyModelAsync(modelsRoot, modelName, model.Sha256, AppendLog, CancellationToken.None);
-            if (!ok)
-                await _modelService.UpdateModelStatusAsync(configPath, modelName, ModelInstallStatus.Failed);
-            else
-                await _modelService.UpdateModelStatusAsync(configPath, modelName, ModelInstallStatus.Installed, model.Sha256, model.SizeBytes, DateTime.UtcNow);
-        }
-        finally
-        {
-            SetModelOperationState(false, "Verify complete");
         }
     }
 
@@ -838,70 +803,137 @@ public class PrepViewModel : BaseViewModel
         }
         if (!EnsureWritable("Remove/delete model")) return;
 
-        var selectedRow = GetCheckedModelRows().FirstOrDefault();
-        if (selectedRow is null)
+        var checkedRows = GetCheckedModelRows();
+        if (checkedRows.Count == 0)
         {
-            AppendLog("Check a model row to remove.");
+            AppendLog("Check one or more models to remove.");
             return;
         }
 
-        var choice = _dialogService.PromptRemoveModel(selectedRow.Name);
+        var removableRows = checkedRows.Where(row => !IsStarterOnlyRecommendationRow(row)).ToList();
+        if (removableRows.Count == 0)
+        {
+            AppendLog("Remove only works for models already in the configuration or on the drive.");
+            return;
+        }
+
+        var skippedCount = checkedRows.Count - removableRows.Count;
+        if (skippedCount > 0)
+            AppendLog($"Skipping {skippedCount} recommended row(s) that are not yet on the drive or in the configuration.");
+
+        var choice = _dialogService.PromptRemoveModel(DescribeRemoveSelection(removableRows));
         if (choice == ModelRemoveChoice.Cancel)
         {
-            AppendLog("Remove/Delete cancelled.");
+            AppendLog("Remove cancelled.");
             return;
         }
 
         var configPath = GetConfigPath(_selectedDrive.RootPath);
         var config = await _modelService.LoadConfigAsync(configPath);
-        var model = config.Models.FirstOrDefault(m => string.Equals(m.Name, selectedRow.Name, StringComparison.OrdinalIgnoreCase));
 
         if (choice == ModelRemoveChoice.ConfigOnly)
         {
-            if (model is null)
+            var configDirty = false;
+            foreach (var selectedRow in removableRows)
             {
-                AppendLog($"{selectedRow.Name} is already on-disk-only and not in config.");
-                return;
+                var model = config.Models.FirstOrDefault(m => string.Equals(m.Name, selectedRow.Name, StringComparison.OrdinalIgnoreCase));
+                if (model is null)
+                {
+                    AppendLog($"{selectedRow.Name} is already only on the drive and not in the configuration.");
+                    continue;
+                }
+
+                config.Models.Remove(model);
+                configDirty = true;
+                AppendLog(selectedRow.IsPresentOnDrive
+                    ? $"{selectedRow.Name}: removed from configuration only (disk contents kept)."
+                    : $"{selectedRow.Name}: removed from configuration.");
             }
-            model.Status = ModelInstallStatus.NotInstalled;
-            model.Sha256 = null;
-            model.SizeBytes = null;
-            model.LastVerifiedUtc = null;
-            await _modelService.SaveConfigAsync(configPath, config);
+
+            if (configDirty)
+                await _modelService.SaveConfigAsync(configPath, config);
+
             await RefreshModelStatusesAsync();
-            AppendLog($"{model.Name}: removed from config only (disk contents kept).");
             return;
         }
 
-        SetModelOperationState(true, $"Deleting {selectedRow.Name} from disk...");
+        var deleteFailures = new List<string>();
+        var configDirtyForDelete = false;
+        SetModelOperationState(
+            true,
+            removableRows.Count == 1
+                ? $"Deleting {removableRows[0].Name} from disk..."
+                : $"Deleting {removableRows.Count} models from disk...");
         IOllamaServerHandle? serverHandle = null;
         try
         {
-            var ollamaExe = await _ollamaPackageService.EnsureOllamaReadyAsync(
-                _selectedDrive.RootPath, _ollamaUrl, AppendLog, null, CancellationToken.None);
-            var modelsRoot = Path.Combine(_selectedDrive.RootPath, SsdLayout.Models);
-
-            // Start a controlled temporary server for the delete operation.
-            serverHandle = await _ollamaPackageService.StartTemporaryServerAsync(
-                ollamaExe, modelsRoot, AppendLog, CancellationToken.None);
-
-            AppendLog($"Deleting {selectedRow.Name} from disk with ollama rm...");
-            await _modelService.DeleteModelAsync(ollamaExe, modelsRoot, selectedRow.Name, AppendLog, CancellationToken.None, serverHandle.Host);
-
-            if (model is not null)
+            foreach (var selectedRow in removableRows.Where(row => !row.IsPresentOnDrive))
             {
-                model.Status = ModelInstallStatus.NotInstalled;
-                model.Sha256 = null;
-                model.SizeBytes = null;
-                model.LastVerifiedUtc = null;
-                await _modelService.SaveConfigAsync(configPath, config);
+                var model = config.Models.FirstOrDefault(m => string.Equals(m.Name, selectedRow.Name, StringComparison.OrdinalIgnoreCase));
+                if (model is null)
+                {
+                    AppendLog($"{selectedRow.Name}: no on-disk files were present to delete.");
+                    continue;
+                }
+
+                config.Models.Remove(model);
+                configDirtyForDelete = true;
+                AppendLog($"{selectedRow.Name}: removed from configuration (no on-disk files were present).");
             }
-            AppendLog($"{selectedRow.Name}: deleted from disk.");
-        }
-        catch (Exception ex)
-        {
-            AppendLog($"Delete failed for {selectedRow.Name}: {ex.Message}");
-            _dialogService.ShowError($"Failed to delete model from disk: {ex.Message}", "Delete failed");
+
+            var rowsPresentOnDrive = removableRows.Where(row => row.IsPresentOnDrive).ToList();
+            if (rowsPresentOnDrive.Count > 0)
+            {
+                var ollamaExe = await _ollamaPackageService.EnsureOllamaReadyAsync(
+                    _selectedDrive.RootPath, _ollamaUrl, AppendLog, null, CancellationToken.None);
+                var modelsRoot = Path.Combine(_selectedDrive.RootPath, SsdLayout.Models);
+
+                // Start a controlled temporary server once for the whole batch.
+                serverHandle = await _ollamaPackageService.StartTemporaryServerAsync(
+                    ollamaExe, modelsRoot, AppendLog, CancellationToken.None);
+
+                foreach (var selectedRow in rowsPresentOnDrive)
+                {
+                    try
+                    {
+                        AppendLog($"Deleting {selectedRow.Name} from disk with ollama rm...");
+                        await _modelService.DeleteModelAsync(ollamaExe, modelsRoot, selectedRow.Name, AppendLog, CancellationToken.None, serverHandle.Host);
+
+                        var model = config.Models.FirstOrDefault(m => string.Equals(m.Name, selectedRow.Name, StringComparison.OrdinalIgnoreCase));
+                        if (model is not null)
+                        {
+                            config.Models.Remove(model);
+                            configDirtyForDelete = true;
+                            AppendLog($"{selectedRow.Name}: deleted from disk and removed from configuration.");
+                        }
+                        else
+                        {
+                            AppendLog($"{selectedRow.Name}: deleted from disk.");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        deleteFailures.Add($"{selectedRow.Name}: {ex.Message}");
+                        AppendLog($"Delete failed for {selectedRow.Name}: {ex.Message}");
+                    }
+                }
+            }
+
+            if (configDirtyForDelete)
+                await _modelService.SaveConfigAsync(configPath, config);
+
+            if (deleteFailures.Count == 1)
+            {
+                _dialogService.ShowError($"Failed to delete model from disk: {deleteFailures[0]}", "Delete failed");
+            }
+            else if (deleteFailures.Count > 1)
+            {
+                var message =
+                    "Failed to delete some models from disk:"
+                    + Environment.NewLine + Environment.NewLine
+                    + string.Join(Environment.NewLine, deleteFailures.Select(f => $"- {f}"));
+                _dialogService.ShowError(message, "Delete failed");
+            }
         }
         finally
         {
@@ -998,9 +1030,9 @@ public class PrepViewModel : BaseViewModel
         }
 
         // Mark the whole format+prepare flow as a busy operation so the
-        // other mutating commands (Pull, Verify, Remove, Finalize) are
+        // other mutating commands (Download, Remove, Finalize) are
         // gated by CanMutateDrive while Format-Volume is running. Without
-        // this, a user could kick off a pull against a drive root that's
+        // this, a user could kick off a download against a drive root that's
         // mid-erase and either fail against a disappearing volume or
         // repopulate the drive before SaveConfigAsync lands.
         SetModelOperationState(true, $"Formatting {root}...");
@@ -1347,7 +1379,12 @@ public class PrepViewModel : BaseViewModel
     {
         if (_selectedDrive is null)
         {
+            // Even without a drive, surface the starter catalog so the
+            // merged grid isn't empty on first launch. Sizing warnings
+            // are "OK" placeholder — they require a drive root to compute.
             ModelRows.Clear();
+            foreach (var row in BuildStarterOnlyRows(freeDiskGb: null, takenNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase)))
+                ModelRows.Add(row);
             return;
         }
 
@@ -1390,12 +1427,14 @@ public class PrepViewModel : BaseViewModel
     {
         var rows = new List<ModelGridRow>();
         var configured = configModels.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        var catalogByTag = _starterCatalog.ToDictionary(e => e.Tag, StringComparer.OrdinalIgnoreCase);
 
         foreach (var model in configured)
         {
             var onDisk = discoveredOnDisk.Contains(model.Name);
             var state = DetermineConfiguredState(model, onDisk);
             var warnings = _modelService.GetSizingWarnings(model.Name, freeDiskGb, _systemRamGb, _gpuVramGb);
+            var (tier, bestAt) = LookupStarterMeta(catalogByTag, model.Name);
             rows.Add(new ModelGridRow(
                 model.Name,
                 state,
@@ -1404,17 +1443,68 @@ public class PrepViewModel : BaseViewModel
                 model.SizeBytes.HasValue ? FormatSize(model.SizeBytes.Value) : "—",
                 string.IsNullOrWhiteSpace(model.Sha256) ? "—" : model.Sha256[..Math.Min(8, model.Sha256.Length)],
                 model.LastVerifiedUtc.HasValue ? model.LastVerifiedUtc.Value.ToLocalTime().ToString("u") : "—",
-                false));
+                isOnDiskOnly: false,
+                isPresentOnDrive: onDisk,
+                tier: tier,
+                bestAt: bestAt));
         }
 
         var configuredNames = new HashSet<string>(configured.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
         foreach (var discovered in discoveredOnDisk.Where(d => !configuredNames.Contains(d)).OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
         {
             var warnings = _modelService.GetSizingWarnings(discovered, freeDiskGb, _systemRamGb, _gpuVramGb);
-            rows.Add(new ModelGridRow(discovered, "On drive only", "Disk", warnings.Count == 0 ? "OK" : string.Join("; ", warnings), "—", "—", "—", true));
+            var (tier, bestAt) = LookupStarterMeta(catalogByTag, discovered);
+            rows.Add(new ModelGridRow(
+                discovered,
+                "On drive only",
+                "Disk",
+                warnings.Count == 0 ? "OK" : string.Join("; ", warnings),
+                "—", "—", "—",
+                isOnDiskOnly: true,
+                isPresentOnDrive: true,
+                tier: tier,
+                bestAt: bestAt));
         }
 
+        // Third pass: recommended starters that aren't in config or on-disk.
+        // Lets the merged grid surface Small/Medium/Large groupings before
+        // the user has downloaded anything. IsSelected default = false.
+        var taken = new HashSet<string>(configuredNames, StringComparer.OrdinalIgnoreCase);
+        foreach (var name in discoveredOnDisk) taken.Add(name);
+        foreach (var starter in BuildStarterOnlyRows(freeDiskGb, taken))
+            rows.Add(starter);
+
         return rows;
+    }
+
+    private IEnumerable<ModelGridRow> BuildStarterOnlyRows(int? freeDiskGb, HashSet<string> takenNames)
+    {
+        foreach (var entry in _starterCatalog
+                     .Where(e => !takenNames.Contains(e.Tag))
+                     .OrderBy(e => e.Tag, StringComparer.OrdinalIgnoreCase))
+        {
+            var warnings = _modelService.GetSizingWarnings(entry.Tag, freeDiskGb, _systemRamGb, _gpuVramGb);
+            var row = new ModelGridRow(
+                entry.Tag,
+                "Not downloaded",
+                "Recommended",
+                warnings.Count == 0 ? "OK" : string.Join("; ", warnings),
+                "—", "—", "—",
+                isOnDiskOnly: false,
+                isPresentOnDrive: false,
+                tier: entry.SizeTier,
+                bestAt: entry.BestAt);
+            row.IsSelected = false;
+            yield return row;
+        }
+    }
+
+    private static (string tier, string bestAt) LookupStarterMeta(
+        Dictionary<string, StarterCatalogEntry> catalogByTag, string name)
+    {
+        if (catalogByTag.TryGetValue(name, out var entry))
+            return (entry.SizeTier, entry.BestAt);
+        return ("Custom", string.Empty);
     }
 
     private void RefreshReadinessItems(List<ReadinessItem> checks)
@@ -1452,7 +1542,6 @@ public class PrepViewModel : BaseViewModel
         AddModelCommand.RaiseCanExecuteChanged();
         AddOrphanToConfigCommand.RaiseCanExecuteChanged();
         DownloadCommand.RaiseCanExecuteChanged();
-        VerifyCommand.RaiseCanExecuteChanged();
         RemoveCommand.RaiseCanExecuteChanged();
         CancelOperationCommand.RaiseCanExecuteChanged();
         FormatPrepareCommand.RaiseCanExecuteChanged();

@@ -461,7 +461,8 @@
                     <Button x:Name="AddFilesButton" Content="Add files"
                             Style="{StaticResource GhostSecondaryButton}"
                             Margin="0,0,8,8" Click="AddFiles_Click"
-                            ToolTip="Pick individual files to ingest into the active library."/>
+                            ToolTipService.ShowOnDisabled="True"
+                            ToolTip="Create or select a library first."/>
                     <Button x:Name="AddFolderButton" Content="Add folder"
                             Style="{StaticResource GhostSecondaryButton}"
                             Margin="0,0,8,8" Click="AddFolder_Click"

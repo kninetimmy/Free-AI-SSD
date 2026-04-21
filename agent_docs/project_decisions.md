@@ -264,3 +264,22 @@ endpoint emits in-stream `{type:"error"}` / `{type:"rag-warning"}` NDJSON events
 
 `OperationCanceledException` is not caught and returned as `Failure` — it rethrows,
 letting callers observe cancellation naturally. Established X13 (PR forthcoming).
+
+---
+
+## 2026-04-21 — F3 merged-grid actions use explicit bulk selection only
+
+PrepApp's merged Models grid does **not** auto-select configured/downloaded rows.
+All model actions now operate only on rows the user explicitly checked in the grid.
+
+The standalone Verify action is removed from the PrepViewModel/UI. Download skips
+checked rows already present on the drive, and Remove applies one chosen action to
+all checked rows instead of silently acting on the first checked row only. For
+config-only removal, entries are removed from config rather than merely reset to
+`NotInstalled`.
+
+Rationale: after Starter + Configured Models merged into one grid, the old defaults
+became unsafe and misleading — default-selected downloaded rows could trigger
+accidental re-downloads, and first-row-only Remove no longer matched the visual
+selection model. Explicit selection keeps the 2-tab PrepApp flow predictable for
+non-technical users.
