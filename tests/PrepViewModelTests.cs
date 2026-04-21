@@ -1,5 +1,6 @@
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Models;
+using FreeAiSsd.Shared.Mvvm;
 using FreeAiSsd.Shared.Services;
 using FreeAiSsd.Shared.ViewModels;
 using Moq;
@@ -51,6 +52,15 @@ public class PrepViewModelTests
         _driveService.Setup(d => d.GetFreeDiskSpaceGb(It.IsAny<string>())).Returns(100);
         string? problem = null;
         _artifactStagingService.Setup(a => a.AreMacArtifactsAvailable(out problem)).Returns(false);
+    }
+
+    private static async Task WaitForCommandAsync(AsyncRelayCommand command)
+    {
+        for (var i = 0; i < 100 && command.IsExecuting; i++)
+            await Task.Delay(10);
+
+        Assert.False(command.IsExecuting);
+        Assert.Null(command.LastException);
     }
 
     [Fact]
@@ -200,27 +210,31 @@ public class PrepViewModelTests
 
         Assert.Equal(2, vm.ModelRows.Count);
         var configRow = vm.ModelRows.First(r => r.Name == "llama3:latest");
-        Assert.Equal("Ready", configRow.Status);
+        Assert.Equal("Downloaded", configRow.Status);
         Assert.False(configRow.IsOnDiskOnly);
+        Assert.True(configRow.IsPresentOnDrive);
+        Assert.False(configRow.IsSelected);
 
         var orphanRow = vm.ModelRows.First(r => r.Name == "orphan:model");
-        Assert.Equal("OnDiskOnly", orphanRow.Status);
+        Assert.Equal("On drive only", orphanRow.Status);
         Assert.True(orphanRow.IsOnDiskOnly);
+        Assert.True(orphanRow.IsPresentOnDrive);
+        Assert.False(orphanRow.IsSelected);
     }
 
     [Fact]
-    public void DetermineConfiguredState_InstalledReturnsReady()
+    public void DetermineConfiguredState_InstalledReturnsDownloaded()
     {
         var model = new ModelConfigEntry { Name = "test", Status = ModelInstallStatus.Installed };
-        Assert.Equal("Ready", GetState(model, true));
-        Assert.Equal("Ready", GetState(model, false));
+        Assert.Equal("Downloaded", GetState(model, true));
+        Assert.Equal("Downloaded", GetState(model, false));
     }
 
     [Fact]
     public void DetermineConfiguredState_NotInstalledAndNotOnDisk()
     {
         var model = new ModelConfigEntry { Name = "test", Status = ModelInstallStatus.NotInstalled };
-        Assert.Equal("ConfiguredNotDownloaded", GetState(model, false));
+        Assert.Equal("Not downloaded", GetState(model, false));
     }
 
     [Fact]
@@ -302,6 +316,130 @@ public class PrepViewModelTests
         var vm = CreateViewModel();
         vm.ProgressIsIndeterminate = true;
         Assert.True(vm.ProgressIsIndeterminate);
+    }
+
+    [Fact]
+    public void ModelGridRow_IsSelected_RaisesPropertyChanged()
+    {
+        var row = new ModelGridRow(
+            "llama3:latest",
+            "Not downloaded",
+            "Recommended",
+            "OK",
+            "—",
+            "—",
+            "—",
+            isOnDiskOnly: false,
+            isPresentOnDrive: false);
+
+        var changed = false;
+        row.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ModelGridRow.IsSelected))
+                changed = true;
+        };
+
+        row.IsSelected = true;
+
+        Assert.True(changed);
+        Assert.True(row.IsSelected);
+    }
+
+    [Fact]
+    public async Task RemoveCommand_ConfigOnly_AppliesToAllCheckedRows()
+    {
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        var config = new PortableConfig();
+        config.Models.Add(new ModelConfigEntry { Name = "llama3:8b", Status = ModelInstallStatus.Installed });
+        config.Models.Add(new ModelConfigEntry { Name = "qwen2.5:7b", Status = ModelInstallStatus.NotInstalled });
+        _modelService.Setup(m => m.LoadConfigAsync(It.IsAny<string>())).ReturnsAsync(config);
+        _dialogService.Setup(d => d.PromptRemoveModel(It.Is<string>(s => s.Contains("2 selected models"))))
+            .Returns(ModelRemoveChoice.ConfigOnly);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        Thread.Sleep(100);
+        vm.ModelRows.First(r => r.Name == "llama3:8b").IsSelected = true;
+        vm.ModelRows.First(r => r.Name == "qwen2.5:7b").IsSelected = true;
+
+        vm.RemoveCommand.Execute(null);
+        await WaitForCommandAsync(vm.RemoveCommand);
+
+        Assert.Empty(config.Models);
+        _modelService.Verify(m => m.SaveConfigAsync(It.IsAny<string>(), config), Times.Once);
+    }
+
+    [Fact]
+    public async Task RemoveCommand_RecommendedOnlySelection_DoesNotPrompt()
+    {
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        await vm.SetStarterCatalogAsync(new[]
+        {
+            new StarterCatalogEntry("llama3.2:3b", "Small", "General chat")
+        });
+
+        var row = vm.ModelRows.Single(r => r.Name == "llama3.2:3b");
+        row.IsSelected = true;
+
+        vm.RemoveCommand.Execute(null);
+        await WaitForCommandAsync(vm.RemoveCommand);
+
+        _dialogService.Verify(d => d.PromptRemoveModel(It.IsAny<string>()), Times.Never);
+        Assert.Contains(vm.LogLines, l => l.Contains("Remove only works"));
+    }
+
+    [Fact]
+    public async Task DownloadCommand_CheckedRowsAlreadyOnDrive_SkipsPull()
+    {
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        var config = new PortableConfig();
+        config.Models.Add(new ModelConfigEntry { Name = "llama3:latest", Status = ModelInstallStatus.Installed });
+        _modelService.Setup(m => m.LoadConfigAsync(It.IsAny<string>())).ReturnsAsync(config);
+        _modelService.Setup(m => m.DiscoverModelsOnDisk(It.IsAny<string>())).Returns(new[] { "llama3:latest" });
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        Thread.Sleep(100);
+        vm.ModelRows.Single(r => r.Name == "llama3:latest").IsSelected = true;
+
+        vm.DownloadCommand.Execute(null);
+        await WaitForCommandAsync(vm.DownloadCommand);
+
+        _driveService.Verify(d => d.EnsureSsdStructure(It.IsAny<string>()), Times.Never);
+        _modelService.Verify(m => m.PullModelAsync(
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<Action<string>>(),
+            It.IsAny<CancellationToken>(),
+            It.IsAny<string?>()), Times.Never);
+        Assert.Contains(vm.LogLines, l => l.Contains("nothing to download"));
+    }
+
+    [Fact]
+    public void ClearSelectionCommand_UnchecksEveryRow()
+    {
+        SetupDefaultMocks();
+        var config = new PortableConfig();
+        config.Models.Add(new ModelConfigEntry { Name = "llama3:8b", Status = ModelInstallStatus.NotInstalled });
+        config.Models.Add(new ModelConfigEntry { Name = "qwen2.5:7b", Status = ModelInstallStatus.NotInstalled });
+        _modelService.Setup(m => m.LoadConfigAsync(It.IsAny<string>())).ReturnsAsync(config);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        Thread.Sleep(100);
+        vm.ModelRows.First().IsSelected = true;
+        vm.ModelRows.Last().IsSelected = true;
+
+        vm.ClearSelectionCommand.Execute(null);
+
+        Assert.All(vm.ModelRows, row => Assert.False(row.IsSelected));
     }
 
     private static string GetState(ModelConfigEntry model, bool onDisk)

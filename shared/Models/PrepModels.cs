@@ -1,3 +1,5 @@
+using FreeAiSsd.Shared.Mvvm;
+
 namespace FreeAiSsd.Shared.Models;
 
 public sealed record ReadinessItem(string Check, bool Passed, string Result)
@@ -9,10 +11,19 @@ public sealed record ReadinessItem(string Check, bool Passed, string Result)
 
 public sealed class ModelGridRow(
     string name, string status, string source, string sizingWarning,
-    string sizeDisplay, string shaPreview, string lastVerifiedDisplay, bool isOnDiskOnly)
+    string sizeDisplay, string shaPreview, string lastVerifiedDisplay, bool isOnDiskOnly,
+    bool isPresentOnDrive, string tier = "Custom", string bestAt = "")
+    : BaseViewModel
 {
-    /// <summary>Whether this model is checked for pull/install operations. Auto-ticked for configured models.</summary>
-    public bool IsSelected { get; set; } = !isOnDiskOnly;
+    private bool _isSelected;
+
+    /// <summary>Whether this row is checked for bulk actions in the merged grid.</summary>
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set => SetProperty(ref _isSelected, value);
+    }
+
     public string Name { get; } = name;
     public string Status { get; } = status;
     public string Source { get; } = source;
@@ -21,20 +32,21 @@ public sealed class ModelGridRow(
     public string ShaPreview { get; } = shaPreview;
     public string LastVerifiedDisplay { get; } = lastVerifiedDisplay;
     public bool IsOnDiskOnly { get; } = isOnDiskOnly;
+    public bool IsPresentOnDrive { get; } = isPresentOnDrive;
+    public string Tier { get; } = tier;
+    public string BestAt { get; } = bestAt;
 }
 
-public sealed class StarterModelRow(
-    string tag, string @params, string sizeTier,
-    string description, string useCasesDisplay, string sizingWarning)
-{
-    public bool IsSelected { get; set; }
-    public string Tag { get; } = tag;
-    public string Params { get; } = @params;
-    public string SizeTier { get; } = sizeTier;
-    public string Description { get; } = description;
-    public string UseCasesDisplay { get; } = useCasesDisplay;
-    public string SizingWarning { get; set; } = sizingWarning;
-}
+/// <summary>
+/// Lightweight shared projection of a starter-catalog entry. The PrepApp
+/// loads the full catalog from JSON and hands these entries to the VM so
+/// the merged Models grid can surface recommended picks alongside user-
+/// added and on-disk rows.
+/// </summary>
+public sealed record StarterCatalogEntry(
+    string Tag,
+    string SizeTier,
+    string BestAt);
 
 [Flags]
 public enum PrepTargets

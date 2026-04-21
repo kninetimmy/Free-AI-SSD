@@ -70,7 +70,8 @@ the style to match.
 **After hardening batch ships — reordered 2026-04-19 (RAG audit; see decision):**
 11. **X21** — embedding provenance + compat gating — **done** (PR #157, `449ec2e`)
 11a. **X21b** — PrepApp reindex prompt — **done** (PR #158, `92625a9`)
-12. **F3** — PrepApp 3-tab restructure (Opus planning) — also folds in the "Add File button disabled" tooltip hint
+12. **F3** — PrepApp 2-tab restructure + UX simplification — **implementation complete 2026-04-21, PR pending** on `feat/f3-prepapp-3-tab-restructure`
+12a. **H3** — F3 manual PrepApp/FTUE smoke follow-up — deferred; run after PR/CI unless review finds a regression that pulls it forward
 13. **F4** — profile FTUE in PrepApp + companion install target selector (multi-stage, Opus planning)
 14. **B2** — build LAN discovery (multi-stage, Opus planning; can run in parallel with F4)
 15. **F2** — live model list fetch (smaller feature)
@@ -255,31 +256,52 @@ No "list documents" or "reindex" endpoint exists today. See Stage 2.
 
 ---
 
-### F3 — PrepApp 3-tab restructure
+### F3 — PrepApp 2-tab restructure + UX simplification
 
-**Status:** triaged
-**Scope:** Multi-stage (4 stages)
-**Model:** Opus 4.7 for the planning prompt, Sonnet 4.6 for implementation stages
+**Status:** implementation complete 2026-04-21. Stage 1 committed (`26d9a14` — VM command consolidation); Stage 2 (PrepApp XAML rewrite) and Stage 3 (FTUE re-target, Runner tooltip, docs refresh) are complete in the current worktree. Follow-up merged-grid safety pass landed: configured/downloaded rows are no longer auto-selected, `Remove` now applies one action to all checked rows, and the dead standalone `VerifyCommand` path is gone. Full build + tests passed; branch is ready to push as a PR. Plan at `C:\Users\Kninetimmy\.claude\plans\im-in-plan-mode-elegant-lightning.md`.
+**Scope:** Multi-stage (3 stages). Working branch remains `feat/f3-prepapp-3-tab-restructure` as a legacy name; feature/PR naming should use the **2-tab** wording.
+**Model:** Sonnet 4.6 for all 3 stages (planning complete, mechanical implementation)
 
-**Existence:** Current layout is 2 tabs (`MainWindow.xaml:77-442`): Model Manager (line 83) and Drive Setup (line 302). TODO's observations are accurate:
-- "Add selected to configuration" (line 111) and "Add to config" (line 203) are redundant.
-- "Pull/Install" (line 186) and "Pull Selected" (line 208) also overlap.
-- Warning strip (`SelectedDriveWarning` at Row 2) is collapsible per PR #120's stable decision, but positioned below the log on the Model Manager side — visibility concern is valid.
-- Log panel (Row 3, `1.5*` height) is squeezed.
+**Locked design** (full detail in plan file):
+- **2 tabs, not 3:** Models + Drive. Drive absorbs Finalize/readiness (they operate on the selected drive — one mental model).
+- **Monolithic `PrepViewModel` retained.** Sub-VM split evaluated and rejected — tight cross-cutting helpers (`AppendLog`, `SetModelOperationState`, `EnsureWritable`, `RefreshModelStatusesAsync`, `ConfirmSizingWarningsIfNeeded`) would become thin wrappers.
+- **Merge Starter + Configured Models grids into one grid** with a `Status` column (`Not downloaded` / `Downloaded` / `On drive only`). Collapses the old two-step "add to config → pull" into a single Download.
+- **Auto-verify on download**, standalone Verify button deleted. On SHA mismatch: delete `.part`, log "Download failed verification — please retry".
+- **Verbage overhaul for non-technical users:** Pull/Install → Download, Finalize SSD → Finish setup, Check SSD Readiness → Run checks, Check for prereq updates → Check for updates, Remove/Delete… → Remove, Cancel Current Operation → Cancel. Model Manager tab → Models, Drive Setup → Drive.
+- **FTUE re-target:** `_ftueTargetTabIndex = { 1, 0, 0 }`, Step 3 body updated.
+- **Runner `AddFilesButton` disabled tooltip** bundled in (polish item folded into this PR).
 
 **Affected files (major rewrite):**
-- `prep-app/MainWindow.xaml` — split into 3 tabs; rewire bindings
-- `shared/ViewModels/PrepViewModel.cs` (1154 lines currently) — may need splitting into per-tab view models
-- `prep-app/MainWindow.xaml.cs` — FTUE step targets may need updating (the overlay targets elements by name)
-- `project_decisions.md` — update decisions about warning strip placement
+- `prep-app/MainWindow.xaml` — rewrite to 2 tabs; merge model grids; verbage swap
+- `shared/ViewModels/PrepViewModel.cs` — rename `PullInstallCommand` → `DownloadCommand`, semantics .Take(1) → all checked; delete `PullSelectedCommand`, `VerifyCommand`, `AddStarterModelsCommand`; auto-verify in `PullModelsAsync`; add `ModelRow.Status`
+- `prep-app/MainWindow.xaml.cs` — FTUE tab-index + step 3 text; delete orphan `OnBrowseStarterModelsClick`
+- `runner/MainWindow.xaml` (line ~461) — `ToolTipService.ShowOnDisabled` + disabled tooltip on `AddFilesButton`
+- `tests/` — retire tests on deleted commands
 
-**Staging (recommend Opus draft the detailed plan first):**
-- **Stage 1** — Extract Tab 1 "Model Downloader": move Starter Models + new "Send to Configuration →" button; remove Configured Models from this tab.
-- **Stage 2** — Extract Tab 3 "Configuration / Finalize": move Configured Models + Finalize + Check Readiness here.
-- **Stage 3** — Clean Tab 2 "Drive Setup": relocate warning strip into this tab prominently; remove host IP (gated on B2 resolution).
-- **Stage 4** — Eliminate redundant buttons; consolidate Pull/Install flow.
+**Staging (single bundled PR, 3 commits):**
+- **Stage 1 ✅** — VM updates (rename + delete + auto-verify). Commit `26d9a14`.
+- **Stage 2 ✅** — XAML rewrite to 2 tabs with merged grid + verbage.
+- **Stage 3 ✅** — FTUE re-target + Runner tooltip + doc updates.
 
-**⚠ Watch for:** FTUE overlay (`MainWindow.xaml:533-578`) hard-references element names — any renames break the onboarding tour.
+**Deferred follow-up (not blocking this PR):** manual FTUE / PrepApp smoke on a real SSD with `FtueCompleted=false`. Captured as backlog item **H3** below.
+
+---
+
+### H3 — F3 manual PrepApp / FTUE smoke follow-up
+
+**Status:** triaged 2026-04-21 (deferred; not blocking F3 PR)
+**Scope:** One-shot verification pass. No code unless a regression is found.
+**Model:** Sonnet 4.6
+
+**Intent:** Come back after the F3 PR is up and CI is green, then run the manual Windows PrepApp smoke that was deferred to keep F3 moving: FTUE tab targeting, merged-grid golden path, warning-strip visibility, and the disabled tooltip polish.
+
+**Checklist:**
+- Launch PrepApp with `FtueCompleted=false`; verify Step 1 targets `TargetDriveRow` on Drive, Steps 2-3 target `StarterModelsCard` / `DownloadButton` on Models.
+- In the merged grid, check a recommended model, click Download, confirm status moves to `Downloaded`, then confirm Clear selection visibly unticks rows.
+- Check multiple rows, run Remove, and confirm one chosen action applies to all checked rows.
+- On the Drive tab, verify the warning strip stays prominent when a risky/fixed drive is selected.
+- In Runner, verify disabled `Add files` shows "Create or select a library first."
+- If any regression is found, spin it into a dedicated backlog item rather than silently reopening F3.
 
 ---
 
@@ -666,7 +688,7 @@ Could be implemented via a `DataTrigger` binding on `IsRunning` or via visibilit
 
 **Existence check (before implementation):**
 - `PortableConfig.cs` probably already has some TTS-related fields (there's a voice-model one for Piper somewhere in the PrepApp flow) — audit and reuse rather than adding parallel settings.
-- Decide whether this Settings surface lives in the Runner only, or also exposed in the PrepApp's F3 3-tab restructure (likely Runner-only, since Piper voices are downloaded via PrepApp's model-manager flow but selected at runtime).
+- Decide whether this Settings surface lives in the Runner only, or also exposed in the PrepApp's F3 2-tab restructure (likely Runner-only, since Piper voices are downloaded via PrepApp's model-manager flow but selected at runtime).
 
 **Affected files (sketch, confirm at implementation time):**
 - New: `runner/SettingsWindow.xaml(.cs)` or a Settings tab inside `MainWindow` — depends on whether Runner tab restructure ships first.
@@ -949,7 +971,7 @@ keeps the contract visible.
 
 ### H2 — Repo hardening batch (Codex deep-review low-severity sweep)
 
-**Status:** implementation complete 2026-04-20. PR pending on `chore/h2-repo-hardening`. **Low.**
+**Status:** merged PR #163 (2026-04-20). **Complete.**
 **Scope:** One-shot housekeeping batch. Slot between bug fixes, not mid-feature.
 **Model:** Sonnet 4.6 (mechanical)
 
