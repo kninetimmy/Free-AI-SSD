@@ -250,7 +250,144 @@
                                            Style="{StaticResource CaptionText}"
                                            Margin="0,0,0,8"/>
 
-                                <!-- Drive selector. x:Name preserved for FTUE step 1. -->
+                                <Border x:Name="TwoMachineExplainerCard"
+                                        Style="{StaticResource NeumorphicCard}"
+                                        Padding="12"
+                                        Margin="0,0,0,10">
+                                    <StackPanel>
+                                        <TextBlock Text="Single PC or split-PC setup"
+                                                   Style="{StaticResource H2Text}"
+                                                   FontSize="14"/>
+                                        <TextBlock Text="One SSD can cover both layouts: keep everything on one AI host PC, or stage the optional VR companion for a second machine over LAN."
+                                                   Style="{StaticResource CaptionText}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,2,0,0"/>
+                                        <Grid Margin="0,10,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Border Grid.Column="0"
+                                                    Background="{StaticResource BgRaisedBrush}"
+                                                    BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="10"
+                                                    Padding="10">
+                                                <StackPanel>
+                                                    <TextBlock Text="AI host PC"
+                                                               Style="{StaticResource H2Text}"
+                                                               FontSize="13"/>
+                                                    <TextBlock Text="Runs the Runner app, Ollama runtime, and downloaded models from this SSD."
+                                                               Style="{StaticResource CaptionText}"
+                                                               TextWrapping="Wrap"
+                                                               Margin="0,4,0,0"/>
+                                                </StackPanel>
+                                            </Border>
+                                            <Border Grid.Column="2"
+                                                    Background="{StaticResource BgRaisedBrush}"
+                                                    BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="10"
+                                                    Padding="10">
+                                                <StackPanel>
+                                                    <TextBlock Text="Optional VR PC"
+                                                               Style="{StaticResource H2Text}"
+                                                               FontSize="13"/>
+                                                    <TextBlock Text="Use the companion on a second machine while the AI host stays on your main PC. Configure its host address below if you need it."
+                                                               Style="{StaticResource CaptionText}"
+                                                               TextWrapping="Wrap"
+                                                               Margin="0,4,0,0"/>
+                                                </StackPanel>
+                                            </Border>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
+                                <GroupBox x:Name="ProfileSelectionCard" Header="Runner profile" Margin="0,0,0,10">
+                                    <StackPanel Margin="8">
+                                        <TextBlock Text="Choose your default profile. You can switch it later from the Runner main window."
+                                                   Style="{StaticResource CaptionText}"
+                                                   TextWrapping="Wrap"/>
+                                        <UniformGrid Columns="2" Margin="0,10,0,0">
+                                            <Border x:Name="FlightSimProfileCard"
+                                                    Margin="0,0,8,0"
+                                                    CornerRadius="12"
+                                                    Background="{StaticResource BgRaisedBrush}"
+                                                    BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                                    BorderThickness="2"
+                                                    Cursor="Hand"
+                                                    SnapsToDevicePixels="True"
+                                                    Effect="{StaticResource RaisedDarkShadow}"
+                                                    MouseLeftButtonDown="FlightSimProfileCard_Click"
+                                                    KeyDown="ProfileCard_KeyDown"
+                                                    Focusable="True">
+                                                <StackPanel Margin="16">
+                                                    <TextBlock Text="Flight Sim"
+                                                               Style="{StaticResource H2Text}"
+                                                               HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="DCS bindings import, HOTAS push-to-talk, and voice defaults tuned for cockpit use."
+                                                               Style="{StaticResource CaptionText}"
+                                                               TextAlignment="Center"
+                                                               TextWrapping="Wrap"
+                                                               Margin="0,6,0,0"/>
+                                                </StackPanel>
+                                            </Border>
+                                            <Border x:Name="GeneralAssistantProfileCard"
+                                                    Margin="8,0,0,0"
+                                                    CornerRadius="12"
+                                                    Background="{StaticResource BgRaisedBrush}"
+                                                    BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                                    BorderThickness="2"
+                                                    Cursor="Hand"
+                                                    SnapsToDevicePixels="True"
+                                                    Effect="{StaticResource RaisedDarkShadow}"
+                                                    MouseLeftButtonDown="GeneralAssistantProfileCard_Click"
+                                                    KeyDown="ProfileCard_KeyDown"
+                                                    Focusable="True">
+                                                <StackPanel Margin="16">
+                                                    <TextBlock Text="General Assistant"
+                                                               Style="{StaticResource H2Text}"
+                                                               HorizontalAlignment="Center"/>
+                                                    <TextBlock Text="Chat-first layout with docs/RAG focus and no flight-sim-only panels shown by default."
+                                                               Style="{StaticResource CaptionText}"
+                                                               TextAlignment="Center"
+                                                               TextWrapping="Wrap"
+                                                               Margin="0,6,0,0"/>
+                                                </StackPanel>
+                                            </Border>
+                                        </UniformGrid>
+                                        <Border Margin="0,10,0,0"
+                                                Padding="8,5"
+                                                Background="{StaticResource BgRaisedBrush}"
+                                                BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="6">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding ProfileSelectionWarning}" Value="">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding ProfileSelectionWarning}" Value="{x:Null}">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                            <StackPanel Orientation="Horizontal">
+                                                <theme:LedStatusIndicator State="Error" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                                <TextBlock Text="{Binding ProfileSelectionWarning}"
+                                                           Foreground="{StaticResource AccentMagentaBrush}"
+                                                           VerticalAlignment="Center"
+                                                           TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </GroupBox>
+
+                                <!-- Drive selector. x:Name preserved for FTUE step 3. -->
                                 <StackPanel x:Name="TargetDriveRow" Orientation="Horizontal" Margin="0,0,0,10">
                                     <TextBlock Text="Target drive:"
                                                Foreground="{StaticResource TextSecondaryBrush}"
@@ -520,15 +657,15 @@
                     Style="{StaticResource NeumorphicCard}">
                 <StackPanel>
                     <TextBlock x:Name="FtueStepLabel"
-                               Text="Step 1 of 3"
+                               Text="Step 1 of 4"
                                Style="{StaticResource CaptionText}"
                                Foreground="{StaticResource AccentCyanBrush}"
                                Margin="0,0,0,6"/>
                     <TextBlock x:Name="FtueTitleText"
-                               Text="Pick your target drive"
+                               Text="How the SSD fits your setup"
                                Style="{StaticResource H2Text}"/>
                     <TextBlock x:Name="FtueBodyText"
-                               Text="Choose the drive where Ollama and models will be installed."
+                               Text="PrepApp can stage one SSD for either a single-PC install or a split AI-host plus VR-companion setup."
                                Style="{StaticResource BodyText}"
                                TextWrapping="Wrap"
                                Margin="0,0,0,16"/>
