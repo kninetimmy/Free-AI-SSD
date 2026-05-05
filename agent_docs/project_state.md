@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-05-04 (MAC0 docs honesty pass; F3 merged to main; H3 deferred)
+Last updated: 2026-05-05 (PR #167 conflict fix merged; mac-support PR still next)
 
 Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
@@ -8,40 +8,38 @@ Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
 ## In flight
 
-**Between tasks.** F3 is now merged on `main` via PR #164 / `953fb1b`. No implementation branch is currently in flight. Optional follow-up `H3` covers a manual Windows PrepApp / FTUE smoke pass if we want one more validation sweep before starting the next feature branch.
+**macOS support docs/backlog branch:** `mac-support-backlog` is pushed to
+origin at `e8d7b24` and ready for PR after reconciling with latest `main`.
+It adds the macOS support backlog, marks MAC0 done, and corrects README /
+QUICKSTART so macOS is described as a limited Swift direct-Ollama beta rather
+than a full Windows Runner equivalent.
 
 ## Recently shipped
 
-- **PR #164 — F3 — merged `953fb1b` (2026-04-21).** PrepApp now uses the 2-tab Models/Drive flow with merged-grid explicit selection, batch Remove semantics, FTUE re-target, Runner disabled-tooltip polish, and focused PrepViewModel regression coverage. `windows-build` passed; local validation stayed green at 454 passed / 4 skipped.
+- **PR #167 - F4 Stage 1 wrap-up docs - merged `8ada5e4` (2026-05-05).** Resolved conflicts against latest `main` via branch merge commit `34d0a4e`; `windows-build` passed.
 
-- **PR #163 — H2 — merged `c8570d2` (2026-04-20).** Six-item housekeeping batch: `build.ps1` stale-artifact cleanup; `SsdLogger` write lock; `[SupportedOSPlatform("windows")]` on WMI methods (cascaded to `DriveService`); GitHub Actions SHA-pinned; README test count + TFM refreshed; xUnit `.Result` → `await`. 449 pass, 2 skip.
+- **PR #168 - Linux strategy doc - merged `a93785b` (2026-04-27).** Added the staged Linux support strategy document from branch `codex/create-linux-support-strategy-document`.
 
-- **PR #162 — X13 — merged `40f41fd` (2026-04-20).** `ChatResult` / `TranscriptionResult` discriminated unions across 13 files; `/voice/query` 503 routing fix; 12 new tests (449 total).
-
-- **PR #161 — X12 — merged `49fe0a2` (2026-04-20).** SHA-256 verification runs against the `.part` temp file before `File.Move`; on mismatch temp is deleted and destination stays absent. 3 new tests.
+- **PR #166 - F4 Stage 1 - merged `166b8a2` (2026-04-21).** Moved first-run profile setup into PrepApp.
 
 ## Next up
 
-Decide whether to run `H3` now as a manual Windows smoke pass. Otherwise pick the next implementation branch from `F4`, `B2`, `F2`, or `R1 Stage 2`.
+1. Sync/reconcile `mac-support-backlog` with latest `main`, then open its PR and let CI/review run.
+2. Start **MAC1** from `agent_docs/mac_project_backlog.md`: define the supported Mac baseline.
+3. For non-Mac work, pick from `H3`, `F4` follow-up, `B2`, `F2`, or `R1 Stage 2`.
 
-**RAG audit backlog:** X17–X23 cover audit findings; X10/X13/X15 scope expansions recorded. Plan: `C:\Users\Kninetimmy\.claude\plans\okay-i-want-to-glowing-galaxy.md`. v1.3.x sequence: X18 → X15 (expanded) → X19 → X20 → X22 → X23. X17 reduced to Stage 1 textless-page diagnostic (full OCR deferred — workload is text-layer PDFs).
+**RAG audit backlog:** X17-X23 cover audit findings; X10/X13/X15 scope expansions recorded. Plan: `C:\Users\Kninetimmy\.claude\plans\okay-i-want-to-glowing-galaxy.md`. v1.3.x sequence: X18 -> X15 (expanded) -> X19 -> X20 -> X22 -> X23. X17 reduced to Stage 1 textless-page diagnostic (full OCR deferred -- workload is text-layer PDFs).
 
 **Dormant (could not reproduce):** X1-Redux. Diag branch `diag/x1-redux-send-hang` stays on remote, unmerged.
 
-**v1.3.x territory:** X4 (bundled web chat UI), Runner tab restructure, X5 (GPU/CPU indicator) — slot around the RAG audit queue.
-
-See `project_backlog.md` for full item details.
-
-**macOS support track:** `agent_docs/mac_project_backlog.md` is the source of
-truth for turning the current Swift macOS beta into a supported platform. MAC0
-completed the docs honesty pass; next Mac item is MAC1 (define supported Mac
-baseline).
+See `project_backlog.md` for full general backlog details. See
+`agent_docs/mac_project_backlog.md` for the macOS support track.
 
 ## Last session
 
-2026-04-21 (F3 merged — PR #164, `953fb1b`) — Merged the 2-tab PrepApp rewrite after `windows-build` went green. Shipped the merged-grid safety pass, FTUE tab retarget, Runner disabled-tooltip copy, and focused PrepViewModel coverage. Manual PrepApp / FTUE smoke remains deferred as `H3`, not a merge blocker.
+2026-05-05 (PR #167 conflict fix + merge - `34d0a4e` / `8ada5e4`) - Identified the conflicting open PR as #167 (`docs/f4-stage1-wrap-up`), not the current `mac-support-backlog` branch. Stashed the local dashboard edit, switched to the PR branch, merged `origin/main`, resolved conflicts in `agent_docs/project_state.md` and `agent_docs/project_backlog.md`, pushed merge commit `34d0a4e`, confirmed GitHub reported the PR mergeable, watched CI, then merged PR #167 as `8ada5e4`. Restored the original `mac-support-backlog` checkout and its uncommitted dashboard edit.
 
-2026-04-21 (F3 close-out) — Finished the merged-grid safety pass for PrepApp: configured/downloaded rows are no longer auto-selected, `Remove` now applies one chosen action to all checked rows, and the dead standalone `VerifyCommand` path is deleted. Added focused PrepViewModel tests for explicit selection, batch remove, clear selection, and download-skip-on-drive behavior. Full build + test suite are green. Manual PrepApp / FTUE smoke is deferred to backlog item `H3`; branch is ready for PR + CI.
+2026-05-04 (MAC0 docs/backlog - `e8d7b24`) - Created `agent_docs/mac_project_backlog.md` as the ordered macOS support track, with MAC0 marked done and MAC1 as the next Mac step. Updated README and QUICKSTART to state that macOS is currently a limited Swift direct-Ollama beta, while RAG/citations, encrypted config unlock, Runner LAN API hosting, RunnerCli against a Mac host, voice/TTS, HOTAS/PTT, and DCS import remain Windows-only for now. Committed and pushed branch `mac-support-backlog`.
 
 ## Open questions
 
