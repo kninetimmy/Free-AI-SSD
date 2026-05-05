@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-05-05 (MAC4 prompt drafted; ready for fresh session)
+Last updated: 2026-05-05 (MAC4 shipped)
 
 Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
@@ -8,14 +8,15 @@ Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
 ## In flight
 
-**MAC4 prompt staged.** `agent_docs/mac4_execution_prompt.md` is ready to run
-in a fresh session. The prompt pins Mac Ollama to v0.5.7 to match the Windows
-`DefaultWindowsPackage`, generalizes `OllamaPackageTrustPolicy` for Mac, adds a
-new `MacOllamaLifecycleService` in `runner-core/`, gates Swift `mac-runner`
-launch on the on-SSD trust attestation, and validates the Apple Silicon (arm64)
-slice. After MAC4: MAC5 encrypted config, then MAC6 Mac LAN API + X4 web UI.
+Nothing in flight. MAC4 merged 2026-05-05; MAC5 (encrypted config on Mac) is
+the next Runner-parity item. After MAC5: MAC6 (Mac LAN API host + Companion
+connectivity + X4 web chat surface), then MAC7 (RAG parity) and MAC8 (Mac
+document management). Cross-platform PrepApp parity (MAC16/17/18) sequences
+after Runner parity per the 2026-05-05 prep parity decision.
 
 ## Recently shipped
+
+- **PR #177 - MAC4 macOS Ollama lifecycle + runtime trust gate - merged `648fcd9` (2026-05-05).** Generalized `OllamaPackageTrustPolicy` so `DefaultMacPackage` (pinned to Ollama v0.5.7) is a first-class peer to `DefaultWindowsPackage`, with a shared `ValidateExecutionAttestationCore` validator. Added `MacOllamaLifecycleService` in `runner-core/` (plain `net8.0`) with trust-gate, loopback bind, `OLLAMA_MODELS`, and argument-array `serve` launch. Apple Silicon (arm64) slice check runs in pure managed code via the new `MachOArchInspector`, so Windows-side PrepApp can refuse non-arm64 payloads without `lipo`. `ArtifactStagingService.StageMacOllamaAsync` now goes through `MacOllamaStagingPipeline` (verify SHA-256 + arm64 + write attestation; scrub partial dir on failure). Swift `mac-runner` re-checks the on-SSD attestation at every launch and refuses on missing / malformed / URL-mismatched / SHA-mismatched records. CI `windows-build` and `mac-runner-build` both passed.
 
 - **PR #176 - macOS runner CI build enabled - merged `7870eb6` (2026-05-05).**
   Codex's small follow-up to MAC3 enabling the macOS runner job in
@@ -35,8 +36,8 @@ slice. After MAC4: MAC5 encrypted config, then MAC6 Mac LAN API + X4 web UI.
 
 ## Next up
 
-1. Execute **MAC4** in a fresh session via `agent_docs/mac4_execution_prompt.md`.
-2. Then **MAC5** (encrypted config on Mac) -> **MAC6** (Mac LAN API + Windows-Companion-to-Mac connectivity + X4 web chat UI surface).
+1. **MAC5** - macOS encrypted config unlock/save. Brings `SsdEncryption` and `ConfigStore` into the Mac runtime path so an encrypted SSD prepped on Windows is usable on Mac (and after MAC17, vice versa). Unblocks MAC17 as well.
+2. **MAC6** - Mac LAN API host + Windows-Companion-to-Mac connectivity + X4 web chat UI served by the same Mac Kestrel.
 3. Cross-platform PrepApp parity (**MAC16/MAC17/MAC18**) sequences after Runner parity (MAC4-MAC8). Decision recorded 2026-05-05; APFS dropped from supported targets, exFAT is universal.
 4. Track **MAC10a** before broad Mac distribution: Windows PrepApp OS compatibility selector preselecting NTFS vs exFAT.
 5. For non-Mac work, pick from `H3`, `F4` follow-up, `B2`, `F2`, or `R1 Stage 2`.
@@ -49,6 +50,8 @@ See `project_backlog.md` for full general backlog details. See
 `agent_docs/mac_project_backlog.md` for the macOS support track.
 
 ## Last session
+
+2026-05-05 (MAC4 macOS Ollama lifecycle + runtime trust gate - PR #177, `648fcd9`) - Created, pushed, CI-validated, and merged `mac4-macos-ollama-lifecycle`. Generalized `OllamaPackageTrustPolicy` so `DefaultMacPackage` (pinned to Ollama v0.5.7, matching `DefaultWindowsPackage`) is a first-class peer; refactored Windows + Mac validators to share a single `ValidateExecutionAttestationCore`. Added pure-managed `MachOArchInspector` so the Apple Silicon (arm64) slice check runs from Windows-side PrepApp without `lipo`, with a new `Arm64SliceMissing` failure reason. Added `MacOllamaLifecycleService` in `runner-core/` (plain `net8.0`) with trust-gate, `127.0.0.1` loopback bind, `OLLAMA_MODELS`, and argument-array `serve` launch. Wired `ArtifactStagingService.StageMacOllamaAsync` through the new `MacOllamaStagingPipeline` (verify SHA-256 + arm64 + write attestation, scrub partial dir on failure). Repinned `tools/FreeAiSsd.PrereqFetch` to the same v0.5.7 release. Swift `mac-runner` re-checks the on-SSD attestation at every launch and refuses on missing / malformed / URL-mismatched / SHA-mismatched records. New tests: `MacOllamaTrustPolicyTests`, `MachOArchInspectorTests`, `MacOllamaLifecycleServiceTests`, `MacOllamaStagingPipelineTests`, plus shared `MachOFixtures`. CI `windows-build` and `mac-runner-build` both passed before merge. Manual real-Mac smoke (tampered/clean attestation, non-arm64 payload) called out as gaps.
 
 2026-05-05 (planning + MAC4 prompt) - Discussion identified a Mac-native PrepApp
 gap (Mac-only users couldn't onboard without a Windows machine) and addressed it
