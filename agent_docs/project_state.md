@@ -14,7 +14,7 @@ Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
 - **PR #166 - F4 Stage 1 - merged from feature tip `34e5f5b` (2026-04-21).** PrepApp now owns first-run profile selection: the FTUE starts with the two-machine explainer, profile choice happens inline, Finalize writes `ActiveProfile` and applies `ProfileDefaults`, and Runner no longer blocks startup with the old required first-run profile dialog. `windows-build` passed; manual PrepApp FTUE visuals / older `ActiveProfile = null` SSD smoke is still pending.
 
-- **PR #165 - F3 - merged from feature tip `2e14d67` (2026-04-21).** PrepApp's 2-tab rewrite shipped: merged Models + Drive tabs, unified model grid with explicit bulk selection, FTUE retarget, Runner disabled-tooltip polish, and focused regression coverage.
+- **PR #164 - F3 - merged `953fb1b` (2026-04-21).** PrepApp's 2-tab rewrite shipped: merged Models + Drive tabs, unified model grid with explicit bulk selection, FTUE retarget, Runner disabled-tooltip polish, and focused regression coverage.
 
 - **PR #163 - H2 - merged `c8570d2` (2026-04-20).** Six-item housekeeping batch: `build.ps1` stale-artifact cleanup; `SsdLogger` write lock; `[SupportedOSPlatform("windows")]` on WMI methods (cascaded to `DriveService`); GitHub Actions SHA-pinned; README test count + TFM refreshed; xUnit `.Result` -> `await`. 449 pass, 2 skip.
 
