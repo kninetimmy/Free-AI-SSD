@@ -311,31 +311,71 @@ records.
 
 ### MAC5 - macOS encrypted config unlock/save
 
-**Status:** planned
+**Status:** done 2026-05-05
 **Scope:** Mac runtime integration
 **Risk:** Medium
-**Goal:** Bring `SsdEncryption` and `ConfigStore` into the Mac runtime path so
-  encrypted SSDs are usable on macOS.
+**Goal:** Bring encrypted-config unlock/save into the Mac runtime path so
+  encrypted SSDs prepped on Windows are usable on macOS (and Mac-saved
+  blobs roundtrip back to Windows).
 
-**Likely files:**
-- `shared/SsdEncryption.cs`
-- `shared/Services/ConfigStore.cs`
-- Mac host/UI code
-- tests for encrypted config roundtrip
+**Outcome:** Native Swift port of `SsdEncryption` shipped at
+`mac-runner/Sources/SsdEncryption.swift`. PBKDF2-HMAC-SHA256 via
+CommonCrypto, AES-256-GCM via CryptoKit, two-file atomic commit
+(`portable-config.encrypted.json` + `encryption-state.json`) with rollback
+on state-rename failure, plaintext-migration mirror of
+`TryMigratePlaintextAsync`. `mac-runner/Sources/main.swift` replaces the
+"mac unlock not supported yet" short-circuit with an unlock sheet, holds an
+`UnlockMaterial` while the session is unlocked, and zeroes the derived key
+on manual lock, app background (`willResignActiveNotification`), and app
+termination (`willTerminateNotification`).
 
-**Do not change:**
-- Encryption format.
-- Windows unlock behavior.
+**Cross-language format pin:** `tests/Fixtures/MacEncryptedConfig/csharp-encrypted/`
+holds a Swift-produced encrypted blob the C# `MacEncryptedConfigCrossLanguageTests`
+round-trip via `SsdEncryption.TryUnlockPortableConfig` on Windows CI. The
+same fixture is asserted by the Swift test binary on Mac CI. Both sides
+also assert the JSON key shape so a silent C# `JsonNamingPolicy` change
+fails Windows CI immediately.
 
-**Acceptance criteria:**
-- Mac can unlock an SSD encrypted by Windows PrepApp/Runner.
-- Mac saves config changes back to encrypted config without plaintext leaks.
-- Wrong password and corrupt metadata fail closed.
+**Files changed:**
+- `mac-runner/Sources/SsdEncryption.swift` (new — full PBKDF2 + AES-GCM port)
+- `mac-runner/Sources/main.swift` (unlock sheet, lock-on-exit, save action)
+- `mac-runner/Tests/SsdEncryptionTests.swift` (new — Swift test runner +
+  `write-fixture` subcommand)
+- `tests/MacEncryptedConfigCrossLanguageTests.cs` (new)
+- `tests/Fixtures/MacEncryptedConfig/csharp-encrypted/` (new — committed
+  cross-language fixture + README)
+- `.github/workflows/build.yml` (mac-runner-build now compiles and runs the
+  Swift test binary before Runner.app)
+- `README.md`, `docs/QUICKSTART.txt` (drop "no Mac unlock" caveat)
+- `agent_docs/mac_platform_dependency_audit.md` (record the deliberate
+  Swift-encryption waiver)
+- `agent_docs/project_decisions.md` (new dated entry —
+  "MAC5 native Swift encryption: deliberate format duplication")
+
+**Validation:**
+- Swift test binary: 15 tests pass locally (PBKDF2 RFC vector, AES-GCM
+  roundtrip, wrong password, tampered ciphertext, missing metadata, save
+  preserves unknown fields, state file fields stay correct, plaintext
+  migration branch A and B, key zeroize, cross-language fixture decrypt).
+- C# `MacEncryptedConfigCrossLanguageTests` covers Swift→C# direction +
+  reverse-direction format-pin assertion. Validated on Windows CI before
+  merge (no local dotnet available during MAC5 development).
+
+**Manual-smoke gaps (deferred to a real Mac):**
+- Encrypt an SSD via Windows PrepApp; mount on Mac; unlock via the Swift
+  UI; verify start/stop and selected-model roundtrip.
+- Mount the same drive back on Windows; verify the Windows runner still
+  unlocks it cleanly after a Mac-side save.
+- Force a mid-save crash between blob and state writes (e.g., kill -9
+  during save); verify the next launch finds a consistent blob+state pair
+  via the `.bak` rollback path.
 
 **Tests:**
-- Cross-platform encrypted roundtrip.
-- Wrong-password test.
-- Save-after-unlock test.
+- Swift unit tests as above.
+- `MacEncryptedConfigCrossLanguageTests` — Swift fixture decrypts in C#,
+  C# blob has Swift-compatible field shape, wrong password rejected.
+- Existing `SsdEncryptionTests` and `ConfigStoreTests` unchanged and still
+  pass (Windows behavior is untouched).
 
 ---
 
@@ -767,10 +807,12 @@ records.
 
 ## Recommended Next Step
 
-MAC0-MAC4 are merged. The next item in the Runner-parity track is
-**MAC5 - macOS encrypted config unlock/save**, which brings `SsdEncryption`
-and `ConfigStore` into the Mac runtime path so encrypted SSDs prepared on
-Windows are usable on macOS (and vice versa once MAC17 ships).
+MAC0-MAC5 are merged. The next item in the Runner-parity track is
+**MAC6 - Mac LAN API host + Companion compatibility + X4 web UI**: stand
+up a macOS host for the Runner API surface so `RunnerCli` and Windows
+Companion can connect to a Mac-hosted Runner over LAN, and X4's web chat
+UI is served from the same Kestrel for free (post-MAC3 RunnerCore moves
+the endpoint host into platform-neutral code).
 
 Cross-platform PrepApp parity (MAC16/17/18) sequences after Runner parity
 (MAC4-MAC8) per the 2026-05-05 prep parity decision. APFS is dropped from

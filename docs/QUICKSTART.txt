@@ -67,12 +67,12 @@ Everything below is optional and layered on top of that baseline.
  - Runner auto-installs any missing Windows prerequisites (VC++ redist,
    .NET 8 Desktop Runtime) from the staged offline bundle on first run.
 
- - macOS beta scope: <SSD>/mac/Runner.app can select/infer the SSD, read
-   installed models from plaintext config, start <SSD>/mac/tools/ollama/ollama,
-   and send basic non-streaming direct chat to Ollama. It does not currently
-   support encrypted config unlock, RAG/citations, document library management,
-   Network Mode API hosting, RunnerCli against a Mac host, voice/TTS,
-   HOTAS/PTT, or DCS import UI.
+ - macOS beta scope: <SSD>/mac/Runner.app can select/infer the SSD, unlock
+   encrypted Windows-prepped SSDs (MAC5 native CryptoKit port), read installed
+   models, start <SSD>/mac/tools/ollama/ollama, and send basic non-streaming
+   direct chat to Ollama. It does not currently support RAG/citations,
+   document library management, Network Mode API hosting, RunnerCli against a
+   Mac host, voice/TTS, HOTAS/PTT, or DCS import UI.
 
  2. Windows Runner: RAG Document Library (grounded answers from your own files)
  -----------------------------------------------------------------------------
@@ -235,10 +235,10 @@ Everything below is optional and layered on top of that baseline.
 
  macOS: feature is missing
    Expected in the current beta. The Swift runner is not yet a full Windows
-   Runner equivalent. It provides basic direct chat through the staged macOS
-   Ollama binary only. Use the Windows Runner for RAG/citations, encrypted
-   SSD unlock, document library management, Network Mode hosting, RunnerCli
-   host support, voice/TTS, HOTAS/PTT, and DCS bindings import.
+   Runner equivalent. It provides basic direct chat and encrypted SSD unlock
+   only (MAC5). Use the Windows Runner for RAG/citations, document library
+   management, Network Mode hosting, RunnerCli host support, voice/TTS,
+   HOTAS/PTT, and DCS bindings import.
 
  Network Mode clients can't connect
    By default Runner binds to 127.0.0.1. To accept LAN connections,

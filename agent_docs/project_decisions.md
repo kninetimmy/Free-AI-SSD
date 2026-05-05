@@ -504,3 +504,67 @@ attestations.
 on Mac (MAC5), Mac LAN API host (MAC6), the staging-time selection between
 `Resources/ollama` and `MacOS/Ollama` inside the upstream `Ollama.app` bundle
 (latent pre-existing behavior, not introduced or worsened by MAC4).
+
+---
+
+## 2026-05-05 — MAC5 native Swift encryption: deliberate format duplication
+
+The macOS Runner now unlocks and re-saves encrypted SSDs natively via
+`mac-runner/Sources/SsdEncryption.swift`, a Swift port of
+`shared/SsdEncryption.cs`. PBKDF2-HMAC-SHA256 (CommonCrypto) and AES-256-GCM
+(CryptoKit) are reimplemented in Swift; the on-disk format is unchanged
+(`aes-256-gcm+pbkdf2-sha256-v1`, 210k iterations, 16-byte salt, 12-byte nonce,
+16-byte tag, lowercase camelCase JSON fields, two-file atomic commit with
+state-rename rollback).
+
+**Why duplicate.** The alternative was hosting a .NET 8 console process on
+Apple Silicon purely so the Mac runtime could call into `SsdEncryption` and
+`ConfigStore`. That would drag a cross-architecture runtime onto the Mac
+launch path to do nothing but read and re-emit a JSON config blob — a small,
+stable, security-critical surface that Apple ships native primitives for
+(`CryptoKit.AES.GCM`, `CommonCrypto.CCKeyDerivationPBKDF`,
+`Foundation.FileManager.replaceItemAt`). For MAC5's bounded surface, native
+beats cross-arch hosting on every axis except code reuse, and the cost of
+that reuse (a .NET sidecar) is high enough to defer to a later item if it's
+ever justified at all.
+
+**Why this doesn't cascade.** The MAC2 dependency-audit doc said "keep the
+Swift app thin — do not duplicate encryption, RAG, or network API logic in
+Swift." MAC5 explicitly waives that guideline for the encrypted-config format
+*only*. RAG (MAC7), document management (MAC8), and network API hosting
+(MAC6) keep the original guideline; those surfaces are large, evolving, and
+not well-served by a native rewrite.
+
+**How drift is prevented.** The cross-language pin lives in
+`tests/Fixtures/MacEncryptedConfig/csharp-encrypted/`. The Swift test binary
+generates the fixture (via the `write-fixture` subcommand) and round-trips it
+on every Mac CI run; the C# `MacEncryptedConfigCrossLanguageTests` round-trip
+the same fixture on every Windows CI run and additionally assert the JSON key
+shape (`enabled`, `scheme`, `iterations`, `encryptedConfigFile`, `updatedAtUtc`
+on the state file; `version`, `scheme`, `iterations`, `salt`, `nonce`, `tag`,
+`ciphertext`, `createdAtUtc` on the encrypted blob) so a silent
+`JsonNamingPolicy` change on the C# side fails Windows CI. The error strings
+returned to users are pinned identically on both platforms ("Incorrect
+password.", "Encrypted drive metadata is missing.", etc.) so user-facing docs
+apply to both.
+
+**Process-launch and key-handling invariants kept.** AES-GCM nonces come from
+`SecRandomCopyBytes` (never reused, never derived); the derived 32-byte key
+is held in a Swift `Data` buffer wrapped by an `UnlockMaterial` class whose
+`zeroize()` overwrites the buffer on app background, app termination, manual
+lock, and `deinit`. No plaintext `portable-config.json` is ever written by the
+Mac runner; the plaintext-migration helper mirrors
+`SsdEncryption.TryMigratePlaintextAsync` (branch A merges newer plaintext into
+the encrypted blob then deletes plaintext; branch B silently removes stale
+plaintext).
+
+**Exit ramp.** If MAC6 (Mac LAN API host) ends up bringing a long-running
+.NET process onto Mac for chat/streaming/RAG, the encrypted-config logic can
+optionally consolidate back into `IConfigStore` at that point. That would be
+a MAC6 decision, not a regret about MAC5 — the format pin makes either
+direction safe.
+
+**Out of scope of MAC5 (deferred to later items):** Mac LAN API host (MAC6),
+RAG / streaming / models endpoints on Mac (MAC6/MAC7), document management
+(MAC8), Mac-native PrepApp that *creates* encrypted drives from Mac (MAC17;
+MAC5 only handles unlock and re-save of existing blobs).
