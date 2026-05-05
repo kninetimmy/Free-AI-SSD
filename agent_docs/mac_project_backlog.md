@@ -50,6 +50,17 @@ Missing from current macOS Runner:
 - DCS bindings import UI.
 - Signing/notarization as a supported release path.
 
+## Planning Notes
+
+- Once macOS reaches the same practical runtime level as the Windows Runner,
+  remaining feature work should be planned as cross-platform work by default:
+  shared/core first, then Windows and macOS host adapters or UI surfaces as
+  needed. Windows-only or Mac-only delivery should be an explicit exception,
+  not the accidental default.
+- Stephen currently has temporary access to a Mac with Xcode and an Apple
+  Developer account. Use that window for MAC10/MAC11 validation when the Mac
+  app is stable enough to make signing/notarization meaningful.
+
 ## Ordered Backlog
 
 ### MAC0 - Truth-in-docs + roadmap anchor
@@ -113,11 +124,17 @@ churn.
 
 ### MAC2 - Platform dependency audit and guardrails
 
-**Status:** planned
+**Status:** done 2026-05-05
 **Scope:** codebase audit + tests/build guardrails
 **Risk:** Medium
 **Goal:** Make the portable-vs-Windows-only boundary explicit before moving
   Runner services.
+
+**Outcome:** Current blockers and the split plan are recorded in
+`agent_docs/mac_platform_dependency_audit.md`. Guardrail tests were added in
+`tests/MacPlatformBoundaryTests.cs` to keep `shared/` and `runner-cli/`
+portable-shaped while MAC3+ pays down the known Windows-only shared-package
+debt.
 
 **Known blockers:**
 - `shared/FreeAiSsd.Shared.csproj` references `System.Management`, `NAudio`,
@@ -144,7 +161,9 @@ churn.
 - Guardrail tests or build checks prevent new WPF/Windows-only dependencies in
   the future core.
 
-**Tests:** Build/test on Windows; non-Windows shared/core build if introduced.
+**Tests:** `dotnet test tests/FreeAiSsd.Tests.csproj --filter
+MacPlatformBoundaryTests --verbosity normal`; full suite recommended before PR
+merge when time permits.
 
 ---
 
@@ -374,11 +393,16 @@ churn.
 - `.github/workflows/build.yml`
 - entitlements file if needed
 - release docs
+- Developer ID setup / notarization guide. A detailed local draft exists at
+  `/Users/stephenelswick/Desktop/Free-AI-SSD-macOS-signing-notarization-guide.md`;
+  fold the durable parts into repo docs or release docs during this item.
 
 **Acceptance criteria:**
 - Signed and notarized `Runner.app`.
 - Clean Mac launch works without right-click workaround.
 - Quarantine/Gatekeeper behavior documented.
+- CI/local setup steps are documented well enough to repeat with a fresh
+  Apple Developer account or rotated credentials.
 
 **Tests:**
 - Notarization CI run.
