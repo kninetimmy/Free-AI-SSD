@@ -100,7 +100,18 @@ public sealed class ArtifactStagingService : IArtifactStagingService
         var cacheArchive = Path.Combine(ssdRoot, SsdLayout.Cache, "ollama-darwin.zip");
         Directory.CreateDirectory(Path.GetDirectoryName(cacheArchive)!);
         File.Copy(bundledArchive, cacheArchive, overwrite: true);
-        var actualSha = DownloadManager.ComputeSha256(cacheArchive);
+
+        // SHA-256 gate on the bundled archive before extraction. Pinned to
+        // OllamaPackageTrustPolicy.DefaultMacPackage so a tampered or
+        // unrelated zip never lands on the SSD.
+        var pinnedMac = OllamaPackageTrustPolicy.DefaultMacPackage;
+        var hashValidation = OllamaPackageTrustPolicy.ValidateDownloadedPackage(cacheArchive, pinnedMac);
+        if (!hashValidation.IsTrusted)
+        {
+            onLog($"Refused macOS Ollama staging: {hashValidation.Message} (actual={hashValidation.ActualSha256 ?? "unknown"})");
+            throw new InvalidOperationException(hashValidation.Message);
+        }
+        var actualSha = hashValidation.ActualSha256 ?? pinnedMac.Sha256;
 
         var ollamaDir = Path.Combine(ssdRoot, SsdLayout.MacOllama);
         if (Directory.Exists(ollamaDir))
@@ -115,6 +126,20 @@ public sealed class ArtifactStagingService : IArtifactStagingService
         var finalCliPath = Path.Combine(ollamaDir, "ollama");
         File.Copy(cliPath, finalCliPath, overwrite: true);
 
+        // Verify the staged payload (SHA-256 + arm64 slice) and write the
+        // trust attestation that the runtime gate (Swift mac-runner +
+        // MacOllamaLifecycleService) checks at launch. On failure, the
+        // partially-staged directory is scrubbed so the next attempt starts
+        // from a clean slate and the runtime gate keeps refusing to launch.
+        var pipeline = MacOllamaStagingPipeline.VerifyAndAttest(ssdRoot, cacheArchive, finalCliPath);
+        if (!pipeline.Success)
+        {
+            var failure = pipeline.Failure!;
+            onLog($"Refused macOS Ollama staging: {failure.Message}");
+            try { Directory.Delete(ollamaDir, recursive: true); } catch { }
+            throw new InvalidOperationException(failure.Message);
+        }
+
         var sourceManifest = ResolveBundledFile(Path.Combine("mac", "tools", "ollama", "mac-tools-manifest.json"));
         if (sourceManifest is not null && File.Exists(sourceManifest))
             File.Copy(sourceManifest, Path.Combine(ollamaDir, "mac-tools-manifest.json"), overwrite: true);
@@ -128,7 +153,8 @@ public sealed class ArtifactStagingService : IArtifactStagingService
             downloadedAtUtc = DateTime.UtcNow.ToString("O")
         }, new JsonSerializerOptions { WriteIndented = true });
         await File.WriteAllTextAsync(MacToolCatalog.GetManifestPath(ssdRoot), manifest, ct);
-        onLog("Staged macOS Ollama runtime.");
+
+        onLog("Staged macOS Ollama runtime and wrote trust attestation.");
     }
 
     public bool AreMacArtifactsAvailable(out string? problem)

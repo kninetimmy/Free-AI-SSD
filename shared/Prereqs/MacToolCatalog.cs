@@ -18,11 +18,14 @@ public static class MacToolCatalog
 
     /// <summary>
     /// Ollama for macOS — downloaded as a universal (ARM64 + x86_64) ZIP archive
-    /// from the official GitHub releases.
+    /// from the official GitHub releases. Pinned to the same upstream version
+    /// as <see cref="OllamaPackageTrustPolicy.DefaultMacPackage"/> so the
+    /// staging hash and runtime trust gate agree on a single known-good
+    /// payload (MAC4).
     /// </summary>
     public static MacToolDefinition Ollama { get; } = new(
         "ollama_macos_universal",
-        "https://github.com/ollama/ollama/releases/latest/download/ollama-darwin.zip",
+        OllamaPackageTrustPolicy.DefaultMacPackage.Url,
         "ollama-darwin.zip");
 
     /// <summary>

@@ -149,27 +149,39 @@ static async Task FetchWindowsAsync(HttpClient http, string outDir, Action<strin
 
 static async Task FetchMacOllamaAsync(HttpClient http, string outDir, Action<string> log)
 {
-    log("Resolving latest Ollama macOS release...");
-    var ollama = await PrereqResolver.ResolveLatestOllamaMacAsync(http);
-    log($"Ollama: version={ollama.Version} url={ollama.Url} trust={ollama.TrustNote}");
+    // MAC4: pin the Mac payload to OllamaPackageTrustPolicy.DefaultMacPackage
+    // (currently v0.5.7) so CI, the bundled archive, the staging hash check,
+    // and the runtime trust gate all reference the same known-good release.
+    // The previous "resolve releases/latest" path drifted from the pinned
+    // metadata whenever upstream cut a new release, which would cause
+    // staging to refuse the bundle.
+    var pinned = OllamaPackageTrustPolicy.DefaultMacPackage;
+    var resolution = new PrereqResolution(
+        Version: pinned.Version,
+        Url: pinned.Url,
+        Hash: pinned.Sha256,
+        HashAlgorithm: "SHA256",
+        TrustNote: $"Pinned by OllamaPackageTrustPolicy.DefaultMacPackage ({pinned.Version}).");
+
+    log($"Ollama: version={resolution.Version} url={resolution.Url} trust={resolution.TrustNote}");
 
     // Downstream staging code expects the on-disk filename to be lowercase
     // "ollama-darwin.zip" (see ArtifactStagingService + MacToolCatalog).
     var archivePath = Path.Combine(outDir, "ollama-darwin.zip");
-    var observedSha = await PrereqResolver.DownloadAndVerifyAsync(http, ollama, archivePath, log);
+    var observedSha = await PrereqResolver.DownloadAndVerifyAsync(http, resolution, archivePath, log);
 
     var manifest = new
     {
         id = MacToolCatalog.Ollama.Id,
-        version = ollama.Version,
-        sourceUrl = ollama.Url,
+        version = resolution.Version,
+        sourceUrl = resolution.Url,
         archive = "ollama-darwin.zip",
         verifiedAtUtc = DateTime.UtcNow.ToString("o"),
-        vendorHash = ollama.Hash,
-        vendorHashAlgorithm = ollama.HashAlgorithm,
+        vendorHash = resolution.Hash,
+        vendorHashAlgorithm = resolution.HashAlgorithm,
         sha256 = observedSha,
         sizeBytes = new FileInfo(archivePath).Length,
-        trustNote = ollama.TrustNote,
+        trustNote = resolution.TrustNote,
     };
 
     var manifestPath = Path.Combine(outDir, MacToolCatalog.ManifestFileName);

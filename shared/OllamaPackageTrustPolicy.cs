@@ -19,7 +19,16 @@ public enum OllamaPackageTrustFailureReason
     DigestMismatch,
     AttestationMissing,
     AttestationDigestMismatch,
-    AttestationUrlMismatch
+    AttestationUrlMismatch,
+    /// <summary>
+    /// The downloaded macOS Ollama payload does not contain an arm64 Mach-O
+    /// slice. Apple Silicon is the only supported Mac hardware (MAC1).
+    /// </summary>
+    Arm64SliceMissing,
+    /// <summary>
+    /// The macOS Ollama binary referenced by trust validation is missing on disk.
+    /// </summary>
+    BinaryMissing
 }
 
 /// <summary>
@@ -77,6 +86,18 @@ public static class OllamaPackageTrustPolicy
         Sha256: "11ec2270a5205228fddeaa15c8319a0f0167c0ee7420d19c43714312d4761d2d");
 
     /// <summary>
+    /// The default pinned macOS Ollama package. Pinned to the same upstream
+    /// version as <see cref="DefaultWindowsPackage"/> so a single Free-AI-SSD
+    /// release ships the same Ollama runtime on both platforms. Universal
+    /// (x86_64 + arm64) Mach-O archive; the arm64 slice is the only one the
+    /// runtime trust gate accepts (see MAC1 baseline).
+    /// </summary>
+    public static readonly OllamaPackageMetadata DefaultMacPackage = new(
+        Version: "v0.5.7",
+        Url: "https://github.com/ollama/ollama/releases/download/v0.5.7/ollama-darwin.zip",
+        Sha256: "09ad6bb2edf7cb78619a0932c93c544c362c6ac738c7d5531b3b1b87ac619971");
+
+    /// <summary>
     /// Set of trusted hostnames from which Ollama packages may be downloaded.
     /// Only HTTPS URLs from these hosts pass source validation.
     /// </summary>
@@ -92,7 +113,8 @@ public static class OllamaPackageTrustPolicy
     /// </summary>
     private static readonly Dictionary<string, OllamaPackageMetadata> PinnedMetadataByUrl = new(StringComparer.Ordinal)
     {
-        [DefaultWindowsPackage.Url] = DefaultWindowsPackage
+        [DefaultWindowsPackage.Url] = DefaultWindowsPackage,
+        [DefaultMacPackage.Url] = DefaultMacPackage
     };
 
     public static string TrustAttestationFileName => "ollama-package-trust.json";
@@ -189,19 +211,39 @@ public static class OllamaPackageTrustPolicy
         CryptoUtils.ComputeSha256Hex(path);
 
     /// <summary>
-    /// Returns the full path where the trust attestation JSON file should be stored on the SSD.
+    /// Returns the full path where the Windows trust attestation JSON file
+    /// should be stored on the SSD (under <c>windows/tools/ollama/</c>).
     /// </summary>
     public static string GetTrustAttestationPath(string ssdRoot) =>
-        Path.Combine(ssdRoot, SsdLayout.Ollama, TrustAttestationFileName);
+        Path.Combine(ssdRoot, SsdLayout.WindowsOllama, TrustAttestationFileName);
 
     /// <summary>
-    /// Writes a trust attestation file to the SSD after a package has been
-    /// successfully downloaded and verified. This attestation is checked at
-    /// runtime to allow execution without re-verification.
+    /// Returns the full path where the macOS trust attestation JSON file
+    /// should be stored on the SSD (under <c>mac/tools/ollama/</c>).
+    /// </summary>
+    public static string GetMacTrustAttestationPath(string ssdRoot) =>
+        Path.Combine(ssdRoot, SsdLayout.MacOllama, TrustAttestationFileName);
+
+    /// <summary>
+    /// Writes a Windows trust attestation file to the SSD after the Windows
+    /// Ollama package has been downloaded and verified. Mirrors
+    /// <see cref="WriteMacTrustAttestation"/> for the Mac side.
     /// </summary>
     /// <param name="ssdRoot">Root path of the portable SSD.</param>
     /// <param name="metadata">Verified package metadata to attest.</param>
-    public static void WriteTrustAttestation(string ssdRoot, OllamaPackageMetadata metadata)
+    public static void WriteTrustAttestation(string ssdRoot, OllamaPackageMetadata metadata) =>
+        WriteTrustAttestationCore(GetTrustAttestationPath(ssdRoot), metadata);
+
+    /// <summary>
+    /// Writes a macOS trust attestation file to the SSD after the Mac Ollama
+    /// package has been downloaded, hash-verified, and arm64-validated.
+    /// </summary>
+    /// <param name="ssdRoot">Root path of the portable SSD.</param>
+    /// <param name="metadata">Verified package metadata to attest.</param>
+    public static void WriteMacTrustAttestation(string ssdRoot, OllamaPackageMetadata metadata) =>
+        WriteTrustAttestationCore(GetMacTrustAttestationPath(ssdRoot), metadata);
+
+    private static void WriteTrustAttestationCore(string attestationPath, OllamaPackageMetadata metadata)
     {
         var attestation = new OllamaPackageTrustAttestation
         {
@@ -211,22 +253,34 @@ public static class OllamaPackageTrustPolicy
             VerifiedAtUtc = DateTime.UtcNow
         };
 
-        var attestationPath = GetTrustAttestationPath(ssdRoot);
         Directory.CreateDirectory(Path.GetDirectoryName(attestationPath)!);
         File.WriteAllText(attestationPath, JsonSerializer.Serialize(attestation, new JsonSerializerOptions { WriteIndented = true }));
     }
 
     /// <summary>
-    /// Validates that an Ollama binary is safe to execute by checking:
-    /// 1. The package source URL is valid and pinned.
-    /// 2. A trust attestation file exists on the SSD.
-    /// 3. The attestation's URL and SHA-256 match the pinned metadata.
-    /// This prevents execution of unverified or tampered binaries.
+    /// Validates that the Windows Ollama binary is safe to execute by checking
+    /// the source URL, attestation presence, and attestation contents against
+    /// the Windows trust attestation under <c>windows/tools/ollama/</c>.
     /// </summary>
     /// <param name="ssdRoot">Root path of the portable SSD.</param>
     /// <param name="urlText">The package source URL to validate against.</param>
     /// <returns>Validation result indicating whether execution is permitted.</returns>
-    public static OllamaPackageTrustValidationResult ValidateExecutionAttestation(string ssdRoot, string? urlText)
+    public static OllamaPackageTrustValidationResult ValidateExecutionAttestation(string ssdRoot, string? urlText) =>
+        ValidateExecutionAttestationCore(GetTrustAttestationPath(ssdRoot), urlText);
+
+    /// <summary>
+    /// Validates that the macOS Ollama binary is safe to execute by checking
+    /// the source URL, attestation presence, and attestation contents against
+    /// the Mac trust attestation under <c>mac/tools/ollama/</c>. Shares the
+    /// same validator core as <see cref="ValidateExecutionAttestation"/>.
+    /// </summary>
+    /// <param name="ssdRoot">Root path of the portable SSD.</param>
+    /// <param name="urlText">The macOS package source URL (typically
+    /// <see cref="DefaultMacPackage"/>'s URL).</param>
+    public static OllamaPackageTrustValidationResult ValidateMacExecutionAttestation(string ssdRoot, string? urlText) =>
+        ValidateExecutionAttestationCore(GetMacTrustAttestationPath(ssdRoot), urlText);
+
+    private static OllamaPackageTrustValidationResult ValidateExecutionAttestationCore(string attestationPath, string? urlText)
     {
         // First validate the source URL itself.
         var sourceValidation = ValidatePackageSource(urlText);
@@ -236,7 +290,6 @@ public static class OllamaPackageTrustPolicy
         }
 
         // Check that a trust attestation file exists on the SSD.
-        var attestationPath = GetTrustAttestationPath(ssdRoot);
         if (!File.Exists(attestationPath))
         {
             return OllamaPackageTrustValidationResult.Fail(
@@ -283,5 +336,32 @@ public static class OllamaPackageTrustPolicy
         }
 
         return OllamaPackageTrustValidationResult.Success(sourceValidation.Metadata);
+    }
+
+    /// <summary>
+    /// Validates that the macOS Ollama binary at <paramref name="binaryPath"/>
+    /// contains an arm64 Mach-O slice. Universal payloads pass as long as
+    /// arm64 is one of their slices; pure-arm64 payloads also pass; pure
+    /// x86_64 payloads fail with <see cref="OllamaPackageTrustFailureReason.Arm64SliceMissing"/>.
+    /// </summary>
+    public static OllamaPackageTrustValidationResult ValidateArm64Slice(string binaryPath, OllamaPackageMetadata? metadata = null)
+    {
+        if (string.IsNullOrWhiteSpace(binaryPath) || !File.Exists(binaryPath))
+        {
+            return OllamaPackageTrustValidationResult.Fail(
+                OllamaPackageTrustFailureReason.BinaryMissing,
+                $"macOS Ollama binary is missing at '{binaryPath}'.",
+                metadata);
+        }
+
+        if (!MachOArchInspector.ContainsArm64Slice(binaryPath))
+        {
+            return OllamaPackageTrustValidationResult.Fail(
+                OllamaPackageTrustFailureReason.Arm64SliceMissing,
+                "macOS Ollama payload missing arm64 slice. Apple Silicon is required for the supported Mac baseline.",
+                metadata);
+        }
+
+        return OllamaPackageTrustValidationResult.Success(metadata ?? DefaultMacPackage);
     }
 }
