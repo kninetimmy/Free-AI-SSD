@@ -7,7 +7,8 @@
  Quick Start in 5 Steps (the impatient version)
 --------------------------------------------------------------------------------
 
-1) Plug in a portable SSD (exFAT recommended if you want Windows + macOS).
+1) Plug in a portable SSD. Use exFAT if you want Windows + macOS
+   read/write from the same drive; see the filesystem note below.
 2) On a Windows machine with internet, download the latest ZIP from
    GitHub Releases and extract it:
      - Stable:       Free-AI-SSD-win.zip                  (Windows target only)
@@ -20,8 +21,11 @@
    "Check SSD Readiness", then "Finalize SSD".
 4) Unplug. Plug into the machine you actually want to use it on.
      - Windows: <SSD>\windows\runner\FreeAiSsd.Runner.exe
-     - macOS:   <SSD>/mac/Runner.app    (beta bundle only; unsigned)
-5) Start the AI engine in Runner and chat. That's it — you're offline.
+     - macOS:   <SSD>/mac/Runner.app    (beta bundle only; unsigned,
+                limited direct-Ollama chat)
+5) Start the AI engine in Runner and chat. On Windows, the full Runner
+   supports RAG, citations, voice, HOTAS/PTT, DCS import, and Network
+   Mode. The macOS beta currently supports basic direct chat only.
 
 Everything below is optional and layered on top of that baseline.
 
@@ -34,9 +38,11 @@ Everything below is optional and layered on top of that baseline.
   minimum.
 - A Windows machine with internet for the one-time preparation (PrepApp is
   Windows-only — it's the prep tool, not the runtime).
-- The target machine (where you'll actually run it) needs no pre-installed
-  software. Runner carries its own prerequisites.
-- Target OS: Windows 10/11 x64, or macOS (beta, Apple Silicon and Intel).
+- Windows target machines need no pre-installed software. Windows Runner
+  carries its own prerequisites. The macOS beta bundle stages macOS Ollama,
+  but that beta app is limited to basic direct chat.
+- Target OS: Windows 10/11 x64 for the full Runner, or macOS beta for
+  basic direct-Ollama chat.
 
 --------------------------------------------------------------------------------
  Full Feature Setup
@@ -47,11 +53,13 @@ Everything below is optional and layered on top of that baseline.
  Already covered in the 5-step quick start. A few notes:
 
  - Filesystem: exFAT is the only filesystem Windows and macOS both read/write
-   natively. If you only care about Windows, NTFS is fine. PrepApp's
-   "Format & Prepare Drive" button formats to NTFS with your chosen volume
-   label — use it if you want PrepApp to handle formatting end-to-end
-   (requires admin; PrepApp will relaunch elevated and auto-resume your
-   selection + label, then ask you to confirm once more before wiping).
+   natively. If you need cross-platform write access, format the SSD as
+   exFAT yourself before preparation and skip PrepApp's format button.
+   PrepApp's "Format & Prepare Drive" button formats to NTFS with your
+   chosen volume label — use it if you only care about Windows and want
+   PrepApp to handle formatting end-to-end (requires admin; PrepApp will
+   relaunch elevated and auto-resume your selection + label, then ask you
+   to confirm once more before wiping).
  - Ollama is staged onto the SSD by PrepApp and bound to loopback only
    (127.0.0.1). No network surface by default.
  - Models live at <SSD>/models/. Pull more any time via PrepApp's Model
@@ -59,12 +67,19 @@ Everything below is optional and layered on top of that baseline.
  - Runner auto-installs any missing Windows prerequisites (VC++ redist,
    .NET 8 Desktop Runtime) from the staged offline bundle on first run.
 
- 2. RAG Document Library (grounded answers from your own files)
- --------------------------------------------------------------
+ - macOS beta scope: <SSD>/mac/Runner.app can select/infer the SSD, read
+   installed models from plaintext config, start <SSD>/mac/tools/ollama/ollama,
+   and send basic non-streaming direct chat to Ollama. It does not currently
+   support encrypted config unlock, RAG/citations, document library management,
+   Network Mode API hosting, RunnerCli against a Mac host, voice/TTS,
+   HOTAS/PTT, or DCS import UI.
+
+ 2. Windows Runner: RAG Document Library (grounded answers from your own files)
+ -----------------------------------------------------------------------------
  Load PDFs, manuals, and notes so the AI answers from your documents
  instead of guessing.
 
- - In Runner, open the "Reference Documents" panel.
+ - In Windows Runner, open the "Reference Documents" panel.
  - Create or select a library.
  - "Add files" to pull in specific documents, or "Add folder" to watch a
    folder and auto-ingest new files.
@@ -76,19 +91,19 @@ Everything below is optional and layered on top of that baseline.
    library meets the similarity threshold, the model is explicitly told
    "no relevant documents found" rather than hallucinating.
  - First use of RAG needs the embedding model (nomic-embed-text). Pull it
-   once online via Runner's "Pull embedding model" button.
+   once online via Windows Runner's "Pull embedding model" button.
 
- 3. DCS Bindings Parser (HOTAS-aware answers)
- --------------------------------------------
+ 3. Windows Runner: DCS Bindings Parser (HOTAS-aware answers)
+ -----------------------------------------------------------
  Import your DCS World controller bindings so the AI answers with the
  buttons on *your* stick and throttle.
 
- - In Runner, open "Bindings Import" (requires an active document library).
- - Runner auto-detects your Saved Games\DCS and Saved Games\DCS.openbeta
+ - In Windows Runner, open "Bindings Import" (requires an active document library).
+ - Windows Runner auto-detects your Saved Games\DCS and Saved Games\DCS.openbeta
    folders. If it doesn't find them, browse manually.
  - Click "Scan" — every aircraft with binding files in Config/Input is
    listed.
- - Select aircraft and click "Import". Runner reads each device's
+ - Select aircraft and click "Import". Windows Runner reads each device's
    diff.lua (stick, throttle, rudder pedals), merges them per-aircraft,
    and writes a reference document into your library.
  - Rebuild the index (or wait for the next folder sweep).
@@ -96,11 +111,11 @@ Everything below is optional and layered on top of that baseline.
  Supported: DCS World stable and Open Beta, multi-device merging.
  Not yet supported: IL-2 Sturmovik, War Thunder.
 
- 4. Voice Input — Whisper.cpp STT
- --------------------------------
+ 4. Windows Runner: Voice Input — Whisper.cpp STT
+ -----------------------------------------------
  Speak your questions. Transcription is fully local via Whisper.cpp.
 
- - Click the microphone button in Runner to start/stop recording.
+ - Click the microphone button in Windows Runner to start/stop recording.
  - Transcription runs locally; text is either sent automatically or placed
    in the prompt for review (controlled by autoSendVoiceInput in config).
  - Whisper model sizes live at <SSD>/models/whisper/:
@@ -111,8 +126,8 @@ Everything below is optional and layered on top of that baseline.
  - First voice use downloads the selected model (one-time internet step).
    After that, fully offline.
 
- 5. Voice Output — TTS
- ---------------------
+ 5. Windows Runner: Voice Output — TTS
+ ------------------------------------
  Have the AI speak back.
 
  - Enable TTS in settings. Two engines:
@@ -123,8 +138,8 @@ Everything below is optional and layered on top of that baseline.
    speech and system audio can go to different places.
  - TTS is offline regardless of engine.
 
- 6. HOTAS Push-to-Talk (hands-free voice, for VR)
- ------------------------------------------------
+ 6. Windows Runner: HOTAS Push-to-Talk (hands-free voice, for VR)
+ ---------------------------------------------------------------
  Bind a joystick button to start/stop voice recording. No keyboard,
  no headset removal, no hands off the controls.
 
@@ -140,9 +155,9 @@ Everything below is optional and layered on top of that baseline.
    transcribes -> prompt sent -> AI responds -> TTS plays through your
    chosen output device.
 
- 7. (Optional) Network Mode — run on one PC, query from another
- --------------------------------------------------------------
- One machine runs Runner + Ollama. Other devices on the same LAN call
+ 7. Windows Runner: (Optional) Network Mode — run on one PC, query from another
+ ----------------------------------------------------------------------------
+ One Windows machine runs Runner + Ollama. Other devices on the same LAN call
  Runner's HTTP API for chat, STT upload, and host-side TTS.
 
  - Ollama stays loopback-only. LAN clients talk to the Runner API,
@@ -161,20 +176,21 @@ Everything below is optional and layered on top of that baseline.
  Ham Radio / Field Reference
    You're deployed for emergency comms or camping with no cell signal.
    Load radio manuals, band plans, and reference docs onto the SSD
-   before you leave. Plug it into whatever laptop you've got, ask by
-   voice, get cited answers. The drive fits in a pocket.
+   before you leave. On Windows Runner, ask by voice and get cited
+   answers. On the macOS beta, use basic direct chat only.
 
  DCS / Flight Sim VR Copilot
    You're in VR, mid-sortie. You forget how to uncage an AIM-9 on the
-   F-16C. Press the PTT button on your throttle, ask, and hear the
-   answer spoken back using *your* actual HOTAS bindings and the real
-   aircraft manual. Hands never leave the stick, headset never comes
-   off, and no cloud AI is involved.
+   F-16C. In the Windows Runner, press the PTT button on your throttle,
+   ask, and hear the answer spoken back using *your* actual HOTAS
+   bindings and the real aircraft manual. Hands never leave the stick,
+   headset never comes off, and no cloud AI is involved.
 
  Private Offline AI Assistant
    You don't trust cloud AI with your data, your workplace restricts
-   internet, or you just want the same setup on every machine you sit
-   down at. Prep once, plug in anywhere.
+   internet, or you just want the same staged SSD available across your
+   machines. Windows Runner is the full offline assistant; macOS is the
+   current direct-chat beta.
 
  Survival / Emergency Reference
    First-aid guides, plant identification, equipment manuals, survival
@@ -216,6 +232,13 @@ Everything below is optional and layered on top of that baseline.
    The beta macOS build is currently unsigned / not notarized. Allow
    it from System Settings > Privacy & Security, or right-click ->
    Open the first time.
+
+ macOS: feature is missing
+   Expected in the current beta. The Swift runner is not yet a full Windows
+   Runner equivalent. It provides basic direct chat through the staged macOS
+   Ollama binary only. Use the Windows Runner for RAG/citations, encrypted
+   SSD unlock, document library management, Network Mode hosting, RunnerCli
+   host support, voice/TTS, HOTAS/PTT, and DCS bindings import.
 
  Network Mode clients can't connect
    By default Runner binds to 127.0.0.1. To accept LAN connections,

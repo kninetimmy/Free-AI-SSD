@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-04-21 (PR #166 merged; F4 Stage 1 shipped)
+Last updated: 2026-05-05 (PR #167 conflict fix merged; mac-support PR still next)
 
 Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
@@ -8,33 +8,38 @@ Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
 ## In flight
 
-**Between tasks.** F4 Stage 1 is shipped via PR #166 / `166b8a2`. No implementation branch is currently in flight. `H3` remains deferred unless a regression from PR #165 or PR #166 pulls it forward.
+**macOS support docs/backlog branch:** `mac-support-backlog` is pushed to
+origin at `e8d7b24` and ready for PR after reconciling with latest `main`.
+It adds the macOS support backlog, marks MAC0 done, and corrects README /
+QUICKSTART so macOS is described as a limited Swift direct-Ollama beta rather
+than a full Windows Runner equivalent.
 
 ## Recently shipped
 
-- **PR #166 - F4 Stage 1 - merged from feature tip `34e5f5b` (2026-04-21).** PrepApp now owns first-run profile selection: the FTUE starts with the two-machine explainer, profile choice happens inline, Finalize writes `ActiveProfile` and applies `ProfileDefaults`, and Runner no longer blocks startup with the old required first-run profile dialog. `windows-build` passed; manual PrepApp FTUE visuals / older `ActiveProfile = null` SSD smoke is still pending.
+- **PR #167 - F4 Stage 1 wrap-up docs - merged `8ada5e4` (2026-05-05).** Resolved conflicts against latest `main` via branch merge commit `34d0a4e`; `windows-build` passed.
 
-- **PR #164 - F3 - merged `953fb1b` (2026-04-21).** PrepApp's 2-tab rewrite shipped: merged Models + Drive tabs, unified model grid with explicit bulk selection, FTUE retarget, Runner disabled-tooltip polish, and focused regression coverage.
+- **PR #168 - Linux strategy doc - merged `a93785b` (2026-04-27).** Added the staged Linux support strategy document from branch `codex/create-linux-support-strategy-document`.
 
-- **PR #163 - H2 - merged `c8570d2` (2026-04-20).** Six-item housekeeping batch: `build.ps1` stale-artifact cleanup; `SsdLogger` write lock; `[SupportedOSPlatform("windows")]` on WMI methods (cascaded to `DriveService`); GitHub Actions SHA-pinned; README test count + TFM refreshed; xUnit `.Result` -> `await`. 449 pass, 2 skip.
+- **PR #166 - F4 Stage 1 - merged `166b8a2` (2026-04-21).** Moved first-run profile setup into PrepApp.
 
 ## Next up
 
-Continue with `F4` Stage 2 if we stay on the same feature. Otherwise take the next implementation branch from `B2`, `F2`, or `R1` Stage 2. `H3` remains deferred unless a PR #165 or PR #166 regression appears and pulls it forward.
+1. Sync/reconcile `mac-support-backlog` with latest `main`, then open its PR and let CI/review run.
+2. Start **MAC1** from `agent_docs/mac_project_backlog.md`: define the supported Mac baseline.
+3. For non-Mac work, pick from `H3`, `F4` follow-up, `B2`, `F2`, or `R1 Stage 2`.
 
-**RAG audit backlog:** X17-X23 cover audit findings; X10/X13/X15 scope expansions recorded. Plan: `C:\Users\Kninetimmy\.claude\plans\okay-i-want-to-glowing-galaxy.md`. v1.3.x sequence: X18 -> X15 (expanded) -> X19 -> X20 -> X22 -> X23. X17 reduced to Stage 1 textless-page diagnostic (full OCR deferred - workload is text-layer PDFs).
+**RAG audit backlog:** X17-X23 cover audit findings; X10/X13/X15 scope expansions recorded. Plan: `C:\Users\Kninetimmy\.claude\plans\okay-i-want-to-glowing-galaxy.md`. v1.3.x sequence: X18 -> X15 (expanded) -> X19 -> X20 -> X22 -> X23. X17 reduced to Stage 1 textless-page diagnostic (full OCR deferred -- workload is text-layer PDFs).
 
 **Dormant (could not reproduce):** X1-Redux. Diag branch `diag/x1-redux-send-hang` stays on remote, unmerged.
 
-**v1.3.x territory:** X4 (bundled web chat UI), Runner tab restructure, X5 (GPU/CPU indicator) - slot around the RAG audit queue.
-
-See `project_backlog.md` for full item details.
+See `project_backlog.md` for full general backlog details. See
+`agent_docs/mac_project_backlog.md` for the macOS support track.
 
 ## Last session
 
-2026-04-21 (F4 Stage 1 shipped - PR #166, merge `166b8a2`) - Implemented the PrepApp-owned profile FTUE on `feat/f4-stage1-prepapp-profile-ftue`, verified with release build plus targeted and full tests, opened PR #166, watched CI, and merged after `windows-build` passed. Final local verification was 458 total tests: 454 passed, 4 skipped. Manual smoke remains pending for PrepApp FTUE visuals and an older SSD where `ActiveProfile` is null.
+2026-05-05 (PR #167 conflict fix + merge - `34d0a4e` / `8ada5e4`) - Identified the conflicting open PR as #167 (`docs/f4-stage1-wrap-up`), not the current `mac-support-backlog` branch. Stashed the local dashboard edit, switched to the PR branch, merged `origin/main`, resolved conflicts in `agent_docs/project_state.md` and `agent_docs/project_backlog.md`, pushed merge commit `34d0a4e`, confirmed GitHub reported the PR mergeable, watched CI, then merged PR #167 as `8ada5e4`. Restored the original `mac-support-backlog` checkout and its uncommitted dashboard edit.
 
-2026-04-21 (F4 kickoff planning + handoff) - Confirmed PR #165 merged and closed F3. Intentionally moved `H3` down the queue, drafted and approved the detailed `F4` plan, and saved the approved `F4` Stage 1 execution prompt at `agent_docs/f4_stage1_execution_prompt.md` for a fresh-session handoff. No code changes happened in that planning-only session.
+2026-05-04 (MAC0 docs/backlog - `e8d7b24`) - Created `agent_docs/mac_project_backlog.md` as the ordered macOS support track, with MAC0 marked done and MAC1 as the next Mac step. Updated README and QUICKSTART to state that macOS is currently a limited Swift direct-Ollama beta, while RAG/citations, encrypted config unlock, Runner LAN API hosting, RunnerCli against a Mac host, voice/TTS, HOTAS/PTT, and DCS import remain Windows-only for now. Committed and pushed branch `mac-support-backlog`.
 
 ## Open questions
 
