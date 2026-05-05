@@ -66,3 +66,24 @@ core.
 
 When MAC3+ pays down the known shared-package debt, update the guardrail tests
 in the same PR that removes the dependencies.
+
+## MAC5 native-encryption waiver (2026-05-05)
+
+The "Keep the Swift macOS app thin" guideline in step 6 above is **explicitly
+waived** for the encrypted-config unlock/save format. MAC5 reimplements
+PBKDF2-HMAC-SHA256 + AES-256-GCM and the two-file atomic commit protocol
+natively in Swift (`mac-runner/Sources/SsdEncryption.swift`) using only
+`CryptoKit`, `CommonCrypto`, and `Foundation`.
+
+Rationale: hosting a .NET 8 console process on Apple Silicon to do nothing but
+read and re-emit a JSON config blob would drag a cross-architecture runtime
+into the Mac launch path for a small, stable, security-critical surface that
+Apple already provides natively. The duplication is bounded by a cross-language
+fixture under `tests/Fixtures/MacEncryptedConfig/csharp-encrypted/` that both
+sides round-trip in CI; if the C# format ever changes silently, the Windows
+build's `MacEncryptedConfigCrossLanguageTests` and the Mac build's Swift test
+binary both fail until the fixture is regenerated alongside a dated decision.
+
+This waiver applies to MAC5's surface only. RAG, network API hosting, and
+document management (MAC6/MAC7/MAC8) keep the original "thin Swift over
+shared/core" rule unless a future decision records its own waiver.

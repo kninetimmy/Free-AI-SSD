@@ -1,0 +1,10 @@
+{
+  "ciphertext" : "XZUP8CAzFBQlKscInNz+mLyWD7uhs4QUGpE8vLWJXiED7DR\/VdvWsSpErUdDVmedUuAhTxb54E1OIAQAe2Akg21JyXVLrtiY89QVUuCeVa\/12k1mQKpUI7DBR1AN1UEH1+sT8KYRCcJOVUzQi9+YfTyxg\/xLx7foPN5NQdQ+Nai26Pjmoh2x8Kmq\/JqgCWkaLY5K6qgU6vRvquF\/fq\/Bqm2YnnqB5C81VXn4L4PHrlbTWEX\/ymYfS7UfpBdGzTdBHyHrj0O\/g2a7vByfqYlSYqXmdDlRtq438CzwkrUZCi1GZffx5MZevzOm2lQilLGNupGgQWkHIzN6YM7JTprpQsjxyarM34RceFspF7xXKmlJPQqWkFOlXGSM5sTJhWe2rCipZZg=",
+  "createdAtUtc" : "2026-05-05T20:37:22.424Z",
+  "iterations" : 210000,
+  "nonce" : "UkPROOCaefns2y\/x",
+  "salt" : "0gME+vZOjiPkOin9HL+FPQ==",
+  "scheme" : "aes-256-gcm+pbkdf2-sha256-v1",
+  "tag" : "U618AK7U1A0ivcCII0eJ8g==",
+  "version" : 1
+}

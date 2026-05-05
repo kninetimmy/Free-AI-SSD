@@ -153,10 +153,20 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Run Swift unit tests (SsdEncryption)
+        # MAC5: smoke-test the Swift port of SsdEncryption (PBKDF2-SHA256
+        # vector, AES-GCM roundtrip, two-file atomic commit, plaintext
+        # migration, key-zeroize) and the cross-language fixture before we
+        # build Runner.app. If this binary fails, encryption is broken and
+        # the runner has no business shipping.
+        run: |
+          mkdir -p out
+          swiftc mac-runner/Sources/SsdEncryption.swift mac-runner/Tests/SsdEncryptionTests.swift             -parse-as-library             -target "arm64-apple-macos11.0"             -O             -o out/ssd-encryption-tests
+          FREE_AI_SSD_REPO="$GITHUB_WORKSPACE" out/ssd-encryption-tests
       - name: Build Runner.app bundle
         run: |
           mkdir -p out/Runner.app/Contents/MacOS out/Runner.app/Contents/Resources
-          swiftc mac-runner/Sources/main.swift             -parse-as-library             -target "arm64-apple-macos11.0"             -O             -o out/Runner.app/Contents/MacOS/Runner             -framework SwiftUI             -framework AppKit
+          swiftc mac-runner/Sources/SsdEncryption.swift mac-runner/Sources/main.swift             -parse-as-library             -target "arm64-apple-macos11.0"             -O             -o out/Runner.app/Contents/MacOS/Runner             -framework SwiftUI             -framework AppKit
           cat > out/Runner.app/Contents/Info.plist <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

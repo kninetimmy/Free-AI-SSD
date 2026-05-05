@@ -1,14 +1,13 @@
 import SwiftUI
 import Foundation
 
-struct PortableConfig: Codable {
-    struct Model: Codable {
-        let name: String
-        let status: String
-    }
-
-    let models: [Model]
-}
+// MARK: - PortableConfig parsing
+//
+// The full PortableConfig schema lives in shared/PortableConfig.cs. The Mac
+// runner only inspects a few fields (the models array for picker population),
+// so we read the JSON dynamically as `[String: Any]`. This preserves any
+// fields the Mac runner doesn't know about across a save round-trip — a
+// regression here would silently drop user data on encrypted-config save.
 
 /// Mirrors `OllamaPackageTrustAttestation` written by the Windows PrepApp's
 /// staging path (`ArtifactStagingService.StageMacOllamaAsync`). The fields
@@ -43,14 +42,50 @@ final class RunnerViewModel: ObservableObject {
     @Published var response: String = ""
     @Published var status: String = "Idle"
     @Published var isEncryptedLocked: Bool = false
+    @Published var unlockDialogPresented: Bool = false
+    @Published var unlockDialogPassword: String = ""
+    @Published var unlockDialogError: String? = nil
 
     private var process: Process?
     private var hostPort = 11434
+
+    /// Cached PBKDF2 output held while the session is unlocked. Kept private
+    /// and zeroized on every lock path (manual lock, app background, app
+    /// terminate, deinit). Never surface the raw key to anything outside this
+    /// view model.
+    private var unlockMaterial: UnlockMaterial?
+
+    /// In-memory plaintext config preserved across saves so unknown fields
+    /// (anything Swift doesn't model directly) survive a Mac-side mutation.
+    /// Mirrors the C# PortableConfig round-trip behavior. nil while locked.
+    private var portableConfig: [String: Any]?
+
+    /// Notification observers retained so they can be removed on deinit.
+    private var notificationObservers: [NSObjectProtocol] = []
 
     init() {
         self.ssdRoot = inferSsdRoot()
         if ssdRoot == nil { pickSsdRoot() }
         loadConfig()
+        registerLifecycleHooks()
+    }
+
+    deinit {
+        for o in notificationObservers { NotificationCenter.default.removeObserver(o) }
+        unlockMaterial?.zeroize()
+    }
+
+    /// Lock-on-background and lock-on-terminate so the derived AES key never
+    /// outlives the user's active session. Manual lock is wired through
+    /// `lockSession()`.
+    private func registerLifecycleHooks() {
+        let nc = NotificationCenter.default
+        notificationObservers.append(nc.addObserver(
+            forName: NSApplication.willResignActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in self?.lockSession(reason: "App backgrounded") })
+        notificationObservers.append(nc.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in self?.lockSession(reason: "App terminating") })
     }
 
     func inferSsdRoot() -> URL? {
@@ -76,30 +111,166 @@ final class RunnerViewModel: ObservableObject {
 
     func loadConfig() {
         guard let root = ssdRoot else { return }
-        let encryptionStateURL = root.appendingPathComponent("config/encryption-state.json")
-        if FileManager.default.fileExists(atPath: encryptionStateURL.path) {
+
+        if SsdEncryption.isEffectivelyEncryptedForWriteGuard(ssdRoot: root) {
+            // Encrypted drive: present the unlock dialog. Don't read or
+            // decode anything else until the user completes unlock.
             isEncryptedLocked = true
             modelNames = []
             selectedModel = ""
-            status = "Encrypted SSD locked (mac unlock not supported yet)"
+            portableConfig = nil
+            unlockMaterial?.zeroize()
+            unlockMaterial = nil
+            status = "Encrypted SSD locked"
+            unlockDialogError = nil
+            unlockDialogPassword = ""
+            unlockDialogPresented = true
             return
         }
 
         isEncryptedLocked = false
         let configURL = root.appendingPathComponent("config/portable-config.json")
         guard let data = try? Data(contentsOf: configURL),
-              let config = try? JSONDecoder().decode(PortableConfig.self, from: data) else {
+              let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            portableConfig = nil
+            modelNames = []
+            selectedModel = ""
+            return
+        }
+        portableConfig = parsed
+        applyConfigToUi(parsed)
+    }
+
+    /// Called from the unlock dialog. Decrypts the on-SSD blob with the
+    /// provided password, populates UI state, and runs the plaintext
+    /// migration so a stale plaintext file from a pre-encryption session is
+    /// either merged in or removed.
+    func attemptUnlock(password: String) {
+        guard let root = ssdRoot else {
+            unlockDialogError = "Select an SSD root first."
             return
         }
 
-        modelNames = config.models.filter { $0.status.lowercased() == "installed" }.map { $0.name }
-        selectedModel = modelNames.first ?? ""
+        let result = SsdEncryption.tryUnlockPortableConfig(ssdRoot: root, password: password)
+        switch result {
+        case .failure(let err):
+            unlockDialogError = err.errorDescription ?? "Unlock failed."
+            log("Unlock failed: \(err.errorDescription ?? "unknown")")
+            return
+        case .success(let unlocked):
+            unlockMaterial?.zeroize()
+            unlockMaterial = unlocked.material
+            portableConfig = unlocked.config
+            isEncryptedLocked = false
+            unlockDialogPresented = false
+            unlockDialogPassword = ""
+            unlockDialogError = nil
+            applyConfigToUi(unlocked.config)
+            status = "Unlocked"
+            log("SSD unlocked successfully.")
+
+            // Mirror Windows: absorb or discard a stale plaintext file so
+            // the drive can never accumulate plaintext secrets.
+            let migration = SsdEncryption.tryMigratePlaintext(
+                ssdRoot: root, material: unlocked.material,
+                log: { [weak self] line in self?.log(line) })
+            if case .mergedFromPlaintext(let merged) = migration {
+                portableConfig = merged
+                applyConfigToUi(merged)
+            }
+        }
+    }
+
+    /// Zeroes the cached UnlockMaterial and drops the in-memory plaintext.
+    /// Safe to call when no session is unlocked.
+    func lockSession(reason: String = "Locked") {
+        guard unlockMaterial != nil || portableConfig != nil else { return }
+        unlockMaterial?.zeroize()
+        unlockMaterial = nil
+        portableConfig = nil
+        modelNames = []
+        selectedModel = ""
+        if let root = ssdRoot, SsdEncryption.isEffectivelyEncryptedForWriteGuard(ssdRoot: root) {
+            isEncryptedLocked = true
+            status = "Encrypted SSD locked"
+        }
+        log(reason)
+    }
+
+    /// Mutates the in-memory plaintext config and writes it back through the
+    /// encrypted save path. Mirrors `IConfigStore.SaveAsync`'s contract: refuses
+    /// to save when the drive is encrypted but no session is unlocked, so the
+    /// caller can prompt for re-unlock instead of silently dropping the change.
+    func saveConfig(mutate: ([String: Any]) -> [String: Any]) {
+        guard let root = ssdRoot else {
+            log("Save refused: no SSD root selected.")
+            return
+        }
+        let isEncrypted = SsdEncryption.isEffectivelyEncryptedForWriteGuard(ssdRoot: root)
+        guard var current = portableConfig else {
+            if isEncrypted {
+                log("Save refused: drive is encrypted but session is locked.")
+            } else {
+                log("Save refused: portable-config not loaded.")
+            }
+            return
+        }
+        current = mutate(current)
+        portableConfig = current
+
+        if isEncrypted {
+            guard let material = unlockMaterial else {
+                log("Save refused: drive is encrypted but session is locked.")
+                return
+            }
+            do {
+                try SsdEncryption.saveEncryptedConfig(
+                    ssdRoot: root, config: current, material: material)
+                log("Saved encrypted portable-config.")
+            } catch {
+                log("Encrypted save failed: \(error.localizedDescription)")
+            }
+        } else {
+            // Plaintext drives still get plaintext writes — same as today.
+            // The encrypted drive code path above is the new MAC5 surface.
+            let configURL = root.appendingPathComponent("config/portable-config.json")
+            do {
+                let data = try JSONSerialization.data(
+                    withJSONObject: current,
+                    options: [.prettyPrinted, .sortedKeys])
+                try data.write(to: configURL, options: [.atomic])
+                log("Saved plaintext portable-config.")
+            } catch {
+                log("Plaintext save failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Pulls the `installed` model names from the parsed config dictionary.
+    /// Tolerates either string status values ("Installed") or numeric ones
+    /// (the C# enum serializer flips between them depending on settings).
+    private func applyConfigToUi(_ config: [String: Any]) {
+        let models = (config["models"] as? [[String: Any]]) ?? []
+        let installed = models.compactMap { entry -> String? in
+            guard let name = entry["name"] as? String, !name.isEmpty else { return nil }
+            if let status = entry["status"] as? String {
+                return status.lowercased() == "installed" ? name : nil
+            }
+            // Numeric enum form: 1 == Installed in ModelInstallStatus.
+            if let status = entry["status"] as? Int {
+                return status == 1 ? name : nil
+            }
+            return nil
+        }
+        modelNames = installed
+        selectedModel = installed.first ?? ""
     }
 
     func startOllama() {
         guard process == nil, let root = ssdRoot else { return }
         if isEncryptedLocked {
-            status = "Unlock encrypted SSD first (use Windows runner)"
+            status = "Unlock encrypted SSD first"
+            unlockDialogPresented = true
             return
         }
 
@@ -230,6 +401,9 @@ struct ContentView: View {
                 Button("Select SSD") { vm.pickSsdRoot() }
                 Button("Start") { vm.startOllama() }
                 Button("Stop") { vm.stopOllama() }
+                if !vm.isEncryptedLocked {
+                    Button("Lock") { vm.lockSession(reason: "Manual lock") }
+                }
             }
             Picker("Model", selection: $vm.selectedModel) {
                 ForEach(vm.modelNames, id: \.self) { Text($0).tag($0) }
@@ -240,6 +414,40 @@ struct ContentView: View {
         }
         .padding(16)
         .frame(minWidth: 720, minHeight: 560)
+        .sheet(isPresented: $vm.unlockDialogPresented) { UnlockSheet(vm: vm) }
+    }
+}
+
+struct UnlockSheet: View {
+    @ObservedObject var vm: RunnerViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Unlock encrypted SSD").font(.title3)
+            Text("Enter the password set during PrepApp finalization.")
+                .font(.callout)
+                .foregroundColor(.secondary)
+            SecureField("Password", text: $vm.unlockDialogPassword)
+                .textFieldStyle(.roundedBorder)
+            if let err = vm.unlockDialogError {
+                Text(err).foregroundColor(.red).font(.callout)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    vm.unlockDialogPresented = false
+                    vm.unlockDialogPassword = ""
+                    vm.unlockDialogError = nil
+                }
+                Button("Unlock") {
+                    vm.attemptUnlock(password: vm.unlockDialogPassword)
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(vm.unlockDialogPassword.isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 360)
     }
 }
 

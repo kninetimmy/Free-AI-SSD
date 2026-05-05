@@ -41,10 +41,10 @@ This started as a way to take AI into the field with no cell signal — ham radi
 - ✅ **Companion tray app for Windows** — lightweight Windows client for a second PC on the LAN (no SSD required on the client)
 - ✅ **Headless CLI (`FreeAiSsd.RunnerCli`)** — terminal REPL for SSH / Tailscale access to a running Windows Runner API; streams chat, shows RAG sources, zero GUI deps
 - ✅ **Offline Windows prereq bundle** — .NET 8 Desktop Runtime + VC++ redist staged and SHA-verified so Runner installs cleanly on fresh targets
-- 🧪 **macOS Swift Runner beta** — staged at `<SSD>/mac/Runner.app`; can select/infer the SSD, read installed models from plaintext config, start `mac/tools/ollama/ollama`, and send basic non-streaming direct chat to Ollama
+- 🧪 **macOS Swift Runner beta** — staged at `<SSD>/mac/Runner.app`; can select/infer the SSD, unlock encrypted Windows-prepped SSDs (native CryptoKit + CommonCrypto port of `SsdEncryption`), read installed models, start `mac/tools/ollama/ollama`, and send basic non-streaming direct chat to Ollama
 
 Known gaps:
-- The macOS beta does **not** currently support encrypted config unlock/save, RAG/citations, document library management, Runner LAN API hosting, RunnerCli against a Mac host, voice/TTS, HOTAS/PTT, or DCS import UI.
+- The macOS beta does **not** currently support RAG/citations, document library management, Runner LAN API hosting, RunnerCli against a Mac host, voice/TTS, HOTAS/PTT, or DCS import UI. Encrypted config unlock/save landed in MAC5; the rest is on the macOS support backlog.
 - Network voice upload currently supports WAV (PCM 16-bit mono 16kHz) and raw `pcm16le`; other codecs not implemented.
 - Direct Ollama LAN exposure is intentionally not supported — Runner API is the only network surface.
 
@@ -149,7 +149,7 @@ Load first aid guides, plant identification references, equipment specs, surviva
 2. Run Runner directly from the SSD:
    - Windows: `<SSD>\windows\runner\FreeAiSsd.Runner.exe`
    - macOS beta: `<SSD>/mac/Runner.app`
-3. Windows: load your documents and start chatting with RAG, citations, voice, HOTAS/PTT, and the LAN API. macOS beta: start Ollama and use basic direct chat with an installed model; RAG, encrypted config unlock, voice, HOTAS/PTT, DCS import, and the Runner LAN API are not implemented there yet.
+3. Windows: load your documents and start chatting with RAG, citations, voice, HOTAS/PTT, and the LAN API. macOS beta: unlock the SSD if it was encrypted on Windows, start Ollama, and use basic direct chat with an installed model; RAG, voice, HOTAS/PTT, DCS import, and the Runner LAN API are not implemented there yet.
 
 ### What Needs Internet vs. What Doesn't
 
@@ -158,6 +158,7 @@ Load first aid guides, plant identification references, equipment specs, surviva
 | PrepApp — download, pull, staging | Yes |
 | Windows Runner start / chat | No |
 | macOS beta Runner start / basic direct chat | No |
+| macOS beta Runner — unlock Windows-prepped encrypted SSD | No |
 | Reference Documents indexing and retrieval (Windows Runner) | No |
 | Pull embedding model (if missing from SSD, Windows Runner) | Once |
 | DCS Bindings Import (Windows Runner) | No |
@@ -184,8 +185,8 @@ Load first aid guides, plant identification references, equipment specs, surviva
 
 **macOS beta limitations**
 - The beta app is a Swift direct-Ollama runner, not the full Windows Runner.
-- It supports selecting/inferring the SSD, reading installed models from plaintext config, starting `mac/tools/ollama/ollama`, and basic non-streaming chat.
-- It does not unlock encrypted SSD configs. Use an unencrypted test SSD for the Mac beta, or run the full Windows Runner for encrypted drives.
+- It supports selecting/inferring the SSD, reading installed models, starting `mac/tools/ollama/ollama`, and basic non-streaming chat.
+- It unlocks encrypted SSDs prepped on Windows and saves changes back to the encrypted blob (MAC5). Mac-prepped encrypted drives roundtrip cleanly to Windows. The on-disk format is identical on both platforms; the Mac unlock path is a native CryptoKit + CommonCrypto reimplementation pinned to the C# format by cross-language tests.
 - It does not provide RAG/citations, document library management, Network Mode API hosting, RunnerCli compatibility against a Mac host, voice/TTS, HOTAS/PTT, or DCS import UI yet.
 
 ### Prereq trust model
