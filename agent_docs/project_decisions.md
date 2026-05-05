@@ -454,3 +454,53 @@ on Windows and SwiftUI prep host on Mac both consume `prep-core/`.
 **Security invariants are unchanged on either side.** SHA-256 + URL allowlist
 on prereq downloads, explicit argument lists on `diskutil` and `Format-Volume`
 calls, encrypted-config format unchanged so drives roundtrip Mac <-> Windows.
+
+---
+
+## 2026-05-05 — Mac Ollama trust gate (MAC4)
+
+PR #177, merge commit `648fcd9`. The macOS Ollama runtime now passes the same
+supply-chain gates as Windows, plus an Apple Silicon (arm64) Mach-O slice check
+required by the MAC1 baseline.
+
+**Pinned version, single source of truth.** `OllamaPackageTrustPolicy` now
+exposes `DefaultMacPackage` alongside `DefaultWindowsPackage`, both pinned to
+upstream Ollama `v0.5.7`. `MacToolCatalog.Ollama.SourceUrl` reads from
+`DefaultMacPackage.Url`, and `tools/FreeAiSsd.PrereqFetch` downloads the
+pinned URL directly (no more `releases/latest/...` resolve), so the bundled
+zip, the staging hash check, and the runtime trust gate cannot drift.
+
+**Validator core is shared between platforms.** `ValidateExecutionAttestation`
+(Windows) and the new `ValidateMacExecutionAttestation` both call a single
+`ValidateExecutionAttestationCore(attestationPath, urlText)` helper. Adding a
+third platform later means adding one path resolver and one entry to
+`PinnedMetadataByUrl`, not duplicating the validator. The Mac attestation
+lives at `<ssd>/mac/tools/ollama/ollama-package-trust.json` so a single SSD
+can carry both Windows and Mac attestations without collision.
+
+**arm64 slice check runs in pure managed code.** New `MachOArchInspector`
+parses Mach-O magic + fat headers without shelling out to `lipo`. This lets
+Windows-side PrepApp validate the arm64 slice during staging, before the SSD
+ever touches a Mac. Pure-x86_64 payloads now fail closed with a new
+`OllamaPackageTrustFailureReason.Arm64SliceMissing` reason; universal
+(arm64+x86_64) and pure-arm64 payloads pass.
+
+**Rationale.** MAC1 fixed Apple Silicon as the only supported Mac hardware,
+but nothing yet *enforced* that at staging or runtime. A future Ollama release
+could ship x86_64-only without warning; without this gate the staged drive
+would still validate by SHA-256 and fail confusingly at first launch. The
+arm64 check turns that into a clear, early refusal at prep time.
+
+**Process-launch invariant preserved.** `MacOllamaLifecycleService`
+(runner-core, plain `net8.0`) and the Swift `mac-runner` both launch
+`ollama serve` via argument-array forms (`ProcessStartInfo.ArgumentList` in
+C#, `Process.arguments: ["serve"]` in Swift), never string concatenation.
+Loopback bind is non-negotiable: `OLLAMA_HOST=127.0.0.1:<port>` always, never
+`0.0.0.0`. Both gates check the on-SSD attestation and refuse to start
+`ollama serve` on missing / malformed / URL-mismatched / SHA-mismatched
+attestations.
+
+**Out of scope of MAC4 (deferred to later items):** encrypted-config unlock
+on Mac (MAC5), Mac LAN API host (MAC6), the staging-time selection between
+`Resources/ollama` and `MacOS/Ollama` inside the upstream `Ollama.app` bundle
+(latent pre-existing behavior, not introduced or worsened by MAC4).

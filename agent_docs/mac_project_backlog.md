@@ -239,30 +239,73 @@ voice, HOTAS/PTT, and DCS import implementations remain in `runner/`.
 
 ### MAC4 - macOS Ollama lifecycle + runtime trust gate
 
-**Status:** planned
+**Status:** done 2026-05-05
 **Scope:** platform adapter
 **Risk:** Medium
 **Goal:** Start and stop `mac/tools/ollama/ollama` through shared/core logic
   with the same security posture as Windows.
 
-**Likely files:**
-- Runner core Ollama lifecycle abstractions.
-- macOS implementation for `mac/tools/ollama/ollama`.
-- `shared/Prereqs/MacToolCatalog.cs`
-- `prep-app/Services/ArtifactStagingService.cs`
+**Outcome:** PR #177, merge commit `648fcd9`. Generalized
+`OllamaPackageTrustPolicy` so `DefaultMacPackage` (pinned to Ollama v0.5.7,
+matching `DefaultWindowsPackage`) is a first-class peer. Added
+`GetMacTrustAttestationPath`, `ValidateMacExecutionAttestation`, and
+`WriteMacTrustAttestation`, refactored the Windows path to share a single
+`ValidateExecutionAttestationCore` helper. Added pure-managed
+`MachOArchInspector` so the Apple Silicon (arm64) slice check runs during
+Windows-side staging without `lipo`, surfaced as
+`OllamaPackageTrustFailureReason.Arm64SliceMissing`. New
+`MacOllamaLifecycleService` (`runner-core/`, plain `net8.0`) implements
+`IOllamaLifecycleService`: trust-gate, loopback bind, `OLLAMA_MODELS`,
+argument-array `serve` launch, stdout/stderr/exit wiring.
+`ArtifactStagingService.StageMacOllamaAsync` now goes through
+`MacOllamaStagingPipeline` (verify SHA-256 + arm64 + write attestation;
+scrub partial dir on failure). `tools/FreeAiSsd.PrereqFetch` repinned to
+`DefaultMacPackage.Url` so CI, the bundled zip, and the runtime gate stay
+in lockstep. Swift `mac-runner` re-checks the on-SSD attestation at every
+launch and refuses on missing / malformed / URL-mismatched / SHA-mismatched
+records.
 
-**Acceptance criteria:**
-- Uses `OLLAMA_MODELS=<SSD>/models`.
-- Binds to loopback.
-- Refuses missing or unverified macOS Ollama payloads.
-- Logs stdout/stderr and process exit.
-- Validates the Apple Silicon/arm64 execution path. Universal upstream payloads
-  are acceptable only when the arm64 slice is verified.
+**Files changed:**
+- `shared/OllamaPackageTrustPolicy.cs` (Mac peer + shared validator core)
+- `shared/MachOArchInspector.cs` (new)
+- `shared/MacOllamaStagingPipeline.cs` (new)
+- `shared/Prereqs/MacToolCatalog.cs` (pinned URL aligned with policy)
+- `runner-core/Services/MacOllamaLifecycleService.cs` (new)
+- `prep-app/Services/ArtifactStagingService.cs` (verify-then-attest)
+- `tools/FreeAiSsd.PrereqFetch/Program.cs` (pinned to v0.5.7)
+- `mac-runner/Sources/main.swift` (Swift trust gate)
+- `tests/MacOllamaTrustPolicyTests.cs`,
+  `tests/MachOArchInspectorTests.cs`,
+  `tests/MacOllamaLifecycleServiceTests.cs`,
+  `tests/MacOllamaStagingPipelineTests.cs`,
+  `tests/MachOFixtures.cs` (new)
 
-**Tests:**
-- Path resolution tests.
-- Environment variable tests.
-- Trust/manifest failure tests.
+**Validation:**
+- CI `windows-build` passed (full .NET test suite including new Mac suites).
+- CI `mac-runner-build` passed (`swiftc` build).
+- `MacPlatformBoundaryTests` still passes; `runner-core` remains plain
+  `net8.0`, non-WPF, non-Windows-targeted.
+
+**Manual-smoke gaps (deferred to a real Mac):**
+- Real-Mac launch with a tampered or deleted attestation refuses cleanly.
+- Real-Mac launch with a clean attestation produced by Windows PrepApp
+  starts `ollama serve` cleanly.
+- Staging an x86_64-only Mac payload (synthetic) refuses with
+  `Arm64SliceMissing` instead of producing a broken drive.
+
+**Tests added:**
+- Mac trust validation: missing, malformed JSON, wrong URL, wrong digest,
+  arm64 slice missing, missing binary, happy path.
+- Mach-O parser: thin (32 + 64) LE, fat universal with arm64+x86_64, fat
+  universal x86_64-only, fat 64 arm64-only, non-Mach-O file, Java class
+  file (shares `0xCAFEBABE` magic), missing file.
+- `MacOllamaLifecycleService`: path resolution, refusal when binary missing,
+  refusal when attestation missing, env var setup via `BuildStartInfo`,
+  loopback-only bind invariant, Mac trust does not pass on a Windows-only
+  attestation.
+- `MacOllamaStagingPipeline`: happy path writes attestation, refuses on
+  hash mismatch, refuses on missing-arm64 binary, refuses on missing binary,
+  no attestation written on any failure mode.
 
 ---
 
@@ -724,10 +767,10 @@ voice, HOTAS/PTT, and DCS import implementations remain in `runner/`.
 
 ## Recommended Next Step
 
-MAC0-MAC3 are merged. The next item in the Runner-parity track is
-**MAC4 - macOS Ollama lifecycle + runtime trust gate**, which moves
-`mac/tools/ollama/ollama` start/stop into shared/core logic with the same
-SHA-256 + URL allowlist trust posture as Windows.
+MAC0-MAC4 are merged. The next item in the Runner-parity track is
+**MAC5 - macOS encrypted config unlock/save**, which brings `SsdEncryption`
+and `ConfigStore` into the Mac runtime path so encrypted SSDs prepared on
+Windows are usable on macOS (and vice versa once MAC17 ships).
 
 Cross-platform PrepApp parity (MAC16/17/18) sequences after Runner parity
 (MAC4-MAC8) per the 2026-05-05 prep parity decision. APFS is dropped from
