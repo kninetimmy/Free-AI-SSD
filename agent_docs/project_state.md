@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-05-05 (MAC2 platform audit/guardrails local)
+Last updated: 2026-05-05 (MAC1 baseline local)
 
 Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
@@ -8,13 +8,13 @@ Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
 ## In flight
 
-**MAC2 local branch in progress:** `mac2-platform-guardrails` records the
-macOS platform dependency audit, adds boundary guardrail tests, and updates the
-Mac backlog/decision docs. Local test execution is blocked on this machine
-because `dotnet` is not installed/on PATH; run the targeted test command before
-opening/merging the PR.
+**MAC1 local branch in progress:** `mac1-supported-mac-baseline` records the
+supported Mac baseline and is ready for review/PR. MAC3 code extraction should
+start only after the MAC1 baseline is merged.
 
 ## Recently shipped
+
+- **PR #173 - MAC2 platform guardrails - merged `72139ac` (2026-05-05).** Added the macOS platform dependency audit, guardrail tests for the portable/shared boundary, and the MAC2 decision/backlog updates. `Build and Package` run #431 passed; PR #172 was closed/recreated as #173 because the GitHub connector hit the known draft-ready schema issue.
 
 - **PR #171 - macOS support merge wrap-up - merged `3e5e831` (2026-05-05).** Updated the dashboard after the macOS support backlog merge; no runtime changes.
 
@@ -24,9 +24,9 @@ opening/merging the PR.
 
 ## Next up
 
-1. Validate MAC2 guardrails with `dotnet test tests/FreeAiSsd.Tests.csproj --filter MacPlatformBoundaryTests --verbosity normal`, then open the MAC2 PR and watch CI.
-2. Complete **MAC1** from `agent_docs/mac_project_backlog.md`: define the supported Mac baseline before MAC3 code extraction.
-3. Start **MAC3** only after MAC1 is recorded: introduce the platform-neutral Runner core.
+1. Review/open/merge **MAC1** baseline docs from `mac1-supported-mac-baseline`.
+2. Start **MAC3** only after MAC1 is merged: introduce the platform-neutral Runner core.
+3. Track **MAC10a** before broad Mac distribution: PrepApp OS compatibility selector should preselect NTFS vs exFAT from the MAC1 baseline.
 4. Optional Mac release prep: enable and validate the existing Developer ID signing/notarization path before distributing the Mac beta broadly.
 5. For non-Mac work, pick from `H3`, `F4` follow-up, `B2`, `F2`, or `R1 Stage 2`.
 
@@ -39,13 +39,11 @@ See `project_backlog.md` for full general backlog details. See
 
 ## Last session
 
-2026-05-05 (MAC2 platform dependency audit / guardrails - local branch) - Created branch `mac2-platform-guardrails`. Added `agent_docs/mac_platform_dependency_audit.md` with the current Windows-only blockers and split plan for platform-neutral core plus host adapters. Marked MAC2 done in `agent_docs/mac_project_backlog.md`, added a dated MAC2 decision, and added `tests/MacPlatformBoundaryTests.cs` to keep `shared/` plain `net8.0`, bound the current Windows-only shared packages as explicit debt, and keep `runner-cli/` portable. Attempted `dotnet test tests/FreeAiSsd.Tests.csproj --filter MacPlatformBoundaryTests --verbosity normal`, but `dotnet` was not installed/on PATH in this shell.
+2026-05-05 (MAC1 supported Mac baseline - local branch) - Created `mac1-supported-mac-baseline`. Recorded Apple Silicon-only macOS support with macOS 11 Big Sur as the minimum OS, arm64-only Free-AI-SSD app artifacts, exFAT as the supported shared Windows + macOS SSD format, NTFS as Windows-only, APFS deferred until Mac-native prep exists, first-supported-Mac requirements, deferred parity features, and Swift/SwiftUI as the default thin native UI over shared/core services. Added MAC10a for the PrepApp OS compatibility filesystem selector so Windows-only defaults to NTFS and Windows + macOS defaults to exFAT.
+
+2026-05-05 (MAC2 platform guardrails - PR #173, `72139ac`) - Created and merged `mac2-platform-guardrails`. Added `agent_docs/mac_platform_dependency_audit.md`, marked MAC2 done in the Mac backlog, appended the MAC2 platform-boundary decision, and added `tests/MacPlatformBoundaryTests.cs`. Local `dotnet` was unavailable, but GitHub Actions `Build and Package` run #431 passed restore, build, `dotnet test`, WPF guard rail, PrepApp publish, Companion publish, and artifact upload. Draft PR #172 was closed and recreated as non-draft PR #173 because the connector's ready-for-review mutation still hits a schema error.
 
 2026-05-05 (macOS signing guidance - no repo changes) - Reviewed the current Mac track and confirmed MAC1 is next. Explained the Developer ID signing + notarization path and noted the existing CI signing steps are present but disabled by `MAC_SIGNING_ENABLED=false`. Created a granular Markdown guide at `/Users/stephenelswick/Desktop/Free-AI-SSD-macOS-signing-notarization-guide.md`; temporary repo scratch was removed and the working tree remained clean.
-
-2026-05-05 (macOS support merge wrap-up - PR #171, `3e5e831`) - Updated the dashboard after PR #170 so `main` reflects the merged macOS support backlog and MAC1 as the next Mac task. This was documentation-only.
-
-2026-05-05 (macOS support backlog merged - PR #170, `a1d63c2`) - Reconciled `mac-support-backlog` with latest `main`, resolved the dashboard conflict, added `agent_docs/mac1_execution_prompt.md`, pushed the branch, and opened PR #169. The draft PR could not be marked ready because the GitHub connector's ready-for-review mutation returned a schema error, so #169 was closed and recreated as non-draft PR #170. `windows-build` passed on both runs for head `702607e`; PR #170 merged to `main` as `a1d63c2`, and local `main` was fast-forwarded.
 
 ## Open questions
 

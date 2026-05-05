@@ -335,3 +335,45 @@ than duplicate encryption, RAG, or API behavior.
 plain non-WPF project, treats the current Windows-only package references as a
 bounded inventory to pay down, and keeps `runner-cli/` as a portable HTTP
 client rather than an in-process Runner host.
+
+---
+
+## 2026-05-05 - MAC1 supported Mac baseline: Apple Silicon, macOS 11+, arm64-only
+
+The first supported Mac release targets Apple Silicon Macs only. Intel Macs are
+explicitly unsupported, not best-effort beta, unless a later decision
+supersedes this baseline.
+
+Minimum supported OS is macOS 11 Big Sur because it is the earliest macOS
+generation that runs production Apple Silicon Macs. The current local test
+machine may run a much newer Tahoe 26.x build, but that does not raise the
+support floor by itself.
+
+Free-AI-SSD Mac app artifacts are arm64-only. Universal or x86_64 app artifacts
+are out of scope. Upstream payloads such as Ollama may be consumed if they ship
+as universal binaries, but only the Apple Silicon path is promised and
+validated.
+
+The supported shared Windows + macOS SSD filesystem is exFAT. NTFS remains the
+Windows-only full-runner format. APFS is Mac-only and is not a supported
+Windows PrepApp staging target unless a future Mac-native prep/staging workflow
+exists.
+
+PrepApp should gain an OS compatibility choice before broad Mac distribution:
+Windows only preselects NTFS; Windows + macOS preselects exFAT; macOS-only media
+still uses exFAT when staged from Windows, with APFS deferred until a Mac-native
+prep workflow exists.
+
+The first supported Mac release requires encrypted config unlock/save, verified
+macOS Ollama start/stop, streaming and non-streaming chat, RAG citations,
+document library use, useful diagnostics, and honest packaging, signing, and
+notarization state.
+
+Voice/STT/TTS, HOTAS/PTT, DCS import UI, Companion split-PC workflows, and a
+Windows-equivalent Prep UI are deferred beyond the first supported Mac release.
+
+The UI direction remains Swift/SwiftUI as a native thin Mac UI over shared/core
+services. This is the right default for a Mac app as long as Swift does not
+duplicate encryption, RAG, config, or network API logic. Avalonia or another
+cross-platform UI should be reconsidered only if MAC3-MAC7 prove the thin
+Swift host blocks parity or creates meaningful duplicated business logic.

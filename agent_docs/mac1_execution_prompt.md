@@ -1,7 +1,10 @@
 # MAC1 Execution Prompt
 
-Use this prompt to start the next macOS support planning pass after the
-`mac-support-backlog` PR is merged or otherwise ready to build on.
+Historical prompt used to start the MAC1 macOS support planning pass.
+
+MAC1 is now completed locally on `mac1-supported-mac-baseline`. Keep this file
+as context for why the decision exists; do not reuse the old baseline proposal
+without checking `agent_docs/project_decisions.md` first.
 
 ## Prompt
 
@@ -26,8 +29,8 @@ Scope:
 
 Decisions to record:
 - Minimum supported macOS version for the first supported Mac release.
-- Apple Silicon / Intel support strategy, including whether artifacts are
-  universal or architecture-specific.
+- Apple Silicon support strategy, including whether artifacts are universal or
+  architecture-specific.
 - Supported SSD filesystem expectations for Windows + macOS use.
 - Required features for the first "supported Mac" release.
 - Explicitly deferred Mac features.
@@ -41,22 +44,24 @@ Expected outcome:
 - Update `agent_docs/project_state.md` with the new last-session summary and
   next Mac item.
 
-Baseline proposal to evaluate and either adopt or adjust:
-- Minimum macOS: macOS 14 Sonoma for the first supported Mac release.
-- Architecture: Apple Silicon first, with universal artifacts only where the
-  upstream payload already provides them reliably; Intel remains best-effort
-  beta unless validated on real hardware.
-- Filesystem: exFAT is the supported shared Windows + macOS SSD format;
-  NTFS remains preferred for Windows-only full-runner use; APFS is Mac-only
-  and not a shared Windows target.
+Final baseline recorded by MAC1:
+- Minimum macOS: macOS 11 Big Sur, the earliest macOS generation that runs
+  production Apple Silicon Macs.
+- Architecture: Apple Silicon only. Intel Macs are unsupported.
+- Artifacts: Free-AI-SSD Mac app artifacts are arm64-only. Universal upstream
+  tools may be consumed only when the arm64 path is verified.
+- Filesystem: exFAT is the supported shared Windows + macOS SSD format; NTFS
+  remains Windows-only; APFS is Mac-only and deferred until a Mac-native
+  prep/staging workflow exists.
+- PrepApp follow-up: add an OS compatibility selector that preselects NTFS for
+  Windows only and exFAT for Windows + macOS.
 - First supported Mac release requires encrypted config unlock/save, verified
   macOS Ollama start/stop, streaming and non-streaming chat, RAG citations,
-  document library use, useful diagnostics, and honest unsigned/notarized
-  packaging state.
+  document library use, useful diagnostics, and honest packaging/signing state.
 - Deferred beyond first supported Mac release: voice/STT/TTS, HOTAS/PTT,
   DCS import UI, Companion split-PC workflows, and Windows-equivalent prep UI.
-- UI stance: keep Swift as a thin native UI over a shared/local host after
-  MAC3-MAC7 prove the host/core boundary.
+- UI stance: keep Swift/SwiftUI as a thin native UI over shared/core services
+  unless MAC3-MAC7 prove that path blocks parity or duplicates business logic.
 
 Validation:
 - Documentation review only.

@@ -95,18 +95,30 @@ this backlog.
 
 ### MAC1 - Define supported Mac baseline
 
-**Status:** planned
+**Status:** done 2026-05-05
 **Scope:** planning / decision record
 **Risk:** Low
 **Goal:** Lock the minimum viable supported Mac release target before code
 churn.
 
-**Decisions to capture:**
-- Minimum macOS version.
-- Apple Silicon / Intel / universal build strategy.
-- Supported filesystem expectations for shared Windows+macOS SSD use.
-- Which features are required for "supported Mac" versus explicitly deferred.
-- Whether the current Swift app remains a thin UI, or is replaced later.
+**Outcome:** The supported Mac baseline is recorded in
+`agent_docs/project_decisions.md` under the 2026-05-05 MAC1 entry.
+
+**Decisions captured:**
+- Minimum supported OS: macOS 11 Big Sur.
+- Hardware: Apple Silicon only; Intel Macs are unsupported.
+- App artifacts: arm64-only; no x86_64 or universal Free-AI-SSD app promise.
+- Shared Windows + macOS SSD format: exFAT.
+- Windows-only SSD format: NTFS.
+- APFS is Mac-only and deferred until a Mac-native prep/staging workflow exists.
+- First supported Mac release requires encrypted config unlock/save, verified
+  macOS Ollama start/stop, streaming/non-streaming chat, RAG citations,
+  document library use, useful diagnostics, and honest packaging state.
+- Deferred beyond first supported Mac release: voice/STT/TTS, HOTAS/PTT, DCS
+  import UI, Companion split-PC workflows, and Windows-equivalent Prep UI.
+- UI stance: keep Swift/SwiftUI as the native thin Mac UI over shared/core
+  services unless MAC3-MAC7 prove that path blocks parity or duplicates core
+  business logic.
 
 **Likely files:**
 - `agent_docs/project_decisions.md`
@@ -196,6 +208,8 @@ merge when time permits.
 - Windows Runner still works through the extracted service boundary.
 - Core can build without WPF.
 - Existing `ChatService` and API tests still pass.
+- Core stays compatible with the Apple Silicon/macOS 11+ baseline; Mac-specific
+  implementation remains in host/adapters.
 
 **Tests:**
 - Existing chat/RAG/API tests.
@@ -222,6 +236,8 @@ merge when time permits.
 - Binds to loopback.
 - Refuses missing or unverified macOS Ollama payloads.
 - Logs stdout/stderr and process exit.
+- Validates the Apple Silicon/arm64 execution path. Universal upstream payloads
+  are acceptable only when the arm64 slice is verified.
 
 **Tests:**
 - Path resolution tests.
@@ -324,7 +340,7 @@ merge when time permits.
 
 **Acceptance criteria:**
 - Create/select library.
-- Ingest PDF/TXT/MD/JSON/CSV.
+- Ingest PDF/TXT/Markdown only.
 - Rebuild/sweep works from stored SSD files.
 - Oversized/unsupported files produce user-facing errors.
 
@@ -340,8 +356,10 @@ merge when time permits.
 **Status:** planned
 **Scope:** architecture decision
 **Risk:** High
-**Goal:** Decide the long-term UI path after the Mac host/core has proven the
-  service boundary.
+**Goal:** Re-check the long-term UI path after the Mac host/core has proven the
+  service boundary. MAC1 sets Swift/SwiftUI as the current default, so this item
+  should only change direction if the thin native UI blocks parity or causes
+  real duplicated business logic.
 
 **Options:**
 - Keep Swift as a thin native UI over local .NET host.
@@ -369,7 +387,9 @@ merge when time permits.
 - release assembly scripts
 
 **Acceptance criteria:**
-- Build strategy for arm64/x64/universal is explicit.
+- Build strategy is arm64-only for Free-AI-SSD app artifacts.
+- macOS deployment target and `LSMinimumSystemVersion` match the macOS 11+
+  Apple Silicon baseline, or a later decision records why the floor changed.
 - App bundle contains or can locate required host pieces.
 - External SSD launch path is tested.
 - Logs and failure messages are useful.
@@ -377,6 +397,40 @@ merge when time permits.
 **Tests:**
 - CI artifact validation.
 - Manual clean-Mac launch smoke.
+
+---
+
+### MAC10a - PrepApp OS compatibility filesystem selector
+
+**Status:** planned
+**Scope:** PrepApp UX + format defaults
+**Risk:** Medium
+**Goal:** Let the user choose target OS compatibility during Windows PrepApp
+  drive preparation, then preselect the filesystem that matches the supported
+  Mac baseline.
+
+**Baseline from MAC1:**
+- Windows only -> NTFS.
+- Windows + macOS -> exFAT.
+- macOS only -> exFAT when staged from Windows; APFS remains deferred until a
+  Mac-native prep/staging workflow exists.
+
+**Likely files:**
+- `prep-app/MainWindow.xaml`
+- `shared/ViewModels/PrepViewModel.cs`
+- `shared/Services/IDriveService.cs`
+- `prep-app/Services/DriveService.cs`
+- tests around filesystem default selection and validated format arguments
+
+**Acceptance criteria:**
+- Compatibility choice is visible before the destructive format/prepare action.
+- Filesystem preselection follows the MAC1 baseline.
+- Existing erase confirmation remains in place.
+- Drive letter and process-launch security invariants are unchanged.
+
+**Tests:**
+- ViewModel tests for compatibility -> filesystem mapping.
+- Existing/new format argument tests continue to use `ProcessRunner.ArgumentList`.
 
 ---
 
@@ -483,6 +537,8 @@ merge when time permits.
 **Acceptance criteria:**
 - README and QUICKSTART match actual Mac behavior.
 - Unsupported/deferred features are named.
+- Docs state Apple Silicon-only, macOS 11+, arm64-only app artifacts, and exFAT
+  for shared Windows + macOS SSDs.
 - Troubleshooting covers Gatekeeper, permissions, Ollama, encrypted drives,
   and external SSD filesystem guidance.
 
