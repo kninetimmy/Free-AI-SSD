@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-04-21 (F3 merged to main; H3 deferred)
+Last updated: 2026-05-04 (MAC0 docs honesty pass; F3 merged to main; H3 deferred)
 
 Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
@@ -31,6 +31,11 @@ Decide whether to run `H3` now as a manual Windows smoke pass. Otherwise pick th
 **v1.3.x territory:** X4 (bundled web chat UI), Runner tab restructure, X5 (GPU/CPU indicator) — slot around the RAG audit queue.
 
 See `project_backlog.md` for full item details.
+
+**macOS support track:** `agent_docs/mac_project_backlog.md` is the source of
+truth for turning the current Swift macOS beta into a supported platform. MAC0
+completed the docs honesty pass; next Mac item is MAC1 (define supported Mac
+baseline).
 
 ## Last session
 
