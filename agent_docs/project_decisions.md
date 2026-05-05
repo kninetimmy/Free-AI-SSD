@@ -398,3 +398,59 @@ Windows adapter.
 `tests/MacPlatformBoundaryTests.cs` now guards RunnerCore as a non-WPF,
 non-Windows-targeted project without blocked Windows-only package references or
 a project reference back to the WPF Runner.
+
+---
+
+## 2026-05-05 - Cross-platform PrepApp parity (amends MAC1)
+
+This entry amends the 2026-05-05 MAC1 baseline, which deferred a Windows-equivalent
+Prep UI beyond the first supported Mac release. Mac-native PrepApp is now in scope
+as MAC16/MAC17/MAC18, sequenced after Runner parity (MAC4-MAC8) and packaging
+hardening (MAC10/MAC10a/MAC11), and before the supported-release docs (MAC15).
+
+**Rationale.** A Mac-only user should be able to download Free-AI-SSD on a Mac,
+prep an external SSD, and run the app without ever owning or borrowing a Windows
+machine. Symmetrically, a Windows-only user should keep the Windows PrepApp path.
+The current "Windows PrepApp prepares everything; Mac just runs" model leaves
+Mac-only users dependent on a borrowed Windows machine, which contradicts the
+stated goal of treating macOS as a first-class supported platform.
+
+**Source/target compatibility, accepted as OS limits (not project gaps):**
+
+- APFS targets require a Mac source. Windows cannot natively format APFS, so
+  APFS prep from Windows is permanently out of scope. Bundling third-party
+  drivers to enable it would add licensing and security review surface that
+  isn't justified for this workload.
+- NTFS targets require a Windows source. macOS cannot natively format NTFS, so
+  NTFS prep from Mac is permanently out of scope. Mac users wanting an
+  NTFS-only drive are directed to Windows PrepApp in docs.
+- exFAT works from either source and is the universal common ground. It is
+  the only filesystem produced by the macOS PrepApp.
+
+**APFS dropped from supported targets entirely.** Earlier MAC1 wording deferred
+APFS until a Mac-native prep workflow existed; that workflow is now planned, but
+APFS is not. exFAT is adequate for the supported workload (RAG via SQLite,
+model files, DCS bindings, encrypted config). The SQLite-WAL-on-exFAT-with-
+external-drive risk applies to cross-platform drives anyway, so it must be
+hardened regardless of whether APFS exists. APFS may be revisited only if exFAT
+proves inadequate during MAC17 validation; in that case a new dated decision
+will record the trigger and target.
+
+**Composition direction in scope for the first supported Mac release.** Mac
+Runner is the cross-platform composition target: it hosts RAG, DCS bindings,
+encrypted config, the LAN API, and X4's web chat UI (because
+`RunnerLocalApiService` lives in `runner-core/` post-MAC3, X4 lands on Mac with
+no Mac-specific UI track). The Windows Companion can connect to a Mac-hosted
+Runner over LAN. **Companion-on-Mac (Mac as a Companion host) remains deferred**
+- the niche of a niche of a niche.
+
+**Architectural pattern.** MAC16 mirrors MAC3: extract platform-neutral PrepApp
+business logic (manifest, staging, prereq fetch, encrypted config write, starter-
+model catalog) into a new `prep-core/FreeAiSsd.PrepCore.csproj`. WPF prep host
+on Windows and SwiftUI prep host on Mac both consume `prep-core/`.
+`IDriveService` adapter stays platform-specific (`Format-Volume` on Windows,
+`diskutil` on Mac) under the MAC2 boundary tests.
+
+**Security invariants are unchanged on either side.** SHA-256 + URL allowlist
+on prereq downloads, explicit argument lists on `diskutil` and `Format-Volume`
+calls, encrypted-config format unchanged so drives roundtrip Mac <-> Windows.

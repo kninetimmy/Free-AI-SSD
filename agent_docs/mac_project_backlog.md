@@ -60,6 +60,17 @@ Missing from current macOS Runner:
 - Stephen currently has temporary access to a Mac with Xcode and an Apple
   Developer account. Use that window for MAC10/MAC11 validation when the Mac
   app is stable enough to make signing/notarization meaningful.
+- Cross-platform PrepApp parity (MAC16/17/18) was added 2026-05-05. A Mac-only
+  user must be able to download, prep, and run Free-AI-SSD without owning a
+  Windows machine, and a Mac-prepped drive must be byte-for-byte interchangeable
+  with a Windows-prepped drive (encrypted config roundtrips both ways). APFS is
+  dropped from supported targets; exFAT is the universal target. NTFS-from-Mac
+  and APFS-from-Windows are accepted OS limits, not project gaps.
+- The Mac Runner is the cross-platform composition target: Mac runs Runner
+  (RAG, DCS bindings, encrypted config); Windows Companion connects to it over
+  LAN; X4's web chat UI is served by the same Mac Kestrel for free because
+  `RunnerLocalApiService` lives in `runner-core/` post-MAC3. Companion-on-Mac
+  itself stays deferred.
 
 ## Ordered Backlog
 
@@ -285,27 +296,38 @@ voice, HOTAS/PTT, and DCS import implementations remain in `runner/`.
 
 ---
 
-### MAC6 - Mac local API host and RunnerCli compatibility
+### MAC6 - Mac local API host, Companion compatibility, and X4 web UI surface
 
 **Status:** planned
 **Scope:** Mac host service
 **Risk:** Medium
 **Goal:** Run the Runner API on macOS for health, models, non-streaming chat,
-  and streaming chat.
+  and streaming chat. Mac Runner is the cross-platform composition target:
+  the Windows Companion connects to it over LAN, and X4's web chat UI is
+  served from the same Mac Kestrel without a separate Mac UI track.
 
 **Likely files:**
-- Extracted `RunnerLocalApiService` / endpoint host.
+- Extracted `RunnerLocalApiService` / endpoint host (already in `runner-core/`
+  after MAC3).
 - `runner-cli/*` tests against Mac-compatible host.
-- Mac launcher/host wiring.
+- `companion/*` connection path validated against a Mac-hosted Runner.
+- Mac launcher/host wiring; `mac/Runner.app` packaging includes RunnerCore
+  static assets when X4 ships.
 
 **Acceptance criteria:**
 - `FreeAiSsd.RunnerCli` can connect to a Mac-hosted Runner API.
 - `/api/health`, `/api/models`, `/api/chat`, `/api/chat/stream` work.
 - API key behavior matches Windows.
+- Windows Companion can discover and connect to a Mac-hosted Runner over
+  LAN with the same handshake/auth as Windows-to-Windows.
+- When X4 lands, the static `/chat/` route is served by the Mac Kestrel
+  with no Mac-specific code path â€” it follows from RunnerCore bundling.
 
 **Tests:**
 - API endpoint tests.
-- RunnerCli streaming/non-streaming tests.
+- RunnerCli streaming/non-streaming tests against a Mac host.
+- Windows Companion -> Mac Runner integration smoke (LAN handshake,
+  health, chat).
 
 ---
 
@@ -535,6 +557,153 @@ voice, HOTAS/PTT, and DCS import implementations remain in `runner/`.
 
 ---
 
+### MAC16 - Extract PrepApp core to `prep-core/`
+
+**Status:** planned
+**Scope:** service extraction (mirrors MAC3 pattern for PrepApp)
+**Risk:** Low
+**Goal:** Move platform-neutral PrepApp business logic out of the WPF
+  `prep-app/` host into a reusable `prep-core/FreeAiSsd.PrepCore.csproj`,
+  so a future macOS PrepApp can share manifest, staging, prereq, and
+  encrypted-config logic without duplicating the Windows code.
+
+**Likely files:**
+- New `prep-core/FreeAiSsd.PrepCore.csproj` (plain `net8.0`, no WPF, no
+  Windows-only packages).
+- `prep-app/Services/ArtifactStagingService.cs` -> moves into `prep-core/`.
+- Manifest, prereq catalog, starter-model catalog, and SHA-256/URL-allowlist
+  download logic relocated to `prep-core/` where they aren't already shared.
+- `prep-app/MainWindow.xaml.cs` Windows orchestration stays in the WPF host.
+- `tests/MacPlatformBoundaryTests.cs` extended to guard `prep-core/`.
+
+**Adapters that stay platform-specific:**
+- `IDriveService` â€” drive enumeration + format. Windows already uses WMI /
+  PowerShell `Format-Volume`; macOS will use `diskutil` (added in MAC17).
+- UI hosts: WPF on Windows, SwiftUI on Mac.
+
+**Do not change:**
+- Existing Windows PrepApp behavior or workflow.
+- Encryption format or `SsdEncryption` / `ConfigStore` shape.
+- SHA-256 + URL allowlist guarantees on prereq downloads.
+- `ProcessRunner.ArgumentList` invariant for any process launches.
+
+**Acceptance criteria:**
+- `prep-core/` builds plain `net8.0` with no WPF and no Windows-only package
+  references.
+- Windows PrepApp drives the same staging/format/finalize flow via
+  `prep-core/` services.
+- Existing PrepApp tests still pass.
+- Guardrail tests block new Windows-only packages from entering
+  `prep-core/`.
+
+**Tests:**
+- Existing PrepApp staging/finalize tests.
+- New construction tests proving `prep-core/` doesn't need WPF.
+- `MacPlatformBoundaryTests` extended to cover `prep-core/`.
+
+---
+
+### MAC17 - macOS PrepApp MVP (exFAT)
+
+**Status:** planned
+**Scope:** new SwiftUI host + `prep-core/` consumer
+**Risk:** High
+**Dependencies:** MAC5 (encrypted config unlock/save on Mac), MAC16
+  (`prep-core/` extraction).
+**Goal:** Ship a Mac-native PrepApp so a Mac-only user can download, prep,
+  and run Free-AI-SSD without owning a Windows machine. Output drives must
+  be byte-for-byte compatible with Windows-prepped drives so the encrypted
+  config and staged artifacts work on either OS.
+
+**Targets supported in MVP:**
+- Mac-only -> exFAT.
+- Cross-platform (Windows + Mac) -> exFAT.
+
+**Out of scope for MVP (and possibly permanently):**
+- APFS targets. Dropped per the 2026-05-05 cross-platform prep parity
+  decision; exFAT covers the Mac-only path. Revisit only if exFAT proves
+  inadequate during validation.
+- NTFS targets from a Mac source. macOS cannot natively format NTFS;
+  users wanting NTFS-only drives are directed to Windows PrepApp in docs.
+
+**Likely files:**
+- New `mac-prep-app/` (SwiftUI app analogous to `mac-runner/`).
+- macOS `IDriveService` implementation using `diskutil list` and
+  `diskutil eraseDisk` with explicit argument lists (no shell string
+  concat).
+- `shared/Prereqs/MacToolCatalog.cs` consumed for Mac-side prereqs.
+- `prep-core/` consumed for manifest, staging, encrypted config write.
+- `mac-prep-app/` packaging in `.github/workflows/build.yml` once MAC10
+  hardening lands.
+
+**Do not change:**
+- Encryption format. Encrypted config written on Mac must unlock on
+  Windows and vice versa.
+- Manifest / staging layout.
+- Security invariants: SHA-256 + URL allowlist on prereqs, explicit
+  argument lists on `diskutil`, destructive-action confirmation.
+
+**Acceptance criteria:**
+- User can pick a target external drive, choose Mac-only vs cross-platform,
+  and see exFAT preselected for both.
+- Format runs through `diskutil` with explicit argument lists; destructive
+  action requires explicit confirmation matching the Windows PrepApp UX
+  posture.
+- Artifact staging copies models, `mac/Runner.app`, `mac/tools/ollama`,
+  prereqs, and starter-model catalog via `prep-core/`.
+- Encrypted config written on Mac unlocks on Windows; encrypted config
+  written on Windows unlocks on Mac (cross-platform roundtrip).
+- Logs and error severity match the Windows PrepApp.
+- Apple Silicon-only; macOS 11+ minimum (per MAC1 baseline).
+
+**Tests:**
+- Cross-platform encrypted config roundtrip (Mac-prepped drive opens on
+  Windows; Windows-prepped drive opens on Mac).
+- `IDriveService` fakes for `diskutil` argument validation.
+- Manifest/staging tests covered by `prep-core/`.
+- Manual dual-OS smoke: prep on Mac -> run Windows Runner; prep on
+  Windows -> run Mac Runner.
+
+---
+
+### MAC18 - Cross-platform prep compatibility docs
+
+**Status:** planned
+**Scope:** docs / release matrix
+**Risk:** Low
+**Dependencies:** MAC17 ships first so the matrix isn't aspirational.
+**Goal:** Document the source/target compatibility matrix so users know
+  which OS to run prep from for which target. Make NTFS-only-from-Windows
+  and APFS-only-from-Mac explicit OS limits, not project gaps.
+
+**Compatibility matrix to publish:**
+
+| Source OS | Target | Filesystem | Supported |
+|-----------|--------|------------|-----------|
+| Windows | Windows-only | NTFS | yes |
+| Windows | Cross-platform | exFAT | yes |
+| Windows | Mac-only | exFAT | yes (APFS not available from Windows) |
+| Mac | Mac-only | exFAT | yes (APFS dropped from supported targets) |
+| Mac | Cross-platform | exFAT | yes |
+| Mac | Windows-only | NTFS | not supported â€” use Windows PrepApp |
+
+**Likely files:**
+- `README.md`
+- `docs/QUICKSTART.txt`
+- release notes when MAC17 ships
+- `agent_docs/project_decisions.md` cross-references the matrix
+
+**Acceptance criteria:**
+- README and QUICKSTART describe the matrix in user-facing language.
+- Each unsupported cell links to the supported alternative (e.g., the
+  Mac -> Windows-only NTFS row points users at Windows PrepApp).
+- Encrypted config compatibility (Mac <-> Windows) is explicitly called
+  out so users don't think prep is one-way.
+
+**Tests:** Doc review.
+
+---
+
 ### MAC15 - Supported Mac release docs
 
 **Status:** planned
@@ -553,11 +722,13 @@ voice, HOTAS/PTT, and DCS import implementations remain in `runner/`.
 
 **Tests:** Doc review.
 
-## Recommended First Step
+## Recommended Next Step
 
-Start with **MAC0 - Truth-in-docs + roadmap anchor**.
+MAC0-MAC3 are merged. The next item in the Runner-parity track is
+**MAC4 - macOS Ollama lifecycle + runtime trust gate**, which moves
+`mac/tools/ollama/ollama` start/stop into shared/core logic with the same
+SHA-256 + URL allowlist trust posture as Windows.
 
-This is the safest first PR because the repo currently implies macOS parity
-that the code does not provide. MAC0 should update README/QUICKSTART and, if
-useful, link this backlog from `project_state.md` without changing runtime
-behavior.
+Cross-platform PrepApp parity (MAC16/17/18) sequences after Runner parity
+(MAC4-MAC8) per the 2026-05-05 prep parity decision. APFS is dropped from
+supported targets; exFAT is the universal target from either source OS.

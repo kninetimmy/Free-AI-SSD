@@ -499,10 +499,13 @@ Could be implemented via a `DataTrigger` binding on `IsRunning` or via visibilit
 
 **Affected files (sketch, to be confirmed in design):**
 - `runner-core/Services/RunnerLocalApiService.cs` â€” add static file middleware + `/chat/` route
-- New: `runner/wwwroot/chat/` â€” static SPA assets
+- New: `runner-core/wwwroot/chat/` â€” static SPA assets (must live in RunnerCore so both Windows and Mac hosts serve them; **not** under `runner/wwwroot/`)
 - `runner/MainWindow.xaml.cs:557â€“561` â€” button opens `http://{host}:41555/chat/`
-- `runner/FreeAiSsd.Runner.csproj` â€” embed or copy static assets at publish time
+- `runner-core/FreeAiSsd.RunnerCore.csproj` â€” embed or copy static assets at publish time
+- Mac Runner host wiring â€” ensure RunnerCore's wwwroot ships inside `mac/Runner.app` so the Mac Kestrel serves the same `/chat/` route
 - `docs/` â€” add a "Web Chat UI" section to QUICKSTART
+
+**Cross-platform note (post-MAC3):** because `RunnerLocalApiService` now lives in `runner-core/`, X4 lands on both Windows and macOS Runners with one implementation if static assets are bundled with RunnerCore rather than the WPF host. This is the X4 â†” MAC6 link â€” MAC6 acceptance includes "X4 web chat UI is reachable when bundled".
 
 **âš  Licensing:** any bundled SPA must have a compatible license (MIT, Apache-2, BSD). Flag to Stephen before adding it as a dep.
 

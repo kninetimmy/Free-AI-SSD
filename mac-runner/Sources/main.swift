@@ -10,6 +10,31 @@ struct PortableConfig: Codable {
     let models: [Model]
 }
 
+/// Mirrors `OllamaPackageTrustAttestation` written by the Windows PrepApp's
+/// staging path (`ArtifactStagingService.StageMacOllamaAsync`). The fields
+/// must stay in lockstep with the C# record's JSON shape.
+struct OllamaPackageTrustAttestation: Codable {
+    let Version: String
+    let Url: String
+    let Sha256: String
+    let VerifiedAtUtc: String
+}
+
+/// Pinned Mac Ollama package metadata. Must match
+/// `OllamaPackageTrustPolicy.DefaultMacPackage` in shared/. If you bump one,
+/// bump both — the runtime gate compares the on-SSD attestation to these
+/// constants and refuses to launch on any mismatch.
+enum PinnedMacOllama {
+    static let url = "https://github.com/ollama/ollama/releases/download/v0.5.7/ollama-darwin.zip"
+    static let sha256 = "09ad6bb2edf7cb78619a0932c93c544c362c6ac738c7d5531b3b1b87ac619971"
+    static let attestationFileName = "ollama-package-trust.json"
+}
+
+enum TrustGateResult {
+    case allowed
+    case refused(String)
+}
+
 final class RunnerViewModel: ObservableObject {
     @Published var ssdRoot: URL?
     @Published var modelNames: [String] = []
@@ -81,6 +106,20 @@ final class RunnerViewModel: ObservableObject {
         let ollama = root.appendingPathComponent("mac/tools/ollama/ollama")
         guard FileManager.default.fileExists(atPath: ollama.path) else { status = "Missing mac/tools/ollama/ollama"; return }
 
+        // MAC4: refuse to launch the staged binary unless the on-SSD trust
+        // attestation matches the pinned URL + SHA-256. PrepApp writes this
+        // file after hash-verifying the upstream payload and confirming the
+        // arm64 slice is present; the Swift app re-checks at every launch
+        // so a tampered or missing attestation fails closed here too.
+        switch evaluateTrustGate(ssdRoot: root) {
+        case .refused(let message):
+            status = message
+            log("Trust gate refused launch: \(message)")
+            return
+        case .allowed:
+            break
+        }
+
         let p = Process()
         p.executableURL = ollama
         p.arguments = ["serve"]
@@ -129,6 +168,41 @@ final class RunnerViewModel: ObservableObject {
                 DispatchQueue.main.async { self.response = text }
             }
         }.resume()
+    }
+
+    /// Reads `<ssdRoot>/mac/tools/ollama/ollama-package-trust.json` and
+    /// compares it to the pinned Mac Ollama metadata. Refuses launch when
+    /// the file is missing, malformed, or disagrees on URL / SHA-256.
+    /// Re-hashing the 180MB binary on every launch is too slow; we
+    /// cross-check the attestation against the embedded constants instead.
+    /// PrepApp staging is responsible for the actual SHA-256 verification
+    /// before this attestation is ever written.
+    func evaluateTrustGate(ssdRoot: URL) -> TrustGateResult {
+        let attestationURL = ssdRoot
+            .appendingPathComponent("mac/tools/ollama")
+            .appendingPathComponent(PinnedMacOllama.attestationFileName)
+
+        guard FileManager.default.fileExists(atPath: attestationURL.path) else {
+            return .refused("Missing trust attestation. Re-stage the macOS Ollama bundle from PrepApp.")
+        }
+
+        guard let data = try? Data(contentsOf: attestationURL) else {
+            return .refused("Trust attestation unreadable. Re-stage the macOS Ollama bundle.")
+        }
+
+        guard let attestation = try? JSONDecoder().decode(OllamaPackageTrustAttestation.self, from: data) else {
+            return .refused("Trust attestation malformed. Re-stage the macOS Ollama bundle.")
+        }
+
+        if attestation.Url != PinnedMacOllama.url {
+            return .refused("Trust attestation URL does not match the pinned Mac Ollama source. Re-stage from PrepApp.")
+        }
+
+        if attestation.Sha256.lowercased() != PinnedMacOllama.sha256.lowercased() {
+            return .refused("Trust attestation digest does not match the pinned Mac Ollama SHA-256. Re-stage from PrepApp.")
+        }
+
+        return .allowed
     }
 
     private func log(_ message: String) {
