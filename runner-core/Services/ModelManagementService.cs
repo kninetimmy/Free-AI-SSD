@@ -7,10 +7,17 @@ namespace FreeAiSsd.Runner.Services;
 public sealed class ModelManagementService : IModelManagementService
 {
     private readonly HttpClient _http;
+    private readonly ISystemResourceProbe _systemResources;
 
     public ModelManagementService(HttpClient http)
+        : this(http, UnknownSystemResourceProbe.Instance)
+    {
+    }
+
+    public ModelManagementService(HttpClient http, ISystemResourceProbe systemResources)
     {
         _http = http;
+        _systemResources = systemResources;
     }
 
     public event Action<string>? LogMessage;
@@ -25,8 +32,8 @@ public sealed class ModelManagementService : IModelManagementService
 
     public List<string> GetModelSizingWarnings(PortableConfig config)
     {
-        var ramGb = SystemResources.GetTotalSystemRamGb();
-        var vramGb = SystemResources.GetGpuVramGb();
+        var ramGb = _systemResources.GetTotalSystemRamGb();
+        var vramGb = _systemResources.GetGpuVramGb();
         var warnings = new List<string>();
 
         foreach (var model in config.Models.Where(m => m.Status == ModelInstallStatus.Installed))

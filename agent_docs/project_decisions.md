@@ -377,3 +377,24 @@ services. This is the right default for a Mac app as long as Swift does not
 duplicate encryption, RAG, config, or network API logic. Avalonia or another
 cross-platform UI should be reconsidered only if MAC3-MAC7 prove the thin
 Swift host blocks parity or creates meaningful duplicated business logic.
+
+---
+
+## 2026-05-05 - MAC3 Runner core boundary: shared business logic moves out of WPF host
+
+MAC3 introduces `runner-core/FreeAiSsd.RunnerCore.csproj` as a plain `net8.0`
+home for platform-neutral Runner logic. Chat, RAG orchestration, document
+operations, model management, local API endpoint logic, and service contracts
+now live there instead of being compiled directly from the WPF `runner/`
+project.
+
+The WPF Runner remains the Windows host and adapter layer. Windows Ollama
+process launch/trust startup, Whisper concrete STT, Windows/Piper TTS playback,
+DirectInput HOTAS/PTT, DCS import UI support, and WMI-backed system resource
+probing stay in `runner/`. Model sizing now depends on the core
+`ISystemResourceProbe` contract, with `WindowsSystemResourceProbe` as the
+Windows adapter.
+
+`tests/MacPlatformBoundaryTests.cs` now guards RunnerCore as a non-WPF,
+non-Windows-targeted project without blocked Windows-only package references or
+a project reference back to the WPF Runner.

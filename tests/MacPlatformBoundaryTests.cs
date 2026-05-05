@@ -62,6 +62,33 @@ public sealed class MacPlatformBoundaryTests
         Assert.DoesNotContain(references, IsRunnerProjectReference);
     }
 
+    [Fact]
+    public void RunnerCore_RemainsPlainPortableProject()
+    {
+        var project = LoadProject("runner-core", "FreeAiSsd.RunnerCore.csproj");
+        var root = project.Root ?? throw new InvalidOperationException("Project XML has no root.");
+        var packages = PackageReferences(project);
+        var references = ProjectReferences(project);
+
+        Assert.Equal("Microsoft.NET.Sdk", root.Attribute("Sdk")?.Value);
+        Assert.Equal("net8.0", RequiredProperty(project, "TargetFramework"));
+        Assert.DoesNotContain("windows", RequiredProperty(project, "TargetFramework"), StringComparison.OrdinalIgnoreCase);
+        Assert.False(IsTrueProperty(project, "UseWPF"));
+        Assert.False(IsTrueProperty(project, "UseWindowsForms"));
+        Assert.False(IsTrueProperty(project, "EnableWindowsTargeting"));
+        Assert.DoesNotContain(packages, IsBlockedWindowsOnlyPackage);
+        Assert.DoesNotContain(references, IsRunnerProjectReference);
+    }
+
+    [Fact]
+    public void RunnerProject_ReferencesRunnerCore()
+    {
+        var references = ProjectReferences(LoadProject("runner", "FreeAiSsd.Runner.csproj"));
+
+        Assert.Contains(references, reference =>
+            reference.Replace('\\', '/').Equals("../runner-core/FreeAiSsd.RunnerCore.csproj", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static XDocument LoadProject(params string[] pathParts)
     {
         return XDocument.Load(Path.Combine(FindRepoRoot(), Path.Combine(pathParts)));
@@ -106,6 +133,15 @@ public sealed class MacPlatformBoundaryTests
         var normalized = reference.Replace('\\', '/');
         return normalized.Contains("/runner/", StringComparison.OrdinalIgnoreCase)
             || normalized.StartsWith("../runner/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsBlockedWindowsOnlyPackage(string package)
+    {
+        return package.Contains("NAudio", StringComparison.OrdinalIgnoreCase)
+            || package.Contains("SharpDX", StringComparison.OrdinalIgnoreCase)
+            || package.Contains("System.Speech", StringComparison.OrdinalIgnoreCase)
+            || package.Contains("System.Management", StringComparison.OrdinalIgnoreCase)
+            || package.Contains("Microsoft.Windows.Compatibility", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string FindRepoRoot()

@@ -123,7 +123,7 @@ Items `B1`â€“`F4` below were triaged from Stephen's `Downloads/# Free-AI-SS
 
 **Intent:** New `runner-cli/` console project (`net8.0`, not `-windows`) that speaks to a running Runner's LAN API. Primary use case: SSH from iPad via Tailscale into the Runner host, run a terminal REPL against the existing chat / RAG pipeline.
 
-**Existence:** Server-side endpoints already present in `runner/Services/RunnerLocalApiService.cs`:
+**Existence:** Server-side endpoints already present in `runner-core/Services/RunnerLocalApiService.cs`:
 - `GET /api/health` (unauth) â€” line 112
 - `GET /api/models` â€” line 121
 - `POST /api/chat` â€” line 134 (returns `{responseText, sources, usedRagContext}`)
@@ -190,7 +190,7 @@ No "list documents" or "reindex" endpoint exists today. See Stage 2.
 
 **Affected files:**
 - New: `shared/Services/LanDiscoveryBroadcaster.cs` (Runner side) + `shared/Services/LanDiscoveryListener.cs` (Companion side) â€” or single file with both
-- `runner/Services/RunnerLocalApiService.cs` â€” kick off broadcast when API starts
+- `runner-core/Services/RunnerLocalApiService.cs` â€” kick off broadcast when API starts
 - `runner/MainWindow.xaml(.cs)` + ViewModel â€” Advanced Options section with manual host IP fallback (per TODO)
 - `companion/CompanionRuntime.cs` â€” consume discovery on startup; fall back to manual settings if not found
 - `companion/SettingsWindow.xaml(.cs)` â€” "Searching â†’ Found [hostname @ ip] / Not Found" status + "Retry Discovery" button + manual entry inline
@@ -498,7 +498,7 @@ Could be implemented via a `DataTrigger` binding on `IsRunning` or via visibilit
 - Chat-log persistence (the main user ask beyond "have a chat window") needs a decision: browser `localStorage`? Server-side store on the SSD? â€” punt to design pass.
 
 **Affected files (sketch, to be confirmed in design):**
-- `runner/Services/RunnerLocalApiService.cs` â€” add static file middleware + `/chat/` route
+- `runner-core/Services/RunnerLocalApiService.cs` â€” add static file middleware + `/chat/` route
 - New: `runner/wwwroot/chat/` â€” static SPA assets
 - `runner/MainWindow.xaml.cs:557â€“561` â€” button opens `http://{host}:41555/chat/`
 - `runner/FreeAiSsd.Runner.csproj` â€” embed or copy static assets at publish time
@@ -528,7 +528,7 @@ Could be implemented via a `DataTrigger` binding on `IsRunning` or via visibilit
 
 **Affected files (phase 1):**
 - `runner/Services/OllamaLifecycleService.cs` or new `runner/Services/OllamaStatusService.cs` â€” `/api/ps` client
-- `runner/Services/ChatService.cs` â€” trigger a status refresh on model load completion
+- `runner-core/Services/ChatService.cs` â€” trigger a status refresh on model load completion
 - `runner/MainWindow.xaml` â€” indicator UI next to model selector
 - `runner/MainWindow.xaml.cs` â€” wire the refresh to the UI
 - `tests/` â€” mock HTTP test for `/api/ps` parsing
@@ -574,7 +574,7 @@ Could be implemented via a `DataTrigger` binding on `IsRunning` or via visibilit
 - `runner/Services/PttVoicePipelineService.cs` â€” the `await Completion` call site and surrounding state transition.
 - `runner/Services/StreamingTtsSpeaker.cs` â€” the TCS/Completion plumbing.
 - `runner/MainWindow.xaml.cs` or the Send-button handler â€” the example-prompt send path.
-- `runner/Services/ChatService.cs` â€” if the text-only send path routes through here.
+- `runner-core/Services/ChatService.cs` â€” if the text-only send path routes through here.
 
 **âš  Release implication:** v1.2.4 tag is **deferred** until this is resolved. Per the checklist's own release rule ("Defer tag if X1 shows any hang regression â€” that's the whole point of the release"), we do not tag.
 
@@ -797,7 +797,7 @@ sealed record UnlockMaterial(byte[] DerivedKey, byte[] Salt, int Iterations, str
 - `shared/SsdEncryption.cs` â€” add `SaveEncryptedConfigAsync`, in-memory encrypt overload, `TryUnlockPortableConfigWithMaterial`.
 - **New:** `shared/Services/IConfigStore.cs`, `shared/Services/ConfigStore.cs`, `shared/Services/UnlockMaterial.cs`.
 - `runner/MainWindow.xaml.cs` â€” route all saves through `IConfigStore`; capture `UnlockMaterial` on unlock; `OnClosing` calls `FlushAsync` then `LockSession`.
-- `runner/Services/DocumentOperationsService.cs:130-133` â€” use `IConfigStore`.
+- `runner-core/Services/DocumentOperationsService.cs` â€” use `IConfigStore`.
 - `prep-app/Services/ModelService.cs` â€” use `IConfigStore`.
 - `prep-app/Services/ReadinessService.cs:92,98` â€” use `IConfigStore`.
 - `shared/ViewModels/PrepViewModel.cs:1212-1226` â€” encrypt from memory; no plaintext intermediate.
@@ -945,7 +945,7 @@ keeps the contract visible.
 **Symptom:** Backend / transport failures in `ChatService` and `WhisperSpeechToTextService` are flattened into empty-string success. Callers (UI, LAN API) cannot distinguish "model returned no answer" from "system failed" â€” users see silent empty responses instead of actionable errors.
 
 **Root cause (verified 2026-04-18):**
-- `runner/Services/ChatService.cs:46-50` â€” catch returns `new ChatResponse(string.Empty, null, false)` on any exception. Streaming path at `:115-125` is slightly better (injects `[Error: â€¦]` into the token stream when partial content exists) but still returns success-shaped object.
+- `runner-core/Services/ChatService.cs` â€” catch returns `new ChatResponse(string.Empty, null, false)` on any exception. Streaming path is slightly better (injects `[Error: â€¦]` into the token stream when partial content exists) but still returns success-shaped object.
 - `runner/Services/WhisperSpeechToTextService.cs:127-131` â€” catch returns `string.Empty` on exception.
 
 **Fix:**
@@ -955,9 +955,9 @@ keeps the contract visible.
 - Keep the streaming `[Error: â€¦]` in-band injection as a UX nicety *in addition to* a structured failure return so the API consumer also sees the error.
 
 **Affected files:**
-- `runner/Services/IChatService.cs`, `ChatService.cs` â€” new result type; update all callers.
-- `runner/Services/ISpeechToTextService.cs`, `WhisperSpeechToTextService.cs` â€” same.
-- `runner/Services/RunnerLocalApiService.cs` â€” error response mapping.
+- `runner-core/Services/IChatService.cs`, `ChatService.cs` â€” new result type; update all callers.
+- `runner-core/Services/ISpeechToTextService.cs`, `runner/Services/WhisperSpeechToTextService.cs` â€” same.
+- `runner-core/Services/RunnerLocalApiService.cs` â€” error response mapping.
 - `runner/MainWindow.xaml.cs` â€” UI error handling at Send / STT call sites.
 - `runner-cli/RunnerApiClient.cs` â€” surface server error responses as CLI errors.
 - `tests/RunnerLocalApiServiceTests.cs`, `ChatServiceTests.cs` (new), `WhisperSpeechToTextServiceTests.cs` â€” regression tests proving backend failure propagates end-to-end, not empty success.
@@ -1146,7 +1146,7 @@ unlock dialog window.
 **Affected files:**
 - `shared/Documents/VectorIndex.cs` â€” FTS5 virtual table, fusion logic.
 - `shared/Documents/RagPromptBuilder.cs` â€” consume expanded chunk set.
-- `runner/Services/ChatService.cs` â€” pass expansion flag.
+- `runner-core/Services/ChatService.cs` â€” pass expansion flag.
 - `tests/` â€” eval harness as a first-class test class.
 
 **Exit criterion:** Eval harness recall@5 improves vs. baseline by a chosen delta. Integration tests cover dense-only / lexical-only / fused paths.
@@ -1237,7 +1237,7 @@ unlock dialog window.
 
 **Affected files:**
 - `shared/Documents/RagPromptBuilder.cs` â€” token-aware budget + stronger instruction block.
-- `runner/Services/ChatService.cs` â€” token budget wiring; model-window lookup.
+- `runner-core/Services/ChatService.cs` â€” token budget wiring; model-window lookup.
 - `shared/` â€” possible new `Tiktoken` or equivalent dependency (flag at kickoff).
 - `tests/RagPipelineIntegrationTests.cs` â€” asserts inline citation presence on grounded answer.
 

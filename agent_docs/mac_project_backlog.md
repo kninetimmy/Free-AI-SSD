@@ -181,23 +181,32 @@ merge when time permits.
 
 ### MAC3 - Introduce platform-neutral Runner core
 
-**Status:** planned
+**Status:** done 2026-05-05
 **Scope:** service extraction
 **Risk:** Medium
 **Goal:** Create a reusable home for Runner business logic currently tied to
   the WPF `runner/` project.
 
-**Candidate services to extract or wrap:**
+**Outcome:** Added `runner-core/FreeAiSsd.RunnerCore.csproj`, a plain `net8.0`
+project for platform-neutral Runner business logic. The Windows WPF Runner now
+references this project for chat, document operations, model management, local
+API endpoint logic, and core service contracts. Windows-specific process,
+voice, HOTAS/PTT, and DCS import implementations remain in `runner/`.
+
+**Extracted services/contracts:**
 - `ChatService`
 - `DocumentOperationsService`
-- `RunnerLocalApiService` or its endpoint logic
+- `RunnerLocalApiService`
 - `ModelManagementService`
-- platform-neutral Ollama lifecycle contract
+- platform-neutral Ollama lifecycle, STT, TTS, and system-resource contracts
 
-**Likely files:**
-- New project such as `runner-core/FreeAiSsd.RunnerCore.csproj`
-- `runner/Services/*`
+**Files changed:**
+- `runner-core/FreeAiSsd.RunnerCore.csproj`
+- `runner-core/Services/*`
+- `runner/Services/WindowsSystemResourceProbe.cs`
+- `runner/FreeAiSsd.Runner.csproj`
 - `tests/FreeAiSsd.Tests.csproj`
+- `tests/MacPlatformBoundaryTests.cs`
 - `FreeAiSsd.sln`
 
 **Do not change:**

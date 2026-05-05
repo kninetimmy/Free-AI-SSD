@@ -11,7 +11,11 @@ for a lightweight companion app on a second PC.
 ## Stack and versions
 - **.NET 8** (`global.json` pinned to `8.0.204`, `rollForward: latestFeature`)
 - **WPF** (`net8.0-windows`) for prep-app, runner, companion
-- **Shared library** (`net8.0`, cross-platform, no WPF) — all core logic
+- **Shared library** (`net8.0`, cross-platform, no WPF) — portable config,
+  document, prerequisite, and helper logic
+- **Runner core** (`net8.0`, cross-platform, no WPF) — platform-neutral Runner
+  chat, RAG orchestration, document operations, model management, and LAN API
+  endpoint logic
 - **Swift/SwiftUI** — `mac-runner/` (beta, unsigned)
 - **xUnit + Moq** — tests target `net10.0` via `tests/` (326 tests as of 2026-04-17)
 - **PdfPig** — PDF ingestion
@@ -25,8 +29,9 @@ for a lightweight companion app on a second PC.
 ```
 FreeAiSsd.sln
 ├── shared/          — net8.0 library; core logic shared by all hosts
+├── runner-core/     — net8.0 library; platform-neutral Runner services
 ├── prep-app/        — net8.0-windows WPF; drive staging & model download
-├── runner/          — net8.0-windows WPF; main chat UI, voice, LAN API
+├── runner/          — net8.0-windows WPF; main UI and Windows adapters
 ├── runner-cli/      — net8.0 CLI; headless REPL client for Runner's LAN API
 ├── companion/       — net8.0-windows WPF; tray/overlay LAN client
 ├── tools/FreeAiSsd.PrereqFetch/  — net8.0 CLI; CI prereq-bundle builder
@@ -48,17 +53,24 @@ Namespaces:
 - **UI/Theme** — Colors.xaml, Controls.xaml, Shadows.xaml, Typography.xaml (neumorphic dark theme, injected into both WPF hosts)
 - **Mvvm** — `BaseViewModel`, `RelayCommand`, `AsyncRelayCommand`, `IDialogService`
 
-### Runner services (`runner/Services/`)
-DI-registered services:
-- `ConfigStore` (`IConfigStore`) — config save chokepoint; serializes saves via `SemaphoreSlim(1,1)`, caches `UnlockMaterial`, zeroes key on `LockSession()`
-- `OllamaLifecycleService` — process start/stop
+### Runner core (`runner-core/`)
+Platform-neutral Runner services and contracts:
 - `ChatService` — RAG-augmented streaming via Ollama `/api/generate`; returns `ChatResult` discriminated union (Success / RagRetrievalFailed / Failure)
-- `DocumentOperationsService` — CRUD, ingestion, index rebuild
+- `DocumentOperationsService` — document library CRUD, ingestion, active-library selection, and index rebuild orchestration
+- `ModelManagementService` — installed model list, embedding model pull, first-run sizing warning state, and hardware sizing checks via `ISystemResourceProbe`
+- `RunnerLocalApiService` — ASP.NET Core LAN HTTP endpoint logic for Companion / RunnerCli compatibility
+- Contracts for platform adapters: `IOllamaLifecycleService`, `ISpeechToTextService`, `ITextToSpeechService`, `ITtsProvider`, and `ISystemResourceProbe`
+
+### Windows Runner host (`runner/Services/`)
+WPF-hosted Windows adapters and UI-facing services:
+- `ConfigStore` (`IConfigStore`) — config save chokepoint; serializes saves via `SemaphoreSlim(1,1)`, caches `UnlockMaterial`, zeroes key on `LockSession()`
+- `OllamaLifecycleService` — Windows Ollama process start/stop
 - `WhisperSpeechToTextService` — STT (Tiny/Base/Small/Medium ggml models); returns `TranscriptionResult` discriminated union (Success / Failure)
 - `SystemTextToSpeechService` / `PiperTextToSpeechService` — Windows SAPI or neural TTS
 - `HotasInputService` — DirectInput joystick polling (SharpDX)
 - `PttVoicePipelineService` — full PTT → record → transcribe → send → TTS loop
-- `RunnerLocalApiService` — ASP.NET Core LAN HTTP host for Companion
+- `DcsBindingsImportService` — DCS binding import UI workflow support
+- `WindowsSystemResourceProbe` — Windows RAM/VRAM probe behind the RunnerCore `ISystemResourceProbe` contract
 
 ### Runner CLI (`runner-cli/`)
 Thin .NET 8 HTTP client against `RunnerLocalApiService`. No WPF/GUI deps —

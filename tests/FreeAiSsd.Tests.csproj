@@ -19,6 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\runner-core\FreeAiSsd.RunnerCore.csproj" />
     <ProjectReference Include="..\shared\FreeAiSsd.Shared.csproj" />
   </ItemGroup>
 
@@ -26,16 +27,7 @@
     <Compile Include="..\prep-app\ModelOperations.cs" Link="PrepApp\ModelOperations.cs" />
     <Compile Include="..\prep-app\PrepStartupArgs.cs" Link="PrepApp\PrepStartupArgs.cs" />
     <Compile Include="..\prep-app\Services\DriveService.cs" Link="PrepApp\DriveService.cs" />
-    <Compile Include="..\runner\Services\IChatService.cs" Link="Runner\IChatService.cs" />
-    <Compile Include="..\runner\Services\ChatService.cs" Link="Runner\ChatService.cs" />
-    <Compile Include="..\runner\Services\ISpeechToTextService.cs" Link="Runner\ISpeechToTextService.cs" />
-    <Compile Include="..\runner\Services\ITextToSpeechService.cs" Link="Runner\ITextToSpeechService.cs" />
-    <Compile Include="..\runner\Services\ITtsProvider.cs" Link="Runner\ITtsProvider.cs" />
-    <Compile Include="..\runner\Services\IRunnerLocalApiService.cs" Link="Runner\IRunnerLocalApiService.cs" />
-    <Compile Include="..\runner\Services\IDocumentOperationsService.cs" Link="Runner\IDocumentOperationsService.cs" />
     <Compile Include="..\runner\Services\IPttVoicePipelineService.cs" Link="Runner\IPttVoicePipelineService.cs" />
-    <Compile Include="..\runner\Services\DocumentOperationsService.cs" Link="Runner\DocumentOperationsService.cs" />
-    <Compile Include="..\runner\Services\RunnerLocalApiService.cs" Link="Runner\RunnerLocalApiService.cs" />
     <Compile Include="..\runner\Services\PttVoicePipelineService.cs" Link="Runner\PttVoicePipelineService.cs" />
     <Compile Include="..\runner\Services\StreamingTtsSpeaker.cs" Link="Runner\StreamingTtsSpeaker.cs" />
     <Compile Include="..\runner\Services\WhisperSpeechToTextService.cs" Link="Runner\WhisperSpeechToTextService.cs" />

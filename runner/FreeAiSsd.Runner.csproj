@@ -23,6 +23,7 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\runner-core\FreeAiSsd.RunnerCore.csproj" />
     <ProjectReference Include="..\shared\FreeAiSsd.Shared.csproj" />
   </ItemGroup>
   <!--
