@@ -2,7 +2,7 @@ namespace FreeAiSsd.Runner.Services;
 
 /// <summary>
 /// Provides text-to-speech synthesis using a local offline engine.
-/// Implementations include Windows SAPI (System.Speech) and Piper TTS.
+/// Implementations are supplied by the host platform.
 /// </summary>
 public interface ITextToSpeechService : IDisposable
 {

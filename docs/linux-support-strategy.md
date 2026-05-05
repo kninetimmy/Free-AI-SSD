@@ -35,7 +35,7 @@ The current repository is Windows-first with a portable shared core.
   - `runner-cli/` is plain `net8.0` and HTTP-based.
   - Core config, document parsing, vector indexing, path guards, and many service contracts are in `shared/`.
   - RAG/document pipeline (`shared/Documents/*`) is mostly OS-neutral.
-  - Local API service behavior and security model (in `runner/Services/RunnerLocalApiService.cs`) can be retained with minimal platform changes.
+  - Local API service behavior and security model (in `runner-core/Services/RunnerLocalApiService.cs`) can be retained with minimal platform changes.
 - SSD layout is centrally defined in `shared/SsdLayout.cs`, but currently includes Windows-specific paths and executable assumptions that must be generalized for Linux.
 
 ## Linux Support Goals

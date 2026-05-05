@@ -43,6 +43,7 @@ public partial class App : System.Windows.Application
             new ConfigStore(sp.GetRequiredService<SsdLogger>()));
 
         // Runner services
+        collection.AddSingleton<ISystemResourceProbe, WindowsSystemResourceProbe>();
         collection.AddSingleton<IOllamaLifecycleService, OllamaLifecycleService>();
         collection.AddSingleton<IModelManagementService, ModelManagementService>();
         collection.AddSingleton<IDocumentOperationsService, DocumentOperationsService>();
