@@ -314,3 +314,24 @@ Runner still allows mid-session profile switching via the in-window pills.
 Runner must remain backward-compatible with older SSDs where `ActiveProfile` is
 null. In that case it starts normally, keeps flight-sim-only UI hidden by default,
 and does not resurrect the old required modal.
+
+---
+
+## 2026-05-05 - MAC2 platform boundary: shared stays mixed only as known debt until adapters exist
+
+MAC2 audits the current macOS portability blockers without moving runtime code.
+`shared/FreeAiSsd.Shared.csproj` remains a plain `net8.0` project, but its
+`System.Management`, `NAudio`, and `SharpDX.DirectInput` references are now
+explicit known debt, not a precedent for adding more Windows-only packages to
+the future core.
+
+The extraction direction is: platform-neutral Runner core first, then host or
+adapter projects for Windows-only audio capture/playback, DirectInput HOTAS,
+Windows SAPI, WMI system probes, UAC, and PowerShell `Format-Volume`. The Mac
+Swift app remains thin and should consume the shared/local host boundary rather
+than duplicate encryption, RAG, or API behavior.
+
+`tests/MacPlatformBoundaryTests.cs` is the guardrail: it keeps `shared/` as a
+plain non-WPF project, treats the current Windows-only package references as a
+bounded inventory to pay down, and keeps `runner-cli/` as a portable HTTP
+client rather than an in-process Runner host.
