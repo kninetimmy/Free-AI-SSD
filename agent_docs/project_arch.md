@@ -88,7 +88,7 @@ ViewModels inherit `BaseViewModel` from shared. UI logic lives in ViewModels, no
 ## Security invariants
 
 - **AES-256-GCM** config encryption (PBKDF2-SHA256, 210k iterations)
-- **Ollama packages** verified by URL allowlist + SHA-256 digest before extraction
+- **Ollama packages** verified by URL allowlist + SHA-256 digest before extraction; macOS payloads additionally require an arm64 Mach-O slice (Apple Silicon baseline). Per-platform on-SSD trust attestations under `windows/tools/ollama/` and `mac/tools/ollama/` gate runtime launch.
 - **Path traversal** blocked by `PathGuards` (throw, don't swallow)
 - **Shell injection** prevented via `ProcessRunner.ArgumentList` (never string concat)
 - **Fail-closed** write guard on encrypted drives (`PrepDriveWriteGuard`)
