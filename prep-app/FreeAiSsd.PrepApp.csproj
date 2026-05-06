@@ -10,12 +10,15 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\shared\FreeAiSsd.Shared.csproj" />
-  </ItemGroup>
-  <ItemGroup>
-    <Content Include="Resources\starter-models.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <EmbeddedResource Include="Resources\starter-models.json" />
+    <!--
+      MAC16: prep-core/ holds the platform-neutral PrepApp business logic
+      (ArtifactStaging, Prereq, OllamaPackage, Model, Readiness, Encryption
+      services + ModelOperations + StarterModelCatalog + MacArtifactAvailability
+      + OllamaServerHandle). The starter-models.json content + embedded
+      resource flow from prep-core via this reference, so the host no longer
+      declares them locally.
+    -->
+    <ProjectReference Include="..\prep-core\FreeAiSsd.PrepCore.csproj" />
   </ItemGroup>
   <!--
     Shared neumorphic theme. The XAML resource dictionaries live in

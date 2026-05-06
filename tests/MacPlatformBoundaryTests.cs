@@ -90,6 +90,40 @@ public sealed class MacPlatformBoundaryTests
     }
 
     [Fact]
+    public void PrepCore_RemainsPlainPortableProject()
+    {
+        // MAC16: prep-core/ holds platform-neutral PrepApp business logic
+        // (ArtifactStaging, Prereq, OllamaPackage, Model, Readiness,
+        // Encryption services + ModelOperations + StarterModelCatalog +
+        // MacArtifactAvailability + OllamaServerHandle). Must build plain
+        // net8.0 so a future macOS PrepApp host (MAC17) can consume it
+        // without dragging WPF into the SwiftUI bundle's net8.0 sidecar.
+        var project = LoadProject("prep-core", "FreeAiSsd.PrepCore.csproj");
+        var root = project.Root ?? throw new InvalidOperationException("Project XML has no root.");
+        var packages = PackageReferences(project);
+        var references = ProjectReferences(project);
+
+        Assert.Equal("Microsoft.NET.Sdk", root.Attribute("Sdk")?.Value);
+        Assert.Equal("net8.0", RequiredProperty(project, "TargetFramework"));
+        Assert.DoesNotContain("windows", RequiredProperty(project, "TargetFramework"), StringComparison.OrdinalIgnoreCase);
+        Assert.False(IsTrueProperty(project, "UseWPF"));
+        Assert.False(IsTrueProperty(project, "UseWindowsForms"));
+        Assert.False(IsTrueProperty(project, "EnableWindowsTargeting"));
+        Assert.DoesNotContain(packages, IsBlockedWindowsOnlyPackage);
+        Assert.DoesNotContain(references, IsPrepAppProjectReference);
+        Assert.DoesNotContain(references, IsRunnerProjectReference);
+    }
+
+    [Fact]
+    public void PrepAppProject_ReferencesPrepCore()
+    {
+        var references = ProjectReferences(LoadProject("prep-app", "FreeAiSsd.PrepApp.csproj"));
+
+        Assert.Contains(references, reference =>
+            reference.Replace('\\', '/').Equals("../prep-core/FreeAiSsd.PrepCore.csproj", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void MacRunnerHost_RemainsPlainNet8WithoutWindowsPackages()
     {
         // MAC6 sidecar: net8.0 host process spawned by the Swift mac-runner.
@@ -160,6 +194,13 @@ public sealed class MacPlatformBoundaryTests
         var normalized = reference.Replace('\\', '/');
         return normalized.Contains("/runner/", StringComparison.OrdinalIgnoreCase)
             || normalized.StartsWith("../runner/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPrepAppProjectReference(string reference)
+    {
+        var normalized = reference.Replace('\\', '/');
+        return normalized.Contains("/prep-app/", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("../prep-app/", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsBlockedWindowsOnlyPackage(string package)
