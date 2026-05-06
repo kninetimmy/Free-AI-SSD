@@ -840,3 +840,48 @@ where someone wants exFAT on a Windows-only drive for cross-tooling
 reasons — re-introduce a dedicated filesystem control then. As long as
 the two intents stay 1:1, deriving one from the other keeps the UI
 honest.
+
+## 2026-05-06 — MAC10b: single shared app icon across Mac Runner and all WPF hosts
+
+MAC10b set out to replace the default macOS placeholder icon on
+`Runner.app`. The user asked that the same icon also apply to the
+Windows WPF apps for cross-platform brand parity, and that the choice
+between "one icon for all hosts" vs "different icons for Runner / PrepApp /
+Companion" be left to judgement.
+
+**Decision:** one shared icon — `assets/icon/AppIcon` — applies to all four
+hosts: Mac `Runner.app`, Windows Runner, Windows PrepApp, Windows Companion.
+
+**Why one icon, not per-host:**
+- Free-AI-SSD is one product. PrepApp and Runner are phases of the same
+  user journey on the same drive, not standalone apps competing for
+  recognition. A shared mark reads as "Free-AI-SSD" everywhere.
+- Per-host icons would mean three more art files to keep in sync if the
+  brand changes, with no user payoff (PrepApp users will recognize the
+  Runner icon when they see it later, and vice versa).
+- Companion is intentionally a satellite of Runner; matching icons make
+  the relationship visually obvious.
+
+**Asset pipeline:** the canonical art is generated in code by
+`assets/icon/IconRenderer.swift` (Core Graphics drawing of a hexagonal
+chip with a glowing core on a Big Sur squircle). `assets/icon/build-icons.sh`
+renders every required size and produces `AppIcon.icns` (macOS) +
+`AppIcon.ico` (Windows) + `AppIcon.png` (1024 master). Both binaries are
+committed so CI doesn't need a Swift-renderer step on the Windows job and
+so MSBuild can reference the `.ico` directly via `<ApplicationIcon>`. Re-run
+`build-icons.sh` if the design changes; the binaries are derivable, but
+committed for build-time stability.
+
+**Info.plist polish bundled with this work:** `CFBundleName` and a new
+`CFBundleDisplayName` set to "Free AI SSD" (≤15 chars); `CFBundleVersion`
+added (was missing); `CFBundleIconFile=AppIcon` added; `LSApplicationCategoryType=public.app-category.utilities`,
+`LSRequiresNativeExecution=true` (arm64-only per MAC1), `NSHighResolutionCapable=true`,
+`NSHumanReadableCopyright`. `CFBundleShortVersionString` deliberately
+left at "1.0" — version-tracking for the Mac app firms up at MAC11 when
+signing/notarization make releases real.
+
+**Exit ramp:** if a downstream phase warrants distinct identity (e.g.
+PrepApp ships standalone for IT admins as a separate distribution
+channel, or Companion gets a marketing push as a remote-control product),
+introduce per-host icon files at that point. The `<ApplicationIcon>`
+property is per-csproj, so divergence is a one-line change per host.

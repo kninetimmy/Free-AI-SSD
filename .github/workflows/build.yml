@@ -282,12 +282,49 @@ jobs:
           mkdir -p out/Runner.app/Contents/Resources/runner-host
           cp -R mac-runner-host/bin/Release/net8.0/osx-arm64/publish/* out/Runner.app/Contents/Resources/runner-host/
           chmod +x out/Runner.app/Contents/Resources/runner-host/FreeAiSsd.MacRunnerHost
+          cp assets/icon/AppIcon.icns out/Runner.app/Contents/Resources/AppIcon.icns
           cat > out/Runner.app/Contents/Info.plist <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict><key>CFBundleExecutable</key><string>Runner</string><key>CFBundleIdentifier</key><string>com.freeaissd.runner</string><key>CFBundleName</key><string>Runner</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>1.0</string><key>LSMinimumSystemVersion</key><string>11.0</string></dict></plist>
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key><string>Runner</string>
+              <key>CFBundleIdentifier</key><string>com.freeaissd.runner</string>
+              <key>CFBundleName</key><string>Free AI SSD</string>
+              <key>CFBundleDisplayName</key><string>Free AI SSD</string>
+              <key>CFBundlePackageType</key><string>APPL</string>
+              <key>CFBundleShortVersionString</key><string>1.0</string>
+              <key>CFBundleVersion</key><string>1</string>
+              <key>CFBundleIconFile</key><string>AppIcon</string>
+              <key>LSMinimumSystemVersion</key><string>11.0</string>
+              <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
+              <key>LSRequiresNativeExecution</key><true/>
+              <key>NSHighResolutionCapable</key><true/>
+              <key>NSHumanReadableCopyright</key><string>Copyright (c) 2026 Free-AI-SSD project</string>
+          </dict>
+          </plist>
           PLIST
           chmod +x out/Runner.app/Contents/MacOS/Runner
+      - name: Verify Runner.app bundle layout
+        run: |
+          set -e
+          test -f out/Runner.app/Contents/Resources/AppIcon.icns || { echo "AppIcon.icns missing from bundle Resources" >&2; exit 1; }
+          plutil -lint out/Runner.app/Contents/Info.plist
+          icon_key=$(plutil -extract CFBundleIconFile raw out/Runner.app/Contents/Info.plist)
+          if [ "$icon_key" != "AppIcon" ]; then
+            echo "Info.plist CFBundleIconFile = '$icon_key' (expected 'AppIcon')" >&2
+            exit 1
+          fi
+          # Round-trip the .icns through iconutil to confirm it has the standard size set
+          # macOS expects in a shipped app icon.
+          iconutil --convert iconset --output /tmp/icns-check.iconset out/Runner.app/Contents/Resources/AppIcon.icns
+          for needed in icon_16x16.png icon_16x16@2x.png icon_32x32.png icon_32x32@2x.png \
+                        icon_128x128.png icon_128x128@2x.png icon_256x256.png icon_256x256@2x.png \
+                        icon_512x512.png icon_512x512@2x.png; do
+            test -f "/tmp/icns-check.iconset/$needed" || { echo "iconset missing $needed" >&2; exit 1; }
+          done
+          rm -rf /tmp/icns-check.iconset
+          echo "Runner.app bundle layout OK."
       # Signing is intentionally disabled until Apple cert + notarization pipeline is ready.
       - name: Import signing certificate
         if: github.event_name == 'workflow_dispatch' && env.MAC_SIGNING_ENABLED == 'true'
