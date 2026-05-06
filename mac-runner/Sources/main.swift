@@ -40,6 +40,9 @@ final class RunnerViewModel: ObservableObject {
     @Published var selectedModel: String = ""
     @Published var prompt: String = ""
     @Published var response: String = ""
+    @Published var responseSources: [String] = []
+    @Published var usedRagContext: Bool = false
+    @Published var ragWarning: String? = nil
     @Published var status: String = "Idle"
     @Published var isEncryptedLocked: Bool = false
     @Published var unlockDialogPresented: Bool = false
@@ -143,6 +146,7 @@ final class RunnerViewModel: ObservableObject {
             isEncryptedLocked = true
             modelNames = []
             selectedModel = ""
+            clearRagState()
             portableConfig = nil
             unlockMaterial?.zeroize()
             unlockMaterial = nil
@@ -160,6 +164,7 @@ final class RunnerViewModel: ObservableObject {
             portableConfig = nil
             modelNames = []
             selectedModel = ""
+            clearRagState()
             return
         }
         portableConfig = parsed
@@ -227,6 +232,7 @@ final class RunnerViewModel: ObservableObject {
         portableConfig = nil
         modelNames = []
         selectedModel = ""
+        clearRagState()
         if let root = ssdRoot, SsdEncryption.isEffectivelyEncryptedForWriteGuard(ssdRoot: root) {
             isEncryptedLocked = true
             status = "Encrypted SSD locked"
@@ -438,18 +444,105 @@ final class RunnerViewModel: ObservableObject {
 
     func sendPrompt() {
         guard !selectedModel.isEmpty else { return }
-        guard let url = URL(string: "http://127.0.0.1:\(hostPort)/api/generate") else { return }
+        guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        clearRagState()
+
+        guard let baseUrl = networkApiBaseUrl,
+              let url = URL(string: "\(baseUrl)/api/chat") else {
+            status = "Start Network Mode before sending chat"
+            networkApiStatus = "API required for RAG chat"
+            log("Chat refused: mac-runner-host is not running, direct Ollama chat would bypass RAG.")
+            return
+        }
+
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: ["model": selectedModel, "prompt": prompt, "stream": false])
+        if let apiKey = apiKeyForLocalApiRequest() {
+            req.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["model": selectedModel, "prompt": prompt])
 
-        URLSession.shared.dataTask(with: req) { data, _, _ in
-            guard let data else { return }
-            if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let text = obj["response"] as? String {
-                DispatchQueue.main.async { self.response = text }
+        URLSession.shared.dataTask(with: req) { [weak self] data, urlResponse, error in
+            guard let self else { return }
+
+            if let error {
+                DispatchQueue.main.async {
+                    self.status = "Chat failed: \(error.localizedDescription)"
+                    self.clearRagState()
+                }
+                return
+            }
+
+            guard let httpResponse = urlResponse as? HTTPURLResponse else {
+                DispatchQueue.main.async {
+                    self.status = "Chat failed: invalid API response"
+                    self.clearRagState()
+                }
+                return
+            }
+
+            guard (200..<300).contains(httpResponse.statusCode), let data else {
+                let message = self.apiErrorMessage(data: data, statusCode: httpResponse.statusCode)
+                DispatchQueue.main.async {
+                    self.status = message
+                    self.clearRagState()
+                }
+                return
+            }
+
+            guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let text = obj["responseText"] as? String else {
+                DispatchQueue.main.async {
+                    self.status = "Chat failed: malformed API response"
+                    self.clearRagState()
+                }
+                return
+            }
+
+            let sources = (obj["sources"] as? [String]) ?? []
+            let usedRag = (obj["usedRagContext"] as? Bool) ?? false
+            var warning = obj["ragWarning"] as? String
+            if warning == nil,
+               httpResponse.value(forHTTPHeaderField: "X-RAG-Status") == "retrieval-failed" {
+                warning = "RAG retrieval failed; answer used the base model only."
+            }
+
+            DispatchQueue.main.async {
+                self.response = text
+                self.responseSources = sources
+                self.usedRagContext = usedRag
+                self.ragWarning = warning
+                self.status = usedRag ? "Answered with sources" : "Answered"
             }
         }.resume()
+    }
+
+    private func clearRagState() {
+        responseSources = []
+        usedRagContext = false
+        ragWarning = nil
+    }
+
+    private func apiKeyForLocalApiRequest() -> String? {
+        guard let config = portableConfig else { return nil }
+        let requireKey = (config["networkRequireApiKey"] as? Bool) ?? true
+        guard requireKey else { return nil }
+        let key = (config["networkApiKey"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return key.isEmpty ? nil : key
+    }
+
+    private func apiErrorMessage(data: Data?, statusCode: Int) -> String {
+        if let data,
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let detail = obj["detail"] as? String, !detail.isEmpty {
+                return "Chat failed: \(detail)"
+            }
+            if let error = obj["error"] as? String, !error.isEmpty {
+                return "Chat failed: \(error)"
+            }
+        }
+        return "Chat failed: API returned \(statusCode)"
     }
 
     /// Reads `<ssdRoot>/mac/tools/ollama/ollama-package-trust.json` and
@@ -522,6 +615,22 @@ struct ContentView: View {
             TextEditor(text: $vm.prompt).frame(height: 120)
             Button("Send") { vm.sendPrompt() }
             TextEditor(text: $vm.response).frame(height: 200)
+            if let warning = vm.ragWarning {
+                Text(warning)
+                    .font(.callout)
+                    .foregroundColor(.orange)
+            }
+            if !vm.responseSources.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Sources")
+                        .font(.headline)
+                    ForEach(vm.responseSources, id: \.self) { source in
+                        Text(source)
+                            .font(.callout)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
 
             // MAC6: Network Mode toggle. Spawns the net8.0 sidecar on switch-on
             // and tears it down on switch-off / Lock / app exit.

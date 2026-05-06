@@ -39,6 +39,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         _logger = logger;
         _ssdRoot = string.IsNullOrWhiteSpace(ssdRoot) ? AppContext.BaseDirectory : ssdRoot;
         _staticFilesRoot = string.IsNullOrWhiteSpace(staticFilesRoot) ? null : staticFilesRoot;
+        _chatService.LogMessage += OnChatLogMessage;
     }
 
     public event Action<string>? LogMessage;
@@ -173,7 +174,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
                 ChatResult.Success s => SetRagStatusHeader(context, "success",
                     Results.Ok(new ChatResultResponse(s.Response.ResponseText, s.Response.Sources ?? new List<string>(), s.Response.UsedRagContext))),
                 ChatResult.RagRetrievalFailed r => SetRagStatusHeader(context, "retrieval-failed",
-                    Results.Ok(new ChatResultResponse(r.Response.ResponseText, r.Response.Sources ?? new List<string>(), r.Response.UsedRagContext))),
+                    Results.Ok(new ChatResultResponse(r.Response.ResponseText, r.Response.Sources ?? new List<string>(), r.Response.UsedRagContext, r.RagError))),
                 ChatResult.Failure f => Results.Problem(detail: f.ErrorMessage, statusCode: StatusCodes.Status503ServiceUnavailable),
                 _ => throw new System.Diagnostics.UnreachableException()
             };
@@ -413,7 +414,14 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
 
     public async ValueTask DisposeAsync()
     {
+        _chatService.LogMessage -= OnChatLogMessage;
         await StopAsync();
+    }
+
+    private void OnChatLogMessage(string message)
+    {
+        _logger?.Info(message);
+        LogMessage?.Invoke(message);
     }
 
     /// <summary>
@@ -892,7 +900,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
     }
 
     public sealed record ChatRequest(string Model, string Prompt);
-    public sealed record ChatResultResponse(string ResponseText, IReadOnlyList<string> Sources, bool UsedRagContext);
+    public sealed record ChatResultResponse(string ResponseText, IReadOnlyList<string> Sources, bool UsedRagContext, string? RagWarning = null);
     public sealed record TtsSpeakRequest(string Text);
     public sealed record SttTranscribeResponse(string Transcription);
     public sealed record VoiceQueryResponse(
