@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-05-06 (MAC10a in flight; PR pending)
+Last updated: 2026-05-06 (PR #187 MAC10a merged; packaging track moves to MAC10b)
 
 Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
@@ -8,18 +8,14 @@ Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
 ## In flight
 
-**MAC10a — Windows PrepApp filesystem derives from PrepTargets** (PR
-pending). Widens `DriveFormatCommand.NormalizeFileSystem` to accept
-`exFAT` (canonical casing emitted regardless of input case), adds a
-`PrepViewModel.ResolveFileSystem(PrepTargets)` mapping (Windows-only →
-NTFS; anything including Mac → exFAT), and surfaces the chosen
-filesystem in `EraseConfirmDialog` before the destructive Format-Volume
-call. The "compatibility selector" the backlog asked for already exists
-as the Windows / Mac checkboxes — see the 2026-05-06 decision entry for
-why MAC10a derives from `PrepTargets` rather than introducing a new
-control. APFS still deferred until MAC17.
+Between tasks. PR #187 (MAC10a Windows PrepApp filesystem from
+PrepTargets) merged at `eb44572`. Mac packaging track continues with
+**MAC10b** (Mac app icon + Info.plist polish) and **MAC11** (signing +
+notarization).
 
 ## Recently shipped
+
+- **PR #187 - MAC10a Windows PrepApp filesystem derives from PrepTargets - merged `eb44572` (2026-05-06).** Widens `DriveFormatCommand.NormalizeFileSystem` to accept `exFAT` alongside `NTFS` (canonical casing emitted regardless of input case; `FAT32`/`refs`/`APFS` still reject). Adds `PrepViewModel.ResolveFileSystem(PrepTargets)` mapping — Windows-only → NTFS; anything including Mac → exFAT — and `FormatPrepareAsync` reads the resolved filesystem once, passes it to both `IDialogService.ConfirmErase` (gains a `fileSystem` parameter) and `IDriveService.FormatAsync`, and logs which filesystem was chosen. `EraseConfirmDialog` now shows "Format as: NTFS (Windows only)" or "Format as: exFAT (Windows + macOS compatible)" before the destructive call. No new selector — the existing `PrepareWindows`/`PrepareMac` checkboxes (persisted via `PrepTargetPreferenceStore`) are the single source of truth, decision recorded as "MAC10a: filesystem derived from existing PrepTargets, not a new selector". Security invariants unchanged: label still via `FREEAI_FORMAT_LABEL` env var, `powershell.exe` still absolute System32 path, erase-confirm still gates the destructive call, `ProcessRunner.ArgumentList` still used for launch. APFS still deferred per MAC1 until MAC17. Tests: pinned `ResolveFileSystem` mapping + Win+Mac/Mac-only `FormatAsync("exFAT", ...)` verifies + canonical-casing `exFAT` happy-path test on `DriveFormatCommand`. Bundled the orphaned post-MAC9-merge `project_state.md` wrap-up that had never been pushed. CI `windows-build` (3m57s) + `mac-runner-build` (59s) green on first run; `package-release` skipped (correct — no release tag).
 
 - **PR #186 - MAC9 Mac UI strategy decision + MAC8 wrap-up - merged `408828d` (2026-05-06).** Docs-only. Locks in Swift/SwiftUI thin-UI over the `mac-runner-host` .NET sidecar as the supported long-term Mac UI; rejects Avalonia replacement and CLI-first-longer. Decision rests on MAC4-MAC8 evidence: ~1,730 lines of Swift, zero business logic in Swift, one approved business-logic duplication (`SsdEncryption.swift`, MAC5 waiver), zero UI-architecture-driven parity blockers. Exit-ramp criteria recorded in `project_decisions.md` for re-opening MAC9 if Swift starts duplicating non-trivial business logic, WPF/Swift drift outpaces parity work, Apple lifecycle exceeds Avalonia's, or a non-Apple Runner platform is added. Bundled the unfiled MAC8 wrap-up that had never been pushed (PR #185 entry, four 2026-05-06 decision entries on R1 Stage 2 supersession, NoOpConfigStore, NDJSON sync-queue + drain, camelCase JsonNamingPolicy, ASP.NET catch-all `%2F` decode; MAC8 status; Next up reorder). CI `windows-build` (3m1s) + `mac-runner-build` (1m0s) pass; no runtime changes.
 
@@ -49,12 +45,11 @@ control. APFS still deferred until MAC17.
 
 ## Next up
 
-1. **MAC10a** - Windows PrepApp OS compatibility selector (NTFS vs exFAT) before broad Mac distribution.
-2. **MAC10b** - Mac app icon + Info.plist polish (Runner.app shows default icon today).
-3. **MAC11** - Signing + notarization (Apple Developer setup; user has temporary access).
-4. Cross-platform PrepApp parity (**MAC16/MAC17/MAC18**) - Mac-only user can prep + run without Windows.
-5. **X4** still unblocked from the host side: only needs SPA assets at `runner-core/wwwroot/chat/`.
-6. For non-Mac work, pick from `H3`, `F4` follow-up, `B2`, `F2`. (`R1 Stage 2` server endpoints shipped via MAC8; only the RunnerCli `/docs`+`/reindex` slash-commands remain.)
+1. **MAC10b** - Mac app icon + Info.plist polish (Runner.app shows default icon today). Natural to bundle with MAC11.
+2. **MAC11** - Signing + notarization (Apple Developer setup; user has temporary access).
+3. Cross-platform PrepApp parity (**MAC16/MAC17/MAC18**) - Mac-only user can prep + run without Windows. MAC17 unblocks APFS support, which collapses MAC10a's "Mac-only → exFAT" branch into "Mac-only → APFS".
+4. **X4** still unblocked from the host side: only needs SPA assets at `runner-core/wwwroot/chat/`.
+5. For non-Mac work, pick from `H3`, `F4` follow-up, `B2`, `F2`. (`R1 Stage 2` server endpoints shipped via MAC8; only the RunnerCli `/docs`+`/reindex` slash-commands remain.)
 
 **RAG audit backlog:** X17-X23 cover audit findings; X10/X13/X15 scope expansions recorded. Plan: `C:\Users\Kninetimmy\.claude\plans\okay-i-want-to-glowing-galaxy.md`. v1.3.x sequence: X18 -> X15 (expanded) -> X19 -> X20 -> X22 -> X23. X17 reduced to Stage 1 textless-page diagnostic (full OCR deferred -- workload is text-layer PDFs).
 
@@ -64,6 +59,8 @@ See `project_backlog.md` for full general backlog details. See
 `agent_docs/mac_project_backlog.md` for the macOS support track.
 
 ## Last session
+
+2026-05-06 (PR #187 MAC10a merged, `eb44572`) - User asked "whats up next mac 10?" between tasks. Walked the MAC10a backlog entry against the current PrepApp surface and discovered the "compatibility selector" the entry asked for already existed as the `PrepareWindows`/`PrepareMac` checkboxes — adding a parallel filesystem dropdown would have been a second source of truth for the same intent. Pivoted MAC10a to derive the filesystem from existing `PrepTargets` instead. User reviewed the breakdown + draft prompt before greenlighting. Implementation: widened `DriveFormatCommand.NormalizeFileSystem` (canonical casing pin), added `PrepViewModel.ResolveFileSystem(PrepTargets)` (internal static so tests can pin it directly), threaded fs through `FormatPrepareAsync` → `IDialogService.ConfirmErase` (added `fileSystem` parameter — single impl in the repo) → `EraseConfirmDialog` (shows "Format as: ..." line). Test fallout: 8 `ConfirmErase` mock setups updated to 3-arg form; new exFAT tests had to override `AreMacArtifactsAvailable` so `PrepareMac` setter doesn't clamp back to false. Bundled the orphaned post-MAC9 `project_state.md` wrap-up that had never been committed (same pattern we just cleaned up last session). CI green on first run. User said "lets merge", merged at `eb44572`. Wrap-up done immediately to avoid the orphan-on-local-main pattern repeating.
 
 2026-05-06 (PR #186 MAC9 merged, `408828d`) - User asked "what's up next" between tasks, then "was there no MAC9". Walked through the three MAC9 options (keep Swift thin-UI / switch to Avalonia / CLI-first-longer) using MAC4-MAC8 evidence. User picked option 1. Discovered the prior session's MAC8 wrap-up docs (PR #185 entry, four decision entries, MAC8 status, Next up reorder) had never been committed — local `main` had ~314 uncommitted insertions sitting there. Bundled with MAC9 into a single docs-only PR rather than leave the wrap-up orphaned. Drafted MAC9 decision entry in `project_decisions.md` with explicit exit-ramp criteria, marked MAC9 done in `mac_project_backlog.md`, updated `project_state.md` In flight + Last session. Branched, committed, pushed, opened PR #186, CI green on first run (windows-build 3m1s, mac-runner-build 1m0s, package-release skipped — docs-only), user said "merge that sucker", merged `408828d`, fast-forwarded local `main`.
 
