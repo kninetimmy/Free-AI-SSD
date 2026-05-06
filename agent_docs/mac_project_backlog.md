@@ -416,11 +416,21 @@ now wires static-file middleware so future X4 assets under
 
 ### MAC7 - RAG parity
 
-**Status:** planned
+**Status:** PR #183 ready for review; CI green 2026-05-06
 **Scope:** document-grounded chat
 **Risk:** High
 **Goal:** Mac chat uses the same RAG pipeline as Windows: embeddings, vector
   search, prompt packing, and citations.
+
+**Outcome:** MAC7 routes the Swift Mac chat UI through the MAC6
+`mac-runner-host` sidecar instead of direct Ollama `/api/generate`, so normal
+Mac chat uses `RunnerLocalApiService` + `ChatService` and honors an already
+prepared `ActiveDocumentLibraryId`. The sidecar path returns sources and
+`usedRagContext` for `/api/chat` and `/api/chat/stream`; `/api/chat` now also
+returns a `ragWarning` field when retrieval fails, while preserving the
+existing `X-RAG-Status` header. Swift displays returned sources and concise
+RAG warnings. MAC8 remains the owner for Mac-side library CRUD, ingestion,
+folder sweep, and rebuild UI.
 
 **Likely files:**
 - `shared/Documents/*`
@@ -436,6 +446,12 @@ now wires static-file middleware so future X4 assets under
 - RAG pipeline integration on Mac-compatible host.
 - Citation/source display test.
 - Embedding model missing/mismatch tests.
+
+**Implemented coverage:**
+- `MacRunnerHostRagParityTests` seeds a temporary SSD library, runs the Mac
+  host's real DI wiring against a deterministic fake Ollama endpoint, and
+  verifies `/api/chat`, `/api/chat/stream`, citations/sources, and embedding
+  dimension mismatch warning behavior.
 
 ---
 

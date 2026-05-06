@@ -36,7 +36,7 @@ FreeAiSsd.sln
 ├── companion/       — net8.0-windows WPF; tray/overlay LAN client
 ├── mac-runner-host/ — net8.0 console; Mac LAN API sidecar spawned by mac-runner (MAC6)
 ├── tools/FreeAiSsd.PrereqFetch/  — net8.0 CLI; CI prereq-bundle builder
-├── mac-runner/      — Swift/SwiftUI macOS beta (unsigned)
+├── mac-runner/      — Swift/SwiftUI macOS beta over local sidecar API (unsigned)
 ├── tests/           — xUnit suite
 ├── docs/            — user-facing docs (Theme.md, QUICKSTART, images)
 └── .github/         — workflows

@@ -11,7 +11,7 @@
 
 **Plug in a drive. Ask your AI anything. No internet required.**
 
-Prepare the drive once on a Windows machine with internet access — download the models, load in your documents, and finalize the SSD. On Windows, the Runner provides the full offline assistant: document-grounded chat, voice, HOTAS PTT, DCS binding import, and the LAN API. macOS support is currently a beta Swift runner for basic direct-Ollama chat from the same SSD; it is not yet feature-equivalent with the Windows Runner.
+Prepare the drive once on a Windows machine with internet access — download the models, load in your documents, and finalize the SSD. On Windows, the Runner provides the full offline assistant: document-grounded chat, voice, HOTAS PTT, DCS binding import, and the LAN API. macOS support is currently a beta Swift runner with a local API sidecar for RAG-backed chat from the same SSD; it is not yet feature-equivalent with the Windows Runner.
 
 - **Portable** — Windows Runner runs from the SSD; the macOS beta runner also launches from the staged SSD payload
 - **Document-grounded on Windows** — load your PDFs, manuals, and notes; the AI cites them when answering
@@ -41,10 +41,10 @@ This started as a way to take AI into the field with no cell signal — ham radi
 - ✅ **Companion tray app for Windows** — lightweight Windows client for a second PC on the LAN (no SSD required on the client)
 - ✅ **Headless CLI (`FreeAiSsd.RunnerCli`)** — terminal REPL for SSH / Tailscale access to a running Windows Runner API; streams chat, shows RAG sources, zero GUI deps
 - ✅ **Offline Windows prereq bundle** — .NET 8 Desktop Runtime + VC++ redist staged and SHA-verified so Runner installs cleanly on fresh targets
-- 🧪 **macOS Swift Runner beta** — staged at `<SSD>/mac/Runner.app`; can select/infer the SSD, unlock encrypted Windows-prepped SSDs (native CryptoKit + CommonCrypto port of `SsdEncryption`), read installed models, start `mac/tools/ollama/ollama`, and send basic non-streaming direct chat to Ollama
+- 🧪 **macOS Swift Runner beta** — staged at `<SSD>/mac/Runner.app`; can select/infer the SSD, unlock encrypted Windows-prepped SSDs (native CryptoKit + CommonCrypto port of `SsdEncryption`), read installed models, start `mac/tools/ollama/ollama`, host the Runner API sidecar, and send RAG-backed chat with citations against an already-prepped active library
 
 Known gaps:
-- The macOS beta does **not** currently support RAG/citations, document library management, Runner LAN API hosting, RunnerCli against a Mac host, voice/TTS, HOTAS/PTT, or DCS import UI. Encrypted config unlock/save landed in MAC5; the rest is on the macOS support backlog.
+- The macOS beta does **not** currently support document library management, Mac-side ingestion/rebuild/sweep, voice/TTS, HOTAS/PTT, or DCS import UI. Encrypted config unlock/save, Runner API hosting, and RAG-backed chat landed in the Mac support track; document management is still on the backlog.
 - Network voice upload currently supports WAV (PCM 16-bit mono 16kHz) and raw `pcm16le`; other codecs not implemented.
 - Direct Ollama LAN exposure is intentionally not supported — Runner API is the only network surface.
 
@@ -52,7 +52,7 @@ Note: Remote HOTAS/PTT is supported via the Companion tray app — HOTAS PTT can
 
 ### SSH / Tailscale access (CLI)
 
-For headless access from a terminal (including an iPad over Tailscale), the `FreeAiSsd.RunnerCli` binary ships alongside the Windows Runner. It's a thin HTTP client against Runner's LAN API — same RAG pipeline, same source citations, but no GUI. The current macOS beta does not host this API yet, so RunnerCli is not a Mac-host bridge today.
+For headless access from a terminal (including an iPad over Tailscale), the `FreeAiSsd.RunnerCli` binary ships alongside the Windows Runner. It's a thin HTTP client against Runner's LAN API — same RAG pipeline, same source citations, but no GUI. The macOS beta can host the same chat API via its sidecar when Network Mode is running; Mac voice/TTS routes remain unavailable.
 
 ```
 $ FreeAiSsd.RunnerCli --help
@@ -122,7 +122,7 @@ Load first aid guides, plant identification references, equipment specs, surviva
 
 - A portable SSD (most models need 4–8 GB for the AI models alone; plan accordingly)
 - A Windows machine with internet access for the one-time preparation step
-- Windows target machines need no pre-installed software — Windows Runner handles staged prerequisites offline. The macOS beta bundle stages its own macOS Ollama payload, but the beta app remains limited to basic direct chat.
+- Windows target machines need no pre-installed software — Windows Runner handles staged prerequisites offline. The macOS beta bundle stages its own macOS Ollama payload and API sidecar, but Mac document management and voice/HOTAS features remain limited.
 
 ### Download
 
@@ -149,7 +149,7 @@ Load first aid guides, plant identification references, equipment specs, surviva
 2. Run Runner directly from the SSD:
    - Windows: `<SSD>\windows\runner\FreeAiSsd.Runner.exe`
    - macOS beta: `<SSD>/mac/Runner.app`
-3. Windows: load your documents and start chatting with RAG, citations, voice, HOTAS/PTT, and the LAN API. macOS beta: unlock the SSD if it was encrypted on Windows, start Ollama, and use basic direct chat with an installed model; RAG, voice, HOTAS/PTT, DCS import, and the Runner LAN API are not implemented there yet.
+3. Windows: load your documents and start chatting with RAG, citations, voice, HOTAS/PTT, and the LAN API. macOS beta: unlock the SSD if it was encrypted on Windows, start Ollama and Network Mode, then use RAG-backed chat with citations against a library already prepared on Windows; Mac document management, voice, HOTAS/PTT, and DCS import are not implemented there yet.
 
 ### What Needs Internet vs. What Doesn't
 
@@ -157,7 +157,7 @@ Load first aid guides, plant identification references, equipment specs, surviva
 |---|---|
 | PrepApp — download, pull, staging | Yes |
 | Windows Runner start / chat | No |
-| macOS beta Runner start / basic direct chat | No |
+| macOS beta Runner start / sidecar-backed chat | No |
 | macOS beta Runner — unlock Windows-prepped encrypted SSD | No |
 | Reference Documents indexing and retrieval (Windows Runner) | No |
 | Pull embedding model (if missing from SSD, Windows Runner) | Once |
@@ -184,10 +184,10 @@ Load first aid guides, plant identification references, equipment specs, surviva
 - If install is blocked, refresh prerequisites from PrepApp while online and retry
 
 **macOS beta limitations**
-- The beta app is a Swift direct-Ollama runner, not the full Windows Runner.
-- It supports selecting/inferring the SSD, reading installed models, starting `mac/tools/ollama/ollama`, and basic non-streaming chat.
+- The beta app is a Swift runner plus a local .NET API sidecar, not the full Windows Runner.
+- It supports selecting/inferring the SSD, reading installed models, starting `mac/tools/ollama/ollama`, Network Mode API hosting, and RAG-backed chat with citations against an already indexed active library.
 - It unlocks encrypted SSDs prepped on Windows and saves changes back to the encrypted blob (MAC5). Mac-prepped encrypted drives roundtrip cleanly to Windows. The on-disk format is identical on both platforms; the Mac unlock path is a native CryptoKit + CommonCrypto reimplementation pinned to the C# format by cross-language tests.
-- It does not provide RAG/citations, document library management, Network Mode API hosting, RunnerCli compatibility against a Mac host, voice/TTS, HOTAS/PTT, or DCS import UI yet.
+- It does not provide document library management, Mac-side ingestion/rebuild/sweep, voice/TTS, HOTAS/PTT, or DCS import UI yet.
 
 ### Prereq trust model
 
@@ -513,7 +513,7 @@ Free-AI-SSD ships several components backed by a shared cross-platform library:
 
 - **PrepApp** (Windows, WPF) — runs on an online machine to configure the SSD: picks drive, downloads and stages Ollama, pulls models, bundles prerequisites, finalizes layout
 - **Runner** (Windows, WPF) — runs from the SSD on the target machine; starts Ollama, provides the chat interface, manages document libraries, voice pipeline, HOTAS PTT, and the LAN API host
-- **macOS Runner beta** (`mac-runner/`, Swift) — thin macOS app for the cross-platform beta bundle; shipped at `<SSD>/mac/Runner.app`. It currently selects/infers the SSD, reads installed models from plaintext config, starts macOS Ollama, and sends basic non-streaming direct chat to Ollama. It is not a full Windows Runner equivalent yet.
+- **macOS Runner beta** (`mac-runner/`, Swift) — thin macOS app for the cross-platform beta bundle; shipped at `<SSD>/mac/Runner.app`. It selects/infers the SSD, unlocks encrypted config, reads installed models, starts macOS Ollama, spawns the local Runner API sidecar, and sends chat through the shared RAG pipeline when an active indexed library exists. It is not a full Windows Runner equivalent yet.
 - **Voice Pipeline** (lives inside Runner's service layer) — `AudioCaptureService` → `WhisperSpeechToTextService` → `ChatService` → `SystemTextToSpeechService` / `PiperTextToSpeechService`, orchestrated by `PttVoicePipelineService` when HOTAS PTT is enabled
 - **Bindings Parser** (inside the shared library at `shared/Documents/`) — `DcsSavedGamesLocator` finds DCS installs, `DcsAircraftScanner` enumerates aircraft, `DcsBindingParser` parses `diff.lua`, `DcsBatchProcessor` merges devices and writes RAG documents
 - **Companion** (`companion/`, WPF tray app) — optional lightweight client for a second LAN machine; no SSD required; talks to the Runner LAN API for chat / STT upload / voice-query / host-side TTS. Supports its own HOTAS PTT loop, an activation beep, a status overlay window, and a mic-preflight check in Settings. When `returnAudio=true` is negotiated on `/api/voice/query`, Companion plays the synthesized TTS locally instead of on the Runner host.
@@ -582,7 +582,7 @@ cache/                   — prep-time download cache
 | `prep-app/` | `net8.0-windows` | WPF PrepApp |
 | `runner/` | `net8.0-windows` | WPF Runner |
 | `companion/` | `net8.0-windows` | WPF Companion tray client (LAN second-PC use) |
-| `mac-runner/` | macOS (Swift) | Swift macOS beta runner for basic direct-Ollama chat |
+| `mac-runner/` | macOS (Swift) | Swift macOS beta runner over the local Runner API sidecar |
 | `tools/FreeAiSsd.PrereqFetch/` | `net8.0` | CI helper that pre-builds the offline prereq bundle via the shared `PrereqResolver` |
 | `tests/` | `net10.0` | xUnit test project (`FreeAiSsd.Tests`) |
 | `docs/` | — | Documentation (includes `QUICKSTART.txt`) |

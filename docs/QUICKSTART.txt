@@ -22,10 +22,11 @@
 4) Unplug. Plug into the machine you actually want to use it on.
      - Windows: <SSD>\windows\runner\FreeAiSsd.Runner.exe
      - macOS:   <SSD>/mac/Runner.app    (beta bundle only; unsigned,
-                limited direct-Ollama chat)
+                limited Runner API sidecar)
 5) Start the AI engine in Runner and chat. On Windows, the full Runner
    supports RAG, citations, voice, HOTAS/PTT, DCS import, and Network
-   Mode. The macOS beta currently supports basic direct chat only.
+   Mode. The macOS beta supports RAG-backed chat against an already
+   prepared active library, but not Mac-side document management yet.
 
 Everything below is optional and layered on top of that baseline.
 
@@ -40,9 +41,9 @@ Everything below is optional and layered on top of that baseline.
   Windows-only — it's the prep tool, not the runtime).
 - Windows target machines need no pre-installed software. Windows Runner
   carries its own prerequisites. The macOS beta bundle stages macOS Ollama,
-  but that beta app is limited to basic direct chat.
+  plus the local API sidecar for RAG-backed chat.
 - Target OS: Windows 10/11 x64 for the full Runner, or macOS beta for
-  basic direct-Ollama chat.
+  limited sidecar-backed chat.
 
 --------------------------------------------------------------------------------
  Full Feature Setup
@@ -69,10 +70,10 @@ Everything below is optional and layered on top of that baseline.
 
  - macOS beta scope: <SSD>/mac/Runner.app can select/infer the SSD, unlock
    encrypted Windows-prepped SSDs (MAC5 native CryptoKit port), read installed
-   models, start <SSD>/mac/tools/ollama/ollama, and send basic non-streaming
-   direct chat to Ollama. It does not currently support RAG/citations,
-   document library management, Network Mode API hosting, RunnerCli against a
-   Mac host, voice/TTS, HOTAS/PTT, or DCS import UI.
+   models, start <SSD>/mac/tools/ollama/ollama, host the Runner API sidecar,
+   and send RAG-backed chat with citations against an already prepared active
+   library. It does not currently support Mac-side document library
+   management, ingestion/rebuild/sweep, voice/TTS, HOTAS/PTT, or DCS import UI.
 
  2. Windows Runner: RAG Document Library (grounded answers from your own files)
  -----------------------------------------------------------------------------
@@ -177,7 +178,8 @@ Everything below is optional and layered on top of that baseline.
    You're deployed for emergency comms or camping with no cell signal.
    Load radio manuals, band plans, and reference docs onto the SSD
    before you leave. On Windows Runner, ask by voice and get cited
-   answers. On the macOS beta, use basic direct chat only.
+   answers. On the macOS beta, use RAG-backed chat against an already
+   prepared active library.
 
  DCS / Flight Sim VR Copilot
    You're in VR, mid-sortie. You forget how to uncage an AIM-9 on the
@@ -233,12 +235,12 @@ Everything below is optional and layered on top of that baseline.
    it from System Settings > Privacy & Security, or right-click ->
    Open the first time.
 
- macOS: feature is missing
+ macOS: document management and voice features are missing
    Expected in the current beta. The Swift runner is not yet a full Windows
-   Runner equivalent. It provides basic direct chat and encrypted SSD unlock
-   only (MAC5). Use the Windows Runner for RAG/citations, document library
-   management, Network Mode hosting, RunnerCli host support, voice/TTS,
-   HOTAS/PTT, and DCS bindings import.
+   Runner equivalent. It provides encrypted SSD unlock, Network Mode hosting,
+   and RAG-backed chat against an existing active library. Use the Windows
+   Runner for document library management, Mac-side ingestion/rebuild/sweep,
+   voice/TTS, HOTAS/PTT, and DCS bindings import.
 
  Network Mode clients can't connect
    By default Runner binds to 127.0.0.1. To accept LAN connections,
