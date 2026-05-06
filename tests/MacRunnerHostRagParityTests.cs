@@ -94,7 +94,7 @@ public sealed class MacRunnerHostRagParityTests : IDisposable
             .ToList();
 
         Assert.Contains(events, e => e.GetProperty("type").GetString() == "token");
-        var complete = Assert.Single(events.Where(e => e.GetProperty("type").GetString() == "complete"));
+        var complete = Assert.Single(events, e => e.GetProperty("type").GetString() == "complete");
         Assert.True(complete.GetProperty("usedRagContext").GetBoolean());
         var sources = complete.GetProperty("sources").EnumerateArray().Select(x => x.GetString() ?? string.Empty).ToList();
         Assert.Contains(sources, s => s.Contains("hydraulics-stream.txt", StringComparison.OrdinalIgnoreCase));
@@ -252,7 +252,7 @@ public sealed class MacRunnerHostRagParityTests : IDisposable
             _app.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
 
-        private async Task<IResult> HandleEmbedAsync(HttpContext context)
+        private async Task HandleEmbedAsync(HttpContext context)
         {
             using var reader = new StreamReader(context.Request.Body, Encoding.UTF8);
             var body = await reader.ReadToEndAsync();
@@ -262,7 +262,7 @@ public sealed class MacRunnerHostRagParityTests : IDisposable
                 : string.Empty;
 
             var embedding = CreateEmbedding(input);
-            return Results.Json(new { embeddings = new[] { embedding } });
+            await context.Response.WriteAsJsonAsync(new { embeddings = new[] { embedding } });
         }
 
         private async Task HandleGenerateAsync(HttpContext context)
