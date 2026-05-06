@@ -19,6 +19,18 @@
   </ItemGroup>
 
   <!--
+    MAC16: ModelOperations exposes a few internal static helpers
+    (BuildOllamaArgs, TrySelectModelLayerDigest) that the test project
+    pinned via the prior <Compile Include> link-source pattern. After the
+    move to prep-core/, ProjectReference does not grant internal access,
+    so we restore that visibility explicitly. Public API surface stays
+    unchanged.
+  -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="FreeAiSsd.Tests" />
+  </ItemGroup>
+
+  <!--
     Starter model catalog ships as both a copied content file (loaded from
     AppContext.BaseDirectory at runtime) and an embedded resource (fallback
     when the content file is missing or unreadable). Both flow to any
