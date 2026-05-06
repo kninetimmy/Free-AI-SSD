@@ -476,8 +476,13 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
                 return Results.NotFound(new ErrorResponse($"Library '{libraryId}' not found."));
             }
 
-            // ASP.NET catch-all routing has already URL-decoded path segments.
-            var decoded = (relPath ?? string.Empty).Trim();
+            // ASP.NET catch-all routing decodes most percent-encoded chars
+            // but deliberately leaves '%2F' encoded (decoding would change
+            // route structure). Decode here so clients can use either
+            // EscapeDataString-style ('files%2F<sha>_<name>') or unencoded
+            // forward slashes — both round-trip to the manifest's
+            // StoredRelativePath of 'files/<sha>_<name>'.
+            var decoded = Uri.UnescapeDataString((relPath ?? string.Empty).Trim());
             if (string.IsNullOrWhiteSpace(decoded))
             {
                 return Results.BadRequest(new ErrorResponse("Stored file path is required."));
