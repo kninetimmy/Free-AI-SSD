@@ -646,37 +646,67 @@ filesystem derived from existing PrepTargets, not a new selector".
 
 ### MAC10b - Mac app icon and bundle metadata polish
 
-**Status:** planned
-**Scope:** Runner.app bundle visual identity
+**Status:** done (PR pending; resolves on merge)
+**Scope:** Runner.app bundle visual identity + Windows WPF parity
 **Risk:** Low
 **Goal:** Replace the default macOS placeholder icon with a Free-AI-SSD app
 icon so the bundle looks shipped, not built-from-CI. Tighten Info.plist
 metadata while we're there.
 
-**Likely files:**
-- `mac-runner/Resources/AppIcon.icns` (new) or a Swift asset catalog
-- `.github/workflows/build.yml` `Build Runner.app bundle` step (copy the
-  icon into `Contents/Resources` and reference it in the Info.plist)
-- The inline Info.plist heredoc in `build.yml` (currently no
-  `CFBundleIconFile` key, minimal metadata)
+**Resolution:** Single shared icon (`assets/icon/AppIcon.{icns,ico,png}`)
+applies to all four hosts: Mac `Runner.app`, Windows Runner, Windows
+PrepApp, Windows Companion. See 2026-05-06 decision entry "MAC10b: single
+shared app icon across Mac Runner and all WPF hosts" for the parity
+rationale.
 
-**Acceptance criteria:**
-- `Runner.app` shows a Free-AI-SSD icon in Finder, the Dock, and
-  command-tab on a clean Mac.
-- Icon resource ships inside `Contents/Resources/` and is referenced via
-  `CFBundleIconFile` (or `CFBundleIconName` with an asset catalog).
-- Standard macOS icon sizes covered (16/32/128/256/512 @1x and @2x).
-- No behavioral change to launch path or to the Swift binary.
+**Asset pipeline:**
+- `assets/icon/IconRenderer.swift` — Core Graphics renderer that draws the
+  canonical Free-AI-SSD glyph (hexagonal chip + glowing core on a Big
+  Sur squircle, indigo→violet→magenta gradient with cyan halo) at any
+  size.
+- `assets/icon/ico-builder.py` — assembles a PNG-embedded `.ico` from
+  rasterized PNGs (no ImageMagick dependency on macOS).
+- `assets/icon/build-icons.sh` — orchestrator: renders all sizes, runs
+  `iconutil` for `.icns`, runs `ico-builder.py` for `.ico`, drops a
+  `1024.png` master.
+- Both binaries are committed so CI doesn't need to re-render on every
+  build and MSBuild can reference the `.ico` directly.
 
-**Tests:**
-- CI artifact validation: assert the icon file exists in
-  `Runner.app/Contents/Resources/` and the Info.plist references it.
-- Manual visual smoke after a CI build.
+**Info.plist polish bundled in:**
+- `CFBundleName` + new `CFBundleDisplayName` = "Free AI SSD" (≤15 chars).
+- `CFBundleVersion` = "1" (was missing — required by macOS app deployment).
+- `CFBundleIconFile` = "AppIcon" (new).
+- `LSApplicationCategoryType` = `public.app-category.utilities`.
+- `LSRequiresNativeExecution` = true (arm64-only per MAC1).
+- `NSHighResolutionCapable` = true.
+- `NSHumanReadableCopyright` = "Copyright (c) 2026 Free-AI-SSD project".
+- `CFBundleShortVersionString` deliberately left at "1.0" — Mac version
+  tracking firms up at MAC11.
 
-**Sequencing note:** sits with MAC10/MAC10a/MAC11 as packaging-track
-work, not on the Runner-parity critical path. Can ship anytime;
-particularly natural to bundle with MAC11 (signing + notarization) since
-both touch the Info.plist + bundle layout.
+**Files changed:**
+- `assets/icon/IconRenderer.swift`, `ico-builder.py`, `build-icons.sh` (new)
+- `assets/icon/AppIcon.icns`, `AppIcon.ico`, `AppIcon.png` (new binaries)
+- `.github/workflows/build.yml` — copies `.icns` into bundle, rewrites
+  Info.plist heredoc, adds `Verify Runner.app bundle layout` step
+- `runner/FreeAiSsd.Runner.csproj`, `prep-app/FreeAiSsd.PrepApp.csproj`,
+  `companion/FreeAiSsd.Companion.csproj` — `<ApplicationIcon>` added
+
+**Validation:**
+- Local: renderer round-trips through `iconutil` (10 size buckets present)
+  and the `.ico` opens with 6 PNG-embedded sizes (16/32/48/64/128/256).
+- CI: new `Verify Runner.app bundle layout` step asserts `AppIcon.icns`
+  is in `Contents/Resources/`, lints the Info.plist with `plutil`,
+  confirms `CFBundleIconFile=AppIcon`, and re-extracts the iconset to
+  verify all 10 sizes are present.
+
+**Manual-smoke gaps (deferred to a real Mac):**
+- Visual smoke: `Runner.app` shows the Free-AI-SSD icon in Finder, the
+  Dock, and command-tab on a clean Mac.
+- Visual smoke: WPF apps show the icon in the title bar and taskbar on
+  Windows.
+
+**Sequencing note:** still natural to bundle with MAC11 (signing +
+notarization) since both touch Info.plist + bundle layout.
 
 ---
 

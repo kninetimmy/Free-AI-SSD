@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-05-06 (PR #187 MAC10a merged; packaging track moves to MAC10b)
+Last updated: 2026-05-06 (MAC10b app icon branch open; PR pending)
 
 Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
@@ -8,12 +8,21 @@ Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
 ## In flight
 
-Between tasks. PR #187 (MAC10a Windows PrepApp filesystem from
-PrepTargets) merged at `eb44572`. Mac packaging track continues with
-**MAC10b** (Mac app icon + Info.plist polish) and **MAC11** (signing +
-notarization).
+**MAC10b** — Mac app icon + Info.plist polish + Windows WPF parity.
+Branch `mac10b-app-icon`. Single shared icon
+(`assets/icon/AppIcon.{icns,ico}`) wired into `Runner.app/Contents/Resources/`,
+referenced by `<ApplicationIcon>` from all three WPF csprojs (Runner,
+PrepApp, Companion). Info.plist heredoc rewritten with polish keys
+(CFBundleIconFile, CFBundleVersion, CFBundleDisplayName, LSApplicationCategoryType,
+LSRequiresNativeExecution, NSHighResolutionCapable, NSHumanReadableCopyright).
+New `Verify Runner.app bundle layout` CI step asserts the icon ships in
+the bundle and Info.plist references it. Also bundles the orphan
+post-PR #188 `project_state.md` edits that were never pushed. PR not
+yet opened.
 
 ## Recently shipped
+
+- **PR #188 - MAC10a merge wrap-up - merged `3dc05c0` (2026-05-06).** Docs-only follow-up to PR #187: moves PR #187's full description into `Recently shipped`, bumps `Last updated`, reorders `Next up` so MAC10b is #1 (paired with MAC11), and notes that MAC17 will collapse MAC10a's "Mac-only → exFAT" branch into "Mac-only → APFS" once a Mac-native prep workflow exists. CI `windows-build` (2m41s) + `mac-runner-build` (46s) green; no runtime changes.
 
 - **PR #187 - MAC10a Windows PrepApp filesystem derives from PrepTargets - merged `eb44572` (2026-05-06).** Widens `DriveFormatCommand.NormalizeFileSystem` to accept `exFAT` alongside `NTFS` (canonical casing emitted regardless of input case; `FAT32`/`refs`/`APFS` still reject). Adds `PrepViewModel.ResolveFileSystem(PrepTargets)` mapping — Windows-only → NTFS; anything including Mac → exFAT — and `FormatPrepareAsync` reads the resolved filesystem once, passes it to both `IDialogService.ConfirmErase` (gains a `fileSystem` parameter) and `IDriveService.FormatAsync`, and logs which filesystem was chosen. `EraseConfirmDialog` now shows "Format as: NTFS (Windows only)" or "Format as: exFAT (Windows + macOS compatible)" before the destructive call. No new selector — the existing `PrepareWindows`/`PrepareMac` checkboxes (persisted via `PrepTargetPreferenceStore`) are the single source of truth, decision recorded as "MAC10a: filesystem derived from existing PrepTargets, not a new selector". Security invariants unchanged: label still via `FREEAI_FORMAT_LABEL` env var, `powershell.exe` still absolute System32 path, erase-confirm still gates the destructive call, `ProcessRunner.ArgumentList` still used for launch. APFS still deferred per MAC1 until MAC17. Tests: pinned `ResolveFileSystem` mapping + Win+Mac/Mac-only `FormatAsync("exFAT", ...)` verifies + canonical-casing `exFAT` happy-path test on `DriveFormatCommand`. Bundled the orphaned post-MAC9-merge `project_state.md` wrap-up that had never been pushed. CI `windows-build` (3m57s) + `mac-runner-build` (59s) green on first run; `package-release` skipped (correct — no release tag).
 
@@ -45,11 +54,10 @@ notarization).
 
 ## Next up
 
-1. **MAC10b** - Mac app icon + Info.plist polish (Runner.app shows default icon today). Natural to bundle with MAC11.
-2. **MAC11** - Signing + notarization (Apple Developer setup; user has temporary access).
-3. Cross-platform PrepApp parity (**MAC16/MAC17/MAC18**) - Mac-only user can prep + run without Windows. MAC17 unblocks APFS support, which collapses MAC10a's "Mac-only → exFAT" branch into "Mac-only → APFS".
-4. **X4** still unblocked from the host side: only needs SPA assets at `runner-core/wwwroot/chat/`.
-5. For non-Mac work, pick from `H3`, `F4` follow-up, `B2`, `F2`. (`R1 Stage 2` server endpoints shipped via MAC8; only the RunnerCli `/docs`+`/reindex` slash-commands remain.)
+1. **MAC11** - Signing + notarization (Apple Developer setup; user has temporary access). MAC10b bundle/Info.plist work lands the icon + polish keys this PR depends on.
+2. Cross-platform PrepApp parity (**MAC16/MAC17/MAC18**) - Mac-only user can prep + run without Windows. MAC17 unblocks APFS support, which collapses MAC10a's "Mac-only → exFAT" branch into "Mac-only → APFS".
+3. **X4** still unblocked from the host side: only needs SPA assets at `runner-core/wwwroot/chat/`.
+4. For non-Mac work, pick from `H3`, `F4` follow-up, `B2`, `F2`. (`R1 Stage 2` server endpoints shipped via MAC8; only the RunnerCli `/docs`+`/reindex` slash-commands remain.)
 
 **RAG audit backlog:** X17-X23 cover audit findings; X10/X13/X15 scope expansions recorded. Plan: `C:\Users\Kninetimmy\.claude\plans\okay-i-want-to-glowing-galaxy.md`. v1.3.x sequence: X18 -> X15 (expanded) -> X19 -> X20 -> X22 -> X23. X17 reduced to Stage 1 textless-page diagnostic (full OCR deferred -- workload is text-layer PDFs).
 
@@ -60,11 +68,9 @@ See `project_backlog.md` for full general backlog details. See
 
 ## Last session
 
+2026-05-06 (MAC10b app icon, branch `mac10b-app-icon`) - User asked "whats next on the docket". Walked the Next-up list and recommended bundling MAC10b (Mac icon + Info.plist polish) with MAC11 since both touch bundle metadata. User picked MAC10b first and asked for the same icon on Windows for parity, with the per-host vs shared decision left to judgement. Surveyed the repo: no `.icns`/`.ico` existed anywhere, no `<ApplicationIcon>` in any csproj, Info.plist was a one-line heredoc with 6 keys. Asked the user about icon source (no asset available — chose option (b), generate one) and Windows scope (all 3 WPF apps for full parity). Designed "AI Core" — Big Sur squircle, indigo→violet→magenta diagonal gradient with cyan upper-right halo, hexagonal chip silhouette with cyan glow, 6 alternating cyan/magenta nodes at the vertices, bright white core, neural spokes — implemented in `assets/icon/IconRenderer.swift` (Core Graphics, no SVG rasterizer needed). Built `assets/icon/build-icons.sh` orchestrator that calls the renderer for every iconset bucket, runs `iconutil` for `.icns`, and runs a small `ico-builder.py` (PNG-embedded ICO assembler, pure stdlib) for the Windows `.ico`. User reviewed the 1024 / 256 / 64 / 32 / 16 previews on Desktop and approved. Wired `cp assets/icon/AppIcon.icns out/Runner.app/Contents/Resources/` into `.github/workflows/build.yml`, rewrote the inline Info.plist heredoc with 8 polish keys (CFBundleIconFile=AppIcon, CFBundleVersion=1, CFBundleDisplayName="Free AI SSD", LSApplicationCategoryType=public.app-category.utilities, LSRequiresNativeExecution=true, NSHighResolutionCapable=true, NSHumanReadableCopyright; renamed CFBundleName to "Free AI SSD"; left CFBundleShortVersionString="1.0" since Mac version tracking firms up at MAC11), and added a `Verify Runner.app bundle layout` step that lints with `plutil`, asserts `CFBundleIconFile=AppIcon`, and re-extracts the iconset to confirm all 10 size buckets ship. Added `<ApplicationIcon>..\assets\icon\AppIcon.ico</ApplicationIcon>` to all three WPF csprojs (Runner, PrepApp, Companion). Decision recorded in `project_decisions.md` ("MAC10b: single shared app icon across Mac Runner and all WPF hosts") with the parity rationale (one product, three hosts) and per-host exit ramp. Bundled the orphan post-PR #188 `project_state.md` edits that were sitting uncommitted on local main.
+
 2026-05-06 (PR #187 MAC10a merged, `eb44572`) - User asked "whats up next mac 10?" between tasks. Walked the MAC10a backlog entry against the current PrepApp surface and discovered the "compatibility selector" the entry asked for already existed as the `PrepareWindows`/`PrepareMac` checkboxes — adding a parallel filesystem dropdown would have been a second source of truth for the same intent. Pivoted MAC10a to derive the filesystem from existing `PrepTargets` instead. User reviewed the breakdown + draft prompt before greenlighting. Implementation: widened `DriveFormatCommand.NormalizeFileSystem` (canonical casing pin), added `PrepViewModel.ResolveFileSystem(PrepTargets)` (internal static so tests can pin it directly), threaded fs through `FormatPrepareAsync` → `IDialogService.ConfirmErase` (added `fileSystem` parameter — single impl in the repo) → `EraseConfirmDialog` (shows "Format as: ..." line). Test fallout: 8 `ConfirmErase` mock setups updated to 3-arg form; new exFAT tests had to override `AreMacArtifactsAvailable` so `PrepareMac` setter doesn't clamp back to false. Bundled the orphaned post-MAC9 `project_state.md` wrap-up that had never been committed (same pattern we just cleaned up last session). CI green on first run. User said "lets merge", merged at `eb44572`. Wrap-up done immediately to avoid the orphan-on-local-main pattern repeating.
-
-2026-05-06 (PR #186 MAC9 merged, `408828d`) - User asked "what's up next" between tasks, then "was there no MAC9". Walked through the three MAC9 options (keep Swift thin-UI / switch to Avalonia / CLI-first-longer) using MAC4-MAC8 evidence. User picked option 1. Discovered the prior session's MAC8 wrap-up docs (PR #185 entry, four decision entries, MAC8 status, Next up reorder) had never been committed — local `main` had ~314 uncommitted insertions sitting there. Bundled with MAC9 into a single docs-only PR rather than leave the wrap-up orphaned. Drafted MAC9 decision entry in `project_decisions.md` with explicit exit-ramp criteria, marked MAC9 done in `mac_project_backlog.md`, updated `project_state.md` In flight + Last session. Branched, committed, pushed, opened PR #186, CI green on first run (windows-build 3m1s, mac-runner-build 1m0s, package-release skipped — docs-only), user said "merge that sucker", merged `408828d`, fast-forwarded local `main`.
-
-2026-05-06 (PR #185 MAC8 merged, `62d6d1d`) - User merged PR #185. Implementation spanned 6 commits: MAC8 prompt fleshed out in `mac_project_backlog.md` (broad-API design over Mac-tight subset); 8 `/api/library/*` endpoints added to `RunnerLocalApiService`; Mac Swift Documents UI in `main.swift`; `NoOpConfigStore` in `mac-runner-host`; `RunnerLocalApiLibraryTests` + `MacRunnerHostLibraryTests`. CI required 4 runs to green — two genuine bugs surfaced by Windows CI (default `JsonSerializer` policy made nested records PascalCase while anonymous frames stayed camelCase, breaking `library.fileCount`; ASP.NET catch-all routing leaves `%2F` encoded so DELETE relPath needed explicit `Uri.UnescapeDataString`) and one refactor that didn't matter on its own (Channel+Task.Run progress pump → sync queue + drain). Local validation gap: no `dotnet` on this Mac, only Swift compile + CI for C#. R1 Stage 2 server endpoints superseded; backlog entry updated to call out only the runner-cli `/docs`+`/reindex` slash-commands as remaining.
 
 ## Open questions
 
