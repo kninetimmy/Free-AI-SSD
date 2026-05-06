@@ -638,3 +638,166 @@ a distinct target for the follow-up, and makes it obvious which changes were
 part of the original feature versus post-merge hardening. The local PR #181
 follow-up fixes from 2026-05-06 are a one-time exception; apply this rule to
 future reviews after that.
+
+---
+
+## 2026-05-06 — MAC8: broader `/api/library/*` API supersedes R1 Stage 2
+
+PR #185 ships the full library-management surface as eight endpoints —
+list / create / set-active / upload (multipart + NDJSON progress) / delete /
+add-watched-folder / sweep / rebuild — instead of the originally narrower
+`R1 Stage 2` plan (`GET /api/documents` + `POST /api/documents/reindex`).
+Rationale: the same endpoints serve the Mac Swift UI now and Windows
+Companion / RunnerCli later, so the API is shaped once. User-explicit
+direction: "more work now is just less work later." `R1 Stage 2`'s entry
+in `project_backlog.md` is updated to call out only the RunnerCli `/docs`
++ `/reindex` slash-commands as remaining work — they wrap the existing
+endpoints, no new server surface needed.
+
+---
+
+## 2026-05-06 — MAC8: Mac sidecar uses `NoOpConfigStore` to preserve plaintext-config invariant
+
+The MAC8 endpoint group introduces call paths through
+`DocumentOperationsService.SaveConfigAsync`, which on Windows persists via
+the real `ConfigStore`. Mac cannot do the same without violating the
+MAC5/MAC6 invariant that encrypted-config IO is Swift-authoritative
+(`ConfigStore` would either fail without a derived key or fall back to
+plaintext). The fix:
+
+- `mac-runner-host/NoOpConfigStore.cs` implements `IConfigStore` with no-op
+  `SaveAsync` / `LoadAsync` and wired into the sidecar's DI in place of
+  `ConfigStore`.
+- Mutating MAC8 endpoints (`POST /api/library`, `PUT /api/library/active`)
+  return the updated `activeLibraryId` in their HTTP response so the Swift
+  parent persists via `SsdEncryption.swift`.
+- `PortableConfig.ActiveDocumentLibraryId` is mutated in the sidecar's
+  in-memory copy by `DocumentOperationsService`, so subsequent `/api/chat`
+  requests on the same sidecar process honor the new active library
+  without a save round-trip.
+- Library manifests, watched-folder lists, and the chunk index are
+  on-SSD JSON / SQLite owned by `DocumentLibraryManager` — never
+  plaintext-config-adjacent and persist regardless of who owns
+  `IConfigStore`.
+
+Windows host keeps using the real `ConfigStore` directly via the WPF
+Runner UI's in-process call path — the HTTP layer is additive and not
+in the Windows hot path.
+
+---
+
+## 2026-05-06 — MAC8: NDJSON progress pump uses sync queue + drain, not Channel + Task.Run
+
+`RunnerLocalApiService.PumpProgressAsync` (used by `/api/library/{id}/files`,
+`/sweep`, `/rebuild`) buffers `IndexingProgress` events into a thread-safe
+`ConcurrentQueue<T>` populated synchronously by the
+`Action<IndexingProgress>` callback `DocumentIngestor` invokes, then drains
+the queue and writes NDJSON frames on the request thread *after* the
+operation completes.
+
+The earlier design used `Channel<IndexingProgress>` + `Task.Run` for a live
+streaming pump, which crashed Windows CI in ways that took two commits to
+diagnose (cross-thread writes to Kestrel's response pipe interacted badly
+with how Windows ASP.NET serializes pipe writes). The buffered design
+loses live progress streaming, but that's irrelevant: the Mac UI parses
+NDJSON buffered (macOS 11 baseline lacks `URLSession.bytes`), and the
+test fixtures buffer the body too. The wire shape — start frame, progress
+frames, complete or error — is unchanged.
+
+Future SSE/NDJSON-emitting endpoints in `RunnerLocalApiService` should
+follow this pattern unless live streaming is a strict UX requirement (in
+which case the cross-thread risk has to be re-investigated).
+
+---
+
+## 2026-05-06 — MAC8: `WriteNdjsonAsync` uses explicit camelCase JsonNamingPolicy
+
+`RunnerLocalApiService.WriteNdjsonAsync` serializes payloads with a static
+`JsonSerializerOptions { PropertyNamingPolicy = CamelCase }`, matching what
+`ConfigureHttpJsonOptions` does for regular `IResult` responses.
+
+Before this fix: `JsonSerializer.Serialize(payload)` with default options
+rendered anonymous-type properties lower-camel ("type", "library") but
+nested record properties PascalCase ("FileCount", "Files", "Id"). Mixed
+casing on the wire broke clients reading `library.fileCount` — including
+the new MAC8 tests, which spent two CI runs failing with
+`KeyNotFoundException` until a defensive test diagnostic dumped the body.
+
+Rule: any future NDJSON-emitting code in `runner-core/` must serialize
+through the same camelCase options (or a shared helper) so anonymous-type
+fields and record fields agree.
+
+---
+
+## 2026-05-06 — MAC8: ASP.NET catch-all routing preserves `%2F` — decode explicitly
+
+When a route uses catch-all (`{*relPath}` syntax), ASP.NET decodes most
+percent-encoded characters but deliberately leaves `%2F` encoded; decoding
+it would change the route structure (a `/` is a path segment delimiter).
+Server handlers that accept paths via catch-all must call
+`Uri.UnescapeDataString` on the bound parameter so clients can use either
+`Uri.EscapeDataString`-style encoding (which encodes `/` to `%2F`) or
+raw forward slashes (which the catch-all preserves). Both must round-trip
+to the same logical path.
+
+Discovered when `RunnerLocalApiLibraryTests.DeleteFile_RemovesEntryAndReturnsRefreshedManifest`
+failed with HTTP 400 because PathGuards saw `files%2F<sha>_<name>.txt`
+(escaped `/`) and refused on traversal. Fix in
+`RunnerLocalApiService.cs` `MapDelete("/{libraryId}/files/{*relPath}", ...)`
+re-decodes via `Uri.UnescapeDataString` before passing to `PathGuards`.
+
+---
+
+## 2026-05-06 — MAC9: Swift thin-UI over .NET sidecar locked in as long-term Mac UI
+
+After MAC4-MAC8 shipped the full Mac Runner-parity track (encrypted
+config, Ollama lifecycle, RAG, library management, network API host,
+chat with citations), MAC9 is the architecture checkpoint to re-evaluate
+whether the Swift/SwiftUI thin-UI bet from MAC1 was correct, or whether
+to course-correct (cheapest moment, before MAC10/10a/10b/11 packaging
+hardening locks in artifact shape).
+
+**Decision:** Keep Swift as a thin native UI over the local
+`mac-runner-host` .NET sidecar. Reject Avalonia replacement and
+CLI-first-longer alternatives.
+
+**Evidence from MAC4-MAC8:**
+- Swift surface: ~1,730 lines (`mac-runner/Sources/main.swift` 1,226 +
+  `mac-runner/Sources/SsdEncryption.swift` 502).
+- Business logic in Swift: zero. RAG, chat, ingestion, library CRUD,
+  `/api/*` endpoints all live in `runner-core/` net8.0 and run on Mac
+  via the `mac-runner-host` sidecar.
+- Approved duplication: exactly one — `SsdEncryption.swift`, with the
+  documented waiver and exit ramp from the 2026-05-05 MAC5 decision
+  entry.
+- Parity blockers caused by the UI-architecture choice: zero. MAC4
+  through MAC8 all shipped without UI-architecture friction.
+- Mac-native niceties Swift gave us free: NSOpenPanel pickers,
+  lock-on-background, app-terminate key zeroization, NSApplication
+  lifecycle integration.
+
+**Why not Avalonia:** would throw away ~1,200 lines of working Swift UI
+through MAC8, reintroduces the cross-arch .NET hosting concern that
+MAC5 deliberately dodged for `SsdEncryption`, makes Apple lifecycle /
+signing / sandbox harder rather than easier, delivers zero user-visible
+value, and risks the temporary Apple Developer access window earmarked
+for MAC10/MAC11 validation.
+
+**Why not CLI-first-longer:** would regress shipped capability. The
+Swift app already exists, works, and matches Windows Runner feature
+parity for the in-scope subset. Going CLI-first now is a step backward
+on Stephen's stated goal ("get Mac up to Windows level").
+
+**Exit-ramp criteria — re-open MAC9 if any of these become true:**
+- A Mac UI feature requires duplicating non-trivial *business* logic in
+  Swift (UI-only duplication does not count).
+- WPF and Swift UIs drift apart in feature set faster than parity work
+  can keep up across two language ecosystems.
+- Apple lifecycle, sandbox, or signing complexity in the Swift host
+  comes to exceed what Avalonia would inherit anyway.
+- A second non-Apple platform target (e.g. Linux Runner) is added,
+  shifting the calculus toward a single cross-platform UI codebase.
+
+None of these are true today, so MAC9 closes here without runtime
+changes. The Swift/SwiftUI thin-UI + `mac-runner-host` sidecar is the
+supported Mac UI architecture going forward.
