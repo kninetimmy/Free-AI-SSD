@@ -1,7 +1,6 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using System.Threading.Channels;
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Documents;
 using Microsoft.AspNetCore.Builder;
@@ -754,8 +753,11 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
 
     /// <summary>
     /// Bridges a synchronous <see cref="Action{IndexingProgress}"/> callback to
-    /// NDJSON progress frames on the response, serialized through a single
-    /// pump task so concurrent embedding workers don't interleave writes.
+    /// NDJSON progress frames on the response. Buffers progress events in a
+    /// thread-safe queue during the operation, then drains the queue back to
+    /// the response after the operation completes — keeps response writes on
+    /// a single thread (no Task.Run cross-thread to Kestrel's pipe), at the
+    /// cost of replaying all progress at once instead of live-streaming.
     /// Returns null on success, or the operation's failure message.
     /// </summary>
     private static async Task<string?> PumpProgressAsync(
@@ -763,30 +765,8 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         CancellationToken ct,
         Func<Action<IndexingProgress>, Task> runOperation)
     {
-        var channel = Channel.CreateUnbounded<IndexingProgress>(new UnboundedChannelOptions
-        {
-            SingleReader = true,
-            SingleWriter = false
-        });
-
-        var pumpTask = Task.Run(async () =>
-        {
-            await foreach (var progress in channel.Reader.ReadAllAsync(ct))
-            {
-                await WriteNdjsonAsync(context.Response, new
-                {
-                    type = "progress",
-                    totalFiles = progress.TotalFiles,
-                    completedFiles = progress.CompletedFiles,
-                    currentFile = progress.CurrentFile,
-                    totalChunks = progress.TotalChunks,
-                    embeddedChunks = progress.EmbeddedChunks,
-                    failedChunks = progress.FailedChunks
-                }, ct);
-            }
-        }, ct);
-
-        Action<IndexingProgress> progressCallback = p => channel.Writer.TryWrite(p);
+        var buffered = new System.Collections.Concurrent.ConcurrentQueue<IndexingProgress>();
+        Action<IndexingProgress> progressCallback = p => buffered.Enqueue(p);
 
         string? errorMessage = null;
         try
@@ -801,10 +781,19 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         {
             errorMessage = ex.Message;
         }
-        finally
+
+        while (buffered.TryDequeue(out var progress))
         {
-            channel.Writer.Complete();
-            try { await pumpTask; } catch { /* pump errors are non-fatal — primary error already captured */ }
+            await WriteNdjsonAsync(context.Response, new
+            {
+                type = "progress",
+                totalFiles = progress.TotalFiles,
+                completedFiles = progress.CompletedFiles,
+                currentFile = progress.CurrentFile,
+                totalChunks = progress.TotalChunks,
+                embeddedChunks = progress.EmbeddedChunks,
+                failedChunks = progress.FailedChunks
+            }, ct);
         }
 
         return errorMessage;

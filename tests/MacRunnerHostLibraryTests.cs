@@ -75,8 +75,11 @@ public sealed class MacRunnerHostLibraryTests : IDisposable
             var uploadResp = await http.PostAsync($"{baseUrl}/api/library/{libraryId}/files", content);
             Assert.True(uploadResp.IsSuccessStatusCode, $"Upload returned {uploadResp.StatusCode}: {await uploadResp.Content.ReadAsStringAsync()}");
 
-            var events = await ReadNdjsonAsync(uploadResp);
-            var complete = Assert.Single(events, e => e.GetProperty("type").GetString() == "complete");
+            var (events, rawBody) = await ReadNdjsonWithBodyAsync(uploadResp);
+            var types = events.Select(e => e.TryGetProperty("type", out var t) ? (t.GetString() ?? "<null>") : "<missing>").ToList();
+            Assert.True(types.Count(t => t == "complete") == 1,
+                $"Expected exactly one 'complete' frame; got types={string.Join(",", types)} body={rawBody}");
+            var complete = events.Single(e => e.TryGetProperty("type", out var t) && t.GetString() == "complete");
             Assert.Equal(1, complete.GetProperty("library").GetProperty("fileCount").GetInt32());
         }
 
@@ -167,17 +170,19 @@ public sealed class MacRunnerHostLibraryTests : IDisposable
         return host;
     }
 
-    private static async Task<List<JsonElement>> ReadNdjsonAsync(HttpResponseMessage response)
+    private static async Task<(List<JsonElement> Events, string RawBody)> ReadNdjsonWithBodyAsync(HttpResponseMessage response)
     {
         var body = await response.Content.ReadAsStringAsync();
         var lines = body.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         var events = new List<JsonElement>();
         foreach (var line in lines)
         {
-            using var doc = JsonDocument.Parse(line);
+            var trimmed = line.TrimEnd('\r').Trim();
+            if (string.IsNullOrEmpty(trimmed)) continue;
+            using var doc = JsonDocument.Parse(trimmed);
             events.Add(doc.RootElement.Clone());
         }
-        return events;
+        return (events, body);
     }
 
     private static int GetFreePort()

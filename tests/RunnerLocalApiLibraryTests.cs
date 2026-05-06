@@ -153,10 +153,12 @@ public sealed class RunnerLocalApiLibraryTests : IDisposable
         Assert.True(response.IsSuccessStatusCode, $"Upload returned {response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
         Assert.Equal("application/x-ndjson", response.Content.Headers.ContentType?.MediaType);
 
-        var events = await ReadNdjsonAsync(response);
-        Assert.Contains(events, e => e.GetProperty("type").GetString() == "start");
-        Assert.Contains(events, e => e.GetProperty("type").GetString() == "progress");
-        var complete = Assert.Single(events, e => e.GetProperty("type").GetString() == "complete");
+        var (events, rawBody) = await ReadNdjsonWithBodyAsync(response);
+        var types = events.Select(TypeOrMissing).ToList();
+        Assert.Contains("start", types);
+        Assert.Contains("progress", types);
+        Assert.True(types.Count(t => t == "complete") == 1, $"Expected exactly one 'complete' frame; got types={string.Join(",", types)} body={rawBody}");
+        var complete = events.Single(e => TypeOrMissing(e) == "complete");
 
         var libraryDetail = complete.GetProperty("library");
         Assert.Equal(1, libraryDetail.GetProperty("fileCount").GetInt32());
@@ -321,8 +323,10 @@ public sealed class RunnerLocalApiLibraryTests : IDisposable
             new StringContent(string.Empty, Encoding.UTF8, "application/json"));
 
         Assert.True(response.IsSuccessStatusCode);
-        var events = await ReadNdjsonAsync(response);
-        var complete = Assert.Single(events, e => e.GetProperty("type").GetString() == "complete");
+        var (events, rawBody) = await ReadNdjsonWithBodyAsync(response);
+        var types = events.Select(TypeOrMissing).ToList();
+        Assert.True(types.Count(t => t == "complete") == 1, $"Expected exactly one 'complete' frame; got types={string.Join(",", types)} body={rawBody}");
+        var complete = events.Single(e => TypeOrMissing(e) == "complete");
         var detail = complete.GetProperty("library");
         Assert.Equal(1, detail.GetProperty("fileCount").GetInt32());
         var fileNames = detail.GetProperty("files").EnumerateArray().Select(x => x.GetProperty("fileName").GetString()).ToList();
@@ -346,8 +350,9 @@ public sealed class RunnerLocalApiLibraryTests : IDisposable
         var response = await fixture.Http.PostAsync($"{fixture.BaseUrl}/api/library/{libraryId}/rebuild",
             new StringContent(string.Empty, Encoding.UTF8, "application/json"));
 
-        var events = await ReadNdjsonAsync(response);
-        Assert.Contains(events, e => e.GetProperty("type").GetString() == "complete");
+        var (events, rawBody) = await ReadNdjsonWithBodyAsync(response);
+        var types = events.Select(TypeOrMissing).ToList();
+        Assert.True(types.Contains("complete"), $"Expected a 'complete' frame; got types={string.Join(",", types)} body={rawBody}");
     }
 
     [Fact]
@@ -374,17 +379,35 @@ public sealed class RunnerLocalApiLibraryTests : IDisposable
         return body.GetProperty("activeLibraryId").GetString()!;
     }
 
-    private static async Task<List<JsonElement>> ReadNdjsonAsync(HttpResponseMessage response)
+    private static async Task<(List<JsonElement> Events, string RawBody)> ReadNdjsonWithBodyAsync(HttpResponseMessage response)
     {
         var body = await response.Content.ReadAsStringAsync();
         var lines = body.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         var events = new List<JsonElement>();
         foreach (var line in lines)
         {
-            using var doc = JsonDocument.Parse(line);
+            var trimmed = line.TrimEnd('\r').Trim();
+            if (string.IsNullOrEmpty(trimmed)) continue;
+            using var doc = JsonDocument.Parse(trimmed);
             events.Add(doc.RootElement.Clone());
         }
+        return (events, body);
+    }
+
+    private static async Task<List<JsonElement>> ReadNdjsonAsync(HttpResponseMessage response)
+    {
+        var (events, _) = await ReadNdjsonWithBodyAsync(response);
         return events;
+    }
+
+    /// <summary>
+    /// Diagnostic helper: returns the event's "type" string, or "&lt;missing&gt;"
+    /// if the event lacks the property. Used in test predicates so a missing
+    /// type field doesn't crash xUnit's iteration with KeyNotFoundException.
+    /// </summary>
+    private static string TypeOrMissing(JsonElement e)
+    {
+        return e.TryGetProperty("type", out var t) ? (t.GetString() ?? "<null>") : "<missing>";
     }
 
     private sealed class Fixture : IAsyncDisposable
