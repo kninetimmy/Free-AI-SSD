@@ -860,9 +860,20 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         return Directory.Exists(baseLocal) ? baseLocal : null;
     }
 
+    private static readonly JsonSerializerOptions NdjsonSerializerOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     private static async Task WriteNdjsonAsync(HttpResponse response, object payload, CancellationToken ct)
     {
-        var json = JsonSerializer.Serialize(payload);
+        // Match ConfigureHttpJsonOptions: every NDJSON frame uses camelCase so
+        // nested records (LibraryDetail, etc.) serialize with the same property
+        // shape clients see from regular IResult responses. Without this,
+        // anonymous-type fields ("type", "library") render camelCase but
+        // record properties ("FileCount", "Files") render PascalCase, and the
+        // resulting mixed-case JSON fails any consumer that expects camelCase.
+        var json = JsonSerializer.Serialize(payload, NdjsonSerializerOptions);
         await response.WriteAsync(json + "\n", Encoding.UTF8, ct);
         await response.Body.FlushAsync(ct);
     }

@@ -278,7 +278,8 @@ public sealed class RunnerLocalApiLibraryTests : IDisposable
             fp.Headers.ContentType = MediaTypeHeaderValue.Parse("text/plain");
             content.Add(fp, name: "files", fileName: "deleteme.txt");
             var ingest = await fixture.Http.PostAsync($"{fixture.BaseUrl}/api/library/{libraryId}/files", content);
-            ingest.EnsureSuccessStatusCode();
+            Assert.True(ingest.IsSuccessStatusCode,
+                $"Upload returned {ingest.StatusCode}: {await ingest.Content.ReadAsStringAsync()}");
         }
 
         // Find the stored relative path
