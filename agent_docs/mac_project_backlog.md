@@ -457,134 +457,96 @@ folder sweep, and rebuild UI.
 
 ### MAC8 - Mac document management
 
-**Status:** implemented (PR pending, awaiting CI)
+**Status:** done 2026-05-06
 **Scope:** library CRUD + ingestion surface (runner-core API + Mac UI)
 **Risk:** High
 **Goal:** Mac users can create/select libraries, add files/folders, sweep,
   rebuild, and remove files. Implement once in `runner-core` so the same
-  endpoints serve Windows Companion / RunnerCli later (this absorbs and
-  expands `R1 Stage 2` in `project_backlog.md`).
+  endpoints serve Windows Companion / RunnerCli later. Supersedes the
+  originally narrower `R1 Stage 2` plan in `project_backlog.md`.
 
-**Approach (least-debt path, decided 2026-05-06):**
+**Outcome:** PR #185, merge commit `62d6d1d`. Eight `/api/library/*`
+endpoints added to `RunnerLocalApiService` (auth-gated, multipart upload +
+NDJSON progress) -- list / create / set-active / upload / delete /
+add-watched-folder / sweep / rebuild. Documents UI added to
+`mac-runner/Sources/main.swift` driving them through the `mac-runner-host`
+sidecar (NSOpenPanel for files & folders, Create sheet, Sweep / Rebuild /
+Remove buttons, library file list). Sidecar config-save split via new
+`NoOpConfigStore` preserves the MAC5/MAC6 plaintext-config invariant:
+mutating endpoints return updated `activeLibraryId` so Swift persists via
+`SsdEncryption.swift`. Library manifests + watched folders + chunk index
+stay sidecar-owned (on-SSD JSON / SQLite via `DocumentLibraryManager`),
+never plaintext-config-adjacent. Two new test classes added:
+`RunnerLocalApiLibraryTests` (HTTP-layer tests against real DI with fake
+Ollama), and `MacRunnerHostLibraryTests` (Mac sidecar full DI with
+end-to-end create -> upload -> chat-with-citations). All 526 tests green.
 
-Build a full `/api/library/*` surface in `RunnerLocalApiService` designed so
-both the Swift Mac UI (now) and the Windows Companion / RunnerCli (later)
-consume the same contract. Ingestion uses upload semantics because Windows'
-existing `DocumentIngestor` already copies user-picked files into the
-library's `source/` directory, so the upload step maps cleanly onto behavior
-that already exists -- no separate path-based vs upload-based code paths.
-
-The Windows WPF Runner UI keeps calling `IDocumentOperationsService`
-in-process. The HTTP layer is a thin shell over the same service; routing
-multi-GB Windows ingest through loopback HTTP buys nothing. Two callers of
-one interface is fine because the business logic doesn't fork.
-
-**Endpoints to add (auth-gated like the rest of `/api/*`):**
-- `GET /api/library` -- returns `{ libraries: [{id, name}], activeLibraryId }`.
-- `POST /api/library` -- body `{name}`; creates library, returns manifest +
-  the new `activeLibraryId` value the host has chosen (Mac client persists
-  this; see config-save split below).
-- `PUT /api/library/active` -- body `{libraryId|null}`; sets active.
-  Returns the updated `activeLibraryId` for client persistence.
-- `POST /api/library/{id}/files` -- multipart upload; ingests each file via
-  `IDocumentOperationsService.IngestFilesAsync`. SSE progress stream using
-  the same NDJSON pattern as `/api/chat/stream` (`start` -> many `progress`
-  -> `complete` or `error`).
-- `DELETE /api/library/{id}/files/{relpath}` -- removes one stored file.
-- `POST /api/library/{id}/folders` -- body `{path}`; adds a watched folder.
-  The path is host-local (must exist on the Runner host). Companion UX for
-  remote folder browsing is deferred -- not an MAC8 concern.
-- `POST /api/library/{id}/sweep` -- SSE progress.
-- `POST /api/library/{id}/rebuild` -- SSE progress.
-
-**Config-save split (preserves MAC5/MAC6 plaintext-config invariant):**
-- `ActiveDocumentLibraryId` lives in `PortableConfig` -> Swift-owned on Mac.
-  Endpoints that mutate it return the new value in the HTTP response; Swift
-  re-saves through `mac-runner/Sources/SsdEncryption.swift`.
-- Library manifests, watched-folder lists, and chunk index are on-SSD JSON /
-  SQLite owned by `DocumentLibraryManager` -> sidecar-owned. No plaintext
-  `PortableConfig` ever touches disk on Mac.
-- Windows host keeps writing `PortableConfig` via `IConfigStore` directly.
-  Same API contract, host-specific persistence -- no dual-path drift in
-  business logic.
-
-**Mac UI (Swift) surface:**
-- Library section in `mac-runner/Sources/main.swift`: picker (active +
-  switch), Create button, Add Files (`NSOpenPanel` multi-select PDF/TXT/MD),
-  Add Watched Folder, Sweep, Rebuild, Remove, with a progress strip backed
-  by SSE stream parsing.
-- After any endpoint that returns an `activeLibraryId` change, the Swift
-  side persists `PortableConfig` via `SsdEncryption.swift` -- same lock /
-  zeroize rules already in place.
-
-**Likely files:**
-- `runner-core/Services/RunnerLocalApiService.cs` -- new endpoint group +
-  multipart upload + SSE progress writers.
-- `runner-core/Services/IDocumentOperationsService.cs` /
-  `DocumentOperationsService.cs` -- minor shape adjustments only if needed
-  (existing surface already covers MAC8 ops).
-- `mac-runner/Sources/main.swift` -- library UI surface, NSOpenPanel
-  pickers, SSE progress parsing.
-- `mac-runner/Sources/MacRunnerHostController.swift` -- if needed for
-  request/auth wiring.
-- `tests/RunnerLocalApiLibraryTests.cs` (new) -- endpoint tests against a
-  temp SSD library.
-- `tests/MacRunnerHostLibraryTests.cs` (new) -- mirrors the
-  `MacRunnerHostRagParityTests` pattern: real Mac-host DI, fake Ollama
-  embeddings, full create -> ingest -> active -> chat-with-citations
-  roundtrip.
-
-**Do not change:**
-- `IDocumentOperationsService` Mac-portability shape (already shipped with
-  MAC3).
-- Encryption format or the Swift-owned plaintext-config invariant.
-- Windows WPF Runner's in-process call path through
-  `DocumentOperationsService` -- it stays as-is.
-- Auth posture: new endpoints sit behind the same Bearer / API-key gate as
-  every other `/api/*` route.
-- `DocumentParser` accepted formats: PDF, TXT, Markdown only. No DOCX.
-
-**Acceptance criteria:**
-- Create / select / switch active library from the Mac UI.
-- Ingest PDF / TXT / Markdown via NSOpenPanel; oversized or unsupported
-  files produce user-facing errors via the SSE `error` frame.
-- Add watched folder + Sweep re-ingests its contents.
-- Rebuild drops and rebuilds the vector index from stored sources.
-- Remove deletes the stored copy and removes manifest + index entries.
-- After any active-library change, `ActiveDocumentLibraryId` round-trips
-  cleanly: Mac -> sidecar (over HTTP response) -> Swift -> encrypted
-  `PortableConfig` -> next Mac launch resumes with the same active library.
-- Windows Runner library workflow is byte-for-byte unchanged.
-- `R1 Stage 2`'s scope (`/api/documents` + reindex) is satisfied by the new
-  endpoints; mark Stage 2 done in `project_backlog.md` as part of this PR.
-
-**Tests:**
-- HTTP-layer tests for every new endpoint against a temp SSD library
-  (create, list, set-active, upload+ingest, sweep, rebuild, remove,
-  add-folder; auth-failure cases; SSE error frames on
-  oversized/unsupported).
-- `MacRunnerHostLibraryTests` -- end-to-end Mac-host DI flow.
-- `MacPlatformBoundaryTests` continues to pass; `runner-core` stays plain
-  `net8.0`, non-WPF.
-- Existing `ChatService` / RAG / API tests unchanged and still pass.
-
-**Sequencing / scope notes:**
-- Companion UI for library control is deferred to a later item; MAC8 only
-  ships the API surface + Mac UI. Companion's remote-folder UX is the
+**Design notes worth preserving:**
+- Upload semantics for ingest (multipart) chosen over local-path body so
+  the same endpoint serves Mac (uploading from local disk) and a future
+  Windows Companion (uploading from a remote PC). Windows' existing
+  `DocumentIngestor` already copies user-picked files into the library's
+  managed `files/` directory -- the multipart step maps cleanly onto
+  behavior that already exists.
+- Windows WPF Runner UI keeps calling `IDocumentOperationsService`
+  in-process; the HTTP layer is a thin shell over the same service.
+  Migrating Windows UI to loopback HTTP was explicitly not in scope --
+  wasted bytes on big ingests for no MAC8 value.
+- Long-running endpoints stream NDJSON frames (`start` -> many `progress`
+  / `file-rejected` -> `complete` / `error`) using a sync-queue + drain
+  pattern (see `project_decisions.md` 2026-05-06 entry on the pump
+  pattern).
+- Companion UI for library control is deferred. Remote-folder UX is the
   unanswered question, not the API shape.
-- Job registry / `/api/jobs/{id}` polling is explicitly out of scope. SSE
-  per long-running endpoint is sufficient for both Mac UI and a future
-  RunnerCli `/docs` command. Add polling only when a real client demands
-  it.
-- Migrating Windows Runner UI to call the API instead of in-process is
-  explicitly **not** in scope -- it would be wasted bytes on big ingests
-  and brings no MAC8 value.
+
+**Files changed:**
+- `runner-core/Services/RunnerLocalApiService.cs` -- new endpoint group +
+  DTOs + `WriteNdjsonAsync` camelCase fix
+- `mac-runner-host/NoOpConfigStore.cs` (new) +
+  `mac-runner-host/HostLifetime.cs` DI wiring
+- `mac-runner/Sources/main.swift` -- Documents UI, library API client
+- `runner/App.xaml.cs` -- pass `IDocumentOperationsService` +
+  `DocumentLibraryManager` to `RunnerLocalApiService` constructor
+- `tests/RunnerLocalApiLibraryTests.cs`,
+  `tests/MacRunnerHostLibraryTests.cs` (both new)
+- `agent_docs/project_backlog.md` -- R1 Stage 2 superseded
+- `agent_docs/mac_project_backlog.md` -- MAC8 status
+
+**Validation:**
+- CI `windows-build` + `mac-runner-build` both green on `c796ba7`
+  (final commit before merge). 526 tests pass.
+- Local Swift compile green via `swiftc` against
+  `arm64-apple-macos11.0`.
+- `dotnet build` / `dotnet test` not run locally (no `dotnet` on the
+  Mac dev machine); CI was the only validation path. Three CI
+  iterations were needed to surface and fix two real bugs (camelCase
+  serialization on nested records; ASP.NET catch-all `%2F` decoding).
+
+**Manual-smoke gaps (deferred to a real Mac):**
+- Network Mode on -> Documents UI populates -> Create library -> Add
+  Files (TXT) -> ingest completes -> Send chat -> returns sources from
+  the uploaded file. End-to-end is covered by
+  `MacRunnerHostLibraryTests` against the real Mac host DI, but not
+  against an actual on-Mac launch with NSOpenPanel + a user-picked
+  SSD.
+
+**Tests added:**
+- `RunnerLocalApiLibraryTests` -- direct HTTP coverage: list (empty,
+  populated), create (happy, duplicate -> 409, blank -> 400), set
+  active (happy, unknown -> 404, null clears), upload (TXT happy +
+  NDJSON shape, unsupported extension rejected, oversized rejected,
+  unknown library -> 404), watched folder (happy, nonexistent path
+  -> 400), delete (happy, traversal -> 400), sweep, rebuild, auth
+  required when `NetworkRequireApiKey`.
+- `MacRunnerHostLibraryTests` -- full Mac sidecar DI:
+  create -> upload -> chat-with-citations end-to-end, set-active
+  round-trip, clear-active.
 
 ---
 
 ### MAC9 - Mac UI strategy decision
 
-**Status:** planned
+**Status:** done 2026-05-06
 **Scope:** architecture decision
 **Risk:** High
 **Goal:** Re-check the long-term UI path after the Mac host/core has proven the
@@ -592,14 +554,24 @@ one interface is fine because the business logic doesn't fork.
   should only change direction if the thin native UI blocks parity or causes
   real duplicated business logic.
 
-**Options:**
-- Keep Swift as a thin native UI over local .NET host.
-- Replace with Avalonia cross-platform Runner UI.
-- Keep Mac support CLI-first longer.
+**Outcome:** Locked in option 1 -- Swift thin-UI over local
+`mac-runner-host` .NET sidecar. Avalonia replacement and CLI-first-longer
+both rejected. Decision and exit-ramp criteria recorded in
+`project_decisions.md` (2026-05-06 entry: "MAC9: Swift thin-UI over
+.NET sidecar locked in as long-term Mac UI"). MAC4-MAC8 evidence:
+~1,730 lines of Swift, zero business logic in Swift (all RAG / chat /
+library / API logic in `runner-core/` net8.0), exactly one approved
+business-logic duplication (`SsdEncryption.swift`, waived 2026-05-05),
+zero parity blockers caused by the UI architecture. Re-open MAC9 only
+if Swift starts duplicating non-trivial business logic, WPF and Swift
+drift apart faster than parity work can keep up, Apple lifecycle /
+signing complexity exceeds Avalonia's, or a non-Apple platform Runner
+is added.
 
-**Acceptance criteria:**
+**Acceptance criteria (met):**
 - Decision recorded in `project_decisions.md`.
-- The chosen path does not duplicate RAG/encryption/network logic.
+- The chosen path does not duplicate RAG / encryption / network logic
+  (only `SsdEncryption.swift` is duplicated, per the MAC5 waiver).
 
 **Tests:** Not applicable.
 
@@ -960,13 +932,25 @@ both touch the Info.plist + bundle layout.
 
 ## Recommended Next Step
 
-MAC0-MAC5 are merged. The next item in the Runner-parity track is
-**MAC6 - Mac LAN API host + Companion compatibility + X4 web UI**: stand
-up a macOS host for the Runner API surface so `RunnerCli` and Windows
-Companion can connect to a Mac-hosted Runner over LAN, and X4's web chat
-UI is served from the same Kestrel for free (post-MAC3 RunnerCore moves
-the endpoint host into platform-neutral code).
+MAC0-MAC9 are merged. Runner-parity track is complete (Mac runs the same
+RunnerCore business logic via `mac-runner-host` for chat, RAG, and library
+management). MAC9 closed as a docs-only architecture lock-in for the
+Swift thin-UI + .NET sidecar approach. The next Mac items split into
+two tracks:
 
-Cross-platform PrepApp parity (MAC16/17/18) sequences after Runner parity
-(MAC4-MAC8) per the 2026-05-05 prep parity decision. APFS is dropped from
-supported targets; exFAT is the universal target from either source OS.
+**Packaging / distribution** (sequence before broader public release):
+- **MAC10a** - Windows PrepApp OS compatibility selector.
+- **MAC10b** - Mac app icon + Info.plist polish.
+- **MAC11** - Signing + notarization.
+
+**Cross-platform PrepApp parity** (so a Mac-only user can prep + run
+without owning a Windows machine):
+- **MAC16** - Extract PrepApp core to `prep-core/` (parallels MAC3).
+- **MAC17** - macOS PrepApp MVP (exFAT). Now unblocked from the
+  encrypted-config side (MAC5 done) and from the prep-core side once
+  MAC16 ships.
+- **MAC18** - Cross-platform prep compatibility docs (after MAC17).
+
+Beyond those, MAC12 (voice/TTS), MAC13 (HOTAS/PTT decision), and MAC14
+(DCS import on Mac) remain as feature-parity items but aren't on the
+critical path for a supported public Mac release.

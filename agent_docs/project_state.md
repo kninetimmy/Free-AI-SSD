@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-05-06 (PR #184 merged; Mac runner artifact launch-tested)
+Last updated: 2026-05-06 (MAC9 docs-only PR drafted: Swift thin-UI locked in)
 
 Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
@@ -8,10 +8,32 @@ Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
 ## In flight
 
-Between tasks. PR #184 (MAC7 docs wrap-up) merged at `fa055c9`. Next
-implementation target is MAC8: Mac document management.
+**MAC9 docs-only PR (drafted, not yet pushed).** Bundles the unfiled
+MAC8 wrap-up (PR #185 entry, four 2026-05-06 decision entries, MAC8
+status flipped to done) with the new MAC9 architecture lock-in:
+Swift/SwiftUI thin-UI over `mac-runner-host` .NET sidecar is the
+supported long-term Mac UI. Avalonia and CLI-first-longer rejected.
+Exit-ramp criteria recorded. No runtime changes. Next implementation
+target after MAC9 merges is **MAC10a** (Windows PrepApp NTFS vs
+exFAT selector).
 
 ## Recently shipped
+
+- **MAC9 - Mac UI strategy decision (docs-only).** Locked in
+  Swift/SwiftUI thin-UI over the `mac-runner-host` .NET sidecar as the
+  supported long-term Mac UI architecture. MAC4-MAC8 evidence: ~1,730
+  lines of Swift, zero business logic in Swift (RAG / chat / library /
+  API logic all in `runner-core/`), exactly one approved business-logic
+  duplication (`SsdEncryption.swift`, MAC5 waiver), zero parity
+  blockers caused by the UI choice. Avalonia rejected (throws away
+  shipped UI, reintroduces cross-arch hosting concern, harder Apple
+  lifecycle). CLI-first rejected (regression on stated parity goal).
+  Exit-ramp criteria recorded for re-opening MAC9 if Swift starts
+  duplicating non-trivial business logic, WPF and Swift drift faster
+  than parity work allows, Apple lifecycle complexity exceeds
+  Avalonia's, or a non-Apple Runner platform is added.
+
+- **PR #185 - MAC8 Mac document management - merged `62d6d1d` (2026-05-06).** Adds 8 `/api/library/*` endpoints to `RunnerLocalApiService` (auth-gated, multipart upload + NDJSON progress) and a Documents UI to the Mac Swift runner driving them through `mac-runner-host`. New `NoOpConfigStore` for the Mac sidecar preserves the MAC5/MAC6 plaintext-config invariant; mutating endpoints return updated `activeLibraryId` so Swift persists via `SsdEncryption.swift`. Supersedes `R1 Stage 2`'s narrower `/api/documents` plan. Two new test classes (`RunnerLocalApiLibraryTests`, `MacRunnerHostLibraryTests`) cover happy paths, file rejection, 404s, traversal, auth, and a full create->upload->chat-with-citations end-to-end. CI required 4 runs: initial fail (4 ingest tests); refactored Channel+Task.Run pump to sync queue+drain (still 4 fails); diagnostic dumps revealed `WriteNdjsonAsync` used default JsonSerializer options so the nested `LibraryDetail` record rendered PascalCase while anonymous fields rendered camelCase, breaking `library.fileCount` (525/526 after fix); restored `Uri.UnescapeDataString` on the DELETE catch-all relPath (ASP.NET preserves `%2F` literally) for the final test. All 526 tests green on `c796ba7`.
 
 - **PR #184 - MAC7 merge wrap-up - merged `fa055c9` (2026-05-06).** Docs-only follow-up to PR #183: marks MAC7 as done in `mac_project_backlog.md`, moves PR #183's full summary into `Recently shipped`, and reorders Next up so MAC8 is #1. CI `windows-build` + `mac-runner-build` green; no runtime changes.
 
@@ -35,19 +57,14 @@ implementation target is MAC8: Mac document management.
 
 - **PR #173 - MAC2 platform guardrails - merged `72139ac` (2026-05-05).** Added the macOS platform dependency audit, guardrail tests for the portable/shared boundary, and the MAC2 decision/backlog updates. `Build and Package` run #431 passed; PR #172 was closed/recreated as #173 because the GitHub connector hit the known draft-ready schema issue.
 
-- **PR #171 - macOS support merge wrap-up - merged `3e5e831` (2026-05-05).** Updated the dashboard after the macOS support backlog merge; no runtime changes.
-
-- **PR #170 - macOS support backlog - merged `a1d63c2` (2026-05-05).** Added the macOS support track, corrected README / QUICKSTART so macOS is described as a limited Swift direct-Ollama beta, added the MAC1 execution prompt, and passed `windows-build`.
-
-- **PR #167 - F4 Stage 1 wrap-up docs - merged `8ada5e4` (2026-05-05).** Resolved conflicts against latest `main` via branch merge commit `34d0a4e`; `windows-build` passed.
-
 ## Next up
 
-1. **MAC8** - Mac document management (library CRUD + ingestion).
-2. Cross-platform PrepApp parity (**MAC16/MAC17/MAC18**) sequences after Runner parity (MAC4-MAC8). Decision recorded 2026-05-05; APFS dropped from supported targets, exFAT is universal. MAC17 is now unblocked from the encrypted-config side (MAC5 done).
-3. Track **MAC10a** before broad Mac distribution: Windows PrepApp OS compatibility selector preselecting NTFS vs exFAT.
-4. **X4** is unblocked from the host side: MAC6 wired the static-file middleware on both platforms (PR #181); X4 only needs to drop SPA assets at `runner-core/wwwroot/chat/`.
-5. For non-Mac work, pick from `H3`, `F4` follow-up, `B2`, `F2`, or `R1 Stage 2`.
+1. **MAC10a** - Windows PrepApp OS compatibility selector (NTFS vs exFAT) before broad Mac distribution.
+2. **MAC10b** - Mac app icon + Info.plist polish (Runner.app shows default icon today).
+3. **MAC11** - Signing + notarization (Apple Developer setup; user has temporary access).
+4. Cross-platform PrepApp parity (**MAC16/MAC17/MAC18**) - Mac-only user can prep + run without Windows.
+5. **X4** still unblocked from the host side: only needs SPA assets at `runner-core/wwwroot/chat/`.
+6. For non-Mac work, pick from `H3`, `F4` follow-up, `B2`, `F2`. (`R1 Stage 2` server endpoints shipped via MAC8; only the RunnerCli `/docs`+`/reindex` slash-commands remain.)
 
 **RAG audit backlog:** X17-X23 cover audit findings; X10/X13/X15 scope expansions recorded. Plan: `C:\Users\Kninetimmy\.claude\plans\okay-i-want-to-glowing-galaxy.md`. v1.3.x sequence: X18 -> X15 (expanded) -> X19 -> X20 -> X22 -> X23. X17 reduced to Stage 1 textless-page diagnostic (full OCR deferred -- workload is text-layer PDFs).
 
@@ -58,11 +75,14 @@ See `project_backlog.md` for full general backlog details. See
 
 ## Last session
 
-2026-05-06 (PR #184 merge + Mac runner launch smoke, `fa055c9`) - User merged PR #184 (the MAC7 docs wrap-up). Reviewed the MAC7 implementation in PR #183 post-merge: `RunnerLocalApiService` change is surgical, `MacRunnerHostRagParityTests` (real DI against a fake Ollama Kestrel server with deterministic embeddings) is arguably better Mac-side coverage than Windows currently has, and the architectural call to require the sidecar (no direct-Ollama fallback) preserves the RAG invariant. Three small follow-ups flagged: Gemini's `id: \.self` SwiftUI nit at `mac-runner/Sources/main.swift:627` (mitigated server-side by `RagPromptBuilder.cs:54` `CitationBuilder.BuildDistinct` but cheap to tighten), `_chatService.LogMessage` event unhooks only in `DisposeAsync` not `StopAsync`, and Swift-side auth-key selection is reimplemented locally rather than shared. With user's Windows machine awaiting a replacement PSU and no SSD prep available, validated the Mac release path another way: downloaded `mac-runner-artifact` from CI run `25448329363` (head `f74b70b`), stripped quarantine, launched Runner.app — bundle opens cleanly with all MAC1-MAC7 controls present (Select SSD, Start, Stop, Lock, Model dropdown, prompt/response panes, Network Mode toggle, status "Stopped"). User confirmed via screenshot. App icon flagged as future work (added as MAC10b in `mac_project_backlog.md`).
+2026-05-06 (MAC9 docs-only PR drafted) - User asked "what's up next" between tasks, then "was there no MAC9" -- I confirmed MAC9 (Mac UI strategy decision) was a planned architecture checkpoint, not implementation. Walked through the three options (keep Swift thin-UI / switch to Avalonia / CLI-first-longer) with MAC4-MAC8 evidence: zero business logic in Swift, only one approved duplication (`SsdEncryption.swift` per MAC5 waiver), zero UI-architecture-driven parity blockers. User picked option 1: keep Swift thin-UI. Drafted bundled docs-only PR -- the MAC8 wrap-up changes from the prior session (PR #185 `Recently shipped` entry, four 2026-05-06 decision entries, MAC8 status, Next up reorder) had never been committed, so MAC9 was bundled with that wrap-up. Added MAC9 decision entry to `project_decisions.md` with explicit exit-ramp criteria (Swift duplicating non-trivial business logic; WPF/Swift drift outpacing parity work; Apple lifecycle exceeding Avalonia's complexity; non-Apple Runner platform added). Marked MAC9 done in `mac_project_backlog.md` and updated the "Recommended Next Step" to say MAC0-MAC9 are merged.
 
-2026-05-06 (PR #183 MAC7 merge wrap-up, `23245f7`) - User merged PR #183. Fast-forwarded local `main` to `origin/main`. MAC7 is now shipped on `main`; next Mac implementation target is MAC8.
+2026-05-06 (PR #185 MAC8 merged, `62d6d1d`) - User merged PR #185. Implementation spanned 6 commits: MAC8 prompt fleshed out in `mac_project_backlog.md` (broad-API design over Mac-tight subset); 8 `/api/library/*` endpoints added to `RunnerLocalApiService`; Mac Swift Documents UI in `main.swift`; `NoOpConfigStore` in `mac-runner-host`; `RunnerLocalApiLibraryTests` + `MacRunnerHostLibraryTests`. CI required 4 runs to green — two genuine bugs surfaced by Windows CI (default `JsonSerializer` policy made nested records PascalCase while anonymous frames stayed camelCase, breaking `library.fileCount`; ASP.NET catch-all routing leaves `%2F` encoded so DELETE relPath needed explicit `Uri.UnescapeDataString`) and one refactor that didn't matter on its own (Channel+Task.Run progress pump → sync queue + drain). Local validation gap: no `dotnet` on this Mac, only Swift compile + CI for C#. R1 Stage 2 server endpoints superseded; backlog entry updated to call out only the runner-cli `/docs`+`/reindex` slash-commands as remaining.
+
+2026-05-06 (PR #184 merge + Mac runner launch smoke, `fa055c9`) - User merged PR #184 (the MAC7 docs wrap-up). Reviewed the MAC7 implementation in PR #183 post-merge: `RunnerLocalApiService` change is surgical, `MacRunnerHostRagParityTests` (real DI against a fake Ollama Kestrel server with deterministic embeddings) is arguably better Mac-side coverage than Windows currently has, and the architectural call to require the sidecar (no direct-Ollama fallback) preserves the RAG invariant. Three small follow-ups flagged: Gemini's `id: \.self` SwiftUI nit at `mac-runner/Sources/main.swift:627` (mitigated server-side by `RagPromptBuilder.cs:54` `CitationBuilder.BuildDistinct` but cheap to tighten), `_chatService.LogMessage` event unhooks only in `DisposeAsync` not `StopAsync`, and Swift-side auth-key selection is reimplemented locally rather than shared. With user's Windows machine awaiting a replacement PSU and no SSD prep available, validated the Mac release path another way: downloaded `mac-runner-artifact` from CI run `25448329363` (head `f74b70b`), stripped quarantine, launched Runner.app — bundle opens cleanly with all MAC1-MAC7 controls present (Select SSD, Start, Stop, Lock, Model dropdown, prompt/response panes, Network Mode toggle, status "Stopped"). User confirmed via screenshot. App icon flagged as future work (added as MAC10b in `mac_project_backlog.md`).
 
 ## Open questions
 
 - Before a public signed Mac beta, verify whether the nested `payload/mac/Runner.app.zip` preserves the stapled notarization ticket after users download and extract the cross-platform ZIP. If not, ship a standalone notarized app ZIP or DMG.
 - **MAC6 manual smoke (deferred until a Mac on the same LAN as a Windows Companion):** Windows Companion discovers and connects to a Mac-hosted Runner with Bearer auth + /api/health + /api/chat; Network Mode toggle with real Ollama serving a real model end-to-end. Bare-bundle launch (no SSD) was sanity-checked 2026-05-06 against the CI `mac-runner-artifact` from run `25448329363` — the bundle opens cleanly on a Mac without Windows tooling.
+- **MAC8 manual smoke (deferred to a real Mac):** Network Mode on → Documents UI populates → Create library → Add Files (TXT) → ingest completes → Send chat → returns sources from the uploaded file. CI covers this via `MacRunnerHostLibraryTests` against the real Mac host DI, but not against a real on-Mac launch with NSOpenPanel + a user-picked SSD.
