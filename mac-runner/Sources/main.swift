@@ -34,6 +34,32 @@ enum TrustGateResult {
     case refused(String)
 }
 
+/// MAC8: Mac-side mirror of `RunnerLocalApiService.LibrarySummary`.
+struct LibrarySummary: Codable, Hashable {
+    let id: String
+    let name: String
+}
+
+/// MAC8: Mac-side mirror of `RunnerLocalApiService.LibraryFileSummary`.
+struct LibraryFileSummary: Codable, Hashable {
+    let fileName: String
+    let storedRelativePath: String
+    let sizeBytes: Int
+    let importedAtUtc: String
+}
+
+/// MAC8: Mac-side mirror of `RunnerLocalApiService.LibraryDetail`.
+struct LibraryDetail: Codable {
+    let id: String
+    let name: String
+    let fileCount: Int
+    let files: [LibraryFileSummary]
+    let watchedFolders: [String]
+    let lastEmbeddingModel: String?
+    let lastEmbeddingDimension: Int?
+    let lastIndexedUtc: String?
+}
+
 final class RunnerViewModel: ObservableObject {
     @Published var ssdRoot: URL?
     @Published var modelNames: [String] = []
@@ -55,6 +81,19 @@ final class RunnerViewModel: ObservableObject {
     @Published var networkModeEnabled: Bool = false
     @Published var networkApiStatus: String = "API stopped"
     @Published var networkApiBaseUrl: String? = nil
+
+    /// MAC8: Document library state, populated from /api/library when the
+    /// Network Mode sidecar is running. The active library + its files/watched
+    /// folders surface in the Documents UI; mutations round-trip through the
+    /// sidecar's HTTP API and (for activeLibraryId) Swift persists via
+    /// `SsdEncryption` because the sidecar's IConfigStore is a no-op on Mac.
+    @Published var libraries: [LibrarySummary] = []
+    @Published var activeLibraryId: String? = nil
+    @Published var activeLibrary: LibraryDetail? = nil
+    @Published var libraryStatus: String = ""
+    @Published var libraryBusy: Bool = false
+    @Published var createLibraryDialogPresented: Bool = false
+    @Published var createLibraryName: String = ""
 
     private var process: Process?
     private var hostPort = 11434
@@ -301,11 +340,18 @@ final class RunnerViewModel: ObservableObject {
             if networkModeEnabled {
                 networkModeEnabled = false
             }
+            libraries = []
+            activeLibrary = nil
+            activeLibraryId = nil
+            libraryStatus = ""
         case .starting:
             networkApiStatus = "Starting API…"
         case .running(let baseUrl):
             networkApiBaseUrl = baseUrl
             networkApiStatus = "API: \(baseUrl)"
+            // MAC8: pull the library list as soon as the sidecar is up so the
+            // Documents section shows the active library without manual refresh.
+            refreshLibraries()
         case .crashed(let message):
             networkApiBaseUrl = nil
             networkModeEnabled = false
@@ -545,6 +591,376 @@ final class RunnerViewModel: ObservableObject {
         return "Chat failed: API returned \(statusCode)"
     }
 
+    // MARK: - MAC8 Document Library Management
+    //
+    // All library mutations route through the mac-runner-host sidecar's
+    // /api/library/* endpoints. The same RunnerLocalApiService that serves
+    // /api/chat/* on Windows. The sidecar's IConfigStore is a no-op on Mac
+    // (NoOpConfigStore) to preserve the MAC5/MAC6 plaintext-config invariant,
+    // so when an endpoint mutates ActiveDocumentLibraryId we apply the change
+    // here in Swift via saveConfig() so it persists encrypted on disk.
+
+    func refreshLibraries() {
+        guard let baseUrl = networkApiBaseUrl, let url = URL(string: "\(baseUrl)/api/library") else {
+            return
+        }
+        var req = URLRequest(url: url)
+        if let key = apiKeyForLocalApiRequest() {
+            req.addValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
+        URLSession.shared.dataTask(with: req) { [weak self] data, urlResponse, error in
+            guard let self else { return }
+            if let error {
+                DispatchQueue.main.async { self.libraryStatus = "Library list failed: \(error.localizedDescription)" }
+                return
+            }
+            guard let http = urlResponse as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode), let data else {
+                DispatchQueue.main.async { self.libraryStatus = "Library list failed (HTTP \((urlResponse as? HTTPURLResponse)?.statusCode ?? 0))" }
+                return
+            }
+            guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                DispatchQueue.main.async { self.libraryStatus = "Library list: malformed response" }
+                return
+            }
+            let libsRaw = (obj["libraries"] as? [[String: Any]]) ?? []
+            let libs: [LibrarySummary] = libsRaw.compactMap { entry in
+                guard let id = entry["id"] as? String, let name = entry["name"] as? String else { return nil }
+                return LibrarySummary(id: id, name: name)
+            }
+            let activeId = obj["activeLibraryId"] as? String
+            let activeDetail = self.decodeActiveLibrary(obj["activeLibrary"] as? [String: Any])
+            DispatchQueue.main.async {
+                self.libraries = libs
+                self.activeLibraryId = activeId
+                self.activeLibrary = activeDetail
+                self.libraryStatus = libs.isEmpty ? "No libraries yet — Create one to ingest documents." : ""
+            }
+        }.resume()
+    }
+
+    func createLibrary(name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard let baseUrl = networkApiBaseUrl, let url = URL(string: "\(baseUrl)/api/library") else {
+            libraryStatus = "Start Network Mode first."
+            return
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let key = apiKeyForLocalApiRequest() { req.addValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["name": trimmed])
+
+        libraryBusy = true
+        libraryStatus = "Creating library…"
+        URLSession.shared.dataTask(with: req) { [weak self] data, urlResponse, error in
+            guard let self else { return }
+            DispatchQueue.main.async { self.libraryBusy = false }
+            if let http = urlResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                let msg = self.apiErrorMessage(data: data, statusCode: http.statusCode)
+                DispatchQueue.main.async { self.libraryStatus = msg }
+                return
+            }
+            if error != nil {
+                DispatchQueue.main.async { self.libraryStatus = "Create failed: \(error!.localizedDescription)" }
+                return
+            }
+            guard let data,
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let activeId = obj["activeLibraryId"] as? String else {
+                DispatchQueue.main.async { self.libraryStatus = "Create failed: malformed response" }
+                return
+            }
+            DispatchQueue.main.async {
+                self.persistActiveLibraryId(activeId)
+                self.refreshLibraries()
+            }
+        }.resume()
+    }
+
+    func setActiveLibrary(libraryId: String?) {
+        guard let baseUrl = networkApiBaseUrl, let url = URL(string: "\(baseUrl)/api/library/active") else {
+            libraryStatus = "Start Network Mode first."
+            return
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let key = apiKeyForLocalApiRequest() { req.addValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        let body: [String: Any] = ["libraryId": libraryId as Any]
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        URLSession.shared.dataTask(with: req) { [weak self] data, urlResponse, error in
+            guard let self else { return }
+            if let http = urlResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                let msg = self.apiErrorMessage(data: data, statusCode: http.statusCode)
+                DispatchQueue.main.async { self.libraryStatus = msg }
+                return
+            }
+            if error != nil {
+                DispatchQueue.main.async { self.libraryStatus = "Set active failed: \(error!.localizedDescription)" }
+                return
+            }
+            DispatchQueue.main.async {
+                self.persistActiveLibraryId(libraryId)
+                self.refreshLibraries()
+            }
+        }.resume()
+    }
+
+    func pickAndIngestFiles() {
+        guard let activeId = activeLibraryId else {
+            libraryStatus = "Create or select a library first."
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.allowedFileTypes = ["pdf", "txt", "md", "json", "csv"]
+        guard panel.runModal() == .OK else { return }
+        let urls = panel.urls
+        guard !urls.isEmpty else { return }
+        ingestFiles(urls: urls, libraryId: activeId)
+    }
+
+    private func ingestFiles(urls: [URL], libraryId: String) {
+        guard let baseUrl = networkApiBaseUrl,
+              let url = URL(string: "\(baseUrl)/api/library/\(libraryId)/files") else {
+            libraryStatus = "Start Network Mode first."
+            return
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        if let key = apiKeyForLocalApiRequest() { req.addValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+
+        let boundary = "Boundary-\(UUID().uuidString)"
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+        for fileURL in urls {
+            guard let fileData = try? Data(contentsOf: fileURL) else { continue }
+            let fileName = fileURL.lastPathComponent
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"files\"; filename=\"\(fileName)\"\r\n".data(using: .utf8)!)
+            body.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
+            body.append(fileData)
+            body.append("\r\n".data(using: .utf8)!)
+        }
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        req.httpBody = body
+
+        libraryBusy = true
+        libraryStatus = "Uploading \(urls.count) file(s)…"
+        URLSession.shared.dataTask(with: req) { [weak self] data, urlResponse, error in
+            guard let self else { return }
+            DispatchQueue.main.async { self.libraryBusy = false }
+            if let http = urlResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                let msg = self.apiErrorMessage(data: data, statusCode: http.statusCode)
+                DispatchQueue.main.async { self.libraryStatus = msg }
+                return
+            }
+            self.handleNdjsonProgress(data: data, error: error, completionVerb: "Ingest")
+        }.resume()
+    }
+
+    func pickAndAddWatchedFolder() {
+        guard let activeId = activeLibraryId else {
+            libraryStatus = "Create or select a library first."
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+
+        guard let baseUrl = networkApiBaseUrl,
+              let url = URL(string: "\(baseUrl)/api/library/\(activeId)/folders") else {
+            libraryStatus = "Start Network Mode first."
+            return
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let key = apiKeyForLocalApiRequest() { req.addValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["path": folder.path])
+
+        libraryBusy = true
+        libraryStatus = "Adding watched folder…"
+        URLSession.shared.dataTask(with: req) { [weak self] data, urlResponse, error in
+            guard let self else { return }
+            DispatchQueue.main.async { self.libraryBusy = false }
+            if let http = urlResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                let msg = self.apiErrorMessage(data: data, statusCode: http.statusCode)
+                DispatchQueue.main.async { self.libraryStatus = msg }
+                return
+            }
+            if error != nil {
+                DispatchQueue.main.async { self.libraryStatus = "Add folder failed: \(error!.localizedDescription)" }
+                return
+            }
+            DispatchQueue.main.async {
+                self.libraryStatus = "Watched folder added."
+                self.refreshLibraries()
+            }
+        }.resume()
+    }
+
+    func sweepActiveLibrary() {
+        runSseLibraryOp(verb: "Sweep", endpoint: "sweep")
+    }
+
+    func rebuildActiveLibrary() {
+        runSseLibraryOp(verb: "Rebuild", endpoint: "rebuild")
+    }
+
+    private func runSseLibraryOp(verb: String, endpoint: String) {
+        guard let activeId = activeLibraryId else {
+            libraryStatus = "Create or select a library first."
+            return
+        }
+        guard let baseUrl = networkApiBaseUrl,
+              let url = URL(string: "\(baseUrl)/api/library/\(activeId)/\(endpoint)") else {
+            libraryStatus = "Start Network Mode first."
+            return
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        if let key = apiKeyForLocalApiRequest() { req.addValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+
+        libraryBusy = true
+        libraryStatus = "\(verb)ing…"
+        URLSession.shared.dataTask(with: req) { [weak self] data, urlResponse, error in
+            guard let self else { return }
+            DispatchQueue.main.async { self.libraryBusy = false }
+            if let http = urlResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                let msg = self.apiErrorMessage(data: data, statusCode: http.statusCode)
+                DispatchQueue.main.async { self.libraryStatus = msg }
+                return
+            }
+            self.handleNdjsonProgress(data: data, error: error, completionVerb: verb)
+        }.resume()
+    }
+
+    func removeFile(storedRelativePath: String) {
+        guard let activeId = activeLibraryId else { return }
+        guard let baseUrl = networkApiBaseUrl else { return }
+        let encoded = storedRelativePath
+            .addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? storedRelativePath
+        guard let url = URL(string: "\(baseUrl)/api/library/\(activeId)/files/\(encoded)") else { return }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        if let key = apiKeyForLocalApiRequest() { req.addValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+
+        libraryBusy = true
+        libraryStatus = "Removing file…"
+        URLSession.shared.dataTask(with: req) { [weak self] data, urlResponse, error in
+            guard let self else { return }
+            DispatchQueue.main.async { self.libraryBusy = false }
+            if let http = urlResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                let msg = self.apiErrorMessage(data: data, statusCode: http.statusCode)
+                DispatchQueue.main.async { self.libraryStatus = msg }
+                return
+            }
+            if error != nil {
+                DispatchQueue.main.async { self.libraryStatus = "Remove failed: \(error!.localizedDescription)" }
+                return
+            }
+            DispatchQueue.main.async {
+                self.libraryStatus = "File removed."
+                self.refreshLibraries()
+            }
+        }.resume()
+    }
+
+    /// Buffered NDJSON parser for /api/library/{id}/files and sweep/rebuild
+    /// responses. URLSession's streaming-bytes API is macOS 12+, but the
+    /// MAC1 baseline pins macOS 11; buffer the full response and replay
+    /// frames once it completes. Live progress display is a follow-up; for
+    /// MAC8 the user sees a single "completed" message and the refreshed
+    /// library detail.
+    private func handleNdjsonProgress(data: Data?, error: Error?, completionVerb: String) {
+        if let error {
+            DispatchQueue.main.async { self.libraryStatus = "\(completionVerb) failed: \(error.localizedDescription)" }
+            return
+        }
+        guard let data, let text = String(data: data, encoding: .utf8) else {
+            DispatchQueue.main.async { self.libraryStatus = "\(completionVerb) failed: empty response" }
+            return
+        }
+
+        var rejectedCount = 0
+        var completedDetail: LibraryDetail? = nil
+        var errorMessage: String? = nil
+
+        for line in text.split(separator: "\n") {
+            guard let lineData = line.data(using: .utf8),
+                  let frame = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                  let type = frame["type"] as? String else {
+                continue
+            }
+            switch type {
+            case "file-rejected":
+                rejectedCount += 1
+                if let fileName = frame["fileName"] as? String,
+                   let reason = frame["reason"] as? String {
+                    log("[library] rejected '\(fileName)': \(reason)")
+                }
+            case "complete":
+                completedDetail = self.decodeActiveLibrary(frame["library"] as? [String: Any])
+            case "error":
+                errorMessage = frame["message"] as? String
+            default:
+                break
+            }
+        }
+
+        DispatchQueue.main.async {
+            if let errorMessage {
+                self.libraryStatus = "\(completionVerb) failed: \(errorMessage)"
+                return
+            }
+            if let completedDetail {
+                self.activeLibrary = completedDetail
+                let parts = ["\(completionVerb) complete: \(completedDetail.fileCount) file(s)"]
+                let suffix = rejectedCount > 0 ? " (\(rejectedCount) rejected — see logs)" : ""
+                self.libraryStatus = parts.joined() + suffix
+            } else {
+                self.libraryStatus = "\(completionVerb) finished."
+            }
+            self.refreshLibraries()
+        }
+    }
+
+    private func decodeActiveLibrary(_ obj: [String: Any]?) -> LibraryDetail? {
+        guard let obj else { return nil }
+        guard let data = try? JSONSerialization.data(withJSONObject: obj) else { return nil }
+        return try? JSONDecoder().decode(LibraryDetail.self, from: data)
+    }
+
+    /// Persists the new activeDocumentLibraryId via Swift's encrypted/plaintext
+    /// save path. Required because the sidecar's IConfigStore is a no-op on
+    /// Mac (MAC5/MAC6 plaintext-config invariant) — the sidecar mutates its
+    /// in-memory PortableConfig and returns the new ID for us to save here.
+    private func persistActiveLibraryId(_ libraryId: String?) {
+        saveConfig { current in
+            var copy = current
+            if let libraryId, !libraryId.isEmpty {
+                copy["activeDocumentLibraryId"] = libraryId
+            } else {
+                copy.removeValue(forKey: "activeDocumentLibraryId")
+            }
+            return copy
+        }
+    }
+
     /// Reads `<ssdRoot>/mac/tools/ollama/ollama-package-trust.json` and
     /// compares it to the pinned Mac Ollama metadata. Refuses launch when
     /// the file is missing, malformed, or disagrees on URL / SHA-256.
@@ -646,10 +1062,126 @@ struct ContentView: View {
                     .font(.callout)
                     .foregroundColor(.secondary)
             }
+
+            // MAC8: Documents (library management). All ops go through the
+            // sidecar's /api/library/* endpoints; gate the UI on Network Mode
+            // so users see one clear "turn it on" hint instead of per-button
+            // failures.
+            Divider()
+            DocumentsSection(vm: vm)
         }
         .padding(16)
-        .frame(minWidth: 720, minHeight: 560)
+        .frame(minWidth: 720, minHeight: 640)
         .sheet(isPresented: $vm.unlockDialogPresented) { UnlockSheet(vm: vm) }
+        .sheet(isPresented: $vm.createLibraryDialogPresented) { CreateLibrarySheet(vm: vm) }
+    }
+}
+
+struct DocumentsSection: View {
+    @ObservedObject var vm: RunnerViewModel
+
+    private var apiUp: Bool { vm.networkApiBaseUrl != nil }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Documents").font(.headline)
+                Spacer()
+                if !vm.libraryStatus.isEmpty {
+                    Text(vm.libraryStatus)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            if !apiUp {
+                Text("Turn on Network Mode to manage document libraries.")
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+            } else {
+                HStack {
+                    Picker("Library", selection: Binding(
+                        get: { vm.activeLibraryId ?? "" },
+                        set: { newValue in
+                            vm.setActiveLibrary(libraryId: newValue.isEmpty ? nil : newValue)
+                        }
+                    )) {
+                        Text("None").tag("")
+                        ForEach(vm.libraries, id: \.id) { lib in
+                            Text(lib.name).tag(lib.id)
+                        }
+                    }
+                    .frame(maxWidth: 280)
+                    Button("Create") {
+                        vm.createLibraryName = ""
+                        vm.createLibraryDialogPresented = true
+                    }
+                    .disabled(vm.libraryBusy)
+                    Spacer()
+                }
+                HStack {
+                    Button("Add Files") { vm.pickAndIngestFiles() }
+                        .disabled(vm.libraryBusy || vm.activeLibraryId == nil)
+                    Button("Add Folder") { vm.pickAndAddWatchedFolder() }
+                        .disabled(vm.libraryBusy || vm.activeLibraryId == nil)
+                    Button("Sweep") { vm.sweepActiveLibrary() }
+                        .disabled(vm.libraryBusy || vm.activeLibraryId == nil)
+                    Button("Rebuild") { vm.rebuildActiveLibrary() }
+                        .disabled(vm.libraryBusy || vm.activeLibraryId == nil)
+                    Spacer()
+                }
+
+                if let detail = vm.activeLibrary, !detail.files.isEmpty {
+                    Text("Files (\(detail.fileCount))")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(detail.files, id: \.storedRelativePath) { file in
+                                HStack {
+                                    Text(file.fileName).font(.callout)
+                                    Spacer()
+                                    Button("Remove") { vm.removeFile(storedRelativePath: file.storedRelativePath) }
+                                        .buttonStyle(.borderless)
+                                        .font(.caption)
+                                        .disabled(vm.libraryBusy)
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 120)
+                }
+            }
+        }
+    }
+}
+
+struct CreateLibrarySheet: View {
+    @ObservedObject var vm: RunnerViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("New library").font(.title3)
+            TextField("Library name", text: $vm.createLibraryName)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    vm.createLibraryDialogPresented = false
+                    vm.createLibraryName = ""
+                }
+                Button("Create") {
+                    let name = vm.createLibraryName
+                    vm.createLibraryDialogPresented = false
+                    vm.createLibraryName = ""
+                    vm.createLibrary(name: name)
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(vm.createLibraryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 360)
     }
 }
 

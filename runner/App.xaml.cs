@@ -66,7 +66,10 @@ public partial class App : System.Windows.Application
             sp.GetRequiredService<ISpeechToTextService>(),
             sp.GetRequiredService<ITtsProvider>(),
             sp.GetRequiredService<SsdLogger>(),
-            ssdRoot));
+            ssdRoot,
+            staticFilesRoot: null,
+            docOps: sp.GetRequiredService<IDocumentOperationsService>(),
+            libraryManager: sp.GetRequiredService<DocumentLibraryManager>()));
 
         // ActivatorUtilities resolves registered services automatically; ssdRoot is
         // the only non-DI parameter and is passed positionally.

@@ -75,7 +75,7 @@ the style to match.
 13. **F4** — profile FTUE in PrepApp + companion install target selector (multi-stage; Stage 1 done in PR #166, Stages 2-4 pending)
 14. **B2** — build LAN discovery (multi-stage, Opus planning; can run in parallel with F4)
 15. **F2** — live model list fetch (smaller feature)
-16. **R1 Stage 2** — `/api/documents` + `/api/documents/reindex` server endpoints + `/docs` / `/reindex` CLI commands (follow-up to R1 Stage 1)
+16. **R1 Stage 2** — Server endpoints shipped as the broader `/api/library/*` surface in **MAC8**. Remaining work is the `runner-cli` `/docs` and `/reindex` slash-commands wrapping those endpoints.
 
 **v1.3.x territory:**
 18. **X4** â€” Bundle a real web chat UI (static SPA served from Runner's Kestrel, reusing existing `/api/chat` endpoints)
@@ -116,7 +116,7 @@ Items `B1`â€“`F4` below were triaged from Stephen's `Downloads/# Free-AI-SS
 
 ### R1 â€” Runner CLI REPL (headless SSH/Tailscale client)
 
-**Status:** Stage 1 done (PR #130, `bb59a6c`); Stage 2 triaged
+**Status:** Stage 1 done (PR #130, `bb59a6c`); Stage 2 server endpoints shipped via **MAC8** (broader `/api/library/*` surface — list/create/set-active/upload/sweep/rebuild/remove with NDJSON progress; auth-gated). The originally planned `GET /api/documents` + `POST /api/documents/reindex` pair is superseded by these richer endpoints. RunnerCli `/docs` / `/reindex` slash-commands remain as a small follow-up that wraps the existing endpoints.
 **Scope:** Multi-stage (2 stages)
 **Model:** Sonnet 4.6 for Stage 1; Sonnet 4.6 for Stage 2
 **Stephen confirmed (2026-04-17):** yes, option 3 (thin HTTP client against existing `RunnerLocalApiService`, not a headless host).

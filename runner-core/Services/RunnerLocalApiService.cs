@@ -1,7 +1,9 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 using FreeAiSsd.Shared;
+using FreeAiSsd.Shared.Documents;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -18,6 +20,8 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
     private readonly IChatService _chatService;
     private readonly ISpeechToTextService _sttService;
     private readonly ITtsProvider _ttsProvider;
+    private readonly IDocumentOperationsService? _docOps;
+    private readonly DocumentLibraryManager? _libraryManager;
     private readonly SsdLogger? _logger;
     private readonly string _ssdRoot;
     private readonly string? _staticFilesRoot;
@@ -31,11 +35,15 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         ITtsProvider ttsProvider,
         SsdLogger? logger,
         string? ssdRoot = null,
-        string? staticFilesRoot = null)
+        string? staticFilesRoot = null,
+        IDocumentOperationsService? docOps = null,
+        DocumentLibraryManager? libraryManager = null)
     {
         _chatService = chatService;
         _sttService = sttService;
         _ttsProvider = ttsProvider;
+        _docOps = docOps;
+        _libraryManager = libraryManager;
         _logger = logger;
         _ssdRoot = string.IsNullOrWhiteSpace(ssdRoot) ? AppContext.BaseDirectory : ssdRoot;
         _staticFilesRoot = string.IsNullOrWhiteSpace(staticFilesRoot) ? null : staticFilesRoot;
@@ -379,11 +387,433 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             }
         });
 
+        if (_docOps is not null && _libraryManager is not null)
+        {
+            MapLibraryEndpoints(api, config, ollamaHost);
+        }
+
         _app = app;
         CurrentBaseUrl = $"http://{bindAddress}:{networkPort}";
         await app.StartAsync(cancellationToken);
         _logger?.Info($"Network API started at {CurrentBaseUrl}");
         LogMessage?.Invoke($"Network API started at {CurrentBaseUrl}");
+    }
+
+    private void MapLibraryEndpoints(RouteGroupBuilder api, PortableConfig config, string ollamaHost)
+    {
+        var docOps = _docOps!;
+        var libraryManager = _libraryManager!;
+        var library = api.MapGroup("/library");
+
+        library.MapGet("", () =>
+        {
+            var registry = libraryManager.LoadRegistry();
+            var libraries = registry.Libraries
+                .Select(l => new LibrarySummary(l.Id, string.IsNullOrWhiteSpace(l.Name) ? l.Id : l.Name))
+                .ToList();
+
+            LibraryDetail? activeDetail = null;
+            string? activeId = null;
+            if (!string.IsNullOrWhiteSpace(config.ActiveDocumentLibraryId) &&
+                libraries.Any(l => l.Id == config.ActiveDocumentLibraryId))
+            {
+                activeId = config.ActiveDocumentLibraryId;
+                var manifest = libraryManager.LoadManifest(activeId!);
+                activeDetail = BuildLibraryDetail(manifest);
+            }
+
+            return Results.Ok(new LibraryListResponse(libraries, activeId, activeDetail));
+        });
+
+        library.MapPost("", async (CreateLibraryRequest request) =>
+        {
+            if (request is null || string.IsNullOrWhiteSpace(request.Name))
+            {
+                return Results.BadRequest(new ErrorResponse("'name' is required."));
+            }
+
+            try
+            {
+                var manifest = await docOps.CreateLibraryAsync(config, _ssdRoot, request.Name.Trim());
+                return Results.Ok(new CreateLibraryResponse(BuildLibraryDetail(manifest), manifest.Id));
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new ErrorResponse(ex.Message));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(new ErrorResponse(ex.Message));
+            }
+        });
+
+        library.MapPut("/active", async (SetActiveLibraryRequest? request) =>
+        {
+            var libraryId = string.IsNullOrWhiteSpace(request?.LibraryId) ? null : request!.LibraryId!.Trim();
+            if (libraryId is not null)
+            {
+                var registry = libraryManager.LoadRegistry();
+                if (!registry.Libraries.Any(l => l.Id == libraryId))
+                {
+                    return Results.NotFound(new ErrorResponse($"Library '{libraryId}' not found."));
+                }
+            }
+
+            var manifest = await docOps.SetActiveLibraryAsync(config, _ssdRoot, libraryId);
+            var detail = manifest is null ? null : BuildLibraryDetail(manifest);
+            return Results.Ok(new SetActiveLibraryResponse(libraryId, detail));
+        });
+
+        library.MapPost("/{libraryId}/files", async (HttpContext context, string libraryId, CancellationToken ct) =>
+        {
+            await HandleIngestUploadAsync(context, libraryId, config, ollamaHost, ct);
+        });
+
+        library.MapDelete("/{libraryId}/files/{*relPath}", async (string libraryId, string relPath) =>
+        {
+            var manifest = LoadManifestIfExists(libraryId);
+            if (manifest is null)
+            {
+                return Results.NotFound(new ErrorResponse($"Library '{libraryId}' not found."));
+            }
+
+            // ASP.NET catch-all routing has already URL-decoded path segments.
+            var decoded = (relPath ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(decoded))
+            {
+                return Results.BadRequest(new ErrorResponse("Stored file path is required."));
+            }
+
+            // Path-traversal guard: the decoded relpath must resolve under the
+            // library's files directory. Reject anything outside (e.g. "../").
+            var libRoot = libraryManager.GetLibraryPath(libraryId);
+            var filesRoot = libraryManager.GetFilesPath(libraryId);
+            var candidate = Path.Combine(libRoot, decoded.Replace('/', Path.DirectorySeparatorChar));
+            try
+            {
+                PathGuards.EnsureUnderRoot(filesRoot, candidate);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new ErrorResponse(ex.Message));
+            }
+
+            await docOps.RemoveFileAsync(manifest, decoded);
+            var refreshed = libraryManager.LoadManifest(libraryId);
+            return Results.Ok(new { library = BuildLibraryDetail(refreshed) });
+        });
+
+        library.MapPost("/{libraryId}/folders", async (string libraryId, AddWatchedFolderRequest? request) =>
+        {
+            if (request is null || string.IsNullOrWhiteSpace(request.Path))
+            {
+                return Results.BadRequest(new ErrorResponse("'path' is required."));
+            }
+
+            var manifest = LoadManifestIfExists(libraryId);
+            if (manifest is null)
+            {
+                return Results.NotFound(new ErrorResponse($"Library '{libraryId}' not found."));
+            }
+
+            var folder = request.Path.Trim();
+            if (!Directory.Exists(folder))
+            {
+                return Results.BadRequest(new ErrorResponse($"Folder does not exist: {folder}"));
+            }
+
+            var added = await docOps.AddWatchedFolderAsync(manifest, folder);
+            var refreshed = libraryManager.LoadManifest(libraryId);
+            return Results.Ok(new AddWatchedFolderResponse(added, refreshed.WatchedFolders.ToList(), BuildLibraryDetail(refreshed)));
+        });
+
+        library.MapPost("/{libraryId}/sweep", async (HttpContext context, string libraryId, CancellationToken ct) =>
+        {
+            await HandleProgressedOpAsync(context, libraryId, ollamaHost, config, ct,
+                (manifest, host, cfg, progress) => docOps.SweepFoldersAsync(manifest, host, cfg, progress));
+        });
+
+        library.MapPost("/{libraryId}/rebuild", async (HttpContext context, string libraryId, CancellationToken ct) =>
+        {
+            await HandleProgressedOpAsync(context, libraryId, ollamaHost, config, ct,
+                (manifest, host, cfg, progress) => docOps.RebuildIndexAsync(manifest, host, cfg, progress));
+        });
+    }
+
+    private DocumentLibraryManifest? LoadManifestIfExists(string libraryId)
+    {
+        var registry = _libraryManager!.LoadRegistry();
+        if (!registry.Libraries.Any(l => l.Id == libraryId))
+        {
+            return null;
+        }
+        return _libraryManager.LoadManifest(libraryId);
+    }
+
+    private static LibraryDetail BuildLibraryDetail(DocumentLibraryManifest manifest)
+    {
+        var files = manifest.Files
+            .Select(f => new LibraryFileSummary(
+                f.FileName,
+                f.StoredRelativePath,
+                f.SizeBytes,
+                f.ImportedAtUtc))
+            .ToList();
+
+        return new LibraryDetail(
+            manifest.Id,
+            manifest.Name,
+            manifest.Files.Count,
+            files,
+            manifest.WatchedFolders.ToList(),
+            manifest.LastEmbeddingModel,
+            manifest.LastEmbeddingDimension,
+            manifest.LastIndexedUtc);
+    }
+
+    private async Task HandleIngestUploadAsync(
+        HttpContext context,
+        string libraryId,
+        PortableConfig config,
+        string ollamaHost,
+        CancellationToken ct)
+    {
+        var manifest = LoadManifestIfExists(libraryId);
+        if (manifest is null)
+        {
+            await WriteJsonErrorAsync(context.Response, HttpStatusCode.NotFound,
+                $"Library '{libraryId}' not found.");
+            return;
+        }
+
+        if (!context.Request.HasFormContentType)
+        {
+            await WriteJsonErrorAsync(context.Response, HttpStatusCode.BadRequest,
+                "Content-Type must be multipart/form-data.");
+            return;
+        }
+
+        IFormCollection form;
+        try
+        {
+            form = await context.Request.ReadFormAsync(ct);
+        }
+        catch (InvalidDataException ex)
+        {
+            await WriteJsonErrorAsync(context.Response, HttpStatusCode.BadRequest,
+                $"Malformed multipart form data: {ex.Message}");
+            return;
+        }
+
+        if (form.Files.Count == 0)
+        {
+            await WriteJsonErrorAsync(context.Response, HttpStatusCode.BadRequest,
+                "No files were uploaded. Use multipart/form-data with file parts.");
+            return;
+        }
+
+        var maxBytes = (long)Math.Max(1, config.MaxDocumentSizeMB) * 1024L * 1024L;
+        var rejected = new List<(string FileName, string Reason)>();
+        var accepted = new List<(string FileName, string TempPath)>();
+        var tempDir = Path.Combine(Path.GetTempPath(), "freeai-ingest-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            foreach (var file in form.Files)
+            {
+                var fileName = string.IsNullOrWhiteSpace(file.FileName)
+                    ? "(unnamed)"
+                    : Path.GetFileName(file.FileName);
+
+                if (file.Length <= 0)
+                {
+                    rejected.Add((fileName, "Empty file."));
+                    continue;
+                }
+
+                if (file.Length > maxBytes)
+                {
+                    rejected.Add((fileName, $"Exceeds max document size of {config.MaxDocumentSizeMB} MB."));
+                    continue;
+                }
+
+                if (!DocumentParser.IsSupported(fileName))
+                {
+                    rejected.Add((fileName, "Unsupported file type. Supported: PDF, TXT, MD, JSON, CSV."));
+                    continue;
+                }
+
+                var tempPath = Path.Combine(tempDir, fileName);
+                try
+                {
+                    PathGuards.EnsureUnderRoot(tempDir, tempPath);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    rejected.Add((fileName, ex.Message));
+                    continue;
+                }
+
+                await using var fs = File.Create(tempPath);
+                await file.CopyToAsync(fs, ct);
+                accepted.Add((fileName, tempPath));
+            }
+
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            context.Response.ContentType = "application/x-ndjson";
+
+            await WriteNdjsonAsync(context.Response, new
+            {
+                type = "start",
+                totalFiles = accepted.Count,
+                rejectedCount = rejected.Count
+            }, ct);
+
+            foreach (var (fileName, reason) in rejected)
+            {
+                await WriteNdjsonAsync(context.Response, new
+                {
+                    type = "file-rejected",
+                    fileName,
+                    reason
+                }, ct);
+            }
+
+            if (accepted.Count > 0)
+            {
+                var error = await PumpProgressAsync(context, ct, async progress =>
+                {
+                    await _docOps!.IngestFilesAsync(
+                        manifest,
+                        accepted.Select(a => a.TempPath).ToArray(),
+                        ollamaHost,
+                        config,
+                        progress);
+                });
+
+                if (error is not null)
+                {
+                    await WriteNdjsonAsync(context.Response, new { type = "error", message = error }, ct);
+                    return;
+                }
+            }
+
+            var refreshed = _libraryManager!.LoadManifest(manifest.Id);
+            await WriteNdjsonAsync(context.Response, new
+            {
+                type = "complete",
+                library = BuildLibraryDetail(refreshed)
+            }, ct);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch { }
+        }
+    }
+
+    private async Task HandleProgressedOpAsync(
+        HttpContext context,
+        string libraryId,
+        string ollamaHost,
+        PortableConfig config,
+        CancellationToken ct,
+        Func<DocumentLibraryManifest, string, PortableConfig, Action<IndexingProgress>?, Task> operation)
+    {
+        var manifest = LoadManifestIfExists(libraryId);
+        if (manifest is null)
+        {
+            await WriteJsonErrorAsync(context.Response, HttpStatusCode.NotFound,
+                $"Library '{libraryId}' not found.");
+            return;
+        }
+
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.ContentType = "application/x-ndjson";
+
+        await WriteNdjsonAsync(context.Response, new { type = "start" }, ct);
+
+        var error = await PumpProgressAsync(context, ct, async progress =>
+        {
+            await operation(manifest, ollamaHost, config, progress);
+        });
+
+        if (error is not null)
+        {
+            await WriteNdjsonAsync(context.Response, new { type = "error", message = error }, ct);
+            return;
+        }
+
+        var refreshed = _libraryManager!.LoadManifest(libraryId);
+        await WriteNdjsonAsync(context.Response, new
+        {
+            type = "complete",
+            library = BuildLibraryDetail(refreshed)
+        }, ct);
+    }
+
+    /// <summary>
+    /// Bridges a synchronous <see cref="Action{IndexingProgress}"/> callback to
+    /// NDJSON progress frames on the response, serialized through a single
+    /// pump task so concurrent embedding workers don't interleave writes.
+    /// Returns null on success, or the operation's failure message.
+    /// </summary>
+    private static async Task<string?> PumpProgressAsync(
+        HttpContext context,
+        CancellationToken ct,
+        Func<Action<IndexingProgress>, Task> runOperation)
+    {
+        var channel = Channel.CreateUnbounded<IndexingProgress>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false
+        });
+
+        var pumpTask = Task.Run(async () =>
+        {
+            await foreach (var progress in channel.Reader.ReadAllAsync(ct))
+            {
+                await WriteNdjsonAsync(context.Response, new
+                {
+                    type = "progress",
+                    totalFiles = progress.TotalFiles,
+                    completedFiles = progress.CompletedFiles,
+                    currentFile = progress.CurrentFile,
+                    totalChunks = progress.TotalChunks,
+                    embeddedChunks = progress.EmbeddedChunks,
+                    failedChunks = progress.FailedChunks
+                }, ct);
+            }
+        }, ct);
+
+        Action<IndexingProgress> progressCallback = p => channel.Writer.TryWrite(p);
+
+        string? errorMessage = null;
+        try
+        {
+            await runOperation(progressCallback);
+        }
+        catch (OperationCanceledException)
+        {
+            errorMessage = "Operation was cancelled.";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            channel.Writer.Complete();
+            try { await pumpTask; } catch { /* pump errors are non-fatal — primary error already captured */ }
+        }
+
+        return errorMessage;
+    }
+
+    private static async Task WriteJsonErrorAsync(HttpResponse response, HttpStatusCode statusCode, string message)
+    {
+        response.StatusCode = (int)statusCode;
+        await response.WriteAsJsonAsync(new ErrorResponse(message));
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
@@ -911,6 +1341,47 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         string? AudioBase64 = null,
         string? AudioMime = null);
     public sealed record ErrorResponse(string Error);
+
+    // Library management DTOs (MAC8). Shared between the Mac Swift UI client and
+    // future Companion / RunnerCli clients; the same shape is returned regardless
+    // of host (Windows in-process or Mac sidecar). Mutating endpoints return
+    // updated activeLibraryId so Mac clients can persist via Swift's
+    // SsdEncryption (the host's IConfigStore is a no-op on Mac to preserve the
+    // MAC5/MAC6 plaintext-config invariant).
+    public sealed record LibrarySummary(string Id, string Name);
+
+    public sealed record LibraryFileSummary(
+        string FileName,
+        string StoredRelativePath,
+        long SizeBytes,
+        DateTime ImportedAtUtc);
+
+    public sealed record LibraryDetail(
+        string Id,
+        string Name,
+        int FileCount,
+        IReadOnlyList<LibraryFileSummary> Files,
+        IReadOnlyList<string> WatchedFolders,
+        string? LastEmbeddingModel,
+        int? LastEmbeddingDimension,
+        DateTime? LastIndexedUtc);
+
+    public sealed record LibraryListResponse(
+        IReadOnlyList<LibrarySummary> Libraries,
+        string? ActiveLibraryId,
+        LibraryDetail? ActiveLibrary);
+
+    public sealed record CreateLibraryRequest(string Name);
+    public sealed record CreateLibraryResponse(LibraryDetail Library, string ActiveLibraryId);
+
+    public sealed record SetActiveLibraryRequest(string? LibraryId);
+    public sealed record SetActiveLibraryResponse(string? ActiveLibraryId, LibraryDetail? ActiveLibrary);
+
+    public sealed record AddWatchedFolderRequest(string Path);
+    public sealed record AddWatchedFolderResponse(
+        bool Added,
+        IReadOnlyList<string> WatchedFolders,
+        LibraryDetail Library);
 
     private sealed record VoiceQueryOptions(bool SendToChat, bool SpeakResponse, string? Model, bool ReturnAudio);
 

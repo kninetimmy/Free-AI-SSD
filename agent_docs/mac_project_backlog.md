@@ -457,7 +457,7 @@ folder sweep, and rebuild UI.
 
 ### MAC8 - Mac document management
 
-**Status:** planned
+**Status:** implemented (PR pending, awaiting CI)
 **Scope:** library CRUD + ingestion surface (runner-core API + Mac UI)
 **Risk:** High
 **Goal:** Mac users can create/select libraries, add files/folders, sweep,

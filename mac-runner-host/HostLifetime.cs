@@ -138,11 +138,12 @@ internal sealed class HostLifetime : IAsyncDisposable
             sp.GetRequiredService<EmbeddingClient>(),
             sp.GetService<SsdLogger>()));
 
-        // The host never saves config — Swift owns saves. ConfigStore is
-        // wired so DocumentOperationsService can construct, but the host
-        // does not call SaveConfigAsync from any active code path in MAC6.
-        collection.AddSingleton<IConfigStore>(sp =>
-            new ConfigStore(sp.GetService<SsdLogger>()));
+        // The host never saves config — Swift owns saves. NoOpConfigStore
+        // satisfies DocumentOperationsService's IConfigStore dependency while
+        // preserving the MAC5/MAC6 plaintext-config invariant. MAC8 mutating
+        // endpoints return the new activeLibraryId in the response so Swift
+        // can persist via SsdEncryption.swift.
+        collection.AddSingleton<IConfigStore, NoOpConfigStore>();
 
         collection.AddSingleton<IOllamaLifecycleService, MacOllamaLifecycleService>();
         collection.AddSingleton<IModelManagementService, ModelManagementService>();
@@ -165,7 +166,10 @@ internal sealed class HostLifetime : IAsyncDisposable
             sp.GetRequiredService<ISpeechToTextService>(),
             sp.GetRequiredService<ITtsProvider>(),
             sp.GetService<SsdLogger>(),
-            _ssdRoot));
+            _ssdRoot,
+            staticFilesRoot: null,
+            docOps: sp.GetRequiredService<IDocumentOperationsService>(),
+            libraryManager: sp.GetRequiredService<DocumentLibraryManager>()));
 
         _services = collection.BuildServiceProvider();
     }
