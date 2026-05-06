@@ -416,7 +416,7 @@ now wires static-file middleware so future X4 assets under
 
 ### MAC7 - RAG parity
 
-**Status:** implemented locally 2026-05-06; pending .NET CI verification
+**Status:** PR #183 ready for review; CI green 2026-05-06
 **Scope:** document-grounded chat
 **Risk:** High
 **Goal:** Mac chat uses the same RAG pipeline as Windows: embeddings, vector
