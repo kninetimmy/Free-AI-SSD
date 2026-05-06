@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-05-06 (PR #183 MAC7 merged; ready for MAC8)
+Last updated: 2026-05-06 (PR #184 merged; Mac runner artifact launch-tested)
 
 Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
@@ -8,10 +8,12 @@ Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
 ## In flight
 
-Between tasks. MAC7 is merged to `main` via PR #183 (`23245f7`) and CI-green.
-Next implementation target is MAC8: Mac document management.
+Between tasks. PR #184 (MAC7 docs wrap-up) merged at `fa055c9`. Next
+implementation target is MAC8: Mac document management.
 
 ## Recently shipped
+
+- **PR #184 - MAC7 merge wrap-up - merged `fa055c9` (2026-05-06).** Docs-only follow-up to PR #183: marks MAC7 as done in `mac_project_backlog.md`, moves PR #183's full summary into `Recently shipped`, and reorders Next up so MAC8 is #1. CI `windows-build` + `mac-runner-build` green; no runtime changes.
 
 - **PR #183 - MAC7 RAG parity on Mac - merged `23245f7` (2026-05-06).** Mac chat now routes through the MAC6 sidecar `/api/chat` path instead of direct Ollama, displays citations/sources in Swift, and preserves MAC5's stdin-only plaintext-config invariant. `RunnerLocalApiService` forwards `ChatService` logs through the API logger and includes `ragWarning` in `/api/chat` retrieval-failed responses. Added `MacRunnerHostRagParityTests` covering real Mac-host DI against a deterministic fake Ollama endpoint for `/api/chat`, `/api/chat/stream`, returned sources, and embedding dimension mismatch warnings. CI passed on final run `25447266282`: `windows-build` ran restore, build, full `dotnet test`, WPF guardrails, and publishes; `mac-runner-build` ran Swift tests, Mac host publish/smoke, runner-core/CLI sanity, and Runner.app bundle.
 
@@ -56,15 +58,11 @@ See `project_backlog.md` for full general backlog details. See
 
 ## Last session
 
+2026-05-06 (PR #184 merge + Mac runner launch smoke, `fa055c9`) - User merged PR #184 (the MAC7 docs wrap-up). Reviewed the MAC7 implementation in PR #183 post-merge: `RunnerLocalApiService` change is surgical, `MacRunnerHostRagParityTests` (real DI against a fake Ollama Kestrel server with deterministic embeddings) is arguably better Mac-side coverage than Windows currently has, and the architectural call to require the sidecar (no direct-Ollama fallback) preserves the RAG invariant. Three small follow-ups flagged: Gemini's `id: \.self` SwiftUI nit at `mac-runner/Sources/main.swift:627` (mitigated server-side by `RagPromptBuilder.cs:54` `CitationBuilder.BuildDistinct` but cheap to tighten), `_chatService.LogMessage` event unhooks only in `DisposeAsync` not `StopAsync`, and Swift-side auth-key selection is reimplemented locally rather than shared. With user's Windows machine awaiting a replacement PSU and no SSD prep available, validated the Mac release path another way: downloaded `mac-runner-artifact` from CI run `25448329363` (head `f74b70b`), stripped quarantine, launched Runner.app — bundle opens cleanly with all MAC1-MAC7 controls present (Select SSD, Start, Stop, Lock, Model dropdown, prompt/response panes, Network Mode toggle, status "Stopped"). User confirmed via screenshot. App icon flagged as future work (added as MAC10b in `mac_project_backlog.md`).
+
 2026-05-06 (PR #183 MAC7 merge wrap-up, `23245f7`) - User merged PR #183. Fast-forwarded local `main` to `origin/main`. MAC7 is now shipped on `main`; next Mac implementation target is MAC8.
-
-2026-05-06 (PR #183 MAC7 RAG parity on Mac) - Approved `agent_docs/mac7_execution_prompt.md` and implemented MAC7 on `mac7-rag-parity`. Added `tests/MacRunnerHostRagParityTests.cs`, which seeds a temporary SSD document library and exercises the Mac host's real RunnerCore DI against a fake Ollama server for `/api/chat`, `/api/chat/stream`, returned sources, and embedding dimension mismatch warnings. Updated `RunnerLocalApiService` to forward `IChatService.LogMessage` through the API logger and include `ragWarning` in `/api/chat` retrieval-failed responses. Updated Swift `sendPrompt()` to require the sidecar API, call `/api/chat` with auth when configured, parse `responseText` / `sources` / `usedRagContext` / `ragWarning`, and display sources in the UI. README / QUICKSTART / Mac backlog now describe RAG-backed Mac chat without claiming MAC8 document management. First CI failed because the fake Ollama `/api/embed` Kestrel handler returned `Task<IResult>` as a method group, causing ASP.NET to discard the response; fixed in commit `88631c6`. Final run `25447266282` passed `mac-runner-build` and `windows-build`, including Swift tests, Mac host publish/smoke/bundle, `dotnet build`, `dotnet test`, and WPF publish guardrails.
-
-2026-05-06 (PR #182 merge + MAC6 alignment, `66a94d9`) - Created PR #182 from the local MAC6 follow-up fixes, pushed `3893f76`, and verified GitHub CI: `windows-build` passed `dotnet build` / `dotnet test`, and `mac-runner-build` passed Swift tests, Mac host publish, Mac host smoke, and Runner.app bundle. Marked the draft ready, merged via GitHub REST after the first `gh pr merge` attempt hit a 504, deleted/pruned the branch, and fast-forwarded local `main` to `origin/main`. Workspace is clean and MAC7 is the next Mac task.
-
-2026-05-06 (PR #181 review + MAC6 follow-up branch) - Reviewed PR #181's implementation for bugs and cleanliness and found three concrete follow-ups: Mac Network Mode could spawn a host with `networkModeEnabled=false` and still report `ready: `, static file serving could prefer `<ssdRoot>/wwwroot` over published RunnerCore assets, and Mac host binary resolution returned readable-but-non-executable files instead of falling through. Implemented fixes in `mac-runner/Sources/main.swift`, `mac-runner-host/HostLifetime.cs`, `runner-core/Services/RunnerLocalApiService.cs`, `mac-runner/Sources/MacRunnerHostController.swift`, plus regression coverage in `tests/MacRunnerHostSmokeTests.cs` and `tests/RunnerLocalApiStaticFilesTests.cs`; added test access via `mac-runner-host/Properties/AssemblyInfo.cs` and a test project reference. `git diff --check` passed and Swift compile passed with `CLANG_MODULE_CACHE_PATH=/private/tmp/freeai-swift-module-cache`; `dotnet build/test` could not run because `dotnet` was not on PATH, so GitHub CI must verify.
 
 ## Open questions
 
 - Before a public signed Mac beta, verify whether the nested `payload/mac/Runner.app.zip` preserves the stapled notarization ticket after users download and extract the cross-platform ZIP. If not, ship a standalone notarized app ZIP or DMG.
-- **MAC6 manual smoke (deferred until a Mac on the same LAN as a Windows Companion):** Windows Companion discovers and connects to a Mac-hosted Runner with Bearer auth + /api/health + /api/chat; Network Mode toggle with real Ollama serving a real model end-to-end.
+- **MAC6 manual smoke (deferred until a Mac on the same LAN as a Windows Companion):** Windows Companion discovers and connects to a Mac-hosted Runner with Bearer auth + /api/health + /api/chat; Network Mode toggle with real Ollama serving a real model end-to-end. Bare-bundle launch (no SSD) was sanity-checked 2026-05-06 against the CI `mac-runner-artifact` from run `25448329363` — the bundle opens cleanly on a Mac without Windows tooling.
