@@ -885,3 +885,71 @@ PrepApp ships standalone for IT admins as a separate distribution
 channel, or Companion gets a marketing push as a remote-control product),
 introduce per-host icon files at that point. The `<ApplicationIcon>`
 property is per-csproj, so divergence is a one-line change per host.
+
+## 2026-05-06 — MAC16: prep-core RootNamespace pinned to FreeAiSsd.PrepApp for namespace stability
+
+MAC16 extracted platform-neutral PrepApp business logic out of the
+WPF `prep-app/` host into a new `prep-core/FreeAiSsd.PrepCore.csproj`
+(plain `net8.0`), mirroring the MAC3 (`runner-core/`) pattern. Eleven
+files moved: six service implementations (`ArtifactStaging`, `Prereq`,
+`OllamaPackage`, `Model`, `Readiness`, `Encryption`),
+`StarterModelCatalog`, `MacArtifactAvailability`, `ModelOperations`,
+`OllamaServerHandle`, plus `Resources/starter-models.json`.
+
+**Decision (a):** the new `prep-core` csproj pins
+`<RootNamespace>FreeAiSsd.PrepApp</RootNamespace>` so every moved file
+keeps its original namespace (`FreeAiSsd.PrepApp` /
+`FreeAiSsd.PrepApp.Services`). Same trick MAC3 used for runner-core
+(kept `FreeAiSsd.Runner.*` namespaces). Two reasons:
+
+1. **Zero call-site churn.** `prep-app/MainWindow.xaml.cs`,
+   `tests/ModelOperationsTests.cs`, and `shared/ViewModels/PrepViewModel.cs`
+   all imported the existing namespaces; renaming would have meant
+   touching every consumer for cosmetic gain.
+2. **Embedded resource name stability.** `StarterModelCatalogLoader.Load`
+   falls back to an embedded resource named
+   `FreeAiSsd.PrepApp.Resources.starter-models.json`. MSBuild generates
+   embedded resource names from `<RootNamespace>` + folder path; pinning
+   the root namespace keeps the resource lookup string in the loader
+   correct without a change.
+
+**Decision (b):** `<InternalsVisibleTo Include="FreeAiSsd.Tests" />` was
+added to the prep-core csproj. `tests/ModelOperationsTests.cs` calls
+`ModelOperations.BuildOllamaArgs` and
+`ModelOperations.TrySelectModelLayerDigest`, both `internal static`
+helpers. The previous `<Compile Include="..\prep-app\ModelOperations.cs"
+Link="...">` link-source pattern in `tests/FreeAiSsd.Tests.csproj`
+compiled the source directly into the test assembly, so `internal`
+members were visible without ceremony. Replacing that with a
+`ProjectReference` to prep-core revoked that visibility — the first CI
+Windows build failed with four CS0117 errors. Surfaced via fix-forward
+commit `079bea3`. Choosing `InternalsVisibleTo` over widening
+`BuildOllamaArgs`/`TrySelectModelLayerDigest` to `public` because they
+are implementation details of the Ollama CLI argument format and OCI
+manifest layer selection — narrowing public API surface is preferable
+to widening it for test plumbing.
+
+**Why one big extraction PR (vs incremental file-by-file):** the eleven
+moved files form a tightly-coupled cluster — `ArtifactStagingService`
+references `MacArtifactAvailability`, `ModelService` references
+`ModelOperations`, `OllamaPackageService` references `OllamaServerHandle`.
+Splitting them across PRs would have forced temporary ProjectReferences
+in both directions or duplicated source files mid-refactor. One mass
+`git mv` with `git`'s rename detection preserves history cleanly and
+makes the boundary review tractable in one pass.
+
+**Exit ramp / re-evaluation triggers:**
+- If MAC17 (macOS PrepApp MVP) finds it needs to expose any of the
+  currently-internal `ModelOperations` helpers to a non-test consumer,
+  promote them to `public` at that point and drop the
+  `InternalsVisibleTo` line.
+- If a future `prep-core` consumer outside `prep-app/` and
+  `mac-prep-app/` (MAC17) wants to use the moved types under a
+  different namespace, accept the call-site churn and drop the
+  `<RootNamespace>` pin then. Until then, the pin is the lowest-cost
+  way to maintain stability.
+- If `Resources/starter-models.json` ever moves to `shared/` (e.g.
+  Runner ever wants to surface starter-model recommendations on
+  the chat side), the embedded resource name will change naturally
+  with the new owning project; the loader's `EmbeddedCatalogResourceName`
+  constant gets updated then, not before.
