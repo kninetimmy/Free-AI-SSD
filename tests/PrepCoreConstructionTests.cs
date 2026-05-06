@@ -1,0 +1,89 @@
+using FreeAiSsd.PrepApp.Services;
+using FreeAiSsd.Shared;
+using FreeAiSsd.Shared.Models;
+using FreeAiSsd.Shared.Services;
+
+namespace FreeAiSsd.Tests;
+
+/// <summary>
+/// MAC16 guardrail: every prep-core service must construct on a plain net8.0
+/// host without reaching for WPF, WindowsDesktop, or any other Windows-only
+/// surface. The test project itself is plain net8.0 (no UseWPF), so a
+/// successful construction here is the strongest portable proof we can run
+/// from the test host. Mirrors RunnerCoreConstructionTests for the
+/// runner-core extraction (MAC3).
+/// </summary>
+public sealed class PrepCoreConstructionTests : IDisposable
+{
+    private readonly string _tempRoot;
+
+    public PrepCoreConstructionTests()
+    {
+        _tempRoot = Path.Combine(Path.GetTempPath(), "freeai-prepcore-test-" + Guid.NewGuid());
+        Directory.CreateDirectory(_tempRoot);
+        SsdLayout.EnsureStructure(_tempRoot);
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_tempRoot, recursive: true); } catch { }
+    }
+
+    [Fact]
+    public void CoreServices_ConstructWithoutWpfHost()
+    {
+        var dialogStub = new DialogStub();
+
+        IArtifactStagingService staging = new ArtifactStagingService();
+        IPrereqService prereqs = new PrereqService(dialogStub);
+        IOllamaPackageService ollama = new OllamaPackageService();
+        IModelService models = new ModelService();
+        IReadinessService readiness = new ReadinessService(models);
+        IEncryptionService encryption = new EncryptionService();
+
+        Assert.NotNull(staging);
+        Assert.NotNull(prereqs);
+        Assert.NotNull(ollama);
+        Assert.NotNull(models);
+        Assert.NotNull(readiness);
+        Assert.NotNull(encryption);
+
+        // Sanity: a method that touches no Win-only surface still works.
+        var emptyModelsRoot = Path.Combine(_tempRoot, "models-empty");
+        Directory.CreateDirectory(emptyModelsRoot);
+        Assert.Empty(models.DiscoverModelsOnDisk(emptyModelsRoot));
+    }
+
+    [Fact]
+    public void StarterModelCatalogLoader_ResolvesEmbeddedFallback_WithoutWpfHost()
+    {
+        // Point at a directory where the on-disk file does not exist so the
+        // loader has to fall through to the embedded resource shipped by
+        // prep-core. Verifies <RootNamespace>FreeAiSsd.PrepApp</RootNamespace>
+        // keeps the embedded resource name stable across the move.
+        var emptyDir = Path.Combine(_tempRoot, "no-catalog-here");
+        Directory.CreateDirectory(emptyDir);
+
+        var result = StarterModelCatalogLoader.Load(emptyDir);
+
+        Assert.NotNull(result);
+        Assert.NotNull(result.Catalog);
+        // The shipped catalog must contain at least one valid entry; an empty
+        // fallback would mean the embedded resource lookup silently failed.
+        Assert.NotEmpty(result.Catalog.Models);
+    }
+
+    private sealed class DialogStub : IDialogService
+    {
+        public void ShowInfo(string message, string title) { }
+        public void ShowWarning(string message, string title) { }
+        public void ShowError(string message, string title) { }
+        public bool Confirm(string message, string title) => false;
+        public bool ConfirmFixedDrive(string driveRoot) => false;
+        public bool ConfirmSizingWarnings(IReadOnlyList<string> warnings) => false;
+        public bool ConfirmErase(string driveRoot, string sizeDisplay, string fileSystem) => false;
+        public string? PromptForEncryptionPassword() => null;
+        public ModelRemoveChoice PromptRemoveModel(string modelName) => ModelRemoveChoice.Cancel;
+        public bool ConfirmPrereqRefresh() => false;
+    }
+}

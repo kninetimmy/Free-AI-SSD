@@ -21,11 +21,17 @@
   <ItemGroup>
     <ProjectReference Include="..\mac-runner-host\FreeAiSsd.MacRunnerHost.csproj" />
     <ProjectReference Include="..\runner-core\FreeAiSsd.RunnerCore.csproj" />
+    <!--
+      MAC16: prep-core/ is plain net8.0 so the test project can reference it
+      directly instead of using the prior &lt;Compile Include&gt; link-source
+      hack for individual prep-app files. ModelOperations + StarterModelCatalog
+      + the moved services come through this reference.
+    -->
+    <ProjectReference Include="..\prep-core\FreeAiSsd.PrepCore.csproj" />
     <ProjectReference Include="..\shared\FreeAiSsd.Shared.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="..\prep-app\ModelOperations.cs" Link="PrepApp\ModelOperations.cs" />
     <Compile Include="..\prep-app\PrepStartupArgs.cs" Link="PrepApp\PrepStartupArgs.cs" />
     <Compile Include="..\prep-app\Services\DriveService.cs" Link="PrepApp\DriveService.cs" />
     <Compile Include="..\runner\Services\IPttVoicePipelineService.cs" Link="Runner\IPttVoicePipelineService.cs" />

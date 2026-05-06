@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!--
+      MAC16: keep RootNamespace pinned to FreeAiSsd.PrepApp so the moved
+      files retain their original namespaces (mirrors MAC3's runner-core
+      pattern, where runner-core kept FreeAiSsd.Runner.* namespaces).
+      This also keeps the embedded resource name
+      "FreeAiSsd.PrepApp.Resources.starter-models.json" stable for the
+      StarterModelCatalogLoader fallback path.
+    -->
+    <RootNamespace>FreeAiSsd.PrepApp</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\shared\FreeAiSsd.Shared.csproj" />
+  </ItemGroup>
+
+  <!--
+    Starter model catalog ships as both a copied content file (loaded from
+    AppContext.BaseDirectory at runtime) and an embedded resource (fallback
+    when the content file is missing or unreadable). Both flow to any
+    consuming host that ProjectReferences prep-core.
+  -->
+  <ItemGroup>
+    <Content Include="Resources\starter-models.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <EmbeddedResource Include="Resources\starter-models.json" />
+  </ItemGroup>
+</Project>

@@ -89,7 +89,7 @@ the style to match.
 
 **Field-test surface from v1.2.5 walkthrough (2026-04-19):**
 - **X14** â€” 50 MB upload limit silently rejects files with no user-facing hint (140 MB PDF case). Small UX fix.
-- **X15** â€” revisit RAG file-size and chunk-size caps so large DCS airframe manuals (Chuck's Guides, 120-160 MB, 800-900 pages) ingest cleanly. Investigation + tuning pass â€” paired follow-up to X14. Not near-term; slot after F3 once the v1.2.x patch stream clears. *(rescoped 2026-04-19 RAG audit into 4 stages â€” see X15 entry)*
+- **X15** â€” revisit RAG file-size and chunk-size caps so large DCS airframe manuals (Chuck's Guides, up to ~180 MB and ~900 pages) ingest cleanly. Investigation + tuning pass â€” paired follow-up to X14. Not near-term; slot after F3 once the v1.2.x patch stream clears. *(rescoped 2026-04-19 RAG audit into 4 stages â€” see X15 entry)*
 
 **RAG audit backlog (2026-04-19 plan session â€” slot into v1.3.x after F3; full plan at `C:\Users\Kninetimmy\.claude\plans\okay-i-want-to-glowing-galaxy.md`):**
 - **X18** â€” ingest observability (Sonnet, quick; surfaces FailedChunks, textless pages, parse errors in UI)
@@ -1032,7 +1032,7 @@ keeps the contract visible.
 **Model:** Opus planning (touches embedding throughput, index size, memory).
 
 **Driver (2026-04-19 field observation):**
-- Chuck's Guides and similar DCS airframe manuals routinely run 120-160 MB and 800-900 pages per jet. Current caps â€” 50 MB file size, 10k chunk size â€” reject these outright at the drop target (see X14 log line). Workaround today would be splitting manuals by hand, which defeats the "drop the whole manual in" UX the library is supposed to offer.
+- Chuck's Guides and similar DCS airframe manuals run up to ~180 MB and ~900 pages per jet at the high end (user-confirmed 2026-05-06 â€” the largest guide observed in the field). Current caps â€” 50 MB file size, 10k chunk size â€” reject these outright at the drop target (see X14 log line). Workaround today would be splitting manuals by hand, which defeats the "drop the whole manual in" UX the library is supposed to offer.
 - This is a primary use case for the project (DCS pilot reference lookup), not an edge case â€” the current limit turns the most valuable documents away.
 
 **Staging (rescoped 2026-04-19 RAG audit â€” addresses audit High #3 "slow/memory-heavy/foreground-bound ingest"):**
@@ -1043,7 +1043,7 @@ keeps the contract visible.
 - **Stage 4 â€” Background job model.** Move ingest off the WPF UI thread through an `IIngestJobService` with `IProgress<IngestProgress>`. UI posts a job, shows progress; cancellation cooperative. Retire any remaining `.Wait()` / `.Result` in WPF handlers. Fixes the "feels hung before useful progress shows" symptom the audit called out.
 
 **Deliverable shape (informed by Stage 1 data):**
-- Raise file cap (likely ~250 MB â€” covers Chuck's Guides + headroom).
+- Raise file cap to ~225 MB â€” a little over the ~180 MB largest-Chuck's-Guide ceiling, covering 99.9% of expected uploads with modest headroom. (Stage 1 benchmark may nudge this; ~225 MB is the working target.)
 - Raise chunk cap to whatever the largest expected manual needs + margin, or remove and rely on natural embedding-time bounds.
 - Possibly expose chunk-size/overlap as tunables in PrepApp library settings.
 - Update X14's rejection message to match the new cap (coordinate so messages don't drift).
@@ -1059,7 +1059,7 @@ keeps the contract visible.
 - Any hard-coded `50 * 1024 * 1024` / `10000` constants in shared.
 - `agent_docs/project_arch.md` RAG section â€” update limits + rationale.
 
-**Exit criterion:** Chuck's Guide-sized manuals (120-160 MB, 800-900 pages) ingest cleanly, index in acceptable time with a visible progress indicator, and retrieve quality hits during chat. X14's rejection messaging reflects the new cap.
+**Exit criterion:** Chuck's Guide-sized manuals (up to ~180 MB / ~900 pages) ingest cleanly, index in acceptable time with a visible progress indicator, and retrieve quality hits during chat. X14's rejection messaging reflects the new cap.
 
 ---
 
@@ -1090,6 +1090,8 @@ unlock dialog window.
 **Model:** Sonnet 4.6.
 
 **Driver:** Audit flagged "multimodal PDF ingest" (OCR + table extraction + image handling) as Critical #1. Product workload is text-layer DCS manuals with embedded diagrams, not scans. X17 keeps only the diagnostic so we get field data if that assumption breaks.
+
+**Before kickoff (reminder for the agent):** Ask the user to point at a representative Chuck's Guide file path on disk so we can inspect what these manuals actually consist of (text-layer vs scanned, diagram density, table structure) and give a concrete recommendation on whole-text vs OCR before committing to the diagnostic-only scope. The "text-layer assumption" is load-bearing for the OCR-deferred decision â€” verify it against a real fixture instead of trusting the assumption blind.
 
 **Fix (Stage 1):**
 - `DocumentParser.cs` flags per-page when extracted text is below a threshold (suggest <20 non-whitespace chars). Carry the flag through `ParsedSegment` / `IngestProgress`.
