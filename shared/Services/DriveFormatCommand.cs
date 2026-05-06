@@ -26,7 +26,7 @@ public static class DriveFormatCommand
     /// </summary>
     /// <param name="rootPath">Drive root like "D:\" or "D:".</param>
     /// <param name="label">Volume label (will be sanitized; empty allowed).</param>
-    /// <param name="fileSystem">"NTFS" (the only currently supported value).</param>
+    /// <param name="fileSystem">"NTFS" or "exFAT" (case-insensitive).</param>
     public static Built Build(string rootPath, string label, string fileSystem)
     {
         var driveLetter = ParseDriveLetter(rootPath);
@@ -104,10 +104,15 @@ public static class DriveFormatCommand
             return DefaultFileSystem;
 
         var upper = fileSystem.Trim().ToUpperInvariant();
-        if (upper != "NTFS")
-            throw new System.ArgumentException($"Unsupported file system '{fileSystem}'. Only NTFS is supported.", nameof(fileSystem));
-
-        return upper;
+        return upper switch
+        {
+            "NTFS" => "NTFS",
+            // Format-Volume's -FileSystem parameter expects the literal
+            // token "exFAT" (mixed case). Emit canonical casing regardless
+            // of how the caller spelled it.
+            "EXFAT" => "exFAT",
+            _ => throw new System.ArgumentException($"Unsupported file system '{fileSystem}'. Supported: NTFS, exFAT.", nameof(fileSystem)),
+        };
     }
 
     public static string SanitizeLabel(string? label)

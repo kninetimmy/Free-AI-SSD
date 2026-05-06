@@ -42,9 +42,9 @@ public sealed class DialogService : IDialogService
         return ThemedMessageDialog.Confirm(message, "Model sizing warnings", _ownerProvider());
     }
 
-    public bool ConfirmErase(string driveRoot, string sizeDisplay)
+    public bool ConfirmErase(string driveRoot, string sizeDisplay, string fileSystem)
     {
-        var dialog = new EraseConfirmDialog(driveRoot, sizeDisplay) { Owner = _ownerProvider() };
+        var dialog = new EraseConfirmDialog(driveRoot, sizeDisplay, fileSystem) { Owner = _ownerProvider() };
         return dialog.ShowDialog() == true && dialog.IsConfirmed;
     }
 

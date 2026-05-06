@@ -30,9 +30,9 @@ public class DriveFormatCommandTests
 
     [Theory]
     [InlineData("FAT32")]
-    [InlineData("exFAT")]
     [InlineData("refs")]
-    public void Build_RejectsNonNtfsFileSystem(string fs)
+    [InlineData("APFS")]
+    public void Build_RejectsUnsupportedFileSystem(string fs)
     {
         Assert.Throws<System.ArgumentException>(() =>
             DriveFormatCommand.Build("D:\\", "Portable AI", fs));
@@ -43,6 +43,18 @@ public class DriveFormatCommandTests
     {
         var built = DriveFormatCommand.Build("D:\\", "Portable AI", "");
         Assert.Contains(built.Arguments, a => a.Contains("-FileSystem NTFS"));
+    }
+
+    [Theory]
+    [InlineData("exFAT")]
+    [InlineData("EXFAT")]
+    [InlineData("exfat")]
+    public void Build_AcceptsExFat_AndEmitsCanonicalCasing(string input)
+    {
+        // Format-Volume's -FileSystem token must be the literal "exFAT".
+        var built = DriveFormatCommand.Build("D:\\", "Portable AI", input);
+        Assert.Contains(built.Arguments, a => a.Contains("-FileSystem exFAT"));
+        Assert.DoesNotContain(built.Arguments, a => a.Contains("-FileSystem EXFAT"));
     }
 
     [Fact]
