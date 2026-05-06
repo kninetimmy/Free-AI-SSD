@@ -605,12 +605,19 @@ is added.
 
 ### MAC10a - PrepApp OS compatibility filesystem selector
 
-**Status:** planned
+**Status:** done (PR pending; resolves on merge)
 **Scope:** PrepApp UX + format defaults
 **Risk:** Medium
 **Goal:** Let the user choose target OS compatibility during Windows PrepApp
   drive preparation, then preselect the filesystem that matches the supported
   Mac baseline.
+
+**Resolution:** Filesystem derived from the already-existing `PrepTargets`
+selection (Windows / Mac checkboxes) rather than a new dropdown. Mapping:
+Windows-only → `NTFS`; anything including Mac → `exFAT`. Chosen filesystem
+shown in `EraseConfirmDialog` before the destructive call. APFS still
+deferred per MAC1 until MAC17. See 2026-05-06 decision entry "MAC10a:
+filesystem derived from existing PrepTargets, not a new selector".
 
 **Baseline from MAC1:**
 - Windows only -> NTFS.

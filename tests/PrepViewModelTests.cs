@@ -546,7 +546,7 @@ public class PrepViewModelTests
     {
         SetupFormatPath(elevated: false);
         _dialogService.Setup(d => d.ConfirmFixedDrive(It.IsAny<string>())).Returns(true);
-        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>())).Returns(true);
         _dialogService.Setup(d => d.Confirm(It.IsAny<string>(), "Administrator required")).Returns(false);
 
         var vm = CreateViewModel();
@@ -563,7 +563,7 @@ public class PrepViewModelTests
     public void FormatPrepare_NotElevated_UserAccepts_UacDeclined_LogsAndStops()
     {
         SetupFormatPath(elevated: false);
-        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>())).Returns(true);
         _dialogService.Setup(d => d.Confirm(It.IsAny<string>(), "Administrator required")).Returns(true);
         _elevationService.Setup(e => e.TryRelaunchElevated(It.IsAny<IEnumerable<string>?>())).Returns(false);
 
@@ -585,7 +585,7 @@ public class PrepViewModelTests
     public void FormatPrepare_EraseNotConfirmed_Aborts()
     {
         SetupFormatPath(elevated: true);
-        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>())).Returns(false);
+        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>())).Returns(false);
 
         var vm = CreateViewModel();
         vm.Initialize();
@@ -600,7 +600,7 @@ public class PrepViewModelTests
     public void FormatPrepare_Elevated_HappyPath_FormatsAndPreparesStructure()
     {
         SetupFormatPath(elevated: true);
-        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>())).Returns(true);
         _driveService.Setup(d => d.FormatAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
@@ -612,6 +612,72 @@ public class PrepViewModelTests
         _driveService.Verify(d => d.FormatAsync("E:\\", It.IsAny<string>(), "NTFS", It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>()), Times.Once);
         _driveService.Verify(d => d.EnsureSsdStructure("E:\\"), Times.Once);
         _modelService.Verify(m => m.SaveConfigAsync(It.IsAny<string>(), It.IsAny<PortableConfig>()), Times.AtLeastOnce);
+    }
+
+    // ───── MAC10a: PrepTargets → filesystem mapping ─────
+
+    [Fact]
+    public void ResolveFileSystem_WindowsOnly_IsNtfs()
+        => Assert.Equal("NTFS", PrepViewModel.ResolveFileSystem(PrepTargets.Windows));
+
+    [Fact]
+    public void ResolveFileSystem_WindowsAndMac_IsExFat()
+        => Assert.Equal("exFAT", PrepViewModel.ResolveFileSystem(PrepTargets.Windows | PrepTargets.Mac));
+
+    [Fact]
+    public void ResolveFileSystem_MacOnly_IsExFat()
+        => Assert.Equal("exFAT", PrepViewModel.ResolveFileSystem(PrepTargets.Mac));
+
+    [Fact]
+    public void ResolveFileSystem_None_Throws()
+        => Assert.Throws<InvalidOperationException>(() => PrepViewModel.ResolveFileSystem(PrepTargets.None));
+
+    [Fact]
+    public void FormatPrepare_WindowsAndMac_FormatsAsExFat()
+    {
+        SetupFormatPath(elevated: true);
+        // PrepareMac setter clamps to false unless Mac artifacts are
+        // available — override the SetupDefaultMocks default so the
+        // mac checkbox stays on through Initialize and the format flow.
+        string? macProblem = null;
+        _artifactStagingService.Setup(a => a.AreMacArtifactsAvailable(out macProblem)).Returns(true);
+        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+        _driveService.Setup(d => d.FormatAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.PrepareWindows = true;
+        vm.PrepareMac = true;
+        vm.FormatPrepareCommand.Execute(null);
+        Thread.Sleep(200);
+
+        _driveService.Verify(d => d.FormatAsync("E:\\", It.IsAny<string>(), "exFAT",
+            It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>()), Times.Once);
+        _dialogService.Verify(d => d.ConfirmErase("E:\\", It.IsAny<string>(), "exFAT"), Times.Once);
+    }
+
+    [Fact]
+    public void FormatPrepare_MacOnly_FormatsAsExFat()
+    {
+        SetupFormatPath(elevated: true);
+        string? macProblem = null;
+        _artifactStagingService.Setup(a => a.AreMacArtifactsAvailable(out macProblem)).Returns(true);
+        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+        _driveService.Setup(d => d.FormatAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.PrepareMac = true;
+        vm.PrepareWindows = false;
+        vm.FormatPrepareCommand.Execute(null);
+        Thread.Sleep(200);
+
+        _driveService.Verify(d => d.FormatAsync("E:\\", It.IsAny<string>(), "exFAT",
+            It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ───── Auto-resume (B3-Redux phase 2) ─────
@@ -676,7 +742,7 @@ public class PrepViewModelTests
     public async Task TryAutoResumeFormat_DrivePresent_SelectsAndFiresFormatWithConfirm()
     {
         SetupFormatPath(elevated: true);
-        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>())).Returns(true);
         _driveService.Setup(d => d.FormatAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
                 It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()))
             .Returns(Task.CompletedTask);
@@ -688,7 +754,7 @@ public class PrepViewModelTests
         await vm.TryAutoResumeFormatAsync();
 
         Assert.Equal("Resumed Label", vm.VolumeLabel);
-        _dialogService.Verify(d => d.ConfirmErase("E:\\", It.IsAny<string>()), Times.Once);
+        _dialogService.Verify(d => d.ConfirmErase("E:\\", It.IsAny<string>(), "NTFS"), Times.Once);
         _driveService.Verify(d => d.FormatAsync("E:\\", "Resumed Label", "NTFS",
             It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>(), false), Times.Once);
     }
@@ -697,7 +763,7 @@ public class PrepViewModelTests
     public async Task TryAutoResumeFormat_UserDeclinesConfirm_NoFormat()
     {
         SetupFormatPath(elevated: true);
-        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>())).Returns(false);
+        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>())).Returns(false);
 
         var vm = CreateViewModel();
         vm.Initialize();
@@ -730,7 +796,7 @@ public class PrepViewModelTests
     public void FormatPrepare_FormatThrows_LogsAndShowsError()
     {
         SetupFormatPath(elevated: true);
-        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+        _dialogService.Setup(d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>())).Returns(true);
         _driveService.Setup(d => d.FormatAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Format-Volume failed on E:\\ (exit 5)."));
 

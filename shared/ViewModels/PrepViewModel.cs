@@ -592,6 +592,18 @@ public class PrepViewModel : BaseViewModel
         return targets;
     }
 
+    // MAC10a: Windows-only → NTFS, anything that includes Mac → exFAT.
+    // APFS is deferred (MAC1) until a Mac-native prep workflow exists, so
+    // exFAT is the only cross-OS option Windows PrepApp can stage today.
+    internal static string ResolveFileSystem(PrepTargets targets) =>
+        targets switch
+        {
+            PrepTargets.None => throw new InvalidOperationException(
+                "PrepTargets must include Windows or Mac before resolving a filesystem."),
+            PrepTargets.Windows => "NTFS",
+            _ => "exFAT",
+        };
+
     private async Task AddModelAsync()
     {
         var tag = (_modelTagInput ?? string.Empty).Trim();
@@ -1008,8 +1020,11 @@ public class PrepViewModel : BaseViewModel
             }
         }
 
+        var fileSystem = ResolveFileSystem(GetSelectedPrepTargets());
+
         if (!_dialogService.ConfirmErase(root,
-            _driveService.GetFreeDiskSpaceGb(root)?.ToString() ?? "unknown"))
+            _driveService.GetFreeDiskSpaceGb(root)?.ToString() ?? "unknown",
+            fileSystem))
         {
             AppendLog("Format cancelled by user.");
             return;
@@ -1108,12 +1123,12 @@ public class PrepViewModel : BaseViewModel
                 DiagLog($"PrepApp base dir     : {AppContext.BaseDirectory}");
                 DiagLog($"PrepApp drive root   : {Path.GetPathRoot(AppContext.BaseDirectory)}");
             }
-            AppendLog($"Formatting {root} as {DriveFormatCommand.DefaultFileSystem} (label: '{_volumeLabel}')...");
+            AppendLog($"Formatting {root} as {fileSystem} (label: '{_volumeLabel}')...");
 
             await _driveService.FormatAsync(
                 root,
                 _volumeLabel,
-                DriveFormatCommand.DefaultFileSystem,
+                fileSystem,
                 onOutput: DiagLog,
                 verboseDiagnostics: _diagEnabled,
                 ct: CancellationToken.None);

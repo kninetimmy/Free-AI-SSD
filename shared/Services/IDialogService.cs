@@ -10,7 +10,7 @@ public interface IDialogService
     bool Confirm(string message, string title);
     bool ConfirmFixedDrive(string driveRoot);
     bool ConfirmSizingWarnings(IReadOnlyList<string> warnings);
-    bool ConfirmErase(string driveRoot, string sizeDisplay);
+    bool ConfirmErase(string driveRoot, string sizeDisplay, string fileSystem);
     string? PromptForEncryptionPassword();
     ModelRemoveChoice PromptRemoveModel(string modelName);
     bool ConfirmPrereqRefresh();

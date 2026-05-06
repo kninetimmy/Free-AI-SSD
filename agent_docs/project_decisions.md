@@ -801,3 +801,42 @@ on Stephen's stated goal ("get Mac up to Windows level").
 None of these are true today, so MAC9 closes here without runtime
 changes. The Swift/SwiftUI thin-UI + `mac-runner-host` sidecar is the
 supported Mac UI architecture going forward.
+
+## 2026-05-06 — MAC10a: filesystem derived from existing PrepTargets, not a new selector
+
+The MAC10a backlog entry reads as "add a Windows / Windows+macOS /
+macOS-only compatibility selector before format." When the work was
+opened, that selector already existed: PrepApp has had **Prepare for
+Windows** and **Prepare for Mac** checkboxes (bound to `PrepareWindows`
+/ `PrepareMac` on `PrepViewModel`, persisted via
+`PrepTargetPreferenceStore`) since the Mac track started. Adding a
+parallel "filesystem" dropdown would have been a second source of truth
+for the same user intent.
+
+**Decision:** MAC10a derives the filesystem from the already-present
+`PrepTargets` selection rather than introducing a new control:
+- Windows-only → `NTFS`.
+- Anything that includes Mac (Mac-only or Win+Mac) → `exFAT`.
+- The chosen filesystem is surfaced in `EraseConfirmDialog` so the user
+  sees "Format as: NTFS (Windows only)" or "Format as: exFAT (Windows +
+  macOS compatible)" before the destructive Format-Volume call.
+
+**Why APFS is still deferred:** Per MAC1, APFS is a Mac-native filesystem
+and Windows can't reliably create or write to it. Until a Mac-native
+prep workflow exists (MAC17), even the "Mac-only" branch has to stage
+exFAT from the Windows PrepApp. The mapping table will get an
+APFS branch when MAC17 lands; until then, Mac-only and Win+Mac collapse
+to the same exFAT answer.
+
+**Security invariants unchanged:** label still passes via the
+`FREEAI_FORMAT_LABEL` env var (never inlined), `powershell.exe` is still
+resolved through the absolute System32 path, the `EraseConfirmDialog`
+gate still precedes the destructive call, and `ProcessRunner.ArgumentList`
+is still used for the format launch.
+
+**Exit ramp:** if a future requirement separates "what OS will use this
+SSD" from "what filesystem to format" — for example, a power-user case
+where someone wants exFAT on a Windows-only drive for cross-tooling
+reasons — re-introduce a dedicated filesystem control then. As long as
+the two intents stay 1:1, deriving one from the other keeps the UI
+honest.
