@@ -457,27 +457,128 @@ folder sweep, and rebuild UI.
 
 ### MAC8 - Mac document management
 
-**Status:** planned
-**Scope:** library CRUD + ingestion surface
+**Status:** implemented (PR pending, awaiting CI)
+**Scope:** library CRUD + ingestion surface (runner-core API + Mac UI)
 **Risk:** High
-**Goal:** Mac users can create/select libraries, add files/folders, sweep, and
-  rebuild.
+**Goal:** Mac users can create/select libraries, add files/folders, sweep,
+  rebuild, and remove files. Implement once in `runner-core` so the same
+  endpoints serve Windows Companion / RunnerCli later (this absorbs and
+  expands `R1 Stage 2` in `project_backlog.md`).
+
+**Approach (least-debt path, decided 2026-05-06):**
+
+Build a full `/api/library/*` surface in `RunnerLocalApiService` designed so
+both the Swift Mac UI (now) and the Windows Companion / RunnerCli (later)
+consume the same contract. Ingestion uses upload semantics because Windows'
+existing `DocumentIngestor` already copies user-picked files into the
+library's `source/` directory, so the upload step maps cleanly onto behavior
+that already exists -- no separate path-based vs upload-based code paths.
+
+The Windows WPF Runner UI keeps calling `IDocumentOperationsService`
+in-process. The HTTP layer is a thin shell over the same service; routing
+multi-GB Windows ingest through loopback HTTP buys nothing. Two callers of
+one interface is fine because the business logic doesn't fork.
+
+**Endpoints to add (auth-gated like the rest of `/api/*`):**
+- `GET /api/library` -- returns `{ libraries: [{id, name}], activeLibraryId }`.
+- `POST /api/library` -- body `{name}`; creates library, returns manifest +
+  the new `activeLibraryId` value the host has chosen (Mac client persists
+  this; see config-save split below).
+- `PUT /api/library/active` -- body `{libraryId|null}`; sets active.
+  Returns the updated `activeLibraryId` for client persistence.
+- `POST /api/library/{id}/files` -- multipart upload; ingests each file via
+  `IDocumentOperationsService.IngestFilesAsync`. SSE progress stream using
+  the same NDJSON pattern as `/api/chat/stream` (`start` -> many `progress`
+  -> `complete` or `error`).
+- `DELETE /api/library/{id}/files/{relpath}` -- removes one stored file.
+- `POST /api/library/{id}/folders` -- body `{path}`; adds a watched folder.
+  The path is host-local (must exist on the Runner host). Companion UX for
+  remote folder browsing is deferred -- not an MAC8 concern.
+- `POST /api/library/{id}/sweep` -- SSE progress.
+- `POST /api/library/{id}/rebuild` -- SSE progress.
+
+**Config-save split (preserves MAC5/MAC6 plaintext-config invariant):**
+- `ActiveDocumentLibraryId` lives in `PortableConfig` -> Swift-owned on Mac.
+  Endpoints that mutate it return the new value in the HTTP response; Swift
+  re-saves through `mac-runner/Sources/SsdEncryption.swift`.
+- Library manifests, watched-folder lists, and chunk index are on-SSD JSON /
+  SQLite owned by `DocumentLibraryManager` -> sidecar-owned. No plaintext
+  `PortableConfig` ever touches disk on Mac.
+- Windows host keeps writing `PortableConfig` via `IConfigStore` directly.
+  Same API contract, host-specific persistence -- no dual-path drift in
+  business logic.
+
+**Mac UI (Swift) surface:**
+- Library section in `mac-runner/Sources/main.swift`: picker (active +
+  switch), Create button, Add Files (`NSOpenPanel` multi-select PDF/TXT/MD),
+  Add Watched Folder, Sweep, Rebuild, Remove, with a progress strip backed
+  by SSE stream parsing.
+- After any endpoint that returns an `activeLibraryId` change, the Swift
+  side persists `PortableConfig` via `SsdEncryption.swift` -- same lock /
+  zeroize rules already in place.
 
 **Likely files:**
-- `shared/Documents/*`
-- Mac UI/host endpoints
-- possibly Runner API document endpoints from `R1 Stage 2`
+- `runner-core/Services/RunnerLocalApiService.cs` -- new endpoint group +
+  multipart upload + SSE progress writers.
+- `runner-core/Services/IDocumentOperationsService.cs` /
+  `DocumentOperationsService.cs` -- minor shape adjustments only if needed
+  (existing surface already covers MAC8 ops).
+- `mac-runner/Sources/main.swift` -- library UI surface, NSOpenPanel
+  pickers, SSE progress parsing.
+- `mac-runner/Sources/MacRunnerHostController.swift` -- if needed for
+  request/auth wiring.
+- `tests/RunnerLocalApiLibraryTests.cs` (new) -- endpoint tests against a
+  temp SSD library.
+- `tests/MacRunnerHostLibraryTests.cs` (new) -- mirrors the
+  `MacRunnerHostRagParityTests` pattern: real Mac-host DI, fake Ollama
+  embeddings, full create -> ingest -> active -> chat-with-citations
+  roundtrip.
+
+**Do not change:**
+- `IDocumentOperationsService` Mac-portability shape (already shipped with
+  MAC3).
+- Encryption format or the Swift-owned plaintext-config invariant.
+- Windows WPF Runner's in-process call path through
+  `DocumentOperationsService` -- it stays as-is.
+- Auth posture: new endpoints sit behind the same Bearer / API-key gate as
+  every other `/api/*` route.
+- `DocumentParser` accepted formats: PDF, TXT, Markdown only. No DOCX.
 
 **Acceptance criteria:**
-- Create/select library.
-- Ingest PDF/TXT/Markdown only.
-- Rebuild/sweep works from stored SSD files.
-- Oversized/unsupported files produce user-facing errors.
+- Create / select / switch active library from the Mac UI.
+- Ingest PDF / TXT / Markdown via NSOpenPanel; oversized or unsupported
+  files produce user-facing errors via the SSE `error` frame.
+- Add watched folder + Sweep re-ingests its contents.
+- Rebuild drops and rebuilds the vector index from stored sources.
+- Remove deletes the stored copy and removes manifest + index entries.
+- After any active-library change, `ActiveDocumentLibraryId` round-trips
+  cleanly: Mac -> sidecar (over HTTP response) -> Swift -> encrypted
+  `PortableConfig` -> next Mac launch resumes with the same active library.
+- Windows Runner library workflow is byte-for-byte unchanged.
+- `R1 Stage 2`'s scope (`/api/documents` + reindex) is satisfied by the new
+  endpoints; mark Stage 2 done in `project_backlog.md` as part of this PR.
 
 **Tests:**
-- Library CRUD tests.
-- Document ingest tests.
-- SQLite WAL / external-drive smoke where feasible.
+- HTTP-layer tests for every new endpoint against a temp SSD library
+  (create, list, set-active, upload+ingest, sweep, rebuild, remove,
+  add-folder; auth-failure cases; SSE error frames on
+  oversized/unsupported).
+- `MacRunnerHostLibraryTests` -- end-to-end Mac-host DI flow.
+- `MacPlatformBoundaryTests` continues to pass; `runner-core` stays plain
+  `net8.0`, non-WPF.
+- Existing `ChatService` / RAG / API tests unchanged and still pass.
+
+**Sequencing / scope notes:**
+- Companion UI for library control is deferred to a later item; MAC8 only
+  ships the API surface + Mac UI. Companion's remote-folder UX is the
+  unanswered question, not the API shape.
+- Job registry / `/api/jobs/{id}` polling is explicitly out of scope. SSE
+  per long-running endpoint is sufficient for both Mac UI and a future
+  RunnerCli `/docs` command. Add polling only when a real client demands
+  it.
+- Migrating Windows Runner UI to call the API instead of in-process is
+  explicitly **not** in scope -- it would be wasted bytes on big ingests
+  and brings no MAC8 value.
 
 ---
 
@@ -561,6 +662,42 @@ folder sweep, and rebuild UI.
 **Tests:**
 - ViewModel tests for compatibility -> filesystem mapping.
 - Existing/new format argument tests continue to use `ProcessRunner.ArgumentList`.
+
+---
+
+### MAC10b - Mac app icon and bundle metadata polish
+
+**Status:** planned
+**Scope:** Runner.app bundle visual identity
+**Risk:** Low
+**Goal:** Replace the default macOS placeholder icon with a Free-AI-SSD app
+icon so the bundle looks shipped, not built-from-CI. Tighten Info.plist
+metadata while we're there.
+
+**Likely files:**
+- `mac-runner/Resources/AppIcon.icns` (new) or a Swift asset catalog
+- `.github/workflows/build.yml` `Build Runner.app bundle` step (copy the
+  icon into `Contents/Resources` and reference it in the Info.plist)
+- The inline Info.plist heredoc in `build.yml` (currently no
+  `CFBundleIconFile` key, minimal metadata)
+
+**Acceptance criteria:**
+- `Runner.app` shows a Free-AI-SSD icon in Finder, the Dock, and
+  command-tab on a clean Mac.
+- Icon resource ships inside `Contents/Resources/` and is referenced via
+  `CFBundleIconFile` (or `CFBundleIconName` with an asset catalog).
+- Standard macOS icon sizes covered (16/32/128/256/512 @1x and @2x).
+- No behavioral change to launch path or to the Swift binary.
+
+**Tests:**
+- CI artifact validation: assert the icon file exists in
+  `Runner.app/Contents/Resources/` and the Info.plist references it.
+- Manual visual smoke after a CI build.
+
+**Sequencing note:** sits with MAC10/MAC10a/MAC11 as packaging-track
+work, not on the Runner-parity critical path. Can ship anytime;
+particularly natural to bundle with MAC11 (signing + notarization) since
+both touch the Info.plist + bundle layout.
 
 ---
 
