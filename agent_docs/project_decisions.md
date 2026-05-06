@@ -568,3 +568,61 @@ direction safe.
 RAG / streaming / models endpoints on Mac (MAC6/MAC7), document management
 (MAC8), Mac-native PrepApp that *creates* encrypted drives from Mac (MAC17;
 MAC5 only handles unlock and re-save of existing blobs).
+
+---
+
+## 2026-05-06 — MAC6 Mac net8.0 sidecar host: approved exit ramp from MAC5
+
+The macOS Runner now hosts the LAN API surface (`/api/health`, `/api/models`,
+`/api/chat`, `/api/chat/stream`, gated `/tts/*`, `/stt/transcribe`,
+`/voice/query`, plus the X4 static-file plumbing) by spawning a net8.0
+sidecar process — `mac-runner-host/FreeAiSsd.MacRunnerHost.csproj` — that
+links runner-core directly and reuses `RunnerLocalApiService` byte-for-byte.
+The Swift `mac-runner` owns Ollama lifecycle and encrypted-config IO; the
+sidecar consumes both via stdin handshake.
+
+**Architectural choice.** Sidecar over Swift port. The alternative —
+reimplementing `RunnerLocalApiService` + `ChatService` + multipart audio
++ NDJSON streaming + the RAG glue in Swift — would have produced large,
+ongoing duplication for an active surface. MAC7 (RAG parity) and MAC8
+(document management) both touch the same underlying services; a Swift
+port would either fork the in-flight work twice or block MAC7/MAC8 on a
+Swift catch-up project.
+
+**Rationale.** MAC5 left this exit ramp open explicitly: encrypted-config
+unlock/save was a small, stable, security-critical surface that justified
+a native Swift port; the chat / RAG / API surface is large, evolving, and
+not well-served by duplication. Apple Silicon (.NET 8 osx-arm64) is fast
+enough that a long-running .NET host pays a tolerable cost — the only
+real downside is the ~70 MB self-contained publish footprint, which is a
+rounding error on an SSD already carrying multi-GB models.
+
+**Boundary preserved from MAC5.** Encrypted-config IO stays Swift-
+authoritative. The Swift app unlocks the SSD, holds the in-memory
+plaintext as `[String: Any]`, and hands the dictionary to the sidecar
+over stdin only — never via a temp file, never via shared memory. The
+plaintext-config invariant from MAC5 is unchanged: no plaintext
+`portable-config.json` is ever written to disk on Mac. When the user
+locks the drive (manual lock, app background, app terminate), the
+sidecar receives `shutdown\n` on stdin and exits before the Swift app
+zeroes the unlock material.
+
+**Reuse boundary, encoded.** The Mac host references runner-core
+directly. There is no fork of `RunnerLocalApiService`. Any platform
+behavioral difference is expressed by injecting a different DI
+implementation (e.g., `NoOpSpeechToTextService` and `NoOpTtsProvider`
+in place of `WhisperSpeechToTextService` and `PiperTextToSpeechService`).
+This is enforced by `MacPlatformBoundaryTests.MacRunnerHost_RemainsPlainNet8WithoutWindowsPackages`.
+
+**X4 plumbing, not X4.** `RunnerLocalApiService` now wires `UseDefaultFiles`
++ `UseStaticFiles` in front of the `/api/*` group when a `wwwroot/`
+directory exists. The runner-core project committed `wwwroot/.gitkeep`
+so the directory ships in publish output on both Windows and Mac. No
+SPA assets are bundled in MAC6 — when X4 ships those assets,
+`/chat/index.html` is served from the same Kestrel on both platforms
+with no Mac-specific code path.
+
+**Out of scope of MAC6 (deferred):** RAG endpoint parity (MAC7),
+document management endpoints (MAC8), Mac-native PrepApp (MAC17), and
+the actual X4 SPA implementation. The host serves chat without a
+populated library (RAG-off path) until MAC7 lands.

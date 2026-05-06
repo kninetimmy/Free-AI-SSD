@@ -34,6 +34,7 @@ FreeAiSsd.sln
 ├── runner/          — net8.0-windows WPF; main UI and Windows adapters
 ├── runner-cli/      — net8.0 CLI; headless REPL client for Runner's LAN API
 ├── companion/       — net8.0-windows WPF; tray/overlay LAN client
+├── mac-runner-host/ — net8.0 console; Mac LAN API sidecar spawned by mac-runner (MAC6)
 ├── tools/FreeAiSsd.PrereqFetch/  — net8.0 CLI; CI prereq-bundle builder
 ├── mac-runner/      — Swift/SwiftUI macOS beta (unsigned)
 ├── tests/           — xUnit suite
@@ -79,6 +80,44 @@ commands, NDJSON streaming. Not an in-process console host for Runner;
 talks to a running Runner instance over HTTP. Binary ships alongside
 Runner via `build.ps1`.
 
+### Mac Runner sidecar host (`mac-runner-host/`) [MAC6]
+Net8.0 console exe spawned by the Swift `mac-runner` when Network Mode
+is on. Links `runner-core/` directly and reuses `RunnerLocalApiService`
+byte-for-byte; the Swift parent owns Ollama lifecycle and encrypted-config
+IO, the sidecar consumes both via a stdin handshake. Self-contained
+single-file publish for `osx-arm64`; lives at
+`<ssdRoot>/mac/runner-host/FreeAiSsd.MacRunnerHost` on a staged SSD.
+
+**Lifecycle.**
+- Spawn — Swift app writes one JSON line to the host's stdin:
+  `{ "ssdRoot": "...", "ollamaHost": "...", "config": { ...PortableConfig dictionary... } }`.
+  The host parses, builds its DI container, calls `RunnerLocalApiService.StartAsync`,
+  and emits `ready: <baseUrl>` on stdout once Kestrel is listening.
+- Steady state — every log message from `RunnerLocalApiService` is mirrored
+  to stdout as `log: <line>` so the Swift status pane can surface API
+  events; stderr carries fatal failures.
+- Config update — `config-update <json>` on stdin restarts the API with
+  the new config (e.g., the user toggled `NetworkRequireApiKey`).
+- Shutdown — `shutdown\n` on stdin, or stdin EOF, triggers a graceful
+  `RunnerLocalApiService.StopAsync` followed by exit 0.
+- Lock semantics — when the user locks the encrypted SSD, backgrounds
+  the app, or terminates it, the Swift app shuts the sidecar down BEFORE
+  zeroing the in-memory `UnlockMaterial`, so the host can never serve
+  requests using a config whose API key has been wiped.
+
+**Plaintext-config invariant (preserved from MAC5).** The Swift app
+must never write the in-memory PortableConfig dictionary to disk to pass
+it to the sidecar. The handshake travels over stdin only. The host holds
+the parsed config in memory for the lifetime of the process and never
+persists it.
+
+**X4 plumbing.** `RunnerLocalApiService` wires `UseDefaultFiles` +
+`UseStaticFiles` in front of the `/api/*` group when a `wwwroot/`
+directory exists. The runner-core project ships `wwwroot/.gitkeep` so
+the directory flows to the Windows runner publish AND the Mac sidecar
+publish on every build. When X4 ships SPA assets, both Kestrels serve
+`/chat/index.html` from the same code path.
+
 ### RAG pipeline
 Embeddings stored as binary BLOBs in SQLite (~60% smaller than JSON). Vector search uses `System.Numerics.Vector<float>` SIMD with cosine similarity threshold (default 0.3). Ingestion is parallel with bounded concurrency and per-file failure isolation (failures logged and skipped, not fatal).
 
@@ -113,7 +152,13 @@ cache/                    — prep-time download cache
 
 `SsdLayout` in shared is the single source of truth for these paths — always use it rather than constructing paths manually.
 
-Network surface: Ollama is never exposed on LAN. `RunnerLocalApiService` is the only network endpoint.
+Network surface: Ollama is never exposed on LAN. `RunnerLocalApiService` is the
+only network endpoint. Post-MAC6 it serves identical wire shapes on Windows
+(in-process inside the WPF Runner) and macOS (the `mac-runner-host` sidecar
+spawned by the Swift Runner). RunnerCli and Windows Companion connect to
+either platform with the same Bearer / X-API-Key handshake; static-file
+middleware in front of `/api/*` is wired the same way on both so X4's web
+chat UI lands cross-platform when it ships.
 
 ## Known gaps / out of scope
 - DOCX format not supported (PDF, TXT, Markdown only)

@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    MAC6: net8.0 sidecar host process spawned by the Swift mac-runner. Links
+    runner-core directly and reuses RunnerLocalApiService byte-for-byte; do
+    not fork that service in this project. The sidecar exists so the LAN API
+    surface (chat, models, /api/chat/stream, X4 static files when shipped)
+    works on Apple Silicon without a Swift port of the API + RAG glue. See
+    agent_docs/project_decisions.md (MAC6 sidecar exit ramp) for rationale.
+
+    Trimming is intentionally OFF — RunnerCore's minimal-API endpoint
+    registration relies on reflection that PublishTrimmed silently breaks.
+    PublishSingleFile is fine; PublishTrimmed is not.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>FreeAiSsd.MacRunnerHost</RootNamespace>
+    <AssemblyName>FreeAiSsd.MacRunnerHost</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <PublishTrimmed>false</PublishTrimmed>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\runner-core\FreeAiSsd.RunnerCore.csproj" />
+    <ProjectReference Include="..\shared\FreeAiSsd.Shared.csproj" />
+  </ItemGroup>
+</Project>

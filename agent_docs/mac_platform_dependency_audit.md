@@ -87,3 +87,38 @@ binary both fail until the fixture is regenerated alongside a dated decision.
 This waiver applies to MAC5's surface only. RAG, network API hosting, and
 document management (MAC6/MAC7/MAC8) keep the original "thin Swift over
 shared/core" rule unless a future decision records its own waiver.
+
+## MAC6 Mac net8.0 sidecar exception (2026-05-06)
+
+The "Keep the Swift macOS app thin" guideline in step 6 above is **also
+explicitly relaxed** for the Mac LAN API surface: a new
+`mac-runner-host/FreeAiSsd.MacRunnerHost.csproj` is allowed to ship as a
+plain `net8.0` console exe, self-contained for `osx-arm64`, that depends on
+`runner-core/`, `shared/`, and ASP.NET Core minimal-APIs. The Swift
+`mac-runner` spawns this binary as a sidecar when Network Mode is on.
+
+This is the explicit exit ramp MAC5 left open. Rationale: the chat / RAG /
+API surface (`RunnerLocalApiService`, `ChatService`, `ModelManagementService`,
+multipart audio, NDJSON streaming) is large, evolving, and security-
+relevant. Reimplementing it in Swift would either fork the in-flight MAC7
+(RAG parity) and MAC8 (document management) work twice, or block both items
+behind a Swift catch-up project. We accept the ~70 MB self-contained
+osx-arm64 .NET runtime cost on the SSD payload as a rounding error against
+multi-GB model files.
+
+**Boundary preserved.** Encrypted-config IO stays Swift-authoritative
+(MAC5 is not reverted). The Swift app holds the unlocked PortableConfig in
+memory and hands the dictionary to the sidecar via **stdin only** — the
+plaintext-config invariant from MAC5 is unchanged. The sidecar never
+writes the plaintext to disk; on Lock / app background / app terminate /
+explicit shutdown, the sidecar exits before the Swift app zeroes the
+unlock material.
+
+**Code-reuse, encoded.** `mac-runner-host` references `runner-core`
+directly and reuses `RunnerLocalApiService` byte-for-byte. There is no
+fork of the API service. `MacPlatformBoundaryTests.MacRunnerHost_RemainsPlainNet8WithoutWindowsPackages`
+guards the project shape (no Windows-only packages, no
+`net8.0-windows`, no `EnableWindowsTargeting`). This waiver applies to
+the network-API surface only; future Mac surfaces still default to the
+"thin Swift over shared/core" rule unless a separate decision records a
+new waiver.

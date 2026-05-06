@@ -89,6 +89,33 @@ public sealed class MacPlatformBoundaryTests
             reference.Replace('\\', '/').Equals("../runner-core/FreeAiSsd.RunnerCore.csproj", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void MacRunnerHost_RemainsPlainNet8WithoutWindowsPackages()
+    {
+        // MAC6 sidecar: net8.0 host process spawned by the Swift mac-runner.
+        // Allowed to depend on RunnerCore + Shared + the ASP.NET Core
+        // framework; must not target Windows or pull in Windows-only NuGet
+        // packages, otherwise it cannot publish for osx-arm64.
+        var project = LoadProject("mac-runner-host", "FreeAiSsd.MacRunnerHost.csproj");
+        var root = project.Root ?? throw new InvalidOperationException("Project XML has no root.");
+        var packages = PackageReferences(project);
+        var references = ProjectReferences(project);
+
+        Assert.Equal("Microsoft.NET.Sdk", root.Attribute("Sdk")?.Value);
+        Assert.Equal("net8.0", RequiredProperty(project, "TargetFramework"));
+        Assert.DoesNotContain("windows", RequiredProperty(project, "TargetFramework"), StringComparison.OrdinalIgnoreCase);
+        Assert.False(IsTrueProperty(project, "UseWPF"));
+        Assert.False(IsTrueProperty(project, "UseWindowsForms"));
+        Assert.False(IsTrueProperty(project, "EnableWindowsTargeting"));
+        Assert.DoesNotContain(packages, IsBlockedWindowsOnlyPackage);
+        Assert.DoesNotContain(references, IsRunnerProjectReference);
+
+        // Must reference runner-core (the whole point of MAC6 — reuse
+        // RunnerLocalApiService byte-for-byte rather than fork it in Swift).
+        Assert.Contains(references, reference =>
+            reference.Replace('\\', '/').Equals("../runner-core/FreeAiSsd.RunnerCore.csproj", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static XDocument LoadProject(params string[] pathParts)
     {
         return XDocument.Load(Path.Combine(FindRepoRoot(), Path.Combine(pathParts)));
