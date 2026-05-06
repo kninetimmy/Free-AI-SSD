@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-05-06 (PR #183 MAC7 ready; CI green)
+Last updated: 2026-05-06 (PR #183 MAC7 merged; ready for MAC8)
 
 Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
@@ -8,13 +8,12 @@ Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
 ## In flight
 
-PR #183 (`mac7-rag-parity`) is ready for review and CI-green. MAC7 routes the
-Mac chat UI through the sidecar `/api/chat` path instead of direct Ollama,
-displays citations/sources, and preserves MAC5's stdin-only plaintext-config
-invariant. Local `dotnet` is still unavailable; GitHub CI verified the .NET
-surface.
+Between tasks. MAC7 is merged to `main` via PR #183 (`23245f7`) and CI-green.
+Next implementation target is MAC8: Mac document management.
 
 ## Recently shipped
+
+- **PR #183 - MAC7 RAG parity on Mac - merged `23245f7` (2026-05-06).** Mac chat now routes through the MAC6 sidecar `/api/chat` path instead of direct Ollama, displays citations/sources in Swift, and preserves MAC5's stdin-only plaintext-config invariant. `RunnerLocalApiService` forwards `ChatService` logs through the API logger and includes `ragWarning` in `/api/chat` retrieval-failed responses. Added `MacRunnerHostRagParityTests` covering real Mac-host DI against a deterministic fake Ollama endpoint for `/api/chat`, `/api/chat/stream`, returned sources, and embedding dimension mismatch warnings. CI passed on final run `25447266282`: `windows-build` ran restore, build, full `dotnet test`, WPF guardrails, and publishes; `mac-runner-build` ran Swift tests, Mac host publish/smoke, runner-core/CLI sanity, and Runner.app bundle.
 
 - **PR #182 - MAC6 follow-up hardening - merged `66a94d9` (2026-05-06).** Follow-up to PR #181 fixing Mac Network Mode sidecar startup config, fail-closed host startup when `RunnerLocalApiService` does not actually start, static-file serving from the published RunnerCore content root instead of `<ssdRoot>/wwwroot`, and executable-bit fallback for the Mac host binary. CI `windows-build` and `mac-runner-build` both passed, including `dotnet build`, `dotnet test`, Swift tests, Mac host publish, Mac host smoke, and Runner.app bundle.
 
@@ -42,12 +41,11 @@ surface.
 
 ## Next up
 
-1. Review/merge **PR #183** - MAC7 RAG parity on Mac.
-2. **MAC8** - Mac document management (library CRUD + ingestion).
-3. Cross-platform PrepApp parity (**MAC16/MAC17/MAC18**) sequences after Runner parity (MAC4-MAC8). Decision recorded 2026-05-05; APFS dropped from supported targets, exFAT is universal. MAC17 is now unblocked from the encrypted-config side (MAC5 done).
-4. Track **MAC10a** before broad Mac distribution: Windows PrepApp OS compatibility selector preselecting NTFS vs exFAT.
-5. **X4** is unblocked from the host side: MAC6 wired the static-file middleware on both platforms (PR #181); X4 only needs to drop SPA assets at `runner-core/wwwroot/chat/`.
-6. For non-Mac work, pick from `H3`, `F4` follow-up, `B2`, `F2`, or `R1 Stage 2`.
+1. **MAC8** - Mac document management (library CRUD + ingestion).
+2. Cross-platform PrepApp parity (**MAC16/MAC17/MAC18**) sequences after Runner parity (MAC4-MAC8). Decision recorded 2026-05-05; APFS dropped from supported targets, exFAT is universal. MAC17 is now unblocked from the encrypted-config side (MAC5 done).
+3. Track **MAC10a** before broad Mac distribution: Windows PrepApp OS compatibility selector preselecting NTFS vs exFAT.
+4. **X4** is unblocked from the host side: MAC6 wired the static-file middleware on both platforms (PR #181); X4 only needs to drop SPA assets at `runner-core/wwwroot/chat/`.
+5. For non-Mac work, pick from `H3`, `F4` follow-up, `B2`, `F2`, or `R1 Stage 2`.
 
 **RAG audit backlog:** X17-X23 cover audit findings; X10/X13/X15 scope expansions recorded. Plan: `C:\Users\Kninetimmy\.claude\plans\okay-i-want-to-glowing-galaxy.md`. v1.3.x sequence: X18 -> X15 (expanded) -> X19 -> X20 -> X22 -> X23. X17 reduced to Stage 1 textless-page diagnostic (full OCR deferred -- workload is text-layer PDFs).
 
@@ -58,7 +56,9 @@ See `project_backlog.md` for full general backlog details. See
 
 ## Last session
 
-2026-05-06 (PR #183 MAC7 RAG parity on Mac) - Approved `agent_docs/mac7_execution_prompt.md` and implemented MAC7 on `mac7-rag-parity`. Added `tests/MacRunnerHostRagParityTests.cs`, which seeds a temporary SSD document library and exercises the Mac host's real RunnerCore DI against a fake Ollama server for `/api/chat`, `/api/chat/stream`, returned sources, and embedding dimension mismatch warnings. Updated `RunnerLocalApiService` to forward `IChatService.LogMessage` through the API logger and include `ragWarning` in `/api/chat` retrieval-failed responses. Updated Swift `sendPrompt()` to require the sidecar API, call `/api/chat` with auth when configured, parse `responseText` / `sources` / `usedRagContext` / `ragWarning`, and display sources in the UI. README / QUICKSTART / Mac backlog now describe RAG-backed Mac chat without claiming MAC8 document management. First CI failed because the fake Ollama `/api/embed` Kestrel handler returned `Task<IResult>` as a method group, causing ASP.NET to discard the response; fixed in commit `88631c6`. Rerun `25446997317` passed `mac-runner-build` and `windows-build`, including Swift tests, Mac host publish/smoke/bundle, `dotnet build`, `dotnet test`, and WPF publish guardrails. PR #183 is ready for review.
+2026-05-06 (PR #183 MAC7 merge wrap-up, `23245f7`) - User merged PR #183. Fast-forwarded local `main` to `origin/main`. MAC7 is now shipped on `main`; next Mac implementation target is MAC8.
+
+2026-05-06 (PR #183 MAC7 RAG parity on Mac) - Approved `agent_docs/mac7_execution_prompt.md` and implemented MAC7 on `mac7-rag-parity`. Added `tests/MacRunnerHostRagParityTests.cs`, which seeds a temporary SSD document library and exercises the Mac host's real RunnerCore DI against a fake Ollama server for `/api/chat`, `/api/chat/stream`, returned sources, and embedding dimension mismatch warnings. Updated `RunnerLocalApiService` to forward `IChatService.LogMessage` through the API logger and include `ragWarning` in `/api/chat` retrieval-failed responses. Updated Swift `sendPrompt()` to require the sidecar API, call `/api/chat` with auth when configured, parse `responseText` / `sources` / `usedRagContext` / `ragWarning`, and display sources in the UI. README / QUICKSTART / Mac backlog now describe RAG-backed Mac chat without claiming MAC8 document management. First CI failed because the fake Ollama `/api/embed` Kestrel handler returned `Task<IResult>` as a method group, causing ASP.NET to discard the response; fixed in commit `88631c6`. Final run `25447266282` passed `mac-runner-build` and `windows-build`, including Swift tests, Mac host publish/smoke/bundle, `dotnet build`, `dotnet test`, and WPF publish guardrails.
 
 2026-05-06 (PR #182 merge + MAC6 alignment, `66a94d9`) - Created PR #182 from the local MAC6 follow-up fixes, pushed `3893f76`, and verified GitHub CI: `windows-build` passed `dotnet build` / `dotnet test`, and `mac-runner-build` passed Swift tests, Mac host publish, Mac host smoke, and Runner.app bundle. Marked the draft ready, merged via GitHub REST after the first `gh pr merge` attempt hit a 504, deleted/pruned the branch, and fast-forwarded local `main` to `origin/main`. Workspace is clean and MAC7 is the next Mac task.
 
