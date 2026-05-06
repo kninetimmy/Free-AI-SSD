@@ -292,9 +292,13 @@ final class MacRunnerHostController {
                 return url
             }
             if fm.fileExists(atPath: url.path) {
-                // Best-effort chmod +x for non-executable copies after extraction.
-                _ = try? fm.attributesOfItem(atPath: url.path)
+                // Best-effort chmod +x for copies that lost executable bits
+                // during ZIP extraction; only return after executability is
+                // confirmed so later bundled/dev candidates can still work.
                 if fm.isReadableFile(atPath: url.path) {
+                    _ = try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+                }
+                if fm.isExecutableFile(atPath: url.path) {
                     return url
                 }
             }

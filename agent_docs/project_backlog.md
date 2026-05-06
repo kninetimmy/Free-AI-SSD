@@ -505,7 +505,7 @@ Could be implemented via a `DataTrigger` binding on `IsRunning` or via visibilit
 - Mac Runner host wiring â€” ensure RunnerCore's wwwroot ships inside `mac/Runner.app` so the Mac Kestrel serves the same `/chat/` route
 - `docs/` â€” add a "Web Chat UI" section to QUICKSTART
 
-**Cross-platform note (post-MAC3):** because `RunnerLocalApiService` now lives in `runner-core/`, X4 lands on both Windows and macOS Runners with one implementation if static assets are bundled with RunnerCore rather than the WPF host. This is the X4 â†” MAC6 link â€” MAC6 acceptance includes "X4 web chat UI is reachable when bundled".
+**Cross-platform note (post-MAC6):** `RunnerLocalApiService` now lives in `runner-core/` and (post-PR #181) wires `UseDefaultFiles` + `UseStaticFiles` against `runner-core/wwwroot/`. X4 only needs to drop SPA assets at `runner-core/wwwroot/chat/` â€” both Windows and Mac Kestrel serve them automatically.
 
 **âš  Licensing:** any bundled SPA must have a compatible license (MIT, Apache-2, BSD). Flag to Stephen before adding it as a dep.
 

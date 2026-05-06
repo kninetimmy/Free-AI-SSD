@@ -25,6 +25,46 @@ namespace FreeAiSsd.Tests;
 public sealed class MacRunnerHostSmokeTests
 {
     [Fact]
+    public async Task HostRunner_WithNetworkModeDisabled_FailsWithoutReadyLine()
+    {
+        using var workdir = new TempDir("freeai-mac6-host-disabled-");
+        Directory.CreateDirectory(Path.Combine(workdir.Path, "logs"));
+        Directory.CreateDirectory(Path.Combine(workdir.Path, "config"));
+
+        var handshake = JsonSerializer.Serialize(new
+        {
+            ssdRoot = workdir.Path,
+            ollamaHost = "127.0.0.1:11434",
+            config = new
+            {
+                networkModeEnabled = false,
+                networkBindAddress = "127.0.0.1",
+                networkPort = GetFreePort(),
+                networkRequireApiKey = false,
+                networkApiKey = string.Empty,
+                networkAllowTts = false,
+                networkAllowRemoteStt = false,
+                networkAllowRemoteVoiceQuery = false,
+                networkMaxAudioUploadMB = 10
+            }
+        });
+
+        using var stdin = new StringReader(handshake + Environment.NewLine);
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await FreeAiSsd.MacRunnerHost.HostRunner.RunAsync(
+            stdin,
+            stdout,
+            stderr,
+            new[] { "--test-mode" });
+
+        Assert.Equal(3, exitCode);
+        Assert.DoesNotContain("ready:", stdout.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("RunnerLocalApiService did not start", stderr.ToString());
+    }
+
+    [Fact]
     public async Task PublishedHost_ServesHealthAndChat_WithStubChat()
     {
         if (!OperatingSystem.IsMacOS())

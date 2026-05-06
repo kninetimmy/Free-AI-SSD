@@ -12,9 +12,11 @@ namespace FreeAiSsd.Tests;
 /// 1. With a placeholder index.html present in <c>wwwroot/chat/</c>, GET
 ///    /chat/index.html returns 200 and the file body. UseDefaultFiles
 ///    rewrites GET /chat/ to /chat/index.html so that also returns 200.
-/// 2. With no SPA assets present (no wwwroot directory at all), GET /chat/
+/// 2. With no SPA assets present (an injected empty wwwroot), GET /chat/
 ///    returns 404 cleanly — the middleware falls through and the API group
 ///    doesn't match, producing the framework's default 404.
+/// 3. A wwwroot directory under the SSD root is ignored so removable-drive
+///    contents cannot shadow the published RunnerCore assets.
 /// </summary>
 public sealed class RunnerLocalApiStaticFilesTests
 {
@@ -27,7 +29,9 @@ public sealed class RunnerLocalApiStaticFilesTests
         var placeholder = "<!doctype html><title>placeholder</title>";
         await File.WriteAllTextAsync(Path.Combine(wwwrootChat, "index.html"), placeholder);
 
-        await using var fixture = await StaticFileFixture.StartAsync(workdir.Path);
+        await using var fixture = await StaticFileFixture.StartAsync(
+            workdir.Path,
+            staticFilesRoot: Path.Combine(workdir.Path, "wwwroot"));
         using var http = new HttpClient();
 
         var indexResponse = await http.GetAsync($"{fixture.BaseUrl}/chat/index.html");
@@ -44,11 +48,14 @@ public sealed class RunnerLocalApiStaticFilesTests
     public async Task ChatRoute_WithoutAssets_ReturnsCleanNotFound()
     {
         using var workdir = new TempWorkingDir();
-        // Intentionally do NOT create wwwroot/. ResolveWwwroot returns null,
-        // the static-file middleware is skipped, and the /chat/ path falls
+        var emptyWwwroot = Path.Combine(workdir.Path, "empty-wwwroot");
+        Directory.CreateDirectory(emptyWwwroot);
+        // Intentionally inject an empty wwwroot. The static-file middleware falls
         // through to the framework's default 404 (the API group only matches
         // /api/*).
-        await using var fixture = await StaticFileFixture.StartAsync(workdir.Path);
+        await using var fixture = await StaticFileFixture.StartAsync(
+            workdir.Path,
+            staticFilesRoot: emptyWwwroot);
         using var http = new HttpClient();
 
         var response = await http.GetAsync($"{fixture.BaseUrl}/chat/");
@@ -59,6 +66,26 @@ public sealed class RunnerLocalApiStaticFilesTests
         // never-started host.
         var health = await http.GetAsync($"{fixture.BaseUrl}/api/health");
         Assert.Equal(HttpStatusCode.OK, health.StatusCode);
+    }
+
+    [Fact]
+    public async Task ChatRoute_DoesNotServeFilesFromSsdRootWwwroot()
+    {
+        using var workdir = new TempWorkingDir();
+        var ssdWwwrootChat = Path.Combine(workdir.Path, "wwwroot", "chat");
+        Directory.CreateDirectory(ssdWwwrootChat);
+        await File.WriteAllTextAsync(Path.Combine(ssdWwwrootChat, "index.html"), "ssd-shadow");
+
+        var publishedWwwroot = Path.Combine(workdir.Path, "published-wwwroot");
+        Directory.CreateDirectory(publishedWwwroot);
+
+        await using var fixture = await StaticFileFixture.StartAsync(
+            workdir.Path,
+            staticFilesRoot: publishedWwwroot);
+        using var http = new HttpClient();
+
+        var response = await http.GetAsync($"{fixture.BaseUrl}/chat/");
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     private sealed class TempWorkingDir : IDisposable
@@ -85,14 +112,15 @@ public sealed class RunnerLocalApiStaticFilesTests
 
         public string BaseUrl => _service.CurrentBaseUrl!;
 
-        public static async Task<StaticFileFixture> StartAsync(string ssdRoot)
+        public static async Task<StaticFileFixture> StartAsync(string ssdRoot, string? staticFilesRoot = null)
         {
             var service = new RunnerLocalApiService(
                 new StubChatService(),
                 new NoOpSpeechToTextService(),
                 new NoOpTtsProvider(),
                 logger: null,
-                ssdRoot: ssdRoot);
+                ssdRoot: ssdRoot,
+                staticFilesRoot: staticFilesRoot);
 
             var config = new PortableConfig
             {

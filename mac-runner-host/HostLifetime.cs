@@ -62,9 +62,15 @@ internal sealed class HostLifetime : IAsyncDisposable
         var api = _services!.GetRequiredService<IRunnerLocalApiService>();
         api.LogMessage += OnLogMessage;
         await api.StartAsync(config, ollamaHost);
-        _api = api;
 
         var baseUrl = api.CurrentBaseUrl ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            api.LogMessage -= OnLogMessage;
+            throw new InvalidOperationException("RunnerLocalApiService did not start. Ensure networkModeEnabled is true before spawning mac-runner-host.");
+        }
+
+        _api = api;
         WriteLineSafe($"ready: {baseUrl}");
         _logger?.Info($"mac-runner-host ready at {baseUrl}");
     }

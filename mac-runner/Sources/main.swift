@@ -252,12 +252,17 @@ final class RunnerViewModel: ObservableObject {
             return
         }
 
-        guard let config = portableConfig else {
+        guard var config = portableConfig else {
             networkApiStatus = "Unlock the SSD before enabling Network Mode"
             networkModeEnabled = false
             log("Network Mode refused: portable-config not loaded.")
             return
         }
+
+        // The UI toggle is the user's runtime Network Mode intent. Keep the
+        // persisted PortableConfig untouched here, but make the sidecar's
+        // in-memory config match the toggle so it actually starts the API.
+        config["networkModeEnabled"] = true
 
         let host = "127.0.0.1:\(hostPort)"
         do {
