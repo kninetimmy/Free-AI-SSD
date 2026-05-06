@@ -46,8 +46,28 @@ final class RunnerViewModel: ObservableObject {
     @Published var unlockDialogPassword: String = ""
     @Published var unlockDialogError: String? = nil
 
+    /// MAC6: Network Mode mirrors the Windows Runner toggle. When on, we spawn
+    /// the net8.0 sidecar host and surface its base URL so RunnerCli /
+    /// Companion clients can connect.
+    @Published var networkModeEnabled: Bool = false
+    @Published var networkApiStatus: String = "API stopped"
+    @Published var networkApiBaseUrl: String? = nil
+
     private var process: Process?
     private var hostPort = 11434
+
+    /// Lazily constructed so the host controller's deinit shutdown only runs
+    /// when the user actually started Network Mode at least once.
+    private lazy var hostController: MacRunnerHostController = {
+        let ctl = MacRunnerHostController()
+        ctl.onStatusChange = { [weak self] s in
+            self?.handleHostStatusChange(s)
+        }
+        ctl.onLogLine = { [weak self] line in
+            self?.log("[api] \(line)")
+        }
+        return ctl
+    }()
 
     /// Cached PBKDF2 output held while the session is unlocked. Kept private
     /// and zeroized on every lock path (manual lock, app background, app
@@ -72,12 +92,17 @@ final class RunnerViewModel: ObservableObject {
 
     deinit {
         for o in notificationObservers { NotificationCenter.default.removeObserver(o) }
+        // MAC6: shut the sidecar before the unlock material is zeroized so the
+        // host process never outlives an unlocked session.
+        hostController.shutdown()
         unlockMaterial?.zeroize()
     }
 
     /// Lock-on-background and lock-on-terminate so the derived AES key never
     /// outlives the user's active session. Manual lock is wired through
-    /// `lockSession()`.
+    /// `lockSession()`. The Network Mode sidecar (MAC6) shuts down on the
+    /// same set of events so the LAN API never serves traffic with a key
+    /// that has already been zeroized.
     private func registerLifecycleHooks() {
         let nc = NotificationCenter.default
         notificationObservers.append(nc.addObserver(
@@ -184,6 +209,18 @@ final class RunnerViewModel: ObservableObject {
     /// Zeroes the cached UnlockMaterial and drops the in-memory plaintext.
     /// Safe to call when no session is unlocked.
     func lockSession(reason: String = "Locked") {
+        // MAC6: tear the LAN API down BEFORE we zero the unlock material so
+        // the sidecar can never serve requests using a config whose API key
+        // has been wiped from this side. We always call shutdown() (it's a
+        // no-op if the host is stopped) and clear the toggle/status.
+        let wasNetworkOn = networkModeEnabled
+        if wasNetworkOn {
+            hostController.shutdown()
+            networkModeEnabled = false
+            networkApiBaseUrl = nil
+            networkApiStatus = "API stopped"
+        }
+
         guard unlockMaterial != nil || portableConfig != nil else { return }
         unlockMaterial?.zeroize()
         unlockMaterial = nil
@@ -195,6 +232,75 @@ final class RunnerViewModel: ObservableObject {
             status = "Encrypted SSD locked"
         }
         log(reason)
+    }
+
+    /// MAC6: Toggle the LAN API sidecar host on or off. Reads the in-memory
+    /// PortableConfig dictionary (so unlock material never touches disk) and
+    /// hands it to the spawned process via stdin.
+    func setNetworkMode(enabled: Bool) {
+        if enabled {
+            startNetworkMode()
+        } else {
+            stopNetworkMode(reason: "User toggled Network Mode off")
+        }
+    }
+
+    private func startNetworkMode() {
+        guard let root = ssdRoot else {
+            networkApiStatus = "Select an SSD root first"
+            networkModeEnabled = false
+            return
+        }
+
+        guard let config = portableConfig else {
+            networkApiStatus = "Unlock the SSD before enabling Network Mode"
+            networkModeEnabled = false
+            log("Network Mode refused: portable-config not loaded.")
+            return
+        }
+
+        let host = "127.0.0.1:\(hostPort)"
+        do {
+            networkApiStatus = "Starting API…"
+            try hostController.start(ssdRoot: root, ollamaHost: host, config: config)
+            networkModeEnabled = true
+            log("Network Mode: spawned mac-runner-host.")
+        } catch {
+            networkModeEnabled = false
+            networkApiBaseUrl = nil
+            networkApiStatus = "API failed: \(error.localizedDescription)"
+            log("Network Mode start failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func stopNetworkMode(reason: String) {
+        hostController.shutdown()
+        networkModeEnabled = false
+        networkApiBaseUrl = nil
+        networkApiStatus = "API stopped"
+        log("Network Mode: \(reason)")
+    }
+
+    private func handleHostStatusChange(_ status: MacRunnerHostController.Status) {
+        switch status {
+        case .stopped:
+            networkApiBaseUrl = nil
+            networkApiStatus = "API stopped"
+            // If a stop wasn't user-initiated, drop the toggle too.
+            if networkModeEnabled {
+                networkModeEnabled = false
+            }
+        case .starting:
+            networkApiStatus = "Starting API…"
+        case .running(let baseUrl):
+            networkApiBaseUrl = baseUrl
+            networkApiStatus = "API: \(baseUrl)"
+        case .crashed(let message):
+            networkApiBaseUrl = nil
+            networkModeEnabled = false
+            networkApiStatus = "API host crashed: \(message)"
+            log("Mac runner host crashed: \(message)")
+        }
     }
 
     /// Mutates the in-memory plaintext config and writes it back through the
@@ -411,6 +517,21 @@ struct ContentView: View {
             TextEditor(text: $vm.prompt).frame(height: 120)
             Button("Send") { vm.sendPrompt() }
             TextEditor(text: $vm.response).frame(height: 200)
+
+            // MAC6: Network Mode toggle. Spawns the net8.0 sidecar on switch-on
+            // and tears it down on switch-off / Lock / app exit.
+            Divider()
+            HStack {
+                Toggle("Network Mode (LAN API)", isOn: Binding(
+                    get: { vm.networkModeEnabled },
+                    set: { newValue in vm.setNetworkMode(enabled: newValue) }
+                ))
+                .disabled(vm.isEncryptedLocked)
+                Spacer()
+                Text(vm.networkApiStatus)
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+            }
         }
         .padding(16)
         .frame(minWidth: 720, minHeight: 560)

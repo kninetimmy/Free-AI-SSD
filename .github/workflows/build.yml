@@ -145,6 +145,7 @@ jobs:
             prep-app/bin/Release/net8.0-windows/runner-publish
             out/windows/tools/prereqs
             out/mac/tools/ollama
+            out/mac/runner-host
             docs/QUICKSTART.txt
             LICENSE
 
@@ -153,6 +154,9 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
+        with:
+          global-json-file: global.json
       - name: Run Swift unit tests (SsdEncryption)
         # MAC5: smoke-test the Swift port of SsdEncryption (PBKDF2-SHA256
         # vector, AES-GCM roundtrip, two-file atomic commit, plaintext
@@ -163,10 +167,121 @@ jobs:
           mkdir -p out
           swiftc mac-runner/Sources/SsdEncryption.swift mac-runner/Tests/SsdEncryptionTests.swift             -parse-as-library             -target "arm64-apple-macos11.0"             -O             -o out/ssd-encryption-tests
           FREE_AI_SSD_REPO="$GITHUB_WORKSPACE" out/ssd-encryption-tests
+      - name: Publish mac-runner-host (osx-arm64 self-contained single-file)
+        # MAC6: build the net8.0 sidecar host so the Swift Runner.app can spawn
+        # it. Self-contained so end users don't need a system .NET 8 install
+        # — the SSD payload is the source of truth. PublishTrimmed=false is
+        # set in the csproj because RunnerCore minimal-API endpoint
+        # registration relies on reflection that PublishTrimmed silently
+        # breaks.
+        run: |
+          dotnet publish mac-runner-host/FreeAiSsd.MacRunnerHost.csproj             -c Release -r osx-arm64 --self-contained true             /p:PublishSingleFile=true
+      - name: Build runner-core + runner-cli (cross-platform sanity)
+        # MAC6: confirm the platform-neutral .NET surface compiles on macOS
+        # so any future RAG / streaming / CLI work catches portability
+        # regressions at this gate. We do NOT build the full solution
+        # because prep-app/runner/companion are net8.0-windows and need
+        # Windows targeting packs that don't ship for macOS.
+        run: |
+          dotnet build runner-core/FreeAiSsd.RunnerCore.csproj -c Release --verbosity minimal
+          dotnet build runner-cli/FreeAiSsd.RunnerCli.csproj -c Release --verbosity minimal
+          dotnet build mac-runner-host/FreeAiSsd.MacRunnerHost.csproj -c Release --verbosity minimal
+      - name: Run mac-runner-host smoke (spawn binary; /api/health + /api/chat)
+        # MAC6: end-to-end smoke that spawns the published mac-runner-host,
+        # writes a known handshake on stdin, hits /api/health and /api/chat
+        # over loopback, and asserts the host exits cleanly when stdin
+        # closes. Uses jq + curl rather than a shim xUnit project to keep
+        # the Mac CI footprint small (the full tests project pulls in WPF
+        # runner / prep-app sources via Compile Include and won't build on
+        # macOS).
+        run: |
+          set -euo pipefail
+          HOST_BIN="$GITHUB_WORKSPACE/mac-runner-host/bin/Release/net8.0/osx-arm64/publish/FreeAiSsd.MacRunnerHost"
+          if [ ! -x "$HOST_BIN" ]; then
+            echo "Published mac-runner-host not found at $HOST_BIN" >&2
+            exit 1
+          fi
+
+          WORK="$(mktemp -d)"
+          mkdir -p "$WORK/logs" "$WORK/config"
+
+          # Pick a high random port. Loopback bind so concurrent runs are isolated.
+          # Range 50000-59999 keeps clear of the IANA registered range.
+          PORT=$(( ( RANDOM % 10000 ) + 50000 ))
+          echo "Smoke port: $PORT"
+
+          HANDSHAKE="{ \"ssdRoot\": \"$WORK\", \"ollamaHost\": \"127.0.0.1:11434\", \"config\": { \"networkModeEnabled\": true, \"networkBindAddress\": \"127.0.0.1\", \"networkPort\": $PORT, \"networkRequireApiKey\": false, \"networkApiKey\": \"\", \"networkAllowTts\": false, \"networkAllowRemoteStt\": false, \"networkAllowRemoteVoiceQuery\": false, \"networkMaxAudioUploadMB\": 10, \"models\": [{\"name\":\"phi3\",\"status\":\"Installed\"}] } }"
+
+          STDOUT_LOG="$WORK/host-stdout.log"
+          STDERR_LOG="$WORK/host-stderr.log"
+
+          # Pipe handshake on stdin, hold stdin open with `cat` so we can
+          # send shutdown later. Use a FIFO for control of stdin.
+          FIFO="$WORK/stdin.fifo"
+          mkfifo "$FIFO"
+          # Keep FIFO open; we'll cat the handshake then later "shutdown".
+          ( "$HOST_BIN" --test-mode <"$FIFO" >"$STDOUT_LOG" 2>"$STDERR_LOG" ) &
+          HOST_PID=$!
+
+          # Open FIFO writer and keep it open via fd 9.
+          exec 9>"$FIFO"
+          printf '%s\n' "$HANDSHAKE" >&9
+
+          # Wait for "ready: <baseUrl>" on stdout.
+          BASE_URL=""
+          for i in $(seq 1 60); do
+            if [ -f "$STDOUT_LOG" ] && grep -q '^ready: ' "$STDOUT_LOG"; then
+              BASE_URL="$(grep '^ready: ' "$STDOUT_LOG" | head -n1 | sed 's/^ready: //')"
+              break
+            fi
+            sleep 0.5
+          done
+
+          if [ -z "$BASE_URL" ]; then
+            echo "Host never reported ready. stderr:" >&2
+            cat "$STDERR_LOG" >&2 || true
+            kill "$HOST_PID" 2>/dev/null || true
+            exit 1
+          fi
+          echo "Host ready at $BASE_URL"
+
+          curl -fsS "$BASE_URL/api/health" | tee "$WORK/health.json"
+          curl -fsS -H 'Content-Type: application/json' -d '{"model":"phi3","prompt":"ping"}' "$BASE_URL/api/chat" | tee "$WORK/chat.json"
+          grep -q 'test-mode' "$WORK/chat.json"
+
+          # Clean shutdown via stdin.
+          printf 'shutdown\n' >&9
+          exec 9>&-
+
+          # Wait for graceful exit.
+          for i in $(seq 1 20); do
+            if ! kill -0 "$HOST_PID" 2>/dev/null; then break; fi
+            sleep 0.25
+          done
+          if kill -0 "$HOST_PID" 2>/dev/null; then
+            echo "Host did not exit after shutdown" >&2
+            kill "$HOST_PID" 2>/dev/null || true
+            exit 1
+          fi
+          wait "$HOST_PID" || EXIT=$?
+          : "${EXIT:=0}"
+          if [ "$EXIT" -ne 0 ]; then
+            echo "Host exited with non-zero status: $EXIT" >&2
+            cat "$STDERR_LOG" >&2 || true
+            exit 1
+          fi
+          echo "MAC6 host smoke passed."
       - name: Build Runner.app bundle
         run: |
           mkdir -p out/Runner.app/Contents/MacOS out/Runner.app/Contents/Resources
-          swiftc mac-runner/Sources/SsdEncryption.swift mac-runner/Sources/main.swift             -parse-as-library             -target "arm64-apple-macos11.0"             -O             -o out/Runner.app/Contents/MacOS/Runner             -framework SwiftUI             -framework AppKit
+          swiftc mac-runner/Sources/SsdEncryption.swift mac-runner/Sources/MacRunnerHostController.swift mac-runner/Sources/main.swift             -parse-as-library             -target "arm64-apple-macos11.0"             -O             -o out/Runner.app/Contents/MacOS/Runner             -framework SwiftUI             -framework AppKit
+          # Bundle the published mac-runner-host binary into Resources/runner-host/
+          # so the Swift app can locate it via Bundle.main.resourceURL when the
+          # Runner.app is launched directly (e.g. dev or ad-hoc test). The SSD
+          # production layout still places the host under <ssdRoot>/mac/runner-host/.
+          mkdir -p out/Runner.app/Contents/Resources/runner-host
+          cp -R mac-runner-host/bin/Release/net8.0/osx-arm64/publish/* out/Runner.app/Contents/Resources/runner-host/
+          chmod +x out/Runner.app/Contents/Resources/runner-host/FreeAiSsd.MacRunnerHost
           cat > out/Runner.app/Contents/Info.plist <<'PLIST'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -292,13 +407,19 @@ jobs:
             New-Item -ItemType Directory -Path (Join-Path $betaRoot "payload/mac") -Force | Out-Null
             Copy-Item "in/mac/Runner.app.zip" (Join-Path $betaRoot "payload/mac/Runner.app.zip") -Force
             Copy-Item "in/windows/out/mac/tools" (Join-Path $betaRoot "payload/mac/tools") -Recurse -Force
+            # MAC6: ship the cross-published net8.0 sidecar host alongside Runner.app.
+            # The Swift app resolves the binary via this path on a staged SSD.
+            if (Test-Path "in/windows/out/mac/runner-host") {
+              Copy-Item "in/windows/out/mac/runner-host" (Join-Path $betaRoot "payload/mac/runner-host") -Recurse -Force
+            }
 
             $macManifest = [ordered]@{
               schemaVersion = 1
               artifacts = @(
                 [ordered]@{ id = "mac_runner"; relativePath = "mac/Runner.app.zip" },
                 [ordered]@{ id = "mac_ollama"; relativePath = "mac/tools/ollama/ollama-darwin.zip" },
-                [ordered]@{ id = "mac_ollama_manifest"; relativePath = "mac/tools/ollama/mac-tools-manifest.json" }
+                [ordered]@{ id = "mac_ollama_manifest"; relativePath = "mac/tools/ollama/mac-tools-manifest.json" },
+                [ordered]@{ id = "mac_runner_host"; relativePath = "mac/runner-host/FreeAiSsd.MacRunnerHost" }
               )
             }
             $macManifest | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $betaRoot "payload/mac/mac-artifacts.manifest.json") -Encoding UTF8

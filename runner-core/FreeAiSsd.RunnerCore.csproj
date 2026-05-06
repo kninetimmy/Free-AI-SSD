@@ -12,4 +12,28 @@
   <ItemGroup>
     <ProjectReference Include="..\shared\FreeAiSsd.Shared.csproj" />
   </ItemGroup>
+
+  <!--
+    MAC6: ship runner-core's wwwroot/ alongside the assembly so any host that
+    references RunnerCore (Windows WPF Runner publish, Mac sidecar publish)
+    serves the same static-file root. The folder is committed empty in
+    MAC6; the X4 backlog item will populate it with SPA assets, at which
+    point Kestrel begins serving /chat/index.html on both platforms with
+    no Mac-specific code path.
+  -->
+  <!--
+    Use Content rather than None so the items flow to the publish output of any
+    project that references runner-core (Windows runner/, Mac mac-runner-host/).
+    Without this, wwwroot/ would only land in runner-core's own bin/ and the
+    referencing publishes would be empty. We deliberately do NOT exclude
+    .gitkeep so a wwwroot/ directory always materializes in output even
+    when X4 has shipped no SPA assets yet — that keeps the runtime
+    static-file middleware path uniform across builds.
+  -->
+  <ItemGroup>
+    <Content Include="wwwroot\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
 </Project>

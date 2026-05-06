@@ -6,7 +6,9 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 
 namespace FreeAiSsd.Runner.Services;
@@ -74,6 +76,29 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         });
 
         var app = builder.Build();
+
+        // Static-file plumbing for the future X4 SPA (web chat UI). When the
+        // host's content root contains a wwwroot/ directory we serve it via
+        // ASP.NET's default-files + static-files middleware so the same Mac
+        // and Windows Kestrel can serve /chat/ once X4 ships its assets.
+        // No assets are bundled in MAC6 — the directory is created empty so
+        // builds carry it; if a host has zero SPA files the middleware
+        // falls through cleanly and the API endpoints below behave as before.
+        var wwwroot = ResolveWwwroot(_ssdRoot);
+        if (wwwroot is not null)
+        {
+            var fileProvider = new PhysicalFileProvider(wwwroot);
+            app.UseDefaultFiles(new DefaultFilesOptions
+            {
+                FileProvider = fileProvider,
+                RequestPath = string.Empty
+            });
+            app.UseStaticFiles(new StaticFileOptions
+            {
+                FileProvider = fileProvider,
+                RequestPath = string.Empty
+            });
+        }
 
         app.Use(async (context, next) =>
         {
@@ -386,6 +411,33 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
     public async ValueTask DisposeAsync()
     {
         await StopAsync();
+    }
+
+    /// <summary>
+    /// Resolves the wwwroot directory served by the static-file middleware.
+    /// Probe order:
+    /// 1. <paramref name="ssdRoot"/>/wwwroot — used by tests that stage a
+    ///    throwaway directory and pass it via the constructor's
+    ///    <c>ssdRoot</c> parameter, so multiple parallel tests do not
+    ///    contend on a shared <see cref="AppContext.BaseDirectory"/>.
+    /// 2. <see cref="AppContext.BaseDirectory"/>/wwwroot — the canonical
+    ///    production location alongside the published assembly.
+    /// Returns null when no wwwroot directory exists so callers can skip
+    /// the static-file middleware entirely.
+    /// </summary>
+    private static string? ResolveWwwroot(string ssdRoot)
+    {
+        if (!string.IsNullOrWhiteSpace(ssdRoot))
+        {
+            var ssdLocal = Path.Combine(ssdRoot, "wwwroot");
+            if (Directory.Exists(ssdLocal))
+            {
+                return ssdLocal;
+            }
+        }
+
+        var baseLocal = Path.Combine(AppContext.BaseDirectory, "wwwroot");
+        return Directory.Exists(baseLocal) ? baseLocal : null;
     }
 
     private static async Task WriteNdjsonAsync(HttpResponse response, object payload, CancellationToken ct)
