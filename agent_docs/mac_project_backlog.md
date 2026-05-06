@@ -804,7 +804,7 @@ notarization) since both touch Info.plist + bundle layout.
 
 ### MAC16 - Extract PrepApp core to `prep-core/`
 
-**Status:** planned
+**Status:** done 2026-05-06 (PR #191, merged `6e2eb39`)
 **Scope:** service extraction (mirrors MAC3 pattern for PrepApp)
 **Risk:** Low
 **Goal:** Move platform-neutral PrepApp business logic out of the WPF
