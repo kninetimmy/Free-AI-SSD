@@ -381,7 +381,7 @@ fails Windows CI immediately.
 
 ### MAC6 - Mac local API host, Companion compatibility, and X4 web UI surface
 
-**Status:** planned
+**Status:** done 2026-05-06
 **Scope:** Mac host service
 **Risk:** Medium
 **Goal:** Run the Runner API on macOS for health, models, non-streaming chat,
@@ -389,28 +389,28 @@ fails Windows CI immediately.
   the Windows Companion connects to it over LAN, and X4's web chat UI is
   served from the same Mac Kestrel without a separate Mac UI track.
 
-**Likely files:**
-- Extracted `RunnerLocalApiService` / endpoint host (already in `runner-core/`
-  after MAC3).
-- `runner-cli/*` tests against Mac-compatible host.
-- `companion/*` connection path validated against a Mac-hosted Runner.
-- Mac launcher/host wiring; `mac/Runner.app` packaging includes RunnerCore
-  static assets when X4 ships.
+**Outcome:** PR #181 (`3557f9c`) added `mac-runner-host/`, a self-contained
+net8.0 osx-arm64 sidecar spawned by the Swift runner. The sidecar hosts the
+same `RunnerLocalApiService` used by Windows and receives the unlocked
+PortableConfig over stdin so Mac encrypted-config IO remains Swift-owned.
+Swift Network Mode starts/stops the sidecar with app lifecycle events. Mac CI
+publishes the host, runs a smoke against `/api/health` and `/api/chat`, and
+bundles the host into `Runner.app/Contents/Resources/runner-host/`. RunnerCore
+now wires static-file middleware so future X4 assets under
+`runner-core/wwwroot/chat/` are served by both Windows and Mac hosts.
 
-**Acceptance criteria:**
-- `FreeAiSsd.RunnerCli` can connect to a Mac-hosted Runner API.
-- `/api/health`, `/api/models`, `/api/chat`, `/api/chat/stream` work.
-- API key behavior matches Windows.
-- Windows Companion can discover and connect to a Mac-hosted Runner over
-  LAN with the same handshake/auth as Windows-to-Windows.
-- When X4 lands, the static `/chat/` route is served by the Mac Kestrel
-  with no Mac-specific code path â€” it follows from RunnerCore bundling.
+**Deferred gaps:**
+- Real-Mac Windows Companion -> Mac Runner LAN smoke with Bearer auth,
+  `/api/health`, and `/api/chat`.
+- Network Mode toggle with real Ollama serving a real model end-to-end.
+- RAG-backed chat and citations; this is MAC7.
 
 **Tests:**
-- API endpoint tests.
-- RunnerCli streaming/non-streaming tests against a Mac host.
-- Windows Companion -> Mac Runner integration smoke (LAN handshake,
-  health, chat).
+- Mac CI sidecar smoke (spawn binary, handshake, `/api/health`, `/api/chat`,
+  clean shutdown).
+- RunnerLocalApi static-file tests.
+- PR #181 follow-up branch adds regressions for disabled Network Mode startup
+  and SSD-root `wwwroot` shadowing.
 
 ---
 

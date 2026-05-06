@@ -20,6 +20,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
     private readonly ITtsProvider _ttsProvider;
     private readonly SsdLogger? _logger;
     private readonly string _ssdRoot;
+    private readonly string? _staticFilesRoot;
     private readonly SemaphoreSlim _sttInitGate = new(1, 1);
     private readonly SemaphoreSlim _sttTranscribeGate = new(1, 1);
     private WebApplication? _app;
@@ -29,13 +30,15 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         ISpeechToTextService sttService,
         ITtsProvider ttsProvider,
         SsdLogger? logger,
-        string? ssdRoot = null)
+        string? ssdRoot = null,
+        string? staticFilesRoot = null)
     {
         _chatService = chatService;
         _sttService = sttService;
         _ttsProvider = ttsProvider;
         _logger = logger;
         _ssdRoot = string.IsNullOrWhiteSpace(ssdRoot) ? AppContext.BaseDirectory : ssdRoot;
+        _staticFilesRoot = string.IsNullOrWhiteSpace(staticFilesRoot) ? null : staticFilesRoot;
     }
 
     public event Action<string>? LogMessage;
@@ -84,7 +87,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         // No assets are bundled in MAC6 — the directory is created empty so
         // builds carry it; if a host has zero SPA files the middleware
         // falls through cleanly and the API endpoints below behave as before.
-        var wwwroot = ResolveWwwroot(_ssdRoot);
+        var wwwroot = ResolveWwwroot(_staticFilesRoot);
         if (wwwroot is not null)
         {
             var fileProvider = new PhysicalFileProvider(wwwroot);
@@ -414,26 +417,16 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
     }
 
     /// <summary>
-    /// Resolves the wwwroot directory served by the static-file middleware.
-    /// Probe order:
-    /// 1. <paramref name="ssdRoot"/>/wwwroot — used by tests that stage a
-    ///    throwaway directory and pass it via the constructor's
-    ///    <c>ssdRoot</c> parameter, so multiple parallel tests do not
-    ///    contend on a shared <see cref="AppContext.BaseDirectory"/>.
-    /// 2. <see cref="AppContext.BaseDirectory"/>/wwwroot — the canonical
-    ///    production location alongside the published assembly.
-    /// Returns null when no wwwroot directory exists so callers can skip
-    /// the static-file middleware entirely.
+    /// Resolves the wwwroot directory served by the static-file middleware. In
+    /// production this is the published app/content root alongside the assembly;
+    /// tests may inject a throwaway root so they do not contend on a shared
+    /// <see cref="AppContext.BaseDirectory"/>.
     /// </summary>
-    private static string? ResolveWwwroot(string ssdRoot)
+    private static string? ResolveWwwroot(string? staticFilesRoot)
     {
-        if (!string.IsNullOrWhiteSpace(ssdRoot))
+        if (!string.IsNullOrWhiteSpace(staticFilesRoot))
         {
-            var ssdLocal = Path.Combine(ssdRoot, "wwwroot");
-            if (Directory.Exists(ssdLocal))
-            {
-                return ssdLocal;
-            }
+            return Directory.Exists(staticFilesRoot) ? staticFilesRoot : null;
         }
 
         var baseLocal = Path.Combine(AppContext.BaseDirectory, "wwwroot");

@@ -19,6 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\mac-runner-host\FreeAiSsd.MacRunnerHost.csproj" />
     <ProjectReference Include="..\runner-core\FreeAiSsd.RunnerCore.csproj" />
     <ProjectReference Include="..\shared\FreeAiSsd.Shared.csproj" />
   </ItemGroup>

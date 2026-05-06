@@ -626,3 +626,15 @@ with no Mac-specific code path.
 document management endpoints (MAC8), Mac-native PrepApp (MAC17), and
 the actual X4 SPA implementation. The host serves chat without a
 populated library (RAG-off path) until MAC7 lands.
+
+---
+
+## 2026-05-06 — Review follow-up fixes use a separate PR
+
+When a merged PR review turns up follow-up bugs or cleanup, implement those
+fixes on a separate branch/PR rather than continuing on the merged feature
+branch. This keeps the original shipped PR history clean, gives CI and review
+a distinct target for the follow-up, and makes it obvious which changes were
+part of the original feature versus post-merge hardening. The local PR #181
+follow-up fixes from 2026-05-06 are a one-time exception; apply this rule to
+future reviews after that.
