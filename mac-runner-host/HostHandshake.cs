@@ -26,7 +26,9 @@ internal sealed record HostHandshake(string SsdRoot, string OllamaHost, Portable
 
     public static HostHandshake Parse(string json)
     {
-        var doc = JsonDocument.Parse(json);
+        // JsonDocument owns pooled buffers — dispose explicitly so a malformed
+        // handshake doesn't leak ArrayPool slots in the host's startup path.
+        using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
         if (!root.TryGetProperty("ssdRoot", out var ssdRootEl) || ssdRootEl.ValueKind != JsonValueKind.String)

@@ -25,10 +25,13 @@
     Use Content rather than None so the items flow to the publish output of any
     project that references runner-core (Windows runner/, Mac mac-runner-host/).
     Without this, wwwroot/ would only land in runner-core's own bin/ and the
-    referencing publishes would be empty.
+    referencing publishes would be empty. We deliberately do NOT exclude
+    .gitkeep so a wwwroot/ directory always materializes in output even
+    when X4 has shipped no SPA assets yet — that keeps the runtime
+    static-file middleware path uniform across builds.
   -->
   <ItemGroup>
-    <Content Include="wwwroot\**\*" Exclude="wwwroot\**\.gitkeep">
+    <Content Include="wwwroot\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
