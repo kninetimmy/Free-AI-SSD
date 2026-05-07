@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using FreeAiSsd.Shared;
 using Xunit;
 
 namespace FreeAiSsd.Tests;
@@ -115,6 +116,70 @@ public sealed class MacPrepHostSmokeTests
         Assert.Equal(0, exitCode);
         Assert.Contains("Unknown command", stderr.ToString());
         Assert.Contains("result: readiness", stdout.ToString());
+    }
+
+    [Fact]
+    public async Task HostRunner_EnsureStructure_CreatesEverySsdLayoutDirectory()
+    {
+        // MAC17b drift-pin: when SsdLayout grows a new directory on the
+        // C# side, this test fails until the expected[] list below is
+        // updated — surfacing the change instead of silently shipping
+        // Mac-prepped drives missing the new directory.
+        using var workdir = new TempDir("freeai-mac17b-ensure-");
+        // logs/ + config/ pre-created so SsdLogger and any other
+        // construction-time IO succeeds; ensure-structure must still
+        // create them idempotently and add everything else.
+        Directory.CreateDirectory(Path.Combine(workdir.Path, "logs"));
+        Directory.CreateDirectory(Path.Combine(workdir.Path, "config"));
+
+        var handshake = JsonSerializer.Serialize(new { ssdRoot = workdir.Path });
+
+        var inputBuilder = new System.Text.StringBuilder();
+        inputBuilder.AppendLine(handshake);
+        inputBuilder.AppendLine("ensure-structure");
+        inputBuilder.AppendLine("shutdown");
+
+        using var stdin = new StringReader(inputBuilder.ToString());
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await FreeAiSsd.MacPrepHost.HostRunner.RunAsync(
+            stdin, stdout, stderr, new[] { "--test-mode" });
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("result: ensure-structure", stdout.ToString());
+
+        // Every relative directory SsdLayout declares must exist on
+        // disk. Keep this list explicit (don't reflect over SsdLayout's
+        // constants) — the failure mode pinned here is "C# adds a dir,
+        // Mac PrepApp silently doesn't ship it", which a reflection-based
+        // test would silently track around.
+        var expected = new[]
+        {
+            SsdLayout.Windows,
+            SsdLayout.WindowsTools,
+            SsdLayout.WindowsOllama,
+            SsdLayout.WindowsPrereqs,
+            SsdLayout.WindowsRunner,
+            SsdLayout.Mac,
+            SsdLayout.MacTools,
+            SsdLayout.MacOllama,
+            SsdLayout.Models,
+            SsdLayout.Blobs,
+            SsdLayout.WhisperModels,
+            SsdLayout.Config,
+            SsdLayout.Logs,
+            SsdLayout.Cache,
+            SsdLayout.Docs,
+            SsdLayout.DocLibraries,
+        };
+
+        foreach (var rel in expected)
+        {
+            Assert.True(
+                Directory.Exists(Path.Combine(workdir.Path, rel)),
+                $"Expected SsdLayout directory '{rel}' to exist after ensure-structure.");
+        }
     }
 
     [Fact]

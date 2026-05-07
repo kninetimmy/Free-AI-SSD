@@ -205,24 +205,17 @@ final class PrepViewModel: ObservableObject {
         isBusy = true
         defer { isBusy = false }
 
-        // Lay down the SSD layout. SsdLayout lives in shared/ which is C# —
-        // Swift creates the directory tree directly via FileManager. Keep
-        // the tree shape in sync with shared/SsdLayout.cs's EnsureStructure.
-        let macSubdirs = [
-            "windows", "windows/tools", "windows/tools/ollama",
-            "windows/tools/prereqs", "windows/runner",
-            "mac", "mac/tools", "mac/tools/ollama",
-            "models", "models/blobs", "models/whisper",
-            "config", "logs", "cache", "docs", "docs/libraries",
-        ]
+        // logs/ has to exist before the sidecar starts so its SsdLogger
+        // can open a log file at construction time; everything else in
+        // the SSD layout is laid down by the sidecar's ensure-structure
+        // command (which delegates to shared/SsdLayout.cs's
+        // EnsureStructure — single source of truth across C# and Swift).
         do {
-            for sub in macSubdirs {
-                let dir = mount.appendingPathComponent(sub)
-                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            }
-            appendLog("SSD layout created.")
+            try FileManager.default.createDirectory(
+                at: mount.appendingPathComponent("logs"),
+                withIntermediateDirectories: true)
         } catch {
-            currentStep = .failed(message: "Failed to create SSD layout: \(error.localizedDescription)")
+            currentStep = .failed(message: "Failed to create logs directory: \(error.localizedDescription)")
             return
         }
 
@@ -231,6 +224,15 @@ final class PrepViewModel: ObservableObject {
             try await hostController.startAndWaitReady(ssdRoot: mount)
         } catch {
             currentStep = .failed(message: "Sidecar startup failed: \(error.localizedDescription)")
+            return
+        }
+
+        // Lay down the rest of the SSD layout via the sidecar.
+        do {
+            _ = try await hostController.send("ensure-structure")
+            appendLog("SSD layout created.")
+        } catch {
+            currentStep = .failed(message: "Failed to create SSD layout: \(error.localizedDescription)")
             return
         }
 
