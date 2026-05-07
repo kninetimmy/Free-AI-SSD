@@ -98,11 +98,16 @@ final class EncryptedConfigWriter {
                 iterations: SsdEncryptionConstants.pbkdf2Iterations,
                 keyBytes: SsdEncryptionConstants.keyBytes)
 
+            // The scheme MUST be SsdEncryptionConstants.schemeName so the
+            // C# unlock path accepts the blob (asserted via the
+            // MacEncryptedConfigCrossLanguageTests cross-language fixture
+            // test). Hardcoding a different value here would silently
+            // ship blobs that Windows Runner refuses.
             let material = UnlockMaterial(
                 derivedKey: derivedKey,
                 salt: salt,
                 iterations: SsdEncryptionConstants.pbkdf2Iterations,
-                scheme: "pbkdf2-sha256")
+                scheme: SsdEncryptionConstants.schemeName)
 
             // Defense-in-depth: zeroize the derived key the moment the
             // write returns, regardless of success/failure. The
