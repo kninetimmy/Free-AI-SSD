@@ -237,11 +237,11 @@ No "list documents" or "reindex" endpoint exists today. See Stage 2.
 
 ### F2 â€” Live model list fetch (HuggingFace / Ollama library)
 
-**Status:** triaged
-**Scope:** One-shot for v1
+**Status:** triaged. **Execution prompt drafted 2026-05-07** at `agent_docs/f2_execution_prompt.md` — covers cross-OS bundle-vs-split decision (default bundle Windows + Mac, fallback split as F2/F2a if Mac UI surface balloons), prep-core service shape (`LiveModelCatalogService` plain net8.0 + `LiveCatalogResult` + URL allowlist + 10s timeout), source-choice design moment to resolve at execution start (Ollama list-API likely HTML-only at `ollama.com/library`; HF `/api/models?filter=gguf` as fallback primary), Windows wiring (`RefreshCatalogCommand` + WPF button), Mac wiring (`mac-prep-host` `refresh-catalog` stdin command + Swift `refreshCatalog()`), tests, security posture, out-of-scope. Cross-platform from the start per the cross-OS parity rule (`project_decisions.md` 2026-05-07).
+**Scope:** One-shot for v1 (cross-platform). Split as F2/F2a if Mac UI surface needs >~30 lines of Swift restructure or sidecar protocol needs new payload shape.
 **Model:** Sonnet 4.6
 
-**Existence:** Current catalog loads from `prep-app/Resources/starter-models.json` with an embedded fallback (`StarterModelCatalogLoader.Load`). Not hardcoded as TODO states â€” **correction: it's JSON-file-based already**, just not live-fetched.
+**Existence:** Current catalog loads from `prep-core/Resources/starter-models.json` (moved from `prep-app/` in MAC16; both Windows PrepApp and `mac-prep-host` consume it via the shared `StarterModelCatalogLoader.Load` chain). Not hardcoded as the original TODO suggested â€” **correction: it's JSON-file-based already**, just not live-fetched.
 
 **Affected files:**
 - `prep-app/StarterModelCatalog.cs` â€” add `LoadFromNetworkAsync` path with fallback to existing file/embedded loaders

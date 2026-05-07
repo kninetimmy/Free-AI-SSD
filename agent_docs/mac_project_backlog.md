@@ -1003,13 +1003,27 @@ isn't fighting an in-flight threading change.
 
 ### MAC18 - Cross-platform prep compatibility docs
 
-**Status:** planned
+**Status:** done 2026-05-07 (PR #200 merged at `5f4a8f3`)
 **Scope:** docs / release matrix
 **Risk:** Low
 **Dependencies:** MAC17 ships first so the matrix isn't aspirational.
 **Goal:** Document the source/target compatibility matrix so users know
   which OS to run prep from for which target. Make NTFS-only-from-Windows
   and APFS-only-from-Mac explicit OS limits, not project gaps.
+
+**Outcome:** PR #200 merged at `5f4a8f3`. Pure docs (`README.md` +
+`docs/QUICKSTART.txt` + `agent_docs/project_decisions.md`); no
+runtime / CI / fixture changes. README gained a new
+`Source/Target compatibility` subsection (anchor
+`#sourcetarget-compatibility`), a `Cross-platform PrepApp`
+feature row, parallel Mac walkthrough in Phase 1, and project
+structure table updates for `runner-core/`, `prep-core/`,
+`mac-prep-app/`, `mac-prep-host/`, `mac-runner-host/`. QUICKSTART
+gained an ASCII matrix block + filesystem-from-target-choice
+rewrite. project_decisions entry locks the matrix and bounds
+scope (no Runner-side beta-framing rewrite — that's MAC15's job
+after MAC11). Held the line on docs-matrix-only per user
+direction. CI green on first run.
 
 **Compatibility matrix to publish:**
 
@@ -1059,25 +1073,42 @@ isn't fighting an in-flight threading change.
 
 ## Recommended Next Step
 
-MAC0-MAC9 are merged. Runner-parity track is complete (Mac runs the same
-RunnerCore business logic via `mac-runner-host` for chat, RAG, and library
-management). MAC9 closed as a docs-only architecture lock-in for the
-Swift thin-UI + .NET sidecar approach. The next Mac items split into
-two tracks:
+**Status as of 2026-05-07:** Mac-track packaging + cross-platform
+prep parity tracks are complete. Specifically:
 
-**Packaging / distribution** (sequence before broader public release):
-- **MAC10a** - Windows PrepApp OS compatibility selector.
-- **MAC10b** - Mac app icon + Info.plist polish.
-- **MAC11** - Signing + notarization.
+- Runner parity: MAC0-MAC9 done. Mac runs the same RunnerCore
+  business logic via `mac-runner-host` for chat, RAG, and library
+  management.
+- Packaging: MAC10a (Windows PrepApp filesystem-from-PrepTargets),
+  MAC10b (shared app icon + Info.plist polish) done.
+- Cross-platform PrepApp parity: MAC16 (`prep-core/` extraction),
+  MAC17 (macOS PrepApp MVP), MAC17a (PR #193 review threading
+  cluster), MAC17b (ensure-structure sidecar), MAC18 (compatibility
+  docs + matrix) all done.
 
-**Cross-platform PrepApp parity** (so a Mac-only user can prep + run
-without owning a Windows machine):
-- **MAC16** - Extract PrepApp core to `prep-core/` (parallels MAC3).
-- **MAC17** - macOS PrepApp MVP (exFAT). Now unblocked from the
-  encrypted-config side (MAC5 done) and from the prep-core side once
-  MAC16 ships.
-- **MAC18** - Cross-platform prep compatibility docs (after MAC17).
+**Only one Mac item remains before a real signed beta cut:**
+- **MAC11** — Signing + notarization. Back-burnered until the
+  user's Apple Developer account renews on payday. MAC10b already
+  landed the bundle metadata (`CFBundleIconFile`,
+  `LSApplicationCategoryType`, `LSRequiresNativeExecution`, etc.)
+  this item depends on, so MAC11 is plumbing-ready when the cert
+  returns.
 
-Beyond those, MAC12 (voice/TTS), MAC13 (HOTAS/PTT decision), and MAC14
-(DCS import on Mac) remain as feature-parity items but aren't on the
-critical path for a supported public Mac release.
+**MAC15 (supported Mac release docs)** is gated on MAC11 — once
+the bundle is signed and notarized, the "macOS beta" framing
+across README + QUICKSTART can be replaced with a real supported
+Mac feature matrix.
+
+**Post-release feature-parity items** that aren't on the critical
+path for the first signed Mac beta:
+- MAC12 (voice / TTS — microphone, STT, TTS adapters).
+- MAC13 (HOTAS / PTT — implement or deliberately defer).
+- MAC14 (DCS import on Mac).
+
+These remain backlog items per MAC1's deferral; pull forward only
+when there is concrete user demand on Mac.
+
+**Next non-Mac active work:** F2 (Live model list fetch) is the
+top of the queue per `agent_docs/project_state.md`. Cross-platform
+from the start — execution prompt drafted at
+`agent_docs/f2_execution_prompt.md`.
