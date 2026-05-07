@@ -1,0 +1,7 @@
+{
+  "enabled" : true,
+  "encryptedConfigFile" : "portable-config.encrypted.json",
+  "iterations" : 210000,
+  "scheme" : "pbkdf2-sha256",
+  "updatedAtUtc" : "2026-05-07T01:39:01.382Z"
+}

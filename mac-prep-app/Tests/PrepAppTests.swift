@@ -21,6 +21,24 @@ import Foundation
 @main
 struct PrepAppTestsMain {
     static func main() {
+        // Subcommand: write a canonical Mac PrepApp encrypted-config
+        // fixture for the cross-language test. Invoked once (or on
+        // deliberate format change) to (re)generate
+        // tests/Fixtures/MacEncryptedConfig/swift-prep-encrypted/.
+        // Mirrors the MAC5 mac-runner Tests' write-fixture subcommand.
+        let args = CommandLine.arguments
+        if args.count >= 3, args[1] == "write-prep-fixture" {
+            let outDir = URL(fileURLWithPath: args[2])
+            do {
+                try writeMac17PrepFixture(outDir: outDir)
+                print("Wrote MAC17 prep fixture to \(outDir.path)")
+                exit(0)
+            } catch {
+                print("MAC17 prep fixture write failed: \(error)")
+                exit(1)
+            }
+        }
+
         let runner = TestRunner()
 
         // MARK: DiskutilFormatCommand parity-pin tests
@@ -112,6 +130,55 @@ struct PrepAppTestsMain {
 
         runner.run()
     }
+}
+
+// MARK: - Fixture writer (cross-language proof)
+//
+// Generates the swift-prep-encrypted fixture under
+// tests/Fixtures/MacEncryptedConfig/swift-prep-encrypted/ via the same
+// EncryptedConfigWriter the SwiftUI flow uses. The fixture is then
+// consumed by the C# MacEncryptedConfigCrossLanguageTests to prove
+// MAC17 PrepApp's first-write payload roundtrips through the Windows
+// Runner. This complements (does not replace) the MAC5 csharp-encrypted/
+// fixture — MAC5 pins the *blob* format, MAC17 pins the *initial-write
+// plaintext shape* (InitialPortableConfigPayload).
+
+// Constants must match the C# test's expected values.
+private let mac17FixturePassword       = "mac17-prep-cross-lang-fixture-pw"
+private let mac17FixtureOllamaPort     = 13577
+private let mac17FixtureNetworkPort    = 41555
+private let mac17FixtureNetworkBind    = "127.0.0.1"
+private let mac17FixturePreferredCompute = "cpu"
+
+func writeMac17PrepFixture(outDir: URL) throws {
+    let fm = FileManager.default
+    // Preserve README.md (and any sibling docs) — only clear the
+    // config/ subdirectory that SsdEncryption.saveEncryptedConfig
+    // writes into. This way `regenerate the fixture` doesn't trash
+    // the README that explains what password unlocks it.
+    let configDir = outDir.appendingPathComponent("config")
+    if fm.fileExists(atPath: configDir.path) {
+        try fm.removeItem(at: configDir)
+    }
+    try fm.createDirectory(at: outDir, withIntermediateDirectories: true)
+
+    // Use a non-default ollamaPort (13577) so the C# unlock test can
+    // distinguish "fixture decoded successfully" from "fixture decoded
+    // empty and PortableConfig defaults filled in 11434." Other fields
+    // stay at their canonical defaults.
+    let payload = InitialPortableConfigPayload(
+        ollamaPort: mac17FixtureOllamaPort,
+        networkModeEnabled: false,
+        networkBindAddress: mac17FixtureNetworkBind,
+        networkPort: mac17FixtureNetworkPort,
+        networkRequireApiKey: true,
+        networkApiKey: "",
+        preferredCompute: mac17FixturePreferredCompute
+    )
+
+    let writer = EncryptedConfigWriter()
+    try writer.writeInitialEncryptedConfig(
+        ssdRoot: outDir, payload: payload, passphrase: mac17FixturePassword)
 }
 
 // MARK: - Test runner harness (mirrors mac-runner/Tests/SsdEncryptionTests.swift)

@@ -30,36 +30,38 @@ enum EncryptedConfigWriterError: Error, LocalizedError {
 }
 
 /// Minimal PortableConfig payload the MAC17 PrepApp emits for the very
-/// first encrypted-config write. Keys mirror shared/PortableConfig.cs's
-/// JSON shape (camelCase). The MAC5 cross-language fixture test pins the
-/// JSON shape; any drift here fails Windows CI.
+/// first encrypted-config write. Field shape mirrors
+/// shared/PortableConfig.cs — only fields PortableConfig actually has.
+/// The MAC17 cross-language fixture test pins this shape; any drift
+/// here fails Windows CI.
+///
+/// Defaults match PortableConfig's defaults so a Windows Runner unlock
+/// of the freshly-prepped SSD reads the same values it would after
+/// constructing a default PortableConfig in C#.
 struct InitialPortableConfigPayload {
-    var ollamaHost: String = "http://127.0.0.1:11434"
-    var defaultModel: String?
+    var ollamaPort: Int = 11434
     var networkModeEnabled: Bool = false
     var networkBindAddress: String = "127.0.0.1"
-    var networkPort: Int = 5800
-    var networkRequireApiKey: Bool = false
+    var networkPort: Int = 41555
+    var networkRequireApiKey: Bool = true
     var networkApiKey: String = ""
+    var preferredCompute: String = "cpu"
 
     /// Render as the `[String: Any]` dictionary SsdEncryption expects.
     /// Keys must stay camelCase — PortableConfig.SaveAsync uses
-    /// JsonNamingPolicy.CamelCase and the cross-language fixture test
-    /// pins this shape.
+    /// JsonNamingPolicy.CamelCase. PortableConfig deserialization is
+    /// permissive, so missing fields take their C# defaults.
     func asDictionary() -> [String: Any] {
-        var dict: [String: Any] = [
-            "ollamaHost": ollamaHost,
+        return [
+            "ollamaPort": ollamaPort,
             "networkModeEnabled": networkModeEnabled,
             "networkBindAddress": networkBindAddress,
             "networkPort": networkPort,
             "networkRequireApiKey": networkRequireApiKey,
             "networkApiKey": networkApiKey,
+            "preferredCompute": preferredCompute,
             "models": [],
         ]
-        if let model = defaultModel, !model.isEmpty {
-            dict["defaultModel"] = model
-        }
-        return dict
     }
 }
 

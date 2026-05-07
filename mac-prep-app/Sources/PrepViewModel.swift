@@ -253,10 +253,7 @@ final class PrepViewModel: ObservableObject {
         }
 
         do {
-            let payload = InitialPortableConfigPayload(
-                ollamaHost: "http://127.0.0.1:11434",
-                defaultModel: selectedStarterModels.first,
-                networkModeEnabled: false)
+            let payload = InitialPortableConfigPayload()
             try encryptedConfigWriter.writeInitialEncryptedConfig(
                 ssdRoot: mount, payload: payload, passphrase: passphrase)
             appendLog("Encrypted config written.")

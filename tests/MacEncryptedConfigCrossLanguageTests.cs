@@ -184,4 +184,101 @@ public sealed class MacEncryptedConfigCrossLanguageTests
         var testsDir = Path.GetDirectoryName(thisFile)!;
         return Path.Combine(testsDir, "Fixtures", "MacEncryptedConfig", "csharp-encrypted");
     }
+
+    // ----------------------------------------------------------------------
+    // MAC17: PrepApp first-write payload fixture
+    //
+    // The mac-prep-app's EncryptedConfigWriter uses the same SsdEncryption
+    // *blob* format pinned above, but writes a different *plaintext* —
+    // InitialPortableConfigPayload, the schema a fresh SSD gets before any
+    // user mutation. These tests prove Windows Runner can decrypt and
+    // deserialize that initial payload.
+    // ----------------------------------------------------------------------
+
+    private const string Mac17PrepFixturePassword = "mac17-prep-cross-lang-fixture-pw";
+    private const int    Mac17PrepFixtureOllamaPort = 13577;
+    private const int    Mac17PrepFixtureNetworkPort = 41555;
+
+    [Fact]
+    public void CSharpUnlock_OnMac17PrepFixture_RecoversInitialPayloadShape()
+    {
+        var fixtureRoot = Mac17PrepFixtureRoot();
+        Assert.True(Directory.Exists(fixtureRoot),
+            $"MAC17 prep fixture missing — regenerate per {Path.Combine(fixtureRoot, "README.md")}.");
+
+        var unlocked = SsdEncryption.TryUnlockPortableConfig(
+            fixtureRoot, Mac17PrepFixturePassword, out var config, out var error);
+
+        Assert.True(unlocked, $"MAC17 prep fixture failed to unlock: {error}");
+        Assert.NotNull(config);
+
+        // The MAC17 InitialPortableConfigPayload writes a strict subset of
+        // PortableConfig fields; the missing ones default. We assert the
+        // ones the writer actively sets so a future Swift-side schema
+        // change fails this test rather than silently producing a config
+        // Windows Runner can't fully read.
+        //
+        // OllamaPort is intentionally non-default (13577 vs 11434) in the
+        // fixture so this assertion can distinguish "fixture decoded" from
+        // "fixture decoded empty + PortableConfig defaults filled in."
+        Assert.Equal(Mac17PrepFixtureOllamaPort, config!.OllamaPort);
+        Assert.False(config.NetworkModeEnabled);
+        Assert.Equal("127.0.0.1", config.NetworkBindAddress);
+        Assert.Equal(Mac17PrepFixtureNetworkPort, config.NetworkPort);
+        Assert.True(config.NetworkRequireApiKey);
+        Assert.Equal("cpu", config.PreferredCompute);
+        Assert.Empty(config.Models);
+    }
+
+    [Fact]
+    public void CSharpUnlock_OnMac17PrepFixture_RejectsWrongPassword()
+    {
+        var fixtureRoot = Mac17PrepFixtureRoot();
+        Assert.True(Directory.Exists(fixtureRoot), "MAC17 prep fixture missing");
+
+        var unlocked = SsdEncryption.TryUnlockPortableConfig(
+            fixtureRoot, "definitely-not-the-mac17-password", out var config, out var error);
+
+        Assert.False(unlocked);
+        Assert.Null(config);
+        Assert.Equal("Incorrect password.", error);
+    }
+
+    [Fact]
+    public void Mac17PrepFixture_StateAndBlob_UseSameFormatAsMac5()
+    {
+        // The MAC17 PrepApp writes via the same SsdEncryption.saveEncryptedConfig
+        // path mac-runner uses, so the blob/state field set must match the
+        // MAC5 fixture exactly. Belt-and-braces guard against a Mac PrepApp
+        // detour that silently emits different keys.
+        var fixtureRoot = Mac17PrepFixtureRoot();
+        var statePath   = Path.Combine(fixtureRoot, SsdLayout.Config, SsdEncryption.StateFileName);
+        var blobPath    = Path.Combine(fixtureRoot, SsdLayout.Config, SsdEncryption.EncryptedConfigFileName);
+
+        Assert.True(File.Exists(statePath), $"MAC17 fixture state missing: {statePath}");
+        Assert.True(File.Exists(blobPath),  $"MAC17 fixture blob missing: {blobPath}");
+
+        var stateNode = JsonNode.Parse(File.ReadAllText(statePath))!.AsObject();
+        var blobNode  = JsonNode.Parse(File.ReadAllText(blobPath))!.AsObject();
+
+        AssertOnlyExpectedKeys(stateNode, new[]
+        {
+            "enabled", "scheme", "iterations", "encryptedConfigFile", "updatedAtUtc"
+        });
+        AssertOnlyExpectedKeys(blobNode, new[]
+        {
+            "version", "scheme", "iterations", "salt", "nonce",
+            "tag", "ciphertext", "createdAtUtc"
+        });
+
+        Assert.True((bool?)stateNode["enabled"]);
+        Assert.Equal(SsdEncryption.SchemeName, (string?)stateNode["scheme"]);
+        Assert.Equal(SsdEncryption.SchemeName, (string?)blobNode["scheme"]);
+    }
+
+    private static string Mac17PrepFixtureRoot([CallerFilePath] string thisFile = "")
+    {
+        var testsDir = Path.GetDirectoryName(thisFile)!;
+        return Path.Combine(testsDir, "Fixtures", "MacEncryptedConfig", "swift-prep-encrypted");
+    }
 }
