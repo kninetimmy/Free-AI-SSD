@@ -17,15 +17,6 @@ import AppKit
 // confirmation specifically uses NSAlert.alertStyle = .critical so the
 // user sees the standard system-red destructive button.
 
-/// Hardcoded MVP starter-model list. Mirrors the most common entries
-/// from prep-core/Resources/starter-models.json. A future MAC17 follow-up
-/// can read the actual catalog from a bundled resource for full parity
-/// with the Windows PrepApp picker.
-private let mac17MvpStarterModels: [String] = [
-    "llama3.1:8b",
-    "phi3:mini",
-]
-
 @MainActor
 final class PrepViewModel: ObservableObject {
     // Flow state
@@ -46,8 +37,14 @@ final class PrepViewModel: ObservableObject {
     @Published var passphrase: String = ""
     @Published var passphraseConfirm: String = ""
 
-    // Starter models
+    // Starter models — F2: rich catalog matches Windows PrepApp's
+    // merged Models grid projection. Populated by discoverCatalog()
+    // (bundled JSON via sidecar) and replaced by refreshCatalog() when
+    // the user fetches the live ollama.com/library list.
+    @Published var starterCatalog: [StarterModelDisplayEntry] = []
     @Published var selectedStarterModels: Set<String> = []
+    @Published var catalogStatusText: String = ""
+    @Published var isRefreshingCatalog: Bool = false
 
     // Readiness
     @Published var readinessItems: [ReadinessRow] = []
@@ -58,12 +55,9 @@ final class PrepViewModel: ObservableObject {
     private let encryptedConfigWriter = EncryptedConfigWriter()
 
     init() {
-        // Default starter selection: the first entry. Keeps MVP simple
-        // while letting users pick more if they want.
-        if let first = mac17MvpStarterModels.first {
-            selectedStarterModels.insert(first)
-        }
-
+        // Default starter selection is set after discoverCatalog() runs
+        // (the bundled list is loaded via the sidecar once it spawns,
+        // not from a hardcoded array — F2).
         hostController.onLogLine = { [weak self] line in
             Task { @MainActor in self?.appendLog(line) }
         }
@@ -74,7 +68,7 @@ final class PrepViewModel: ObservableObject {
         return mount
     }
 
-    var availableStarterModels: [String] { mac17MvpStarterModels }
+    var availableStarterModels: [StarterModelDisplayEntry] { starterCatalog }
 
     // MARK: - Step transitions
 
@@ -243,9 +237,91 @@ final class PrepViewModel: ObservableObject {
             _ = try await hostController.send("stage-ollama")
             _ = try await hostController.send("stage-prereqs")
             appendLog("Staging complete.")
+
+            // F2: pull bundled catalog before showing the picker so
+            // the user sees rich entries (tag + tier + best-at) — same
+            // shape Windows' merged grid renders. Soft-failure: if
+            // the bundled load fails the picker stays empty and the
+            // status text explains; user can still type a custom tag
+            // once the model-pull step exposes free-form entry.
+            await discoverCatalog()
+
             currentStep = .encryptionSetup
         } catch {
             currentStep = .failed(message: "Staging failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Load the bundled starter-models.json via the sidecar's
+    /// discover-catalog command. Called once after staging completes —
+    /// the sidecar is up by then and StarterModelCatalogLoader inside
+    /// it reads the prep-core embedded resource without any network.
+    func discoverCatalog() async {
+        do {
+            let result = try await hostController.send("discover-catalog")
+            let entries = decodeStarterEntries(from: result.payload)
+            starterCatalog = entries.map(StarterModelDisplayEntry.from)
+            if let warning = result.payload["warning"] as? String, !warning.isEmpty {
+                catalogStatusText = "Bundled catalog warning: \(warning)"
+                appendLog("Catalog warning: \(warning)")
+            } else if !starterCatalog.isEmpty {
+                catalogStatusText = "Bundled catalog: \(starterCatalog.count) models. Click Refresh to fetch the latest from Ollama."
+            }
+            // Default-pick the first entry so the picker isn't completely
+            // empty for a new user (matches the prior MVP behavior of
+            // pre-selecting the first hardcoded model).
+            if selectedStarterModels.isEmpty, let first = starterCatalog.first {
+                selectedStarterModels.insert(first.tag)
+            }
+        } catch {
+            appendLog("Failed to load bundled catalog: \(error.localizedDescription)")
+            catalogStatusText = "Bundled catalog unavailable; click Refresh to fetch from Ollama."
+        }
+    }
+
+    /// F2: fetch the live catalog from ollama.com/library via the
+    /// sidecar's refresh-catalog arm. Soft-failure mirrors Windows
+    /// behavior — the existing in-memory catalog stays in place and
+    /// the status text surfaces the failure reason.
+    func refreshCatalog() async {
+        if isRefreshingCatalog { return }
+        isRefreshingCatalog = true
+        defer { isRefreshingCatalog = false }
+
+        do {
+            // 30s budget — the prep-core service has its own 10s
+            // timeout for the HTTP fetch; this outer budget covers
+            // sidecar dispatch overhead.
+            let result = try await hostController.send("refresh-catalog", timeout: 30)
+            let ok = result.payload["ok"] as? Bool ?? false
+            if ok {
+                let entries = decodeStarterEntries(from: result.payload)
+                if !entries.isEmpty {
+                    starterCatalog = entries.map(StarterModelDisplayEntry.from)
+                    let sourceUrl = result.payload["sourceUrl"] as? String ?? "live"
+                    catalogStatusText = "Live catalog: \(starterCatalog.count) models from \(sourceUrl)."
+                    appendLog("Refreshed catalog with \(starterCatalog.count) models.")
+
+                    // Drop selections that no longer exist in the
+                    // live catalog; default-pick the first if the
+                    // user is left with nothing selected.
+                    let liveTags = Set(starterCatalog.map(\.tag))
+                    selectedStarterModels.formIntersection(liveTags)
+                    if selectedStarterModels.isEmpty, let first = starterCatalog.first {
+                        selectedStarterModels.insert(first.tag)
+                    }
+                } else {
+                    catalogStatusText = "Refresh returned no entries; existing list kept."
+                }
+            } else {
+                let reason = result.payload["reason"] as? String ?? "unknown"
+                let errorMsg = result.payload["error"] as? String ?? "(no detail)"
+                catalogStatusText = "Refresh failed (\(reason)): \(errorMsg). Existing list kept."
+                appendLog("Catalog refresh failed: \(errorMsg)")
+            }
+        } catch {
+            catalogStatusText = "Refresh failed: \(error.localizedDescription). Existing list kept."
+            appendLog("Catalog refresh failed: \(error.localizedDescription)")
         }
     }
 

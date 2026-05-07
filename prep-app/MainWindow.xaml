@@ -54,15 +54,35 @@
                         <Border Style="{StaticResource NeumorphicCard}" Margin="0,4,0,0" Padding="10">
                             <DockPanel>
                                 <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
-                                    <TextBlock Text="Models"
-                                               Style="{StaticResource H2Text}"
-                                               FontSize="16"/>
-                                    <TextBlock Text="Pick one or more models to download onto your SSD."
-                                               Style="{StaticResource CaptionText}"/>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="Models"
+                                                       Style="{StaticResource H2Text}"
+                                                       FontSize="16"/>
+                                            <TextBlock Text="Pick one or more models to download onto your SSD."
+                                                       Style="{StaticResource CaptionText}"/>
+                                        </StackPanel>
+                                        <Button x:Name="RefreshCatalogButton"
+                                                Grid.Column="1"
+                                                Content="Refresh from Ollama"
+                                                VerticalAlignment="Top"
+                                                Padding="10,4" MinHeight="0"
+                                                Style="{StaticResource GhostSecondaryButton}"
+                                                Click="RefreshCatalogButton_Click"
+                                                ToolTip="Fetch the latest model list from ollama.com/library. The bundled list stays in place if the fetch fails."/>
+                                    </Grid>
                                     <TextBlock x:Name="StarterCatalogWarningText"
                                                Foreground="{StaticResource StatusWarningBrush}"
                                                Margin="0,4,0,0"
                                                TextWrapping="Wrap"
+                                               Visibility="Collapsed"/>
+                                    <TextBlock x:Name="CatalogLastUpdatedText"
+                                               Style="{StaticResource CaptionText}"
+                                               Margin="0,4,0,0"
                                                Visibility="Collapsed"/>
                                 </StackPanel>
 

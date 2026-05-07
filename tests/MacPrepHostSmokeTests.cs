@@ -183,6 +183,83 @@ public sealed class MacPrepHostSmokeTests
     }
 
     [Fact]
+    public async Task HostRunner_DiscoverCatalog_ReturnsBundledEntries()
+    {
+        // F2 protocol pin: discover-catalog returns the bundled
+        // starter-models.json so the Mac picker has parity with Windows
+        // immediately after staging — before the user has a chance to
+        // click Refresh. The bundled catalog ships via prep-core's
+        // <Content>+<EmbeddedResource> declarations, so this works whether
+        // the test runs from a content-copied bin or via the embedded
+        // fallback inside the test host.
+        using var workdir = new TempDir("freeai-f2-discover-catalog-");
+        Directory.CreateDirectory(Path.Combine(workdir.Path, "logs"));
+        Directory.CreateDirectory(Path.Combine(workdir.Path, "config"));
+
+        var handshake = JsonSerializer.Serialize(new { ssdRoot = workdir.Path });
+        var inputBuilder = new System.Text.StringBuilder();
+        inputBuilder.AppendLine(handshake);
+        inputBuilder.AppendLine("discover-catalog");
+        inputBuilder.AppendLine("shutdown");
+
+        using var stdin = new StringReader(inputBuilder.ToString());
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await FreeAiSsd.MacPrepHost.HostRunner.RunAsync(
+            stdin, stdout, stderr, new[] { "--test-mode" });
+
+        Assert.Equal(0, exitCode);
+        var output = stdout.ToString();
+        Assert.Contains("result: discover-catalog", output);
+        Assert.Contains("\"ok\":true", output);
+        Assert.Contains("\"entries\":", output);
+
+        // Spot-check a known bundled entry. starter-models.json ships
+        // llama3.1:8b at the time of writing — if a future catalog edit
+        // removes it, this drift-pin breaks loudly so the test gets
+        // updated alongside the JSON.
+        Assert.Contains("\"tag\":\"llama3.1:8b\"", output);
+    }
+
+    [Fact]
+    public async Task HostRunner_RefreshCatalog_TestMode_EmitsSyntheticOkPayload()
+    {
+        // F2 protocol pin: refresh-catalog must surface as a clean result
+        // line with the same key shape Swift will decode against. The
+        // test-mode short-circuit avoids crossing the real network in CI;
+        // failure-mode coverage lives in LiveModelCatalogServiceTests.
+        using var workdir = new TempDir("freeai-f2-refresh-catalog-");
+        Directory.CreateDirectory(Path.Combine(workdir.Path, "logs"));
+        Directory.CreateDirectory(Path.Combine(workdir.Path, "config"));
+
+        var handshake = JsonSerializer.Serialize(new { ssdRoot = workdir.Path });
+        var inputBuilder = new System.Text.StringBuilder();
+        inputBuilder.AppendLine(handshake);
+        inputBuilder.AppendLine("refresh-catalog");
+        inputBuilder.AppendLine("shutdown");
+
+        using var stdin = new StringReader(inputBuilder.ToString());
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await FreeAiSsd.MacPrepHost.HostRunner.RunAsync(
+            stdin, stdout, stderr, new[] { "--test-mode" });
+
+        Assert.Equal(0, exitCode);
+        var output = stdout.ToString();
+        Assert.Contains("result: refresh-catalog", output);
+
+        // Drift-pin the JSON keys Swift decodes against. If any of these
+        // change without an accompanying Swift update, this fails.
+        Assert.Contains("\"ok\":true", output);
+        Assert.Contains("\"testMode\":true", output);
+        Assert.Contains("\"fetchedAt\":", output);
+        Assert.Contains("\"sourceUrl\":", output);
+        Assert.Contains("\"entries\":", output);
+    }
+
+    [Fact]
     public async Task PublishedHost_TestMode_HandshakeReadinessShutdown()
     {
         if (!OperatingSystem.IsMacOS())

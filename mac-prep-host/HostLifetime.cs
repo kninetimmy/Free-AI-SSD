@@ -33,6 +33,7 @@ internal sealed class HostLifetime : IAsyncDisposable
     private readonly ModelService _modelService = new();
     private readonly PrereqService _prereqService;
     private readonly ReadinessService _readinessService;
+    private readonly ILiveModelCatalogService _liveCatalogService;
 
     private static readonly JsonSerializerOptions ResultOptions = new()
     {
@@ -63,6 +64,7 @@ internal sealed class HostLifetime : IAsyncDisposable
         _ollamaPackage = new OllamaPackageService();
         _prereqService = new PrereqService(dialogService);
         _readinessService = new ReadinessService(_modelService);
+        _liveCatalogService = new LiveModelCatalogService();
     }
 
     public void Start()
@@ -108,6 +110,12 @@ internal sealed class HostLifetime : IAsyncDisposable
             case "readiness":
                 await RunReadinessAsync(ct);
                 break;
+            case "refresh-catalog":
+                await RefreshCatalogAsync(ct);
+                break;
+            case "discover-catalog":
+                DiscoverCatalog();
+                break;
             default:
                 await _stderr.WriteLineAsync($"Unknown command: {command}");
                 break;
@@ -119,6 +127,10 @@ internal sealed class HostLifetime : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await StopAsync();
+        if (_liveCatalogService is IDisposable disposable)
+        {
+            disposable.Dispose();
+        }
     }
 
     // --- Command implementations ----------------------------------------
@@ -261,6 +273,89 @@ internal sealed class HostLifetime : IAsyncDisposable
         }).ToArray();
 
         EmitResult("readiness", new { ok = true, items = serialized });
+    }
+
+    /// <summary>
+    /// Return the bundled starter-model catalog (the same JSON Windows
+    /// PrepApp loads via <see cref="StarterModelCatalogLoader"/>) so the
+    /// Mac picker has parity with Windows immediately after staging.
+    /// Live refresh is a separate arm (<c>refresh-catalog</c>) so the
+    /// user-visible distinction between bundled and live remains clear.
+    /// </summary>
+    private void DiscoverCatalog()
+    {
+        var loadResult = StarterModelCatalogLoader.Load(AppContext.BaseDirectory);
+        EmitResult("discover-catalog", new
+        {
+            ok = true,
+            warning = loadResult.Warning,
+            entries = loadResult.Catalog.Models.Select(m => new
+            {
+                tag = m.Tag,
+                @params = m.Params,
+                sizeTier = m.SizeTier,
+                description = m.Description,
+                useCases = m.UseCases.ToArray(),
+            }).ToArray(),
+        });
+    }
+
+    /// <summary>
+    /// Live-fetch the starter catalog from a public source. Soft-failure
+    /// model: parser/network errors emit <c>result: refresh-catalog
+    /// {ok:false, error:...}</c> rather than throwing — matches the
+    /// <c>verify-model</c> pattern so the Swift caller always gets a
+    /// result line and can fall back to the bundled catalog without
+    /// timing out on <c>awaitCommandResult</c>.
+    /// </summary>
+    private async Task RefreshCatalogAsync(CancellationToken ct)
+    {
+        if (_testMode)
+        {
+            EmitLog("test-mode: skipping live catalog fetch");
+            EmitResult("refresh-catalog", new
+            {
+                ok = true,
+                testMode = true,
+                fetchedAt = DateTimeOffset.UtcNow,
+                sourceUrl = "test-mode",
+                entries = Array.Empty<object>(),
+            });
+            return;
+        }
+
+        try
+        {
+            EmitLog("Fetching live model catalog…");
+            var result = await _liveCatalogService.FetchAsync(ct);
+            EmitLog($"Fetched {result.Catalog.Models.Count} models from {result.SourceUrl}");
+
+            EmitResult("refresh-catalog", new
+            {
+                ok = true,
+                fetchedAt = result.FetchedAt,
+                sourceUrl = result.SourceUrl,
+                entries = result.Catalog.Models.Select(m => new
+                {
+                    tag = m.Tag,
+                    @params = m.Params,
+                    sizeTier = m.SizeTier,
+                    description = m.Description,
+                    useCases = m.UseCases.ToArray(),
+                }).ToArray(),
+            });
+        }
+        catch (LiveCatalogFetchException ex)
+        {
+            EmitLog($"Catalog refresh failed: {ex.Message}");
+            EmitResult("refresh-catalog", new
+            {
+                ok = false,
+                reason = ex.Reason.ToString(),
+                error = ex.Message,
+                statusCode = ex.StatusCode,
+            });
+        }
     }
 
     // --- Output helpers --------------------------------------------------
