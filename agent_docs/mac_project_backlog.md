@@ -958,7 +958,7 @@ isn't fighting an in-flight threading change.
 
 ### MAC17b - PrepApp Issue #5: replace hardcoded SSD layout with sidecar delegation
 
-**Status:** planned
+**Status:** done 2026-05-07 (PR #198 merged `224f4b5`)
 **Scope:** mac-prep-app SwiftUI host + mac-prep-host sidecar protocol
 **Risk:** Low (single new sidecar command + one Swift call site
   swap; structural rather than behavioral)
