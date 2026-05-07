@@ -364,9 +364,208 @@ jobs:
           name: mac-runner-artifact
           path: out/Runner.app.zip
 
+  mac-prep-build:
+    if: github.event_name != 'workflow_dispatch' || fromJSON(github.event.inputs.include_macos || 'false')
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
+        with:
+          global-json-file: global.json
+      - name: Run Swift unit tests (DiskutilFormatCommand + PrepFlowStep)
+        # MAC17: pure-builder parity-pin tests for the Mac PrepApp. The same
+        # argv shape is unit-tested from C# (DiskutilFormatCommandTests.cs)
+        # in the windows-build lane — both sides must agree, so any drift
+        # fails CI before reaching destructive disk code.
+        run: |
+          mkdir -p out
+          swiftc mac-prep-app/Sources/PrepFlowStep.swift mac-prep-app/Sources/DiskutilFormatCommand.swift mac-prep-app/Tests/PrepAppTests.swift             -parse-as-library             -target "arm64-apple-macos11.0"             -O             -o out/mac-prep-tests
+          out/mac-prep-tests
+      - name: Publish mac-prep-host (osx-arm64 self-contained single-file)
+        # MAC17: build the net8.0 sidecar host so the Swift PrepApp.app can
+        # spawn it. Self-contained so end users don't need a system .NET 8
+        # install. PublishTrimmed=false is set in the csproj because
+        # prep-core's StarterModelCatalogLoader uses reflection-based
+        # embedded-resource lookup that PublishTrimmed silently breaks.
+        run: |
+          dotnet publish mac-prep-host/FreeAiSsd.MacPrepHost.csproj             -c Release -r osx-arm64 --self-contained true             /p:PublishSingleFile=true
+      - name: Build prep-core + mac-prep-host (cross-platform sanity)
+        # MAC17: confirm the platform-neutral .NET surface compiles on macOS.
+        # We do NOT build the full solution because prep-app/runner/companion
+        # are net8.0-windows and need Windows targeting packs that don't
+        # ship for macOS.
+        run: |
+          dotnet build prep-core/FreeAiSsd.PrepCore.csproj -c Release --verbosity minimal
+          dotnet build mac-prep-host/FreeAiSsd.MacPrepHost.csproj -c Release --verbosity minimal
+      - name: Run mac-prep-host smoke (spawn binary; handshake → readiness → shutdown)
+        # MAC17: end-to-end smoke that spawns the published mac-prep-host
+        # in --test-mode (so commands return synthetic OK results without
+        # needing real artifacts or a running Ollama), pipes a known
+        # handshake on stdin, sends the readiness command, and asserts a
+        # clean shutdown via stdin close. Mirrors the mac-runner-host smoke
+        # bash but for the prep sidecar's stdin command surface.
+        run: |
+          set -euo pipefail
+          HOST_BIN="$GITHUB_WORKSPACE/mac-prep-host/bin/Release/net8.0/osx-arm64/publish/FreeAiSsd.MacPrepHost"
+          if [ ! -x "$HOST_BIN" ]; then
+            echo "Published mac-prep-host not found at $HOST_BIN" >&2
+            exit 1
+          fi
+
+          WORK="$(mktemp -d)"
+          mkdir -p "$WORK/logs" "$WORK/config"
+
+          HANDSHAKE="{ \"ssdRoot\": \"$WORK\", \"ollamaHost\": \"http://127.0.0.1:11434\" }"
+
+          STDOUT_LOG="$WORK/host-stdout.log"
+          STDERR_LOG="$WORK/host-stderr.log"
+
+          FIFO="$WORK/stdin.fifo"
+          mkfifo "$FIFO"
+          ( "$HOST_BIN" --test-mode <"$FIFO" >"$STDOUT_LOG" 2>"$STDERR_LOG" ) &
+          HOST_PID=$!
+
+          # Hold FIFO open via fd 9 so the host stays alive between commands.
+          exec 9>"$FIFO"
+          printf '%s\n' "$HANDSHAKE" >&9
+
+          # Wait for "ready" line.
+          READY=""
+          for i in $(seq 1 60); do
+            if [ -f "$STDOUT_LOG" ] && grep -q '^ready' "$STDOUT_LOG"; then
+              READY=1
+              break
+            fi
+            sleep 0.5
+          done
+          if [ -z "$READY" ]; then
+            echo "Host never reported ready. stderr:" >&2
+            cat "$STDERR_LOG" >&2 || true
+            kill "$HOST_PID" 2>/dev/null || true
+            exit 1
+          fi
+          echo "Host ready."
+
+          # Send readiness command and wait for the result line.
+          printf 'readiness\n' >&9
+          for i in $(seq 1 30); do
+            if grep -q '^result: readiness ' "$STDOUT_LOG"; then
+              break
+            fi
+            sleep 0.3
+          done
+          grep -q '^result: readiness ' "$STDOUT_LOG" || {
+            echo "readiness result not received." >&2
+            cat "$STDOUT_LOG" >&2
+            cat "$STDERR_LOG" >&2
+            kill "$HOST_PID" 2>/dev/null || true
+            exit 1
+          }
+          # The synthetic test-mode payload must contain the testMode flag.
+          grep -q '"testMode":true' "$STDOUT_LOG" || {
+            echo "readiness result missing testMode flag." >&2
+            cat "$STDOUT_LOG" >&2
+            kill "$HOST_PID" 2>/dev/null || true
+            exit 1
+          }
+
+          # Clean shutdown via stdin close.
+          printf 'shutdown\n' >&9
+          exec 9>&-
+
+          for i in $(seq 1 20); do
+            if ! kill -0 "$HOST_PID" 2>/dev/null; then break; fi
+            sleep 0.25
+          done
+          if kill -0 "$HOST_PID" 2>/dev/null; then
+            echo "Host did not exit after shutdown" >&2
+            kill "$HOST_PID" 2>/dev/null || true
+            exit 1
+          fi
+          wait "$HOST_PID" || EXIT=$?
+          : "${EXIT:=0}"
+          if [ "$EXIT" -ne 0 ]; then
+            echo "Host exited with non-zero status: $EXIT" >&2
+            cat "$STDERR_LOG" >&2 || true
+            exit 1
+          fi
+          echo "MAC17 prep-host smoke passed."
+      - name: Build PrepApp.app bundle
+        # MAC17: assemble the SwiftUI PrepApp.app bundle. SsdEncryption.swift
+        # is reused from mac-runner via shared swiftc input — see the MAC5
+        # decision; no duplication, no module boundary needed.
+        run: |
+          mkdir -p out/PrepApp.app/Contents/MacOS out/PrepApp.app/Contents/Resources
+          swiftc             mac-runner/Sources/SsdEncryption.swift             mac-prep-app/Sources/PrepFlowStep.swift             mac-prep-app/Sources/BrandColors.swift             mac-prep-app/Sources/DiskutilFormatCommand.swift             mac-prep-app/Sources/DiskutilDriveService.swift             mac-prep-app/Sources/PrepHostController.swift             mac-prep-app/Sources/EncryptedConfigWriter.swift             mac-prep-app/Sources/PrepViewModel.swift             mac-prep-app/Sources/main.swift             -parse-as-library             -target "arm64-apple-macos11.0"             -O             -o out/PrepApp.app/Contents/MacOS/PrepApp             -framework SwiftUI             -framework AppKit
+          # Bundle the published mac-prep-host binary into Resources/prep-host/
+          # so PrepHostController can locate it via Bundle.main.resourceURL
+          # when PrepApp.app is launched directly (e.g. dev, ad-hoc test, or
+          # before the first SSD is staged).
+          mkdir -p out/PrepApp.app/Contents/Resources/prep-host
+          cp -R mac-prep-host/bin/Release/net8.0/osx-arm64/publish/* out/PrepApp.app/Contents/Resources/prep-host/
+          chmod +x out/PrepApp.app/Contents/Resources/prep-host/FreeAiSsd.MacPrepHost
+          cp assets/icon/AppIcon.icns out/PrepApp.app/Contents/Resources/AppIcon.icns
+          # MAC17 Info.plist mirrors the MAC10b Runner.app keys per the user's
+          # call ("copy it makes things make sense"). One product, two apps,
+          # consistent metadata.
+          cat > out/PrepApp.app/Contents/Info.plist <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key><string>PrepApp</string>
+              <key>CFBundleIdentifier</key><string>com.freeaissd.prepapp</string>
+              <key>CFBundleName</key><string>Free AI SSD Prep</string>
+              <key>CFBundleDisplayName</key><string>Free AI SSD Prep</string>
+              <key>CFBundlePackageType</key><string>APPL</string>
+              <key>CFBundleShortVersionString</key><string>1.0</string>
+              <key>CFBundleVersion</key><string>1</string>
+              <key>CFBundleIconFile</key><string>AppIcon</string>
+              <key>LSMinimumSystemVersion</key><string>11.0</string>
+              <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
+              <key>LSRequiresNativeExecution</key><true/>
+              <key>NSHighResolutionCapable</key><true/>
+              <key>NSHumanReadableCopyright</key><string>Copyright (c) 2026 Free-AI-SSD project</string>
+          </dict>
+          </plist>
+          PLIST
+          chmod +x out/PrepApp.app/Contents/MacOS/PrepApp
+      - name: Verify PrepApp.app bundle layout
+        run: |
+          set -e
+          test -f out/PrepApp.app/Contents/Resources/AppIcon.icns || { echo "AppIcon.icns missing from bundle Resources" >&2; exit 1; }
+          test -x out/PrepApp.app/Contents/Resources/prep-host/FreeAiSsd.MacPrepHost || { echo "prep-host binary missing or not executable" >&2; exit 1; }
+          plutil -lint out/PrepApp.app/Contents/Info.plist
+          icon_key=$(plutil -extract CFBundleIconFile raw out/PrepApp.app/Contents/Info.plist)
+          if [ "$icon_key" != "AppIcon" ]; then
+            echo "Info.plist CFBundleIconFile = '$icon_key' (expected 'AppIcon')" >&2
+            exit 1
+          fi
+          # Pin the executable name + bundle id so a future rename forces
+          # an explicit decision rather than silent drift.
+          exe=$(plutil -extract CFBundleExecutable raw out/PrepApp.app/Contents/Info.plist)
+          if [ "$exe" != "PrepApp" ]; then
+            echo "Info.plist CFBundleExecutable = '$exe' (expected 'PrepApp')" >&2
+            exit 1
+          fi
+          bundle_id=$(plutil -extract CFBundleIdentifier raw out/PrepApp.app/Contents/Info.plist)
+          if [ "$bundle_id" != "com.freeaissd.prepapp" ]; then
+            echo "Info.plist CFBundleIdentifier = '$bundle_id' (expected 'com.freeaissd.prepapp')" >&2
+            exit 1
+          fi
+          echo "PrepApp.app bundle layout OK."
+      - name: Package PrepApp.app zip artifact
+        run: |
+          ditto -c -k --keepParent out/PrepApp.app out/PrepApp.app.zip
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mac-prep-artifact
+          path: out/PrepApp.app.zip
+
   package-release:
     runs-on: windows-latest
-    needs: [windows-build, mac-runner-build]
+    needs: [windows-build, mac-runner-build, mac-prep-build]
     # Phase-A hardening: entire release-assembly job is gated to workflow_dispatch
     # runs. PR and push-to-main builds stop at the windows-build / mac-runner-build
     # jobs. This matches the gating on "Download offline Windows prerequisites" and
@@ -383,7 +582,7 @@ jobs:
     # the explicit `needs.mac-runner-build.result == 'skipped'` branch below can
     # actually take effect. We intentionally use !cancelled() rather than
     # always() so a user-cancelled workflow does NOT create a release.
-    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && needs.windows-build.result == 'success' && (needs.mac-runner-build.result == 'success' || needs.mac-runner-build.result == 'skipped') }}
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && needs.windows-build.result == 'success' && (needs.mac-runner-build.result == 'success' || needs.mac-runner-build.result == 'skipped') && (needs.mac-prep-build.result == 'success' || needs.mac-prep-build.result == 'skipped') }}
     # Phase-A hardening (Task 4): scoped write permission ONLY on the release job.
     # The "Create Release" / "Upload beta ZIP to release" steps below gate themselves
     # to workflow_dispatch, so the write scope is only exercised on manual release runs.
@@ -400,6 +599,11 @@ jobs:
         with:
           name: mac-runner-artifact
           path: in/mac
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        if: github.event_name == 'workflow_dispatch' && fromJSON(github.event.inputs.include_macos || 'false')
+        with:
+          name: mac-prep-artifact
+          path: in/mac-prep
       - name: Assemble distributables
         shell: pwsh
         run: |
@@ -443,6 +647,12 @@ jobs:
             Copy-Item $winRoot $betaRoot -Recurse -Force
             New-Item -ItemType Directory -Path (Join-Path $betaRoot "payload/mac") -Force | Out-Null
             Copy-Item "in/mac/Runner.app.zip" (Join-Path $betaRoot "payload/mac/Runner.app.zip") -Force
+            # MAC17: ship PrepApp.app.zip alongside Runner.app.zip — two
+            # apps, mirroring Windows (per the user's call). The shared
+            # MAC10b icon means both apps look like one product family.
+            if (Test-Path "in/mac-prep/PrepApp.app.zip") {
+              Copy-Item "in/mac-prep/PrepApp.app.zip" (Join-Path $betaRoot "payload/mac/PrepApp.app.zip") -Force
+            }
             Copy-Item "in/windows/out/mac/tools" (Join-Path $betaRoot "payload/mac/tools") -Recurse -Force
             # MAC6: ship the cross-published net8.0 sidecar host alongside Runner.app.
             # The Swift app resolves the binary via this path on a staged SSD.
@@ -454,6 +664,7 @@ jobs:
               schemaVersion = 1
               artifacts = @(
                 [ordered]@{ id = "mac_runner"; relativePath = "mac/Runner.app.zip" },
+                [ordered]@{ id = "mac_prep_app"; relativePath = "mac/PrepApp.app.zip" },
                 [ordered]@{ id = "mac_ollama"; relativePath = "mac/tools/ollama/ollama-darwin.zip" },
                 [ordered]@{ id = "mac_ollama_manifest"; relativePath = "mac/tools/ollama/mac-tools-manifest.json" },
                 [ordered]@{ id = "mac_runner_host"; relativePath = "mac/runner-host/FreeAiSsd.MacRunnerHost" }
