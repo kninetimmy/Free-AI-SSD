@@ -850,7 +850,7 @@ notarization) since both touch Info.plist + bundle layout.
 
 ### MAC17 - macOS PrepApp MVP (exFAT)
 
-**Status:** done 2026-05-06 (PR pending merge)
+**Status:** done 2026-05-06 (PR #193 merged at `b6e7089`; follow-ups in MAC17a)
 **Scope:** new SwiftUI host + `prep-core/` consumer
 **Risk:** High
 **Dependencies:** MAC5 (encrypted config unlock/save on Mac), MAC16

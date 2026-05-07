@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-05-06 (MAC17 macOS PrepApp MVP branch open; PR pending push)
+Last updated: 2026-05-06 (PR #193 MAC17 macOS PrepApp MVP merged; wrap-up in flight)
 
 Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
@@ -8,20 +8,18 @@ Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5.
 
 ## In flight
 
-**MAC17 — macOS PrepApp MVP (exFAT).** Branch
-`kninetimmy/mac17-mac-prepapp-mvp` ready to push. Six commits:
-DiskutilFormatCommand pure builder + tests; mac-prep-host net8.0
-sidecar + boundary/construction/smoke tests; mac-prep-app SwiftUI
-host (9 Sources/ files + Tests/) compiling clean locally with
-swiftc; CI mac-prep-build job + PrepApp.app bundle + package-release
-wiring; cross-language swift-prep-encrypted/ fixture (Mac-PrepApp →
-Windows-Runner roundtrip pin); plus the 2026-05-06 Mac UI design
-language decision (brand-tinted native, MAC17 leans pure-native).
-PR title: `MAC17: macOS PrepApp MVP (exFAT)`. Manual smoke deferred
-to a real Mac with an external SSD. **MAC11** (signing + notarization)
-remains back-burnered until the user's Apple Developer account renews.
+PR #193 (MAC17 macOS PrepApp MVP) merged at `b6e7089`. Cross-platform
+PrepApp parity track now points at **MAC18** (compatibility docs)
+and **MAC17a** (Gemini review follow-ups — see
+`agent_docs/mac17_followup_notes.md`). **MAC11** (signing +
+notarization) remains back-burnered until the user's Apple Developer
+account renews. Wrap-up follow-up PR for this session updates
+project_state.md, marks MAC17 done in mac_project_backlog.md, and
+reorders Next up.
 
 ## Recently shipped
+
+- **PR #193 - MAC17 macOS PrepApp MVP (exFAT) - merged `b6e7089` (2026-05-06).** Mac-native PrepApp so a Mac-only user can prep a Free-AI-SSD without owning a Windows machine. New SwiftUI `mac-prep-app/` host (9 Sources/ files: PrepFlowStep state machine, PrepViewModel @MainActor orchestrator, DiskutilDriveService wrapping `/usr/sbin/diskutil` with explicit argv, DiskutilFormatCommand parity-pin, PrepHostController async stdin command protocol, EncryptedConfigWriter via SsdEncryption.swift, BrandColors, main.swift scene + step views) + Tests/PrepAppTests.swift standalone CLI (9/9 passing). New `mac-prep-host/` net8.0 sidecar mirroring MAC6 mac-runner-host shape but for prep-core consumption — Program/HostHandshake/HostLifetime/NoOpDialogService — with stdin commands (stage-runner, stage-ollama, stage-prereqs, discover-models, pull-model, verify-model, readiness, shutdown) and stdout protocol (ready, log:, result: <command> <json>). Pure-builder C# `shared/Services/DiskutilFormatCommand.cs` is the parity-pin both Swift and C# tests (`DiskutilFormatCommandTests.cs` 14 cases) assert against — drift in the destructive argv shape fails Windows CI before reaching disk code. Sidecar wired with `MacPlatformBoundaryTests.MacPrepHost_RemainsPlainNet8WithoutWindowsPackages`, `MacPrepHostConstructionTests` (7 cases), `MacPrepHostSmokeTests` (5 cases — 4 in-process via `HostRunner.RunAsync` on Windows CI; 1 published-binary smoke on Mac CI). New `mac-prep-build` CI job (macos-14): swift unit tests, `dotnet publish mac-prep-host` osx-arm64 self-contained, end-to-end stdin smoke (handshake → readiness → shutdown asserting testMode flag), PrepApp.app bundle assembly with prep-host/ in Resources, plutil + executable-bit verification. PrepApp.app.zip lands in payload/mac/ alongside Runner.app.zip (two apps mirroring Windows per the user's MAC17 fork-1 call). New cross-language fixture `tests/Fixtures/MacEncryptedConfig/swift-prep-encrypted/` proves Mac PrepApp first-write payload roundtrips through Windows Runner unlock — three new C# tests in `MacEncryptedConfigCrossLanguageTests` (non-default OllamaPort=13577 distinguishes "decoded" from "decoded empty + defaults filled in"). Decision recorded ("Mac UI design language: brand-tinted native, MAC17 leans pure-native") — native macOS HIG controls, NSAlert with .critical for destructive erase, brand colors limited to AccentColor (#00E5FF cyan from WPF Colors.xaml) + Status* palette via BrandColors.swift, no custom button chrome / font overrides / hardcoded backgrounds. SsdEncryption.swift reused from mac-runner via shared swiftc invocation — no duplication, MAC5 plaintext invariant carried into MAC17. Targeted macOS 11 per MAC1 (had to swap `.tint(...)` 12+ → `.accentColor(...)` and `.foregroundStyle(...)` 14+ → `.foregroundColor(...)` after the first swiftc compile flagged version mismatches). CI required 3 runs: run 1 failed mac-prep-build with cannot-find-in-scope errors because `write-prep-fixture` references EncryptedConfigWriter + InitialPortableConfigPayload — fix-forward `1fd5ef0` extended the swiftc input list. Run 2 fixed mac-prep-build but windows-build hit two cascading issues: `ReadinessItem` field-name mismatch (I assumed Name/Status/Detail but the record is Check/Passed/Result — fix-forward `0b04504` mapped correctly), and `Mac17PrepFixture_StateAndBlob_UseSameFormatAsMac5` caught a real cross-language drift where the Swift writer hardcoded `scheme: "pbkdf2-sha256"` instead of the canonical `SsdEncryptionConstants.schemeName` (`aes-256-gcm+pbkdf2-sha256-v1`) — fix-forward `32d9937` pinned the constant and regenerated the fixture. Run 3 all green: windows-build 2m50s, mac-runner-build 55s, mac-prep-build 1m7s, package-release skipped (correct — no release tag on PR). Gemini code review surfaced 3 high + 4 medium items knowingly deferred and backlogged as MAC17a (PR #193 commit `ea768fd`); details captured in `agent_docs/mac17_followup_notes.md` with per-issue file:line refs. Manual smoke deferred to a real Mac + external SSD (drive listing → format → stage → encrypt → model pull → readiness; cross-platform roundtrip Mac-prepped → Windows Runner).
 
 - **PR #192 - MAC16 merge wrap-up - merged `99f276d` (2026-05-06).** Docs-only follow-up to PR #191: moves PR #191's full description into `Recently shipped`, bumps `Last updated`, rewrites `In flight` to flag MAC11 parked behind the user's Apple Developer renewal and MAC17 fully unblocked, reorders `Next up` so MAC17 is #1, marks MAC16 done in `mac_project_backlog.md`, and appends a 2026-05-06 `project_decisions.md` entry covering the two load-bearing MAC16 design choices (`<RootNamespace>FreeAiSsd.PrepApp</RootNamespace>` namespace pin + `<InternalsVisibleTo Include="FreeAiSsd.Tests" />` to restore test access to `ModelOperations`' internal static helpers). CI `windows-build` (3m53s) + `mac-runner-build` (57s) green; no runtime changes.
 
@@ -61,10 +59,11 @@ remains back-burnered until the user's Apple Developer account renews.
 
 ## Next up
 
-1. **MAC18** - Cross-platform prep compatibility docs. Now in the lead since MAC17 is in flight on the branch — sequenced so the matrix isn't aspirational.
-2. **MAC11** - Signing + notarization. **Back-burnered** until the user's Apple Developer account renews on payday. MAC10b already landed the bundle metadata (`CFBundleIconFile`, `LSApplicationCategoryType`, `LSRequiresNativeExecution`, etc.) this PR depends on, so MAC11 is plumbing-ready when the cert returns.
-3. **X4** still unblocked from the host side: only needs SPA assets at `runner-core/wwwroot/chat/`.
-4. For non-Mac work, pick from `H3`, `F4` follow-up, `B2`, `F2`. (`R1 Stage 2` server endpoints shipped via MAC8; only the RunnerCli `/docs`+`/reindex` slash-commands remain.)
+1. **MAC17a** - PrepApp follow-ups from PR #193 review. 3 high (continuation leak in `PrepHostController.send` + UI-blocking sync ops on `@MainActor` for format and PBKDF2) + 4 medium (sidecar shutdown busy-wait, hardcoded SSD layout duplicating `SsdLayout.cs`, encryption-toggle UX mismatch, drive scan blocking @MainActor). See `agent_docs/mac17_followup_notes.md` for per-issue file:line + proposed fixes. Suggested PR split: ship #1 + #6 + threading cluster #2/#3/#4/#7 together; defer #5 structural refactor to MAC17b.
+2. **MAC18** - Cross-platform prep compatibility docs. Now unblocked by MAC17 merge — sequenced so the matrix isn't aspirational.
+3. **MAC11** - Signing + notarization. **Back-burnered** until the user's Apple Developer account renews on payday. MAC10b already landed the bundle metadata (`CFBundleIconFile`, `LSApplicationCategoryType`, `LSRequiresNativeExecution`, etc.) this PR depends on, so MAC11 is plumbing-ready when the cert returns.
+4. **X4** still unblocked from the host side: only needs SPA assets at `runner-core/wwwroot/chat/`.
+5. For non-Mac work, pick from `H3`, `F4` follow-up, `B2`, `F2`. (`R1 Stage 2` server endpoints shipped via MAC8; only the RunnerCli `/docs`+`/reindex` slash-commands remain.)
 
 **RAG audit backlog:** X17-X23 cover audit findings; X10/X13/X15 scope expansions recorded. Plan: `C:\Users\Kninetimmy\.claude\plans\okay-i-want-to-glowing-galaxy.md`. v1.3.x sequence: X18 -> X15 (expanded) -> X19 -> X20 -> X22 -> X23. X17 reduced to Stage 1 textless-page diagnostic (full OCR deferred -- workload is text-layer PDFs).
 
