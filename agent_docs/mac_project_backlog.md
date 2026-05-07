@@ -913,7 +913,10 @@ notarization) since both touch Info.plist + bundle layout.
 
 ### MAC17a - PrepApp follow-ups from PR #193 review
 
-**Status:** planned
+**Status:** in flight 2026-05-07 on `kninetimmy/mac17a-prep-followups`
+  — 6/7 review items bundled (#1, #2, #3, #4, #6, #7); #5 deferred
+  to MAC17b as a structural refactor that benefits from landing
+  after the threading cluster.
 **Scope:** mac-prep-app SwiftUI host correctness + UI responsiveness
 **Risk:** Low (one latent crash on cancel, four UI hitches, two structural cleanups)
 **Dependencies:** MAC17 (merged)

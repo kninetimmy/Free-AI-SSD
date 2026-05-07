@@ -65,7 +65,11 @@ struct InitialPortableConfigPayload {
     }
 }
 
-final class EncryptedConfigWriter {
+// `@unchecked Sendable`: stateless (no instance vars). Marked so
+// PrepViewModel can capture the writer in `Task.detached` for
+// MAC17a #3 — hopping the PBKDF2 + AES-GCM seal off `@MainActor`
+// so the SwiftUI spinner ticks during encryption setup.
+final class EncryptedConfigWriter: @unchecked Sendable {
     /// Write the initial encrypted PortableConfig at <ssdRoot>/config/.
     /// Derives a fresh PBKDF2 key from the passphrase, builds an
     /// UnlockMaterial, and invokes SsdEncryption.saveEncryptedConfig

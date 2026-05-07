@@ -51,7 +51,11 @@ enum DiskutilDriveServiceError: Error, LocalizedError {
     }
 }
 
-final class DiskutilDriveService {
+// `@unchecked Sendable`: stateless (no instance vars). Marked so
+// PrepViewModel can capture the service in `Task.detached` for
+// MAC17a #2/#7 — hopping format + listExternalCandidates off
+// `@MainActor` so the SwiftUI ProgressView ticks during long ops.
+final class DiskutilDriveService: @unchecked Sendable {
     /// List candidate external disks. Filters out internal/system disks
     /// (typically disk0/disk1 on Apple Silicon) by inspecting the
     /// `Internal` flag from `diskutil info`. The candidate list is what the

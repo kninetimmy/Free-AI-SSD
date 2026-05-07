@@ -36,7 +36,7 @@ struct PrepHostResult {
     let payload: [String: Any]
 }
 
-final class PrepHostController {
+final class PrepHostController: @unchecked Sendable {
     enum Status: Equatable {
         case stopped
         case starting
@@ -155,13 +155,63 @@ final class PrepHostController {
         guard let stdin = stdinPipe else { throw PrepHostError.notRunning }
 
         let commandName = command.split(separator: " ", maxSplits: 1).first.map(String.init) ?? command
+        let line = command + "\n"
 
+        return try await awaitCommandResult(commandName: commandName, timeout: timeout) {
+            if let payload = line.data(using: .utf8) {
+                stdin.fileHandleForWriting.write(payload)
+            }
+        }
+    }
+
+    /// Internal seam: register a continuation for `commandName`, run
+    /// `dispatch` to fire the side-effect that should eventually
+    /// produce a matching `result:` line (e.g. write to stdin), and
+    /// race the wait against a `Task.sleep` timeout. On cancellation
+    /// or timeout the slot is removed and the continuation resumes
+    /// with `CancellationError()` — fixes the leak/double-resume
+    /// identified in the PR #193 Gemini review by making the
+    /// pendingResults bookkeeping cancel-safe.
+    ///
+    /// Race-handling: registration and cancellation contend for the
+    /// same `pendingResults` slot. Both run inside `stateQueue.sync`,
+    /// and the registration path also checks `Task.isCancelled` inside
+    /// the critical section so a cancellation that fires *before* the
+    /// registration body runs cannot leak the continuation.
+    internal func awaitCommandResult(
+        commandName: String,
+        timeout: TimeInterval,
+        dispatch: @escaping @Sendable () -> Void
+    ) async throws -> PrepHostResult {
+        let queue = self.stateQueue
         return try await withThrowingTaskGroup(of: PrepHostResult.self) { group in
-            group.addTask {
-                try await withCheckedThrowingContinuation { (cont: CheckedContinuation<PrepHostResult, Error>) in
-                    self.stateQueue.sync { self.pendingResults[commandName] = cont }
-                    if let payload = (command + "\n").data(using: .utf8) {
-                        stdin.fileHandleForWriting.write(payload)
+            group.addTask { [weak self] in
+                // Bind to a local let so the nested closures capture a
+                // clean constant — Swift 6 strict-concurrency treats
+                // the implicit recapture of `[weak self]` inside a
+                // concurrent onCancel/continuation closure as a
+                // captured-var error.
+                let weakSelf = self
+                return try await withTaskCancellationHandler {
+                    try await withCheckedThrowingContinuation { (cont: CheckedContinuation<PrepHostResult, Error>) in
+                        var didRegister = false
+                        queue.sync {
+                            if Task.isCancelled {
+                                cont.resume(throwing: CancellationError())
+                            } else {
+                                weakSelf?.pendingResults[commandName] = cont
+                                didRegister = true
+                            }
+                        }
+                        if didRegister {
+                            dispatch()
+                        }
+                    }
+                } onCancel: {
+                    queue.sync {
+                        if let cont = weakSelf?.pendingResults.removeValue(forKey: commandName) {
+                            cont.resume(throwing: CancellationError())
+                        }
                     }
                 }
             }
@@ -175,41 +225,65 @@ final class PrepHostController {
         }
     }
 
-    /// Graceful shutdown. Writes "shutdown\n", waits up to 2s, then
-    /// SIGTERM/SIGKILLs the child. Safe to call when already stopped.
-    func shutdown(timeout: TimeInterval = 2.0) {
+    /// Test-only seam: number of outstanding pending result
+    /// continuations. Used by PrepAppTests to assert the cancel-path
+    /// fix for Issue #1 actually frees the slot.
+    internal var pendingResultsCountForTest: Int {
+        stateQueue.sync { pendingResults.count }
+    }
+
+    /// Async graceful shutdown. Writes "shutdown\n", waits up to
+    /// `timeout` for the child to exit, then SIGTERM, then SIGKILL.
+    /// Async so the @MainActor caller (PrepViewModel.finalize /
+    /// .restart) does not freeze the UI while the child winds down.
+    /// Safe to call when already stopped.
+    func shutdown(timeout: TimeInterval = 2.0) async {
         guard let proc = process else {
             status = .stopped
             return
         }
+        sendShutdownAndCloseStdin()
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while proc.isRunning && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+        }
+        if proc.isRunning {
+            proc.terminate()
+            let killDeadline = Date().addingTimeInterval(0.5)
+            while proc.isRunning && Date() < killDeadline {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+            if proc.isRunning {
+                kill(proc.processIdentifier, SIGKILL)
+            }
+        }
+        clearProcessRefs()
+    }
+
+    deinit {
+        // deinit cannot be async. Best-effort: SIGTERM the child if
+        // still running and let the OS reap it. terminationHandler
+        // captures [weak self] so it no-ops once self is gone.
+        process?.terminate()
+    }
+
+    private func sendShutdownAndCloseStdin() {
         if let stdin = stdinPipe {
             if let payload = "shutdown\n".data(using: .utf8) {
                 stdin.fileHandleForWriting.write(payload)
             }
             stdin.fileHandleForWriting.closeFile()
         }
-        let deadline = Date().addingTimeInterval(timeout)
-        while proc.isRunning && Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-        if proc.isRunning {
-            proc.terminate()
-            let killDeadline = Date().addingTimeInterval(0.5)
-            while proc.isRunning && Date() < killDeadline {
-                Thread.sleep(forTimeInterval: 0.05)
-            }
-            if proc.isRunning {
-                kill(proc.processIdentifier, SIGKILL)
-            }
-        }
+    }
+
+    private func clearProcessRefs() {
         process = nil
         stdinPipe = nil
         stdoutPipe = nil
         stderrPipe = nil
         status = .stopped
     }
-
-    deinit { shutdown() }
 
     // MARK: - Stream handling
 

@@ -383,9 +383,11 @@ jobs:
         # subcommand the regenerator path uses; the unit-test path itself
         # doesn't exercise them, but Swift's @main entry compiles the
         # whole file together so the symbols must resolve.
+        # PrepHostController.swift is included because MAC17a Issue #1
+        # cancel-path tests drive its `awaitCommandResult` seam directly.
         run: |
           mkdir -p out
-          swiftc mac-runner/Sources/SsdEncryption.swift mac-prep-app/Sources/PrepFlowStep.swift mac-prep-app/Sources/DiskutilFormatCommand.swift mac-prep-app/Sources/EncryptedConfigWriter.swift mac-prep-app/Tests/PrepAppTests.swift             -parse-as-library             -target "arm64-apple-macos11.0"             -O             -o out/mac-prep-tests
+          swiftc mac-runner/Sources/SsdEncryption.swift mac-prep-app/Sources/PrepFlowStep.swift mac-prep-app/Sources/DiskutilFormatCommand.swift mac-prep-app/Sources/EncryptedConfigWriter.swift mac-prep-app/Sources/PrepHostController.swift mac-prep-app/Tests/PrepAppTests.swift             -parse-as-library             -target "arm64-apple-macos11.0"             -O             -o out/mac-prep-tests
           out/mac-prep-tests
       - name: Publish mac-prep-host (osx-arm64 self-contained single-file)
         # MAC17: build the net8.0 sidecar host so the Swift PrepApp.app can

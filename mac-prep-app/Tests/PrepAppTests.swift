@@ -20,7 +20,7 @@ import Foundation
 
 @main
 struct PrepAppTestsMain {
-    static func main() {
+    static func main() async {
         // Subcommand: write a canonical Mac PrepApp encrypted-config
         // fixture for the cross-language test. Invoked once (or on
         // deliberate format change) to (re)generate
@@ -128,7 +128,61 @@ struct PrepAppTestsMain {
             try expect(PrepFlowStep.failed(message: "a") != .failed(message: "b"))
         }
 
-        runner.run()
+        // MARK: PrepHostController cancel-path tests (MAC17a Issue #1)
+        //
+        // Pin the bug fix: on timeout the pending continuation slot must
+        // be freed and the command name re-usable. Pre-fix, the slot
+        // leaked and a re-send under the same name would either trap on
+        // double-resume or silently overwrite the leaked continuation.
+        // Drives the internal `awaitCommandResult` seam directly so we
+        // don't need a real spawned sidecar.
+
+        runner.test("Issue #1: send timeout frees pending result slot") {
+            let controller = PrepHostController()
+            var caught: Error?
+            do {
+                _ = try await controller.awaitCommandResult(
+                    commandName: "test-cmd",
+                    timeout: 0.05,
+                    dispatch: {})
+            } catch {
+                caught = error
+            }
+            try expect(caught != nil, "expected timeout/cancel to throw")
+            try expect(controller.pendingResultsCountForTest == 0,
+                       "pending slot leaked: count=\(controller.pendingResultsCountForTest)")
+        }
+
+        runner.test("Issue #1: same command name is re-usable after timeout") {
+            let controller = PrepHostController()
+
+            // First call: time out, slot must clear.
+            _ = try? await controller.awaitCommandResult(
+                commandName: "cmd-x",
+                timeout: 0.05,
+                dispatch: {})
+            try expect(controller.pendingResultsCountForTest == 0,
+                       "first-call slot leaked")
+
+            // Second call with the same command name must not crash on
+            // re-registration. Pre-fix, the slot still held the stale
+            // continuation and the next stdout `result:` line would
+            // try to resume it, trapping on double-resume in real use.
+            var caught: Error?
+            do {
+                _ = try await controller.awaitCommandResult(
+                    commandName: "cmd-x",
+                    timeout: 0.05,
+                    dispatch: {})
+            } catch {
+                caught = error
+            }
+            try expect(caught != nil, "second-call expected timeout/cancel")
+            try expect(controller.pendingResultsCountForTest == 0,
+                       "second-call slot leaked")
+        }
+
+        await runner.run()
     }
 }
 
@@ -196,20 +250,20 @@ func expect(_ condition: @autoclosure () -> Bool, _ message: String = "") throws
 final class TestRunner {
     private struct Case {
         let name: String
-        let body: () throws -> Void
+        let body: () async throws -> Void
     }
 
     private var cases: [Case] = []
 
-    func test(_ name: String, _ body: @escaping () throws -> Void) {
+    func test(_ name: String, _ body: @escaping () async throws -> Void) {
         cases.append(Case(name: name, body: body))
     }
 
-    func run() {
+    func run() async {
         var failures = 0
         for c in cases {
             do {
-                try c.body()
+                try await c.body()
                 print("ok      \(c.name)")
             } catch let f as ExpectationFailure {
                 failures += 1
