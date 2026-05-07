@@ -219,17 +219,18 @@ struct EncryptionSetupStepView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Set up encryption")
                 .font(.headline)
-            Toggle("Encrypt the drive's configuration store", isOn: $vm.enableEncryption)
-            if vm.enableEncryption {
-                Form {
-                    SecureField("Passphrase", text: $vm.passphrase)
-                    SecureField("Confirm passphrase", text: $vm.passphraseConfirm)
-                }
-                Text("The passphrase decrypts the SSD's config on every launch. Store it somewhere you won't lose it — there is no recovery path.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            // MAC17a #6: encryption is mandatory for MAC17 MVP; the
+            // toggle was wishful UI for a future plaintext mode that
+            // doesn't exist. Removed so the only way forward is to
+            // enter a passphrase.
+            Form {
+                SecureField("Passphrase", text: $vm.passphrase)
+                SecureField("Confirm passphrase", text: $vm.passphraseConfirm)
             }
+            Text("The passphrase decrypts the SSD's config on every launch. Store it somewhere you won't lose it — there is no recovery path.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             Divider()
 
@@ -259,7 +260,7 @@ struct EncryptionSetupStepView: View {
                     Task { await vm.writeEncryptionAndProceed() }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(vm.enableEncryption && (vm.passphrase.isEmpty || vm.passphrase != vm.passphraseConfirm))
+                .disabled(vm.passphrase.isEmpty || vm.passphrase != vm.passphraseConfirm)
             }
         }
     }
@@ -331,9 +332,11 @@ struct DoneStepView: View {
 
             HStack {
                 Spacer()
-                Button("Finish") { vm.finalize() }
-                    .keyboardShortcut(.defaultAction)
-                    .controlSize(.large)
+                Button("Finish") {
+                    Task { await vm.finalize() }
+                }
+                .keyboardShortcut(.defaultAction)
+                .controlSize(.large)
             }
         }
     }
@@ -377,8 +380,10 @@ struct FailedStepView: View {
 
             HStack {
                 Spacer()
-                Button("Restart") { vm.restart() }
-                    .keyboardShortcut(.defaultAction)
+                Button("Restart") {
+                    Task { await vm.restart() }
+                }
+                .keyboardShortcut(.defaultAction)
             }
         }
     }

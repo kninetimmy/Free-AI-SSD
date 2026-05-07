@@ -42,8 +42,7 @@ final class PrepViewModel: ObservableObject {
     @Published var logLines: [String] = []
     @Published var isBusy: Bool = false
 
-    // Encryption
-    @Published var enableEncryption: Bool = true
+    // Encryption — mandatory for MAC17 MVP, no toggle. (MAC17a #6)
     @Published var passphrase: String = ""
     @Published var passphraseConfirm: String = ""
 
@@ -86,8 +85,14 @@ final class PrepViewModel: ObservableObject {
 
     func refreshCandidates() async {
         statusMessage = "Scanning external drives…"
+        // MAC17a #7: hop diskutil list off @MainActor — on a system with
+        // several USB devices it's several hundred milliseconds and
+        // produces a noticeable hitch on Refresh / post-format auto-refresh.
+        let driveSvc = self.driveService
         do {
-            let list = try driveService.listExternalCandidates()
+            let list = try await Task.detached(priority: .userInitiated) {
+                try driveSvc.listExternalCandidates()
+            }.value
             candidates = list
             statusMessage = list.isEmpty
                 ? "No external drives found. Plug an SSD in and click Refresh."
@@ -155,14 +160,23 @@ final class PrepViewModel: ObservableObject {
         defer { isBusy = false }
 
         appendLog("Formatting \(candidate.identifier) as exFAT (label: \(volumeLabel))…")
+        // MAC17a #2: hop diskutil eraseDisk off @MainActor. For a real
+        // external SSD that's tens of seconds; without this hop the
+        // SwiftUI ProgressView freezes and the log scroll doesn't tick.
+        let driveSvc = self.driveService
+        let identifier = candidate.identifier
+        let label = volumeLabel
+        let logSink: @Sendable (String) -> Void = { [weak self] line in
+            Task { @MainActor in self?.appendLog(line) }
+        }
         do {
-            try driveService.format(
-                diskIdentifier: candidate.identifier,
-                label: volumeLabel,
-                fileSystem: "ExFAT",
-                onOutput: { [weak self] line in
-                    Task { @MainActor in self?.appendLog(line) }
-                })
+            try await Task.detached(priority: .userInitiated) {
+                try driveSvc.format(
+                    diskIdentifier: identifier,
+                    label: label,
+                    fileSystem: "ExFAT",
+                    onOutput: logSink)
+            }.value
             appendLog("Format complete.")
             // diskutil mounts the new volume automatically; refresh so
             // we pick up the new mount path on the same identifier.
@@ -236,26 +250,23 @@ final class PrepViewModel: ObservableObject {
         isBusy = true
         defer { isBusy = false }
 
-        if !enableEncryption {
-            // Skipping encryption — write a plaintext PortableConfig as
-            // SsdEncryption.swift would expect for unencrypted mode.
-            // For MVP simplicity we still go through SsdEncryption with
-            // an empty-passphrase guard rejection: route as failure to
-            // surface that plaintext-mode-without-encryption is
-            // out-of-scope for MAC17.
-            currentStep = .failed(message: "Plaintext-mode prep is out of scope for MAC17 MVP. Enable encryption to continue.")
-            return
-        }
-
         if passphrase.isEmpty || passphrase != passphraseConfirm {
             statusMessage = "Passphrases must match and not be empty."
             return
         }
 
+        // MAC17a #3: hop PBKDF2 + AES-GCM seal off @MainActor. PBKDF2
+        // at 210k iterations + AES-GCM seal totals ~500ms–1s on Apple
+        // Silicon — long enough to freeze the SwiftUI spinner without
+        // this hop.
+        let writer = self.encryptedConfigWriter
+        let pass = self.passphrase
+        let payload = InitialPortableConfigPayload()
         do {
-            let payload = InitialPortableConfigPayload()
-            try encryptedConfigWriter.writeInitialEncryptedConfig(
-                ssdRoot: mount, payload: payload, passphrase: passphrase)
+            try await Task.detached(priority: .userInitiated) {
+                try writer.writeInitialEncryptedConfig(
+                    ssdRoot: mount, payload: payload, passphrase: pass)
+            }.value
             appendLog("Encrypted config written.")
 
             // Zeroize the in-memory passphrase strings. Swift Strings
@@ -323,17 +334,21 @@ final class PrepViewModel: ObservableObject {
         }
     }
 
-    func finalize() {
-        // Graceful sidecar shutdown — the prep flow is complete.
-        hostController.shutdown()
+    func finalize() async {
+        // MAC17a #4: graceful sidecar shutdown is now async so the
+        // Finish button doesn't freeze the UI for up to 2.5s while the
+        // child winds down.
+        await hostController.shutdown()
         appendLog("Drive ready. Launch Free AI SSD Runner from the SSD's mac/ folder.")
     }
 
     /// Reset to the welcome step after a failure so the user can retry
     /// from a clean slate. (More targeted re-entry — e.g. retry just
     /// staging — is a future MAC17 follow-up.)
-    func restart() {
-        hostController.shutdown()
+    func restart() async {
+        // MAC17a #4: async shutdown so the Restart button doesn't
+        // freeze the UI for up to 2.5s.
+        await hostController.shutdown()
         readinessItems = []
         logLines = []
         statusMessage = ""
