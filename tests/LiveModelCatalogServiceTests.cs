@@ -11,7 +11,8 @@ public class LiveModelCatalogServiceTests
     [Fact]
     public async Task FetchAsync_RefusesNonAllowlistedUrl()
     {
-        using var handler = new StubHandler((_, _) => throw new InvalidOperationException("Should never reach the network"));
+        using var handler = new StubHandler((_, _) =>
+            Task.FromException<HttpResponseMessage>(new InvalidOperationException("Should never reach the network")));
         using var client = new HttpClient(handler);
         using var svc = new LiveModelCatalogService(client, sourceUrl: "https://example.com/models");
 
@@ -56,7 +57,8 @@ public class LiveModelCatalogServiceTests
     [Fact]
     public async Task FetchAsync_TranslatesNetworkErrorToTypedException()
     {
-        using var handler = new StubHandler((_, _) => throw new HttpRequestException("dns failure"));
+        using var handler = new StubHandler((_, _) =>
+            Task.FromException<HttpResponseMessage>(new HttpRequestException("dns failure")));
         using var client = new HttpClient(handler);
         using var svc = new LiveModelCatalogService(client);
 
@@ -243,11 +245,6 @@ public class LiveModelCatalogServiceTests
         public StubHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler)
         {
             _handler = handler;
-        }
-
-        public StubHandler(Func<HttpRequestMessage, CancellationToken, HttpResponseMessage> handler)
-            : this((req, ct) => Task.FromResult(handler(req, ct)))
-        {
         }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
