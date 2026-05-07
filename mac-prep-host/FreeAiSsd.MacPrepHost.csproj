@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    MAC17: net8.0 sidecar host process spawned by the Swift mac-prep-app.
+    Mirrors the MAC6 mac-runner-host pattern but with prep-core service
+    consumption in place of runner-core/RunnerLocalApiService. The sidecar
+    exists so platform-neutral PrepApp business logic (artifact staging,
+    Ollama package, model pull/verify, prereqs, readiness) runs on Apple
+    Silicon without a Swift port. See agent_docs/project_decisions.md
+    (2026-05-06 Mac UI design language entry) for the architectural split:
+    Swift owns destructive disk ops + encrypted-config write; the sidecar
+    owns prep-core consumption.
+
+    Trimming intentionally OFF — prep-core uses reflection in places
+    (notably StarterModelCatalogLoader's embedded-resource fallback) that
+    PublishTrimmed would silently break. PublishSingleFile is fine.
+
+    No FrameworkReference for Microsoft.AspNetCore.App — unlike the runner
+    sidecar, the prep sidecar has no HTTP surface. Stdin commands only.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>FreeAiSsd.MacPrepHost</RootNamespace>
+    <AssemblyName>FreeAiSsd.MacPrepHost</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <PublishTrimmed>false</PublishTrimmed>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\prep-core\FreeAiSsd.PrepCore.csproj" />
+    <ProjectReference Include="..\shared\FreeAiSsd.Shared.csproj" />
+  </ItemGroup>
+</Project>

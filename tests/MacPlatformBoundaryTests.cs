@@ -150,6 +150,41 @@ public sealed class MacPlatformBoundaryTests
             reference.Replace('\\', '/').Equals("../runner-core/FreeAiSsd.RunnerCore.csproj", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public void MacPrepHost_RemainsPlainNet8WithoutWindowsPackages()
+    {
+        // MAC17 sidecar: net8.0 host process spawned by the Swift
+        // mac-prep-app. Allowed to depend on prep-core + Shared (no ASP.NET
+        // Core — prep is one-shot stdin commands, not a long-running HTTP
+        // host). Must not target Windows or pull Windows-only NuGet packages,
+        // otherwise it cannot publish for osx-arm64.
+        var project = LoadProject("mac-prep-host", "FreeAiSsd.MacPrepHost.csproj");
+        var root = project.Root ?? throw new InvalidOperationException("Project XML has no root.");
+        var packages = PackageReferences(project);
+        var references = ProjectReferences(project);
+
+        Assert.Equal("Microsoft.NET.Sdk", root.Attribute("Sdk")?.Value);
+        Assert.Equal("net8.0", RequiredProperty(project, "TargetFramework"));
+        Assert.DoesNotContain("windows", RequiredProperty(project, "TargetFramework"), StringComparison.OrdinalIgnoreCase);
+        Assert.False(IsTrueProperty(project, "UseWPF"));
+        Assert.False(IsTrueProperty(project, "UseWindowsForms"));
+        Assert.False(IsTrueProperty(project, "EnableWindowsTargeting"));
+        Assert.DoesNotContain(packages, IsBlockedWindowsOnlyPackage);
+        Assert.DoesNotContain(references, IsRunnerProjectReference);
+        Assert.DoesNotContain(references, IsPrepAppProjectReference);
+
+        // Must reference prep-core (the whole point of MAC17 — reuse
+        // platform-neutral PrepApp services rather than fork them in Swift).
+        Assert.Contains(references, reference =>
+            reference.Replace('\\', '/').Equals("../prep-core/FreeAiSsd.PrepCore.csproj", StringComparison.OrdinalIgnoreCase));
+
+        // Symmetric guardrail: prep-host must NOT pull in runner-core
+        // (different lifecycle, different command surface). MAC17 keeps
+        // the Mac sidecars cleanly separated.
+        Assert.DoesNotContain(references, reference =>
+            reference.Replace('\\', '/').Contains("runner-core", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static XDocument LoadProject(params string[] pathParts)
     {
         return XDocument.Load(Path.Combine(FindRepoRoot(), Path.Combine(pathParts)));
