@@ -11,7 +11,7 @@
 
 **Plug in a drive. Ask your AI anything. No internet required.**
 
-Prepare the drive once on a Windows machine with internet access — download the models, load in your documents, and finalize the SSD. On Windows, the Runner provides the full offline assistant: document-grounded chat, voice, HOTAS PTT, DCS binding import, and the LAN API. macOS support is currently a beta Swift runner with a local API sidecar for RAG-backed chat from the same SSD; it is not yet feature-equivalent with the Windows Runner.
+Prepare the drive once on a Windows or Mac machine with internet access — download the models, load in your documents, and finalize the SSD. PrepApp ships for both hosts: a WPF app on Windows and a native SwiftUI app on Mac, so a Mac-only user can prep and run Free-AI-SSD without owning a Windows machine. On Windows, the Runner provides the full offline assistant: document-grounded chat, voice, HOTAS PTT, DCS binding import, and the LAN API. macOS support is currently a beta Swift runner with a local API sidecar for RAG-backed chat from the same SSD; it is not yet feature-equivalent with the Windows Runner. See [Source/Target compatibility](#sourcetarget-compatibility) below for which prep host can produce which target filesystem.
 
 - **Portable** — Windows Runner runs from the SSD; the macOS beta runner also launches from the staged SSD payload
 - **Document-grounded on Windows** — load your PDFs, manuals, and notes; the AI cites them when answering
@@ -41,6 +41,7 @@ This started as a way to take AI into the field with no cell signal — ham radi
 - ✅ **Companion tray app for Windows** — lightweight Windows client for a second PC on the LAN (no SSD required on the client)
 - ✅ **Headless CLI (`FreeAiSsd.RunnerCli`)** — terminal REPL for SSH / Tailscale access to a running Windows Runner API; streams chat, shows RAG sources, zero GUI deps
 - ✅ **Offline Windows prereq bundle** — .NET 8 Desktop Runtime + VC++ redist staged and SHA-verified so Runner installs cleanly on fresh targets
+- ✅ **Cross-platform PrepApp** — Windows WPF (`FreeAiSsd.PrepApp.exe`) and native macOS SwiftUI (`PrepApp.app`); both produce drives with byte-identical encrypted-config and SSD layout. A Mac-only user can prep and run without owning a Windows machine
 - 🧪 **macOS Swift Runner beta** — staged at `<SSD>/mac/Runner.app`; can select/infer the SSD, unlock encrypted Windows-prepped SSDs (native CryptoKit + CommonCrypto port of `SsdEncryption`), read installed models, start `mac/tools/ollama/ollama`, host the Runner API sidecar, and send RAG-backed chat with citations against an already-prepped active library
 
 Known gaps:
@@ -121,14 +122,37 @@ Load first aid guides, plant identification references, equipment specs, surviva
 ### What You Need
 
 - A portable SSD (most models need 4–8 GB for the AI models alone; plan accordingly)
-- A Windows machine with internet access for the one-time preparation step
+- A Windows **or** Mac machine with internet access for the one-time preparation step. PrepApp ships for both: WPF on Windows, native SwiftUI on Mac. See [Source/Target compatibility](#sourcetarget-compatibility) for which prep host can produce which target filesystem.
 - Windows target machines need no pre-installed software — Windows Runner handles staged prerequisites offline. The macOS beta bundle stages its own macOS Ollama payload and API sidecar, but Mac document management and voice/HOTAS features remain limited.
+- Mac host requirements (for PrepApp or Runner): Apple Silicon (arm64) only; macOS 11 Big Sur or newer. Intel Macs are not supported.
+
+<a name="sourcetarget-compatibility"></a>
+
+### Source/Target compatibility
+
+Which prep host (source OS) can produce which target drive:
+
+| Source OS | Target | Filesystem | Supported |
+|---|---|---|---|
+| Windows | Windows-only | NTFS | Yes |
+| Windows | Cross-platform (Windows + Mac) | exFAT | Yes |
+| Windows | Mac-only | exFAT | Yes (APFS not available from Windows) |
+| Mac | Mac-only | exFAT | Yes (APFS deferred from supported targets) |
+| Mac | Cross-platform (Windows + Mac) | exFAT | Yes |
+| Mac | Windows-only | NTFS | Not supported — use Windows PrepApp (macOS cannot natively format NTFS) |
+
+**Encrypted-config roundtrip is bidirectional.** A drive prepped on Windows unlocks cleanly on Mac, and a drive prepped on Mac unlocks cleanly on Windows. The on-disk encrypted format (AES-256-GCM + PBKDF2-SHA256) is identical on both platforms and is pinned by cross-language tests.
+
+Notes on the unsupported cells:
+- **APFS** is a Mac-native filesystem and Windows cannot reliably create or write to it. APFS targets are deferred from the supported set; exFAT covers all current Mac use.
+- **Mac → Windows-only NTFS** is an OS limitation, not a project gap — macOS does not natively format NTFS. If you need an NTFS-only drive, run Windows PrepApp.
+- **exFAT** is the only filesystem Windows and macOS both read and write natively, so cross-platform drives always land on exFAT.
 
 ### Download
 
 **Stable (recommended):** Download `Free-AI-SSD-win.zip` from [Releases](../../releases). Extract anywhere on Windows. Run `FreeAiSsd.PrepApp.exe`.
 
-**Beta cross-platform bundle:** `Free-AI-SSD-beta-crossplatform.zip` includes macOS artifacts for the limited Swift runner. The macOS build is currently unsigned/not notarized — expect Gatekeeper prompts.
+**Beta cross-platform bundle:** `Free-AI-SSD-beta-crossplatform.zip` includes the Mac PrepApp (`PrepApp.app`) and Mac Runner beta (`Runner.app`) alongside the Windows artifacts. The macOS builds are currently unsigned/not notarized — expect Gatekeeper prompts.
 
 **CI artifacts:** Available from GitHub Actions for validation and testing. Prefer Releases for normal use.
 
@@ -136,12 +160,24 @@ Load first aid guides, plant identification references, equipment specs, surviva
 
 **Phase 1 — Prepare (online, once):**
 
+On **Windows**:
+
 1. Open `FreeAiSsd.PrepApp.exe`
-2. On **Drive Setup**, select your target external SSD and enter a volume label
-3. Click **Format & Prepare Drive** (optional — skip if the drive is already formatted the way you want). PrepApp will prompt for admin elevation, re-confirm, then format the volume and lay out the canonical directory structure. If Windows asks to relaunch as admin, accept — the elevated window auto-resumes with your label pre-filled and asks you to confirm once more before formatting.
+2. On **Drive Setup**, select your target external SSD, choose target compatibility (Windows-only / Mac-only / cross-platform), and enter a volume label
+3. Click **Format & Prepare Drive** (optional — skip if the drive is already formatted the way you want). PrepApp picks the filesystem from your target choice (NTFS for Windows-only, exFAT for anything including Mac), prompts for admin elevation, re-confirms, then formats the volume and lays out the canonical directory structure. If Windows asks to relaunch as admin, accept — the elevated window auto-resumes with your label pre-filled and asks you to confirm once more before formatting.
 4. On **Model Manager**, add or select models and pull them
 5. Run **Check SSD Readiness** until checks pass
 6. Click **Finalize SSD**
+
+On **Mac**:
+
+1. Open `PrepApp.app` from the cross-platform bundle (right-click → Open the first time to bypass Gatekeeper, since the build is unsigned/not notarized)
+2. Pick your target external SSD and choose target compatibility (Mac-only or cross-platform — Windows-only NTFS is not available from a Mac host)
+3. Confirm the destructive erase in the native confirmation dialog. PrepApp drives `diskutil` directly to format the drive as exFAT and lay out the canonical SSD directory structure
+4. Stage the runner, Ollama, and prereq payloads; pull a starter model
+5. Set an encryption passphrase, then run readiness checks and finalize
+
+The resulting drive is byte-for-byte interchangeable with a Windows-prepped drive of the same target compatibility, including the encrypted config blob.
 
 **Phase 2 — Run (offline, anywhere):**
 
@@ -511,8 +547,9 @@ Mode selection at install time: **general use** or **flight sim mode**. Flight s
 
 Free-AI-SSD ships several components backed by a shared cross-platform library:
 
-- **PrepApp** (Windows, WPF) — runs on an online machine to configure the SSD: picks drive, downloads and stages Ollama, pulls models, bundles prerequisites, finalizes layout
-- **Runner** (Windows, WPF) — runs from the SSD on the target machine; starts Ollama, provides the chat interface, manages document libraries, voice pipeline, HOTAS PTT, and the LAN API host
+- **PrepApp** (Windows, WPF — `prep-app/`) — runs on an online Windows machine to configure the SSD: picks drive, downloads and stages Ollama, pulls models, bundles prerequisites, finalizes layout
+- **Mac PrepApp** (`mac-prep-app/`, SwiftUI) — native macOS PrepApp for the cross-platform bundle; shipped at `<SSD>/mac/PrepApp.app` and as a separate `PrepApp.app.zip` payload. Drives `diskutil` directly to format target SSDs as exFAT, stages the runner / Ollama / prereq payloads via the shared `mac-prep-host` net8.0 sidecar (which consumes `prep-core/`), and writes the encrypted config in a format byte-identical to the Windows PrepApp. Apple Silicon (arm64), macOS 11+
+- **Runner** (Windows, WPF — `runner/`) — runs from the SSD on the target machine; starts Ollama, provides the chat interface, manages document libraries, voice pipeline, HOTAS PTT, and the LAN API host
 - **macOS Runner beta** (`mac-runner/`, Swift) — thin macOS app for the cross-platform beta bundle; shipped at `<SSD>/mac/Runner.app`. It selects/infers the SSD, unlocks encrypted config, reads installed models, starts macOS Ollama, spawns the local Runner API sidecar, and sends chat through the shared RAG pipeline when an active indexed library exists. It is not a full Windows Runner equivalent yet.
 - **Voice Pipeline** (lives inside Runner's service layer) — `AudioCaptureService` → `WhisperSpeechToTextService` → `ChatService` → `SystemTextToSpeechService` / `PiperTextToSpeechService`, orchestrated by `PttVoicePipelineService` when HOTAS PTT is enabled
 - **Bindings Parser** (inside the shared library at `shared/Documents/`) — `DcsSavedGamesLocator` finds DCS installs, `DcsAircraftScanner` enumerates aircraft, `DcsBindingParser` parses `diff.lua`, `DcsBatchProcessor` merges devices and writes RAG documents
@@ -579,10 +616,15 @@ cache/                   — prep-time download cache
 | Directory | Target | Purpose |
 |---|---|---|
 | `shared/` | `net8.0` | Cross-platform shared library (`FreeAiSsd.Shared`) |
-| `prep-app/` | `net8.0-windows` | WPF PrepApp |
-| `runner/` | `net8.0-windows` | WPF Runner |
+| `runner-core/` | `net8.0` | Platform-neutral Runner business logic (chat, RAG, library, local API) shared by Windows Runner and the Mac runner-host sidecar |
+| `prep-core/` | `net8.0` | Platform-neutral PrepApp business logic (manifest, staging, prereq, encrypted config) shared by Windows PrepApp and the Mac prep-host sidecar |
+| `prep-app/` | `net8.0-windows` | WPF PrepApp (Windows) |
+| `mac-prep-app/` | macOS (Swift) | Native SwiftUI PrepApp (Mac); produces drives byte-identical to Windows PrepApp |
+| `mac-prep-host/` | `net8.0` | osx-arm64 sidecar that runs `prep-core/` business logic for the Mac PrepApp over a stdin command protocol |
+| `runner/` | `net8.0-windows` | WPF Runner (Windows) |
+| `mac-runner/` | macOS (Swift) | Swift macOS beta Runner over the local Runner API sidecar |
+| `mac-runner-host/` | `net8.0` | osx-arm64 sidecar that hosts `RunnerLocalApiService` for the Mac Runner |
 | `companion/` | `net8.0-windows` | WPF Companion tray client (LAN second-PC use) |
-| `mac-runner/` | macOS (Swift) | Swift macOS beta runner over the local Runner API sidecar |
 | `tools/FreeAiSsd.PrereqFetch/` | `net8.0` | CI helper that pre-builds the offline prereq bundle via the shared `PrereqResolver` |
 | `tests/` | `net10.0` | xUnit test project (`FreeAiSsd.Tests`) |
 | `docs/` | — | Documentation (includes `QUICKSTART.txt`) |
