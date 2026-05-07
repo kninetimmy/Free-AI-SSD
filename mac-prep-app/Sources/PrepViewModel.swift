@@ -166,8 +166,13 @@ final class PrepViewModel: ObservableObject {
         let driveSvc = self.driveService
         let identifier = candidate.identifier
         let label = volumeLabel
+        // Bind to a local let so the inner Task captures a clean
+        // constant — Swift 6 strict-concurrency treats the implicit
+        // recapture of `[weak self]` inside a nested concurrent
+        // closure as a captured-var error.
         let logSink: @Sendable (String) -> Void = { [weak self] line in
-            Task { @MainActor in self?.appendLog(line) }
+            let weakSelf = self
+            Task { @MainActor in weakSelf?.appendLog(line) }
         }
         do {
             try await Task.detached(priority: .userInitiated) {

@@ -186,14 +186,20 @@ final class PrepHostController: @unchecked Sendable {
         let queue = self.stateQueue
         return try await withThrowingTaskGroup(of: PrepHostResult.self) { group in
             group.addTask { [weak self] in
-                try await withTaskCancellationHandler {
+                // Bind to a local let so the nested closures capture a
+                // clean constant — Swift 6 strict-concurrency treats
+                // the implicit recapture of `[weak self]` inside a
+                // concurrent onCancel/continuation closure as a
+                // captured-var error.
+                let weakSelf = self
+                return try await withTaskCancellationHandler {
                     try await withCheckedThrowingContinuation { (cont: CheckedContinuation<PrepHostResult, Error>) in
                         var didRegister = false
                         queue.sync {
                             if Task.isCancelled {
                                 cont.resume(throwing: CancellationError())
                             } else {
-                                self?.pendingResults[commandName] = cont
+                                weakSelf?.pendingResults[commandName] = cont
                                 didRegister = true
                             }
                         }
@@ -203,7 +209,7 @@ final class PrepHostController: @unchecked Sendable {
                     }
                 } onCancel: {
                     queue.sync {
-                        if let cont = self?.pendingResults.removeValue(forKey: commandName) {
+                        if let cont = weakSelf?.pendingResults.removeValue(forKey: commandName) {
                             cont.resume(throwing: CancellationError())
                         }
                     }
