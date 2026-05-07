@@ -1134,3 +1134,85 @@ than a footnote. If Mac-side NTFS becomes feasible without a runtime
 dependency (e.g., Apple ships native NTFS write support), the
 "Mac → Windows-only NTFS" cell flips to supported and the docs
 update accordingly.
+
+## 2026-05-07 — Cross-OS parity audit is mandatory after every single-OS task
+
+Free-AI-SSD ships on Windows + Mac with shared cores (`runner-core/`,
+`prep-core/`, `shared/`) consumed by per-OS host adapters (WPF on
+Windows, SwiftUI on Mac, with `mac-runner-host` / `mac-prep-host`
+sidecars bridging Swift to the .NET cores). Single-OS surfaces (UI
+hosts, platform adapters like `IDriveService`, packaging metadata,
+docs) can drift silently when work lands on only one OS.
+
+User established the rule explicitly 2026-05-07 after MAC18 wrapped
+up the cross-platform PrepApp parity track: *"from now on when one
+os gets work done it needs to also get looked at on the other os
+and see if the work needs to be done there as well i dont want to
+miss things on os to os."*
+
+**Decision (workflow rule, applies to all future work):**
+
+After completing a task that touches one OS, before declaring it
+done, perform a cross-OS audit. The audit asks:
+- Does the surface this task touched exist on the other OS?
+- Does the other OS's adapter / UI / docs need a corresponding
+  change?
+- If yes, surface it as a follow-up backlog item or PR rather than
+  letting it drift.
+
+**Two execution patterns are both acceptable.** Pick whichever fits
+the change shape:
+
+1. **Audit-after-merge with focused single-OS PRs (default).** Land
+   the task on one OS, merge it, then do the cross-OS audit. If
+   work is needed on the other OS, file a follow-up PR. Matches
+   the existing MAC17 → MAC17a → MAC17b cascade pattern. Best when:
+   - The change is large enough that mixing platforms in one PR
+     hurts review.
+   - The platforms have meaningfully different host concerns
+     (e.g., WPF threading vs Swift strict-concurrency).
+   - One platform's CI failure shouldn't block the other.
+
+2. **Bundle both OSes per task.** Single PR adds the shared-core
+   change plus both platform adapters / UI wirings. Best when:
+   - The change is naturally dual-platform (e.g., a shared-core
+     service consumed by both hosts, where each host's wiring is
+     small).
+   - Splitting would create an awkward intermediate state on `main`
+     where the shared-core service exists but only one platform
+     uses it.
+
+**How to choose for a given task:**
+- If a shared-core change is needed AND both per-host UI surfaces
+  are small (~≤30 lines each), default to bundle.
+- If shared-core is unchanged and only one platform is touched,
+  default to audit-after-merge.
+- If shared-core is changed but one platform's wiring is large or
+  has design questions, split: ship the shared-core + simpler
+  platform first; do the larger platform as a follow-up.
+
+The split is a real escape hatch, not a default for "any time the
+Mac surface is bigger." First case where this gets exercised
+seriously: F2 (Live model list fetch) — execution prompt at
+`agent_docs/f2_execution_prompt.md` documents the bundle-default,
+F2a-followup-fallback decision shape.
+
+**How to surface the audit result:**
+- Always flag the audit in the user-facing summary, even when no
+  work is needed ("checked Windows side — no mirror needed because
+  X"), so the user sees the check happened.
+- Track parity gaps in whichever backlog they belong to:
+  `agent_docs/mac_project_backlog.md` for Mac items,
+  `agent_docs/project_backlog.md` for general / Windows.
+
+**Why this is in `project_decisions.md` and not just user memory:**
+The rule is load-bearing for all future work. User memory at
+`~/.claude/projects/-Users-stephenelswick-Free-AI-SSD/memory/feedback_cross_os_parity_audit.md`
+captures it for sessions on the user's machine, but
+`project_decisions.md` is the project-facing capture so any agent
+(human or otherwise) reading the repo cold sees the rule.
+
+**Exit ramp:** if Free-AI-SSD ever drops back to a single supported
+OS (e.g., a hypothetical Mac-only fork), this rule becomes
+trivially satisfied and can be retired. As long as both OSes are
+actively supported, the rule stands.
