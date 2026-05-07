@@ -850,7 +850,7 @@ notarization) since both touch Info.plist + bundle layout.
 
 ### MAC17 - macOS PrepApp MVP (exFAT)
 
-**Status:** planned
+**Status:** done 2026-05-06 (PR pending merge)
 **Scope:** new SwiftUI host + `prep-core/` consumer
 **Risk:** High
 **Dependencies:** MAC5 (encrypted config unlock/save on Mac), MAC16
@@ -908,6 +908,48 @@ notarization) since both touch Info.plist + bundle layout.
 - Manifest/staging tests covered by `prep-core/`.
 - Manual dual-OS smoke: prep on Mac -> run Windows Runner; prep on
   Windows -> run Mac Runner.
+
+---
+
+### MAC17a - PrepApp follow-ups from PR #193 review
+
+**Status:** planned
+**Scope:** mac-prep-app SwiftUI host correctness + UI responsiveness
+**Risk:** Low (one latent crash on cancel, four UI hitches, two structural cleanups)
+**Dependencies:** MAC17 (merged)
+**Goal:** Address Gemini code review items from PR #193 that were
+  knowingly deferred at MVP merge — none blocked the MVP smoke but
+  several materially improve real-Mac UX, and one (#1 continuation
+  leak) is a latent crash on prep-flow cancel + retry.
+
+**Detail file:** see `agent_docs/mac17_followup_notes.md` for
+per-issue file:line references, current code excerpts, proposed
+fixes, and bundling/sequencing recommendations.
+
+**Issue summary (high → medium):**
+- #1 (HIGH) `PrepHostController.send` continuation leak on cancel/timeout — only correctness item.
+- #2 (HIGH) `PrepViewModel.formatSelected` blocks `@MainActor` on disk format.
+- #3 (HIGH) `PrepViewModel.writeEncryptionAndProceed` blocks `@MainActor` on PBKDF2.
+- #4 (MED)  `PrepHostController.shutdown` busy-waits on `@MainActor`.
+- #5 (MED)  SSD layout hardcoded in `PrepViewModel` — duplicates `SsdLayout.cs`.
+- #6 (MED)  Encryption toggle UX mismatch — interactive control causes hard failure.
+- #7 (MED)  `PrepViewModel.refreshCandidates` blocks `@MainActor` on diskutil list.
+
+**Suggested split:** ship #1 + #6 + the background-threading cluster
+(#2/#3/#4/#7) together. Defer #5 to MAC17b so the structural refactor
+isn't fighting an in-flight threading change.
+
+**Do not change:**
+- Encrypted-config format / scheme name / fixture cross-language pin.
+- Destructive-erase NSAlert posture.
+- MAC5 plaintext invariant.
+
+**Acceptance criteria:**
+- All seven issues resolved or explicitly punted to MAC17b with
+  `mac17_followup_notes.md` updated to reflect the punt.
+- New unit tests for #1's cancel-then-retry path and #5's
+  ensure-structure delegation (if landed in this round).
+- CI green.
 
 ---
 

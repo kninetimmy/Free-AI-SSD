@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\mac-runner-host\FreeAiSsd.MacRunnerHost.csproj" />
+    <ProjectReference Include="..\mac-prep-host\FreeAiSsd.MacPrepHost.csproj" />
     <ProjectReference Include="..\runner-core\FreeAiSsd.RunnerCore.csproj" />
     <!--
       MAC16: prep-core/ is plain net8.0 so the test project can reference it
