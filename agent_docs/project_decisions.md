@@ -1216,3 +1216,55 @@ captures it for sessions on the user's machine, but
 OS (e.g., a hypothetical Mac-only fork), this rule becomes
 trivially satisfied and can be retired. As long as both OSes are
 actively supported, the rule stands.
+
+
+---
+
+## 2026-05-07 — F2: live catalog source = Ollama HTML scrape with bundled fallback
+
+PrepApp's Refresh button (F2) fetches the live starter-model catalog
+by HTML-scraping `https://ollama.com/library`. HuggingFace's
+`/api/models?filter=gguf` was the obvious clean-API alternative
+but was rejected: HF returns model IDs like
+`bartowski/Meta-Llama-3.1-8B-Instruct-GGUF` which are not
+Ollama-pullable tags, and PrepApp's whole purpose is to surface
+tags the user can hand to `ollama pull`.
+
+**Source verification (2026-05-07):**
+- `ollama.com/library` returns HTML only — no JSON endpoint, no
+  `__NEXT_DATA__` blob.
+- `registry.ollama.ai/v2/library/<model>/tags/list` returns 404
+  for unauthenticated requests.
+- HF `/api/models` is a clean JSON API but wrong-shape data.
+
+**Why HTML-scraping is acceptable here:**
+- Ollama's library page exposes `x-test-*` attributes
+  (`x-test-model`, `x-test-model-title`, `x-test-size`,
+  `x-test-capability`, `x-test-pull-count`) clearly designed as
+  test selectors. These should be more stable than CSS class names
+  under refactors.
+- The failure mode is graceful: typed `LiveCatalogFetchException`
+  with a `SchemaDrift` reason fires when the parser finds zero
+  cards. Both Windows and Mac UI catch it and keep the existing
+  bundled list in place; the user sees a status caption explaining
+  the failure rather than a modal error.
+- A captured HTML fixture at
+  `tests/Fixtures/OllamaLibrary/2026-05-07-snapshot.html` pins
+  the parser against a known page version. When Ollama redesigns,
+  the test fails loudly (zero matches → SchemaDrift) and we
+  refresh the fixture + selectors as a focused follow-up.
+
+**URL allowlist:** `LiveModelCatalogService.AllowedSources` is a
+code constant. Adding a new source requires a PR review. HTTPS-only,
+checked before the request leaves the process so CI grep can audit
+the network surface. Mirrors `OllamaPackageTrustPolicy` posture.
+
+**Exit ramps:**
+1. If Ollama publishes a real list-API JSON endpoint, swap the
+   parser for a clean JSON path — the `StarterModelCatalog`
+   shape stays the same, only the parsing layer changes.
+2. If a HuggingFace → Ollama-tag translation layer becomes
+   tractable (e.g., HF starts publishing Ollama-pullable mappings),
+   add HF as a second source behind the same interface.
+3. If scraping breaks faster than we can patch (>1x per quarter),
+   degrade to bundled-only and remove the live path.

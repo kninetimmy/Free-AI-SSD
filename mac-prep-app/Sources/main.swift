@@ -234,19 +234,64 @@ struct EncryptionSetupStepView: View {
 
             Divider()
 
-            Text("Starter models")
-                .font(.headline)
-            VStack(alignment: .leading) {
-                ForEach(vm.availableStarterModels, id: \.self) { tag in
-                    Toggle(tag, isOn: Binding(
-                        get: { vm.selectedStarterModels.contains(tag) },
-                        set: { sel in
-                            if sel { vm.selectedStarterModels.insert(tag) }
-                            else   { vm.selectedStarterModels.remove(tag) }
+            HStack {
+                Text("Starter models")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    Task { await vm.refreshCatalog() }
+                } label: {
+                    if vm.isRefreshingCatalog {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("Refreshing…")
                         }
-                    ))
+                    } else {
+                        Text("Refresh from Ollama")
+                    }
+                }
+                .disabled(vm.isRefreshingCatalog)
+            }
+            if !vm.catalogStatusText.isEmpty {
+                Text(vm.catalogStatusText)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 6) {
+                    ForEach(vm.availableStarterModels) { entry in
+                        Toggle(isOn: Binding(
+                            get: { vm.selectedStarterModels.contains(entry.tag) },
+                            set: { sel in
+                                if sel { vm.selectedStarterModels.insert(entry.tag) }
+                                else   { vm.selectedStarterModels.remove(entry.tag) }
+                            }
+                        )) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                HStack(spacing: 6) {
+                                    Text(entry.tag).font(.body).bold()
+                                    Text(entry.sizeTier)
+                                        .font(.caption2)
+                                        .padding(.horizontal, 5).padding(.vertical, 1)
+                                        .background(Color.brandStatusInfo.opacity(0.15))
+                                        .foregroundColor(Color.brandStatusInfo)
+                                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                                }
+                                if !entry.bestAt.isEmpty {
+                                    Text(entry.bestAt)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(2)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                        .toggleStyle(.checkbox)
+                    }
                 }
             }
+            .frame(minHeight: 120, maxHeight: 240)
             Text("Starter model pull happens after encryption. If the pull fails (e.g. Mac Ollama isn't running yet), it's non-fatal — you can pull models later from Mac Runner.")
                 .font(.caption)
                 .foregroundColor(.secondary)

@@ -16,6 +16,12 @@ public partial class MainWindow : Window
     private readonly PrepViewModel _viewModel;
     private PrepTargetPreferenceStore? _prefStore;
 
+    // F2: live catalog fetcher. Owns its own HttpClient — the service is
+    // long-lived (MainWindow == app lifetime) and the fetch only fires
+    // on user click, so HttpClientFactory churn isn't worth the wiring.
+    private readonly LiveModelCatalogService _liveModelCatalogService = new();
+    private bool _isRefreshingCatalog;
+
     // FTUE state
     private int _ftueStepIndex;
     private FrameworkElement[] _ftueTargets = Array.Empty<FrameworkElement>();
@@ -122,20 +128,7 @@ public partial class MainWindow : Window
             StarterCatalogWarningText.Visibility = Visibility.Collapsed;
         }
 
-        var entries = loadResult.Catalog.Models
-            .Select(m => new StarterCatalogEntry(
-                m.Tag,
-                m.SizeTier,
-                // "Best at" = description + comma-joined use cases, mirroring
-                // the pre-merge Starter grid's Best-at + Use-cases columns.
-                string.IsNullOrWhiteSpace(m.Description)
-                    ? string.Join(", ", m.UseCases)
-                    : m.UseCases.Count == 0
-                        ? m.Description
-                        : $"{m.Description} ({string.Join(", ", m.UseCases)})"))
-            .ToList();
-
-        await _viewModel.SetStarterCatalogAsync(entries);
+        await _viewModel.SetStarterCatalogAsync(ProjectCatalog(loadResult.Catalog));
 
         // Group the merged grid by Tier so Small / Medium / Large / Custom
         // show as visual sections (same affordance the pre-merge Starter
@@ -143,6 +136,75 @@ public partial class MainWindow : Window
         var collectionView = new ListCollectionView(_viewModel.ModelRows);
         collectionView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(ModelGridRow.Tier)));
         ModelStatusGrid.ItemsSource = collectionView;
+    }
+
+    /// <summary>
+    /// Project the rich <see cref="StarterModelEntry"/> into the lighter
+    /// <see cref="StarterCatalogEntry"/> the merged grid consumes.
+    /// "Best at" combines description + comma-joined use cases, mirroring
+    /// the pre-merge Starter grid's Best-at + Use-cases columns.
+    /// Shared between bundled and live (F2) catalog paths.
+    /// </summary>
+    private static IReadOnlyList<StarterCatalogEntry> ProjectCatalog(StarterModelCatalog catalog)
+    {
+        return catalog.Models
+            .Select(m => new StarterCatalogEntry(
+                m.Tag,
+                m.SizeTier,
+                string.IsNullOrWhiteSpace(m.Description)
+                    ? string.Join(", ", m.UseCases)
+                    : m.UseCases.Count == 0
+                        ? m.Description
+                        : $"{m.Description} ({string.Join(", ", m.UseCases)})"))
+            .ToList();
+    }
+
+    /// <summary>
+    /// F2: fetch the latest catalog from ollama.com/library and swap it
+    /// in. On any failure (typed <see cref="LiveCatalogFetchException"/>
+    /// or unexpected) the existing catalog stays in place so the user's
+    /// session isn't disturbed; the failure surfaces in the log + a
+    /// "fetch failed" caption rather than a modal dialog.
+    /// </summary>
+    private async void RefreshCatalogButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isRefreshingCatalog) return;
+
+        _isRefreshingCatalog = true;
+        RefreshCatalogButton.IsEnabled = false;
+        var originalContent = RefreshCatalogButton.Content;
+        RefreshCatalogButton.Content = "Refreshing…";
+
+        try
+        {
+            var result = await _liveModelCatalogService.FetchAsync(CancellationToken.None);
+            await _viewModel.SetStarterCatalogAsync(ProjectCatalog(result.Catalog));
+
+            // The bundled-load path may have populated the warning text
+            // earlier — clear it now that the live catalog won.
+            StarterCatalogWarningText.Text = string.Empty;
+            StarterCatalogWarningText.Visibility = Visibility.Collapsed;
+
+            CatalogLastUpdatedText.Text =
+                $"Last updated: {result.FetchedAt.LocalDateTime:g} (live, {result.Catalog.Models.Count} models from {result.SourceUrl}).";
+            CatalogLastUpdatedText.Visibility = Visibility.Visible;
+        }
+        catch (LiveCatalogFetchException ex)
+        {
+            CatalogLastUpdatedText.Text = $"Refresh failed ({ex.Reason}): {ex.Message}. Using bundled list.";
+            CatalogLastUpdatedText.Visibility = Visibility.Visible;
+        }
+        catch (Exception ex)
+        {
+            CatalogLastUpdatedText.Text = $"Refresh failed unexpectedly: {ex.Message}. Using bundled list.";
+            CatalogLastUpdatedText.Visibility = Visibility.Visible;
+        }
+        finally
+        {
+            RefreshCatalogButton.Content = originalContent;
+            RefreshCatalogButton.IsEnabled = true;
+            _isRefreshingCatalog = false;
+        }
     }
 
     private void LogLines_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
