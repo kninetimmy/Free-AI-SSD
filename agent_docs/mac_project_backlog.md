@@ -913,10 +913,10 @@ notarization) since both touch Info.plist + bundle layout.
 
 ### MAC17a - PrepApp follow-ups from PR #193 review
 
-**Status:** in flight 2026-05-07 on `kninetimmy/mac17a-prep-followups`
-  — 6/7 review items bundled (#1, #2, #3, #4, #6, #7); #5 deferred
-  to MAC17b as a structural refactor that benefits from landing
-  after the threading cluster.
+**Status:** done 2026-05-07 (PR #195 merged at `eba669a`). 6/7
+  review items bundled (#1, #2, #3, #4, #6, #7); #5 deferred to
+  MAC17b as a structural refactor that benefits from landing after
+  the threading cluster.
 **Scope:** mac-prep-app SwiftUI host correctness + UI responsiveness
 **Risk:** Low (one latent crash on cancel, four UI hitches, two structural cleanups)
 **Dependencies:** MAC17 (merged)
@@ -952,6 +952,51 @@ isn't fighting an in-flight threading change.
   `mac17_followup_notes.md` updated to reflect the punt.
 - New unit tests for #1's cancel-then-retry path and #5's
   ensure-structure delegation (if landed in this round).
+- CI green.
+
+---
+
+### MAC17b - PrepApp Issue #5: replace hardcoded SSD layout with sidecar delegation
+
+**Status:** planned
+**Scope:** mac-prep-app SwiftUI host + mac-prep-host sidecar protocol
+**Risk:** Low (single new sidecar command + one Swift call site
+  swap; structural rather than behavioral)
+**Dependencies:** MAC17a (merged) — threading cluster needs to be
+  in before this refactor lands so the diff is purely structural.
+
+**Goal:** Replace the hardcoded `macSubdirs` list in
+  `PrepViewModel.runStaging` (mac-prep-app/Sources/PrepViewModel.swift:198-ish)
+  with a sidecar `ensure-structure` command that delegates to
+  `shared/SsdLayout.cs`'s `EnsureStructure(_ssdRoot)`. Today the
+  Swift list duplicates the C# tree shape; if the C# side adds a
+  directory the Mac PrepApp silently ships drives missing it and
+  downstream operations fail in subtle ways.
+
+**Detail file:** see `agent_docs/mac17_followup_notes.md` Issue #5
+  for per-line context.
+
+**Implementation sketch:**
+- Add `ensure-structure` to the `mac-prep-host/` stdin command set;
+  delegate to `SsdLayout.EnsureStructure(_ssdRoot)` (prep-core /
+  shared are already ProjectReferences).
+- Swap `for sub in macSubdirs { ... }` for
+  `_ = try await hostController.send("ensure-structure")`.
+- Test seam: extend `MacPrepHostConstructionTests` (or add a new
+  case) that runs `ensure-structure` against a fresh temp dir and
+  asserts every directory `SsdLayout` declares actually exists.
+  This pins drift between C# and Swift the way
+  `DiskutilFormatCommandTests` does for the format argv shape.
+
+**Do not change:**
+- Encrypted-config format / scheme name / fixture cross-language pin.
+- MAC5 plaintext invariant (sidecar still receives PortableConfig
+  over stdin only).
+
+**Acceptance criteria:**
+- Hardcoded `macSubdirs` is gone from PrepViewModel.
+- New host-side test pins SsdLayout's declared directories against
+  the post-`ensure-structure` filesystem state.
 - CI green.
 
 ---
