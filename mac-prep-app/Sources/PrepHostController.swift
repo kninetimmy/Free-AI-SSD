@@ -198,9 +198,16 @@ final class PrepHostController: @unchecked Sendable {
                         queue.sync {
                             if Task.isCancelled {
                                 cont.resume(throwing: CancellationError())
-                            } else {
-                                weakSelf?.pendingResults[commandName] = cont
+                            } else if let strong = weakSelf {
+                                strong.pendingResults[commandName] = cont
                                 didRegister = true
+                            } else {
+                                // Controller deallocated between addTask
+                                // capture and registration — without this
+                                // branch the continuation would never be
+                                // resumed and CheckedContinuation would
+                                // trap on dealloc.
+                                cont.resume(throwing: PrepHostError.notRunning)
                             }
                         }
                         if didRegister {
@@ -232,6 +239,13 @@ final class PrepHostController: @unchecked Sendable {
         stateQueue.sync { pendingResults.count }
     }
 
+    /// Test-only seam: drives the same drain that deinit performs so
+    /// PrepAppTests can pin the Fix 4 (PR #195 review) behavior
+    /// without having to actually deallocate a controller mid-flight.
+    internal func failAllPendingForTest(_ error: Error) {
+        failAllPending(error)
+    }
+
     /// Async graceful shutdown. Writes "shutdown\n", waits up to
     /// `timeout` for the child to exit, then SIGTERM, then SIGKILL.
     /// Async so the @MainActor caller (PrepViewModel.finalize /
@@ -244,14 +258,21 @@ final class PrepHostController: @unchecked Sendable {
         }
         sendShutdownAndCloseStdin()
 
+        // Cancellation note: `try?` swallows Task.sleep's
+        // CancellationError, so without an explicit isCancelled
+        // check a cancelled task would spin this loop until the
+        // deadline. Break early instead — the SIGTERM/SIGKILL
+        // escalation below still runs so the child is reaped.
         let deadline = Date().addingTimeInterval(timeout)
         while proc.isRunning && Date() < deadline {
+            if Task.isCancelled { break }
             try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
         }
         if proc.isRunning {
             proc.terminate()
             let killDeadline = Date().addingTimeInterval(0.5)
             while proc.isRunning && Date() < killDeadline {
+                if Task.isCancelled { break }
                 try? await Task.sleep(nanoseconds: 50_000_000)
             }
             if proc.isRunning {
@@ -264,8 +285,12 @@ final class PrepHostController: @unchecked Sendable {
     deinit {
         // deinit cannot be async. Best-effort: SIGTERM the child if
         // still running and let the OS reap it. terminationHandler
-        // captures [weak self] so it no-ops once self is gone.
+        // captures [weak self] so it no-ops once self is gone — which
+        // means it won't drain pendingResults, so we have to do it
+        // here ourselves. Otherwise CheckedContinuation traps on its
+        // own dealloc when a command is in flight at teardown.
         process?.terminate()
+        failAllPending(PrepHostError.notRunning)
     }
 
     private func sendShutdownAndCloseStdin() {
