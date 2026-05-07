@@ -235,11 +235,16 @@ internal sealed class HostLifetime : IAsyncDisposable
         }
 
         var items = await _readinessService.RunReadinessChecksAsync(_ssdRoot, EmitLog, ct);
+        // ReadinessItem is (string Check, bool Passed, string Result). Map to
+        // a name/status/detail shape the Swift ReadinessRow consumes. The
+        // Pass/Fail boolean loses the Warn info that ReadinessItem.Warn(...)
+        // encodes (Passed=true, Result=warning text), but for MAC17 MVP the
+        // detail string surfaces the warning text in the UI either way.
         var serialized = items.Select(i => new
         {
-            name = i.Name,
-            status = i.Status.ToString(),
-            detail = i.Detail,
+            name = i.Check,
+            status = i.Passed ? "Pass" : "Fail",
+            detail = i.Result,
         }).ToArray();
 
         EmitResult("readiness", new { ok = true, items = serialized });
