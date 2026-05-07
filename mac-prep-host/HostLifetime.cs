@@ -84,6 +84,9 @@ internal sealed class HostLifetime : IAsyncDisposable
 
         switch (command)
         {
+            case "ensure-structure":
+                EnsureStructure();
+                break;
             case "stage-runner":
                 await StageRunnerAsync(ct);
                 break;
@@ -119,6 +122,16 @@ internal sealed class HostLifetime : IAsyncDisposable
     }
 
     // --- Command implementations ----------------------------------------
+
+    private void EnsureStructure()
+    {
+        // No _testMode short-circuit: SsdLayout.EnsureStructure is just
+        // Directory.CreateDirectory calls against _ssdRoot, which the
+        // caller already controls. Skipping it under test mode would
+        // defeat the drift-pinning test that lives in MacPrepHostSmokeTests.
+        SsdLayout.EnsureStructure(_ssdRoot);
+        EmitResult("ensure-structure", new { ok = true });
+    }
 
     private async Task StageRunnerAsync(CancellationToken ct)
     {
