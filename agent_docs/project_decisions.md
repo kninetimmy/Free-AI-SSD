@@ -1059,3 +1059,78 @@ MAC17 is the place to cash in the brand tinting in earnest.
    That's the right place to revisit `mac-runner/Sources/main.swift`
    wholesale, since today's screen is the rawest stock-SwiftUI
    surface in the project.
+
+## 2026-05-07 — MAC18: cross-platform prep compatibility matrix published
+
+With MAC17 / MAC17a / MAC17b shipped, both Windows and Mac PrepApp
+hosts produce drives that are byte-identical at the encrypted-config
+and SSD-layout level. MAC18 publishes the source/target/filesystem
+matrix in user-facing docs so users know which prep host can produce
+which target drive, and so the unsupported cells are recorded as OS
+limits rather than project gaps.
+
+**Matrix (locked):**
+
+| Source OS | Target | Filesystem | Supported |
+|-----------|--------|------------|-----------|
+| Windows | Windows-only | NTFS | yes |
+| Windows | Cross-platform | exFAT | yes |
+| Windows | Mac-only | exFAT | yes (APFS not available from Windows) |
+| Mac | Mac-only | exFAT | yes (APFS deferred from supported targets) |
+| Mac | Cross-platform | exFAT | yes |
+| Mac | Windows-only | NTFS | not supported — use Windows PrepApp |
+
+**Why these specific cells stay unsupported:**
+
+- *APFS from any source:* Per MAC1, APFS is Mac-native; Windows
+  cannot reliably create or write to it. MAC10a's PrepTargets →
+  filesystem mapping deliberately collapses Mac-only and
+  cross-platform onto exFAT for this reason. MAC17 inherits the
+  same mapping in `DiskutilFormatCommand`. APFS support would
+  require both a Mac-native prep workflow (which exists post-MAC17)
+  and a deliberate decision that exFAT has proven inadequate — no
+  evidence of that today, so APFS stays out of supported targets
+  rather than being on the roadmap.
+- *Mac → Windows-only NTFS:* macOS does not natively format NTFS.
+  Third-party drivers exist but introduce a runtime dependency the
+  project deliberately avoids (the whole point is "plug in a drive,
+  it just works"). Users wanting NTFS-only drives are routed to
+  Windows PrepApp explicitly in README + QUICKSTART.
+
+**Encrypted-config bidirectional roundtrip is a published guarantee.**
+Drives prepped on Windows unlock cleanly on Mac and vice versa. The
+on-disk format (AES-256-GCM + PBKDF2-SHA256) is identical on both
+platforms; this is pinned by the cross-language fixture under
+`tests/Fixtures/MacEncryptedConfig/` (both `csharp-encrypted/` from
+MAC5 and `swift-prep-encrypted/` from MAC17). Either direction
+breaking would fail Windows CI.
+
+**Files changed:**
+- `README.md` — tagline updated, `Cross-platform PrepApp` feature row
+  added, new `Source/Target compatibility` subsection with the matrix
+  + bidirectional-roundtrip callout, "What You Need" reframed for
+  either host, parallel Mac walkthrough in Phase 1, components
+  reference updated to include `mac-prep-app/`, `mac-prep-host/`,
+  `mac-runner-host/`, `runner-core/`, `prep-core/`.
+- `docs/QUICKSTART.txt` — 5-step quick-start reframed for either host,
+  matrix added as its own block, filesystem note rewritten around
+  "filesystem comes from your target choice".
+- `agent_docs/project_decisions.md` — this entry.
+
+**Out of scope (held the line):**
+- Removing the "macOS beta" framing from Runner-side docs — that's
+  MAC15's job and depends on MAC11 (signing + notarization) landing
+  first. MAC18 only adds the prep matrix; the Runner-side beta
+  caveats stay as-is.
+- Release notes — v1.2.9 (2026-04-19) was the last release, pre-MAC17.
+  The next release will pick up MAC17/17a/17b/18 together; release
+  notes drafted at MAC11 / signed-beta cut, not now.
+- Mac PrepApp screenshots — deferred to MAC15 + a real-Mac smoke
+  pass.
+
+**Exit ramp:** if exFAT proves inadequate for a real Mac use case,
+re-open the APFS-target decision; the matrix gains a new row rather
+than a footnote. If Mac-side NTFS becomes feasible without a runtime
+dependency (e.g., Apple ships native NTFS write support), the
+"Mac → Windows-only NTFS" cell flips to supported and the docs
+update accordingly.

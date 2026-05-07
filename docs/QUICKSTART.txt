@@ -7,18 +7,21 @@
  Quick Start in 5 Steps (the impatient version)
 --------------------------------------------------------------------------------
 
-1) Plug in a portable SSD. Use exFAT if you want Windows + macOS
-   read/write from the same drive; see the filesystem note below.
-2) On a Windows machine with internet, download the latest ZIP from
-   GitHub Releases and extract it:
+1) Plug in a portable SSD. Pick a target compatibility — see the
+   source/target matrix below for which OS to prep from for which
+   target filesystem.
+2) On a Windows OR Mac machine with internet, download the latest ZIP
+   from GitHub Releases and extract it:
      - Stable:       Free-AI-SSD-win.zip                  (Windows target only)
-     - Beta (xplat): Free-AI-SSD-beta-crossplatform.zip   (Windows + macOS)
-3) Run FreeAiSsd.PrepApp.exe. Select your SSD. On Drive Setup, enter a
-   volume label and (optionally) click "Format & Prepare Drive" to wipe
-   and relabel — Windows will prompt for admin; accept, confirm once more
-   in the elevated window, and the drive is formatted for you. Then on
-   Model Manager, pull one model (e.g. phi3 or llama3.1:8b). Click
-   "Check SSD Readiness", then "Finalize SSD".
+     - Beta (xplat): Free-AI-SSD-beta-crossplatform.zip   (Windows + macOS,
+                                                           includes Mac PrepApp)
+3) Run the prep tool for your host OS:
+     - Windows host: FreeAiSsd.PrepApp.exe
+     - Mac host:     PrepApp.app  (from the cross-platform bundle)
+   Select your SSD. Choose target compatibility (Windows-only / Mac-only
+   / cross-platform). Format the drive (the prep tool picks the right
+   filesystem from your target choice — see matrix below). Pull one
+   model (e.g. phi3 or llama3.1:8b). Run readiness checks, then finalize.
 4) Unplug. Plug into the machine you actually want to use it on.
      - Windows: <SSD>\windows\runner\FreeAiSsd.Runner.exe
      - macOS:   <SSD>/mac/Runner.app    (beta bundle only; unsigned,
@@ -27,6 +30,40 @@
    supports RAG, citations, voice, HOTAS/PTT, DCS import, and Network
    Mode. The macOS beta supports RAG-backed chat against an already
    prepared active library, but not Mac-side document management yet.
+
+--------------------------------------------------------------------------------
+ Source / Target Compatibility Matrix
+--------------------------------------------------------------------------------
+
+ Which prep host (source OS) can produce which target drive:
+
+ +-----------+----------------+------------+----------------------------------+
+ | Source OS | Target         | Filesystem | Supported?                       |
+ +-----------+----------------+------------+----------------------------------+
+ | Windows   | Windows-only   | NTFS       | Yes                              |
+ | Windows   | Cross-platform | exFAT      | Yes                              |
+ | Windows   | Mac-only       | exFAT      | Yes (APFS not available from     |
+ |           |                |            |   Windows)                       |
+ | Mac       | Mac-only       | exFAT      | Yes (APFS deferred from current  |
+ |           |                |            |   supported targets)             |
+ | Mac       | Cross-platform | exFAT      | Yes                              |
+ | Mac       | Windows-only   | NTFS       | Not supported — use Windows      |
+ |           |                |            |   PrepApp (macOS cannot natively |
+ |           |                |            |   format NTFS)                   |
+ +-----------+----------------+------------+----------------------------------+
+
+ Bidirectional encrypted-config roundtrip: an SSD prepped on one OS
+ unlocks cleanly on the other and vice versa. The on-disk encrypted
+ format is identical on both platforms (AES-256-GCM + PBKDF2-SHA256).
+
+ Notes:
+ - APFS is a Mac-native filesystem; Windows cannot reliably create or
+   write to it. APFS targets are deferred from the supported set; exFAT
+   covers all Mac use today.
+ - exFAT is the only filesystem Windows and macOS both read and write
+   natively, so cross-platform drives always land on exFAT.
+ - The "Mac → Windows-only NTFS" cell is an OS limitation, not a
+   project gap. Use Windows PrepApp if you need an NTFS-only drive.
 
 Everything below is optional and layered on top of that baseline.
 
@@ -37,13 +74,18 @@ Everything below is optional and layered on top of that baseline.
 - A portable SSD. Budget ~5–10 GB per LLM, plus headroom for documents and
   Whisper STT models. A 128 GB drive is comfortable; 64 GB is the practical
   minimum.
-- A Windows machine with internet for the one-time preparation (PrepApp is
-  Windows-only — it's the prep tool, not the runtime).
+- A Windows OR Mac machine with internet for the one-time preparation.
+  PrepApp ships for both: FreeAiSsd.PrepApp.exe on Windows, PrepApp.app
+  (in the cross-platform bundle) on macOS. Pick whichever host you have
+  — see the Source/Target matrix above for which target filesystems each
+  host can produce.
 - Windows target machines need no pre-installed software. Windows Runner
   carries its own prerequisites. The macOS beta bundle stages macOS Ollama,
   plus the local API sidecar for RAG-backed chat.
 - Target OS: Windows 10/11 x64 for the full Runner, or macOS beta for
   limited sidecar-backed chat.
+- Mac host requirements: Apple Silicon (arm64) only; macOS 11 Big Sur
+  or newer. Intel Macs are not supported.
 
 --------------------------------------------------------------------------------
  Full Feature Setup
@@ -53,14 +95,17 @@ Everything below is optional and layered on top of that baseline.
  ------------------------------------------
  Already covered in the 5-step quick start. A few notes:
 
- - Filesystem: exFAT is the only filesystem Windows and macOS both read/write
-   natively. If you need cross-platform write access, format the SSD as
-   exFAT yourself before preparation and skip PrepApp's format button.
-   PrepApp's "Format & Prepare Drive" button formats to NTFS with your
-   chosen volume label — use it if you only care about Windows and want
-   PrepApp to handle formatting end-to-end (requires admin; PrepApp will
-   relaunch elevated and auto-resume your selection + label, then ask you
-   to confirm once more before wiping).
+ - Filesystem is picked by your target compatibility choice (see the
+   Source/Target matrix above):
+     Windows-only target  -> NTFS  (Windows host only)
+     Cross-platform / Mac -> exFAT (either host)
+   On Windows, PrepApp's "Format & Prepare Drive" formats per that
+   choice (requires admin; PrepApp relaunches elevated and auto-resumes
+   your selection + label, then asks once more before wiping). On Mac,
+   PrepApp.app uses `diskutil` with explicit confirmation through a
+   native NSAlert before erasing the drive.
+ - APFS is deferred — exFAT is the supported Mac target today. NTFS-only
+   drives must be prepped from Windows; macOS cannot natively format NTFS.
  - Ollama is staged onto the SSD by PrepApp and bound to loopback only
    (127.0.0.1). No network surface by default.
  - Models live at <SSD>/models/. Pull more any time via PrepApp's Model
