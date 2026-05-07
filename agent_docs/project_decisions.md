@@ -953,3 +953,109 @@ makes the boundary review tractable in one pass.
   the chat side), the embedded resource name will change naturally
   with the new owning project; the loader's `EmbeddedCatalogResourceName`
   constant gets updated then, not before.
+
+## 2026-05-06 — Mac UI design language: brand-tinted native (Option C), MAC17 leans pure-native (Option A)
+
+The MAC9 decision locked in Swift/SwiftUI as the long-term Mac UI
+architecture but did not settle the *visual* direction. Today's Mac
+Runner (`mac-runner/Sources/main.swift`) is stock SwiftUI on dark mode
+— zero styling — while the Windows hosts share a locked-in neumorphic
+dark theme (`shared/UI/Theme/{Colors,Controls,Theme}.xaml`,
+non-negotiable per the existing UI/theme decision). Before MAC17 ships
+a second SwiftUI host (`mac-prep-app/`) and bakes a default in for
+both apps, settle the cross-platform visual stance.
+
+**Decision:** Mac apps adopt **brand-tinted native** styling
+(Option C) — native macOS HIG controls, native dialogs, native sheet
+behavior, but with a brand-consistent dark color palette and accent
+colors pulled from the shared WPF tokens. **MAC17 specifically leans
+closer to pure native** (Option A): destructive disk operations use
+unmodified `NSAlert` confirmation sheets, system-default button
+chrome on the erase / format affordance, and the OS's standard
+disk-permission prompts. The Mac Runner refresh that comes after
+MAC17 is the place to cash in the brand tinting in earnest.
+
+**Why brand-tinted native, not full neumorphic port (Option B):**
+- A faithful Swift port of `Controls.xaml` / `Theme.xaml` means
+  building custom `ButtonStyle`, `TextFieldStyle`, panel surface,
+  border, and shadow primitives in SwiftUI to mimic WPF chrome.
+  That's a real surface area to maintain — every WPF style change
+  becomes drift the Mac side has to chase, and SwiftUI's defaults
+  fight back at every step (focus rings, hover states, accessibility
+  affordances).
+- Native controls are the *only* thing that gives Mac users
+  predictable behavior: cmd-comma for prefs, tab focus order,
+  VoiceOver, full-keyboard-access, dark-mode auto-tracking,
+  Dynamic Type. A custom theme either reimplements all of that or
+  silently regresses on it.
+- MAC9 explicitly cited "Mac-native niceties Swift gave us free" as
+  a reason to keep Swift; throwing those away to chase pixel parity
+  with WPF undermines the rationale that justified Swift in the
+  first place.
+
+**Why pure native specifically for MAC17:**
+- MAC17's PrepApp formats drives. A custom-themed destructive-erase
+  confirmation dialog is a trust regression — users (correctly)
+  weight unfamiliar UI on a destructive action as a red flag.
+  Native `NSAlert` with the standard "destructive" button styling is
+  what macOS users have been trained to recognize for fifteen years.
+- `diskutil` permission prompts come from the OS regardless of UI
+  chrome; surrounding them with a custom-themed shell makes the
+  trusted OS prompt feel like an interruption rather than a
+  continuation of the flow.
+- PrepApp is short-residence software (run once or twice per drive,
+  not daily). Brand expression has lower payoff there than in the
+  Mac Runner, which is the daily-use surface.
+
+**What "brand-tinted" means concretely:**
+- **Accent color:** SwiftUI `tint(.accentColor)` driven by an asset
+  catalog `AccentColor` set to the WPF `AccentCyanColor` (#00E5FF)
+  for primary actions, with `AccentMagentaColor` (#FF2D92) reserved
+  for destructive emphasis where native semantics allow override
+  (status pills, progress accents — *not* the actual destructive
+  confirmation button, which stays system-default red).
+- **Backgrounds / surfaces:** stay native (`.background(.regularMaterial)`,
+  `Color(NSColor.windowBackgroundColor)`) — do not hardcode
+  `BgBaseColor` (#1A1D24) on every view. Light mode comes free; if
+  we lock to dark via Info.plist `NSRequiresAquaSystemAppearance` later
+  that's a separate decision.
+- **Status colors:** `StatusSuccessColor` / `StatusWarningColor` /
+  `StatusDangerColor` from the WPF palette mirror cleanly into
+  SwiftUI for inline status indicators (badges, log severity
+  glyphs), without touching control chrome.
+- **Typography:** native SF Pro at native sizes — no font overrides.
+  The brand identity comes from color and the icon, not type.
+- **Iconography:** the shared `AppIcon` from MAC10b is already
+  brand-consistent across all four hosts; SF Symbols for in-app
+  affordances stay native.
+
+**What stays explicitly off-limits on the Mac side:**
+- Custom `ButtonStyle` that changes shape, shadow, or padding from
+  system defaults.
+- Hardcoded background color hex on view containers.
+- Font family overrides (SF Pro only).
+- Custom focus rings, custom hover states, custom selection
+  highlights.
+- Custom dialog windows for destructive confirmations — always
+  `NSAlert` / SwiftUI `.alert(...)` / SwiftUI `.confirmationDialog`.
+
+**Exit ramp — re-open this decision if any of these become true:**
+- A Windows<->Mac switching user reports the visual disconnect is
+  bad enough to confuse them about which app they're in (real user
+  feedback, not aesthetic preference).
+- The Windows neumorphic theme gets reworked toward something
+  closer to native — at which point the cross-platform target
+  shifts and the Mac side can re-anchor.
+- A second non-Apple platform target lands and a single
+  cross-platform UI codebase becomes attractive (same exit-ramp
+  trigger as MAC9).
+
+**Application order:**
+1. MAC17 (mac-prep-app, this PR series) — pure native + the asset
+   catalog `AccentColor` and `Status*` color set wired up but used
+   sparingly. Establishes the asset catalog convention.
+2. Mac Runner refresh (separate future item, not yet on backlog) —
+   apply brand tinting in earnest now that the conventions exist.
+   That's the right place to revisit `mac-runner/Sources/main.swift`
+   wholesale, since today's screen is the rawest stock-SwiftUI
+   surface in the project.
