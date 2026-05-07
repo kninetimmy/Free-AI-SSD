@@ -237,22 +237,9 @@ No "list documents" or "reindex" endpoint exists today. See Stage 2.
 
 ### F2 â€” Live model list fetch (HuggingFace / Ollama library)
 
-**Status:** triaged. **Execution prompt drafted 2026-05-07** at `agent_docs/f2_execution_prompt.md` — covers cross-OS bundle-vs-split decision (default bundle Windows + Mac, fallback split as F2/F2a if Mac UI surface balloons), prep-core service shape (`LiveModelCatalogService` plain net8.0 + `LiveCatalogResult` + URL allowlist + 10s timeout), source-choice design moment to resolve at execution start (Ollama list-API likely HTML-only at `ollama.com/library`; HF `/api/models?filter=gguf` as fallback primary), Windows wiring (`RefreshCatalogCommand` + WPF button), Mac wiring (`mac-prep-host` `refresh-catalog` stdin command + Swift `refreshCatalog()`), tests, security posture, out-of-scope. Cross-platform from the start per the cross-OS parity rule (`project_decisions.md` 2026-05-07).
-**Scope:** One-shot for v1 (cross-platform). Split as F2/F2a if Mac UI surface needs >~30 lines of Swift restructure or sidecar protocol needs new payload shape.
+**Status:** **done** — merged 2026-05-07 (PR #202, squash commit `dbc2510`). Bundled both OSes in one PR per the cross-OS parity rule: prep-core service + Windows wiring + Mac sidecar arms (`discover-catalog` for bundled, `refresh-catalog` for live) + Mac UI uplift (rich Windows-parity picker replacing the 2-string toggle list). HTML-scrape `ollama.com/library` chosen over HuggingFace API (HF returns HF model IDs, not Ollama-pullable tags) — verified at execution start; decision recorded in `project_decisions.md` 2026-05-07 with exit ramps. CI required 3 runs: 2 fix-forwards (CS0103 missing `using FreeAiSsd.PrepApp;` for `StarterModelCatalogLoader`, CS0121 ambiguous `StubHandler` constructors), neither touched core logic. Manual smoke deferred to a real Mac + a Windows machine (see `project_state.md` Open questions). Original execution prompt: `agent_docs/f2_execution_prompt.md`.
+**Scope:** One-shot for v1 (cross-platform), bundled per the parity rule.
 **Model:** Sonnet 4.6
-
-**Existence:** Current catalog loads from `prep-core/Resources/starter-models.json` (moved from `prep-app/` in MAC16; both Windows PrepApp and `mac-prep-host` consume it via the shared `StarterModelCatalogLoader.Load` chain). Not hardcoded as the original TODO suggested â€” **correction: it's JSON-file-based already**, just not live-fetched.
-
-**Affected files:**
-- `prep-app/StarterModelCatalog.cs` â€” add `LoadFromNetworkAsync` path with fallback to existing file/embedded loaders
-- New: `prep-app/Services/LiveModelCatalogService.cs` (or similar) â€” handles HuggingFace / Ollama API fetch
-- `shared/ViewModels/PrepViewModel.cs` â€” add `RefreshCatalogCommand` + `LastCatalogUpdate` display
-- `prep-app/MainWindow.xaml:93-118` â€” add "Refresh Model List" button + timestamp caption
-- Consider: `shared/OllamaPackageTrustPolicy.cs` pattern â€” any new outbound HTTP endpoint should go through a trust policy to match project's security posture
-
-**Source choice:** Ollama library is simpler (curated, already size-tagged). HuggingFace requires heavier filtering. Recommend Ollama-first, HuggingFace as optional advanced source.
-
-**âš  Security note:** This introduces outbound HTTP from PrepApp. Per global CLAUDE.md, flag dependency/network additions to Stephen before installing any JSON parser beyond what's available, though `System.Text.Json` should cover it.
 
 ---
 
