@@ -153,6 +153,60 @@ struct PrepAppTestsMain {
                        "pending slot leaked: count=\(controller.pendingResultsCountForTest)")
         }
 
+        // MARK: PR #195 review fixes — Fix 4 (deinit drains pending)
+        //
+        // Pin the behavior that the controller's deinit now relies on:
+        // failAllPending drains a registered pending continuation and
+        // resumes it with the supplied error. Pre-fix, deinit would
+        // call only process?.terminate(); the terminationHandler
+        // captures [weak self] so it no-ops once self is gone, and any
+        // in-flight CheckedContinuation in pendingResults would trap
+        // on its own dealloc. Driven via a Task that registers via
+        // awaitCommandResult, then invoked synchronously through the
+        // failAllPendingForTest seam (matching what deinit now does).
+
+        runner.test("Fix 4: failAllPending drains pending continuations") {
+            let controller = PrepHostController()
+
+            let task = Task { () -> String in
+                do {
+                    _ = try await controller.awaitCommandResult(
+                        commandName: "drain-me",
+                        timeout: 60.0,
+                        dispatch: {})
+                    return "completed"
+                } catch let e as PrepHostError {
+                    switch e {
+                    case .notRunning: return "notRunning"
+                    default:          return "other-prep:\(e)"
+                    }
+                } catch is CancellationError {
+                    return "cancelled"
+                } catch {
+                    return "other:\(error)"
+                }
+            }
+
+            // Yield long enough for the addTask body to run the
+            // registration `queue.sync` block and seat the
+            // continuation in pendingResults.
+            for _ in 0..<20 {
+                try? await Task.sleep(nanoseconds: 10_000_000) // 10ms
+                if controller.pendingResultsCountForTest == 1 { break }
+            }
+            try expect(controller.pendingResultsCountForTest == 1,
+                       "expected 1 pending registration before drain, got \(controller.pendingResultsCountForTest)")
+
+            // Simulate the deinit drain.
+            controller.failAllPendingForTest(PrepHostError.notRunning)
+
+            let outcome = await task.value
+            try expect(outcome == "notRunning",
+                       "expected notRunning after drain, got \(outcome)")
+            try expect(controller.pendingResultsCountForTest == 0,
+                       "slot leaked after drain: count=\(controller.pendingResultsCountForTest)")
+        }
+
         runner.test("Issue #1: same command name is re-usable after timeout") {
             let controller = PrepHostController()
 
