@@ -146,7 +146,14 @@ internal sealed class HostLifetime : IAsyncDisposable
         collection.AddSingleton<IConfigStore, NoOpConfigStore>();
 
         collection.AddSingleton<IOllamaLifecycleService, MacOllamaLifecycleService>();
-        collection.AddSingleton<IModelManagementService, ModelManagementService>();
+        // MAC33: ModelManagementService needs the SSD root to enumerate the
+        // on-disk model store; the Mac sidecar can't write back to the
+        // encrypted config after pulls, so config.Models is unreliable.
+        // The 2-arg ctor defaults to UnknownSystemResourceProbe.Instance —
+        // sizing warnings are unused on the Mac sidecar today.
+        collection.AddSingleton<IModelManagementService>(sp => new ModelManagementService(
+            sp.GetRequiredService<HttpClient>(),
+            _ssdRoot));
         collection.AddSingleton<IDocumentOperationsService, DocumentOperationsService>();
 
         if (_testMode)
@@ -169,7 +176,8 @@ internal sealed class HostLifetime : IAsyncDisposable
             _ssdRoot,
             staticFilesRoot: null,
             docOps: sp.GetRequiredService<IDocumentOperationsService>(),
-            libraryManager: sp.GetRequiredService<DocumentLibraryManager>()));
+            libraryManager: sp.GetRequiredService<DocumentLibraryManager>(),
+            modelService: sp.GetRequiredService<IModelManagementService>()));
 
         _services = collection.BuildServiceProvider();
     }

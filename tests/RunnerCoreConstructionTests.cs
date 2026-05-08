@@ -32,7 +32,7 @@ public sealed class RunnerCoreConstructionTests : IDisposable
 
         var chat = new ChatService(http, libraryManager, logger: null);
         var docs = new DocumentOperationsService(libraryManager, ingestor, new ConfigStore());
-        var models = new ModelManagementService(http, UnknownSystemResourceProbe.Instance);
+        var models = new ModelManagementService(http, UnknownSystemResourceProbe.Instance, _tempRoot);
         var api = new RunnerLocalApiService(chat, new FakeSttService(), new TtsProvider(), logger: null, ssdRoot: _tempRoot);
 
         Assert.False(api.IsRunning);

@@ -409,24 +409,49 @@ final class RunnerViewModel: ObservableObject {
         }
     }
 
-    /// Pulls the `installed` model names from the parsed config dictionary.
-    /// Tolerates either string status values ("Installed") or numeric ones
-    /// (the C# enum serializer flips between them depending on settings).
+    /// MAC33: Picker source is on-disk truth, not config-pinned status.
+    /// The Mac sidecar can't write back to the encrypted config after pulls
+    /// (the passphrase is zeroized before pulls run), so config["models"]
+    /// is empty on a Mac-prepped SSD even when the models are present on
+    /// disk. Mirrors runner-core's GetInstalledModelNames swap so the Mac
+    /// SwiftUI picker, the Windows WPF picker, and the LAN /models endpoint
+    /// all agree on what's installed.
     private func applyConfigToUi(_ config: [String: Any]) {
-        let models = (config["models"] as? [[String: Any]]) ?? []
-        let installed = models.compactMap { entry -> String? in
-            guard let name = entry["name"] as? String, !name.isEmpty else { return nil }
-            if let status = entry["status"] as? String {
-                return status.lowercased() == "installed" ? name : nil
-            }
-            // Numeric enum form: 1 == Installed in ModelInstallStatus.
-            if let status = entry["status"] as? Int {
-                return status == 1 ? name : nil
-            }
-            return nil
-        }
+        let installed = discoverInstalledModelsOnDisk()
         modelNames = installed
         selectedModel = installed.first ?? ""
+    }
+
+    /// MAC33: Walks `<ssdRoot>/models/manifests/registry.ollama.ai/library/<model>/<tag>`
+    /// and reconstructs `"name:tag"` entries. Mirrors prep-core's
+    /// `ModelOperations.DiscoverModelsOnDisk` so disk-truth reads agree
+    /// across the two language surfaces.
+    private func discoverInstalledModelsOnDisk() -> [String] {
+        guard let root = ssdRoot else { return [] }
+        let manifestsRoot = root.appendingPathComponent("models/manifests")
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: manifestsRoot.path),
+              let enumerator = fm.enumerator(
+                at: manifestsRoot,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]) else {
+            return []
+        }
+
+        var discovered = Set<String>()
+        for case let url as URL in enumerator {
+            let values = try? url.resourceValues(forKeys: [.isRegularFileKey])
+            guard values?.isRegularFile == true else { continue }
+            // Last two path components are <model>/<tag>; tag is a regular file.
+            let parts = url.pathComponents
+            guard parts.count >= 2 else { continue }
+            let tag = parts[parts.count - 1]
+            let model = parts[parts.count - 2]
+            guard !model.isEmpty, !tag.isEmpty else { continue }
+            discovered.insert("\(model):\(tag)")
+        }
+
+        return discovered.sorted { $0.lowercased() < $1.lowercased() }
     }
 
     func startOllama() {
