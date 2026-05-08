@@ -2276,3 +2276,91 @@ lifetime. Symmetric to Windows.
   materializes, sidecar log captures pull progress lines.
 - After sidecar exit (`shutdown` over stdin or process termination),
   no orphan `ollama` process — `pgrep -fl ollama` empty.
+
+### MAC28 - OllamaServerHandle startup timeout + stream stderr
+
+**Status:** filed 2026-05-08 from v1.3.8 mac field test. In implementation
+  on `kninetimmy/mac28-server-startup-timeout`.
+**Scope:** small — one production file (`prep-core/OllamaServerHandle.cs`)
+  + one new test file. Cross-platform (touches Windows + Mac).
+**Risk:** Low. Bumps a constant from 30 to 120 (15s → 60s health-poll
+  budget) and routes stdout/stderr through the existing `onLog` callback
+  instead of discarding it. No protocol change, no new spawn behavior.
+**Dependencies:** MAC27 must have shipped (it did, v1.3.8) — without
+  the temp server start path firing in the first place, there's
+  nothing to wait on.
+**Goal:** Mac field model pull clears the cold-start window where
+  Gatekeeper signature verification + Go runner discovery exceed 15s.
+
+**Driver:** v1.3.8 mac field test. The MAC27 fix is partially working —
+the new log line `Starting temporary Ollama server on 127.0.0.1:53376...`
+proves the temp server start path fires. But the next line is:
+
+```
+[stderr] Command failed (`pull-model llama3.2:1b`):
+  Ollama server on 127.0.0.1:53376 did not become healthy within 15 seconds.
+```
+
+The user's screenshot also shows the macOS Gatekeeper "Verifying
+'Ollama'" modal *still on screen* at the moment of failure — Gatekeeper
+is holding the binary's first-launch signature verification (Apple OCSP
+roundtrip) longer than the 15s health-poll budget. Once Gatekeeper
+finishes, the Go-based ollama server still has to run its
+`Dynamic LLM libraries: [metal cpu_avx cpu_avx2]` runner discovery
+before binding `/api/tags`. The combined cold-start chain on a freshly
+staged SSD blows the 15s window we wrote in November when Windows was
+the only target.
+
+**Diagnostic gap:** the inner ollama's stdout/stderr is silently
+discarded by `OllamaServerHandle.DrainAsync` (literally named "drain").
+There's no signal in the PrepApp log explaining *why* the server
+didn't come up — the user only sees the timeout. Routing the output
+through `onLog` would have made this field test self-diagnosing.
+
+**Fix:**
+
+1. `prep-core/OllamaServerHandle.cs`:
+   - `WaitForHealthyAsync.maxAttempts`: `30` → `120`. With the existing
+     500ms cadence, this lifts the budget from 15s to 60s. Same code
+     path Windows uses; symmetric bump.
+   - Rename `DrainAsync(StreamReader)` → `ConsumeAsync(StreamReader,
+     Action<string> onLog, string streamLabel)`. Each non-empty line
+     gets forwarded as `[ollama serve <streamLabel>] <line>`. Empty /
+     whitespace lines filtered. `try { onLog(...) } catch { }` around
+     the dispatch so a misbehaving `onLog` cannot leave bytes unread
+     on the pipe (the loop's primary purpose remains preventing pipe
+     deadlock). Flipped to `internal static` so tests drive it with
+     synthetic streams.
+   - Update both `Task.Run(() => DrainAsync(...))` call sites to pass
+     `onLog` + label.
+
+2. `tests/OllamaServerHandleConsumeTests.cs` (new, 4 cases):
+   - Routes each non-empty line through `onLog` with the
+     `[ollama serve <label>]` prefix.
+   - Skips empty / whitespace lines (no UI clutter).
+   - A throwing `onLog` does not abort the drain (pipe-deadlock
+     invariant).
+   - Empty stream returns immediately.
+
+**Affected files:**
+- `prep-core/OllamaServerHandle.cs` — timeout bump + ConsumeAsync.
+- `tests/OllamaServerHandleConsumeTests.cs` — new test file.
+
+**Cross-OS review pass:**
+- **Windows surfaces:** the temp server start path is shared. Windows
+  also gains the longer health-poll window (its 15s was tight too) and
+  the streamed `[ollama serve]` log lines. No regression — Windows
+  ollama serve typically binds in 1-3s, well within either budget.
+- **Mac surfaces:** addresses the field-blocker directly. Cold-start
+  chain (Gatekeeper + runner discovery) gets the headroom it needs.
+  Streamed output makes future mac-specific spawn issues diagnosable
+  without another field test round-trip.
+
+**Acceptance / smoke:**
+- CI green on `windows-build` (runs the new ConsumeAsync tests),
+  `mac-runner-build`, `mac-prep-build`.
+- v1.3.9 mac field run: PrepApp reaches the pull progress lines
+  (`Pulling Llama3.2:1b... pulling X.YGB / Z.WGB`) without timing
+  out at server startup; `<ssd>/models/blobs/sha256-...` populates;
+  sidecar log includes `[ollama serve stderr]` lines confirming the
+  Go server bound the port and discovered runners.

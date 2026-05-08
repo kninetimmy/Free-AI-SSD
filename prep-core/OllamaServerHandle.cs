@@ -67,11 +67,17 @@ public sealed class OllamaServerHandle : IOllamaServerHandle
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         process.Start();
 
-        // Drain stdout/stderr on background threads to prevent buffer deadlocks.
-        // Must use Task.Run because DrainAsync starts synchronously and we must
-        // not block the UI thread while waiting for the first byte of output.
-        _ = Task.Run(() => DrainAsync(process.StandardOutput), ct);
-        _ = Task.Run(() => DrainAsync(process.StandardError), ct);
+        // Stream stdout/stderr through onLog (prefixed `[ollama serve]`)
+        // on background threads. Pre-MAC28 we discarded output, which made
+        // first-launch failures (Gatekeeper holds, GPU runner discovery
+        // errors, port collisions) invisible — the only signal was a
+        // generic "did not become healthy" timeout. Routing through onLog
+        // surfaces ollama's own startup log lines in the PrepApp UI so
+        // the next failure mode is diagnosable from the staged SSD log.
+        // Must use Task.Run because ConsumeAsync starts synchronously and
+        // we must not block the UI thread while waiting for the first byte.
+        _ = Task.Run(() => ConsumeAsync(process.StandardOutput, onLog, "stdout"), ct);
+        _ = Task.Run(() => ConsumeAsync(process.StandardError, onLog, "stderr"), ct);
 
         // Wait for the server to become healthy before returning.
         // If the health check fails, kill the process immediately so it doesn't
@@ -156,7 +162,16 @@ public sealed class OllamaServerHandle : IOllamaServerHandle
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
         var url = $"http://{host}/api/tags";
 
-        const int maxAttempts = 30;
+        // MAC28: bumped from 30 (=15s) to 120 (=60s). The 15s budget was
+        // tight even on Windows — on Mac, the first-launch path includes
+        // Gatekeeper signature verification (Apple OCSP roundtrip on a
+        // freshly-staged inner Ollama binary) and the Go server's runner
+        // discovery (`Dynamic LLM libraries: [metal cpu_avx cpu_avx2]`).
+        // v1.3.8 mac field test reproduced the timeout while the
+        // Gatekeeper "Verifying 'Ollama'" modal was still visible. 60s
+        // gives the cold-start chain enough headroom without making
+        // genuinely-broken cases meaningfully slower to diagnose.
+        const int maxAttempts = 120;
         for (var i = 0; i < maxAttempts; i++)
         {
             ct.ThrowIfCancellationRequested();
@@ -188,17 +203,34 @@ public sealed class OllamaServerHandle : IOllamaServerHandle
     }
 
     /// <summary>
-    /// Reads and discards all output from a stream to prevent buffer deadlocks.
-    /// Uses ReadLineAsync (returns null at EOF) instead of the EndOfStream property,
-    /// which is synchronous and blocks the calling thread when no data is available.
+    /// Reads lines from <paramref name="reader"/> and routes each non-empty
+    /// line through <paramref name="onLog"/> tagged
+    /// <c>[ollama serve <paramref name="streamLabel"/>] &lt;line&gt;</c>.
+    /// Uses ReadLineAsync (returns null at EOF) instead of the EndOfStream
+    /// property, which is synchronous and blocks the calling thread when no
+    /// data is available. The <c>internal static</c> shape exists so tests
+    /// can drive synthetic streams without spawning a real ollama process.
     /// </summary>
-    private static async Task DrainAsync(StreamReader reader)
+    internal static async Task ConsumeAsync(StreamReader reader, Action<string> onLog, string streamLabel)
     {
         try
         {
-            while (await reader.ReadLineAsync() is not null)
+            while (await reader.ReadLineAsync() is { } line)
             {
-                // Discard output; we only drain to prevent buffer deadlocks.
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+
+                try
+                {
+                    onLog($"[ollama serve {streamLabel}] {line}");
+                }
+                catch
+                {
+                    // A misbehaving onLog must not stop the consumer — the
+                    // primary purpose of this loop is to drain the pipe so
+                    // the child process doesn't block on a full stdout/stderr
+                    // buffer.
+                }
             }
         }
         catch
