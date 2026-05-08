@@ -193,7 +193,7 @@ public sealed class PortableConfig
 
     /// <summary>Standard relative path for the config file within the SSD structure.</summary>
     [JsonIgnore]
-    public string ConfigRelativePath => @"config\\portable-config.json";
+    public string ConfigRelativePath => "config/portable-config.json";
 
     /// <summary>
     /// Loads a config from disk with explicit validity reporting.
