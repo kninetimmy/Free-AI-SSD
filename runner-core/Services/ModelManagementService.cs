@@ -1,5 +1,6 @@
 using System.Net.Http;
 using System.Net.Http.Json;
+using FreeAiSsd.PrepApp;
 using FreeAiSsd.Shared;
 
 namespace FreeAiSsd.Runner.Services;
@@ -8,25 +9,32 @@ public sealed class ModelManagementService : IModelManagementService
 {
     private readonly HttpClient _http;
     private readonly ISystemResourceProbe _systemResources;
+    private readonly string _ssdRoot;
 
-    public ModelManagementService(HttpClient http)
-        : this(http, UnknownSystemResourceProbe.Instance)
+    public ModelManagementService(HttpClient http, string ssdRoot)
+        : this(http, UnknownSystemResourceProbe.Instance, ssdRoot)
     {
     }
 
-    public ModelManagementService(HttpClient http, ISystemResourceProbe systemResources)
+    public ModelManagementService(HttpClient http, ISystemResourceProbe systemResources, string ssdRoot)
     {
         _http = http;
         _systemResources = systemResources;
+        _ssdRoot = ssdRoot ?? throw new ArgumentNullException(nameof(ssdRoot));
     }
 
     public event Action<string>? LogMessage;
 
+    // MAC33: Reads disk truth via ModelOperations.DiscoverModelsOnDisk because
+    // the Mac sidecar can't write back to the encrypted config after pulls
+    // (passphrase is zeroized before pulls run), so config.Models is empty
+    // on a Mac-prepped SSD even when models are present on disk.
     public List<string> GetInstalledModelNames(PortableConfig config)
     {
-        return config.Models
-            .Where(m => m.Status == ModelInstallStatus.Installed)
-            .Select(m => m.Name)
+        var modelsRoot = Path.Combine(_ssdRoot, SsdLayout.Models);
+        return ModelOperations.DiscoverModelsOnDisk(modelsRoot)
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
@@ -36,9 +44,9 @@ public sealed class ModelManagementService : IModelManagementService
         var vramGb = _systemResources.GetGpuVramGb();
         var warnings = new List<string>();
 
-        foreach (var model in config.Models.Where(m => m.Status == ModelInstallStatus.Installed))
+        foreach (var modelName in GetInstalledModelNames(config))
         {
-            var sizing = ModelSizingCatalog.Suggest(model.Name);
+            var sizing = ModelSizingCatalog.Suggest(modelName);
             var reasons = new List<string>();
 
             if (ramGb.HasValue && ramGb.Value < sizing.RecommendedSystemRamGb)
@@ -60,7 +68,7 @@ public sealed class ModelManagementService : IModelManagementService
 
             if (reasons.Count > 0)
             {
-                warnings.Add($"{model.Name}: {string.Join("; ", reasons)}");
+                warnings.Add($"{modelName}: {string.Join("; ", reasons)}");
             }
         }
 

@@ -45,7 +45,12 @@ public partial class App : System.Windows.Application
         // Runner services
         collection.AddSingleton<ISystemResourceProbe, WindowsSystemResourceProbe>();
         collection.AddSingleton<IOllamaLifecycleService, OllamaLifecycleService>();
-        collection.AddSingleton<IModelManagementService, ModelManagementService>();
+        // MAC33: ModelManagementService needs the SSD root to enumerate the
+        // on-disk model store via ModelOperations.DiscoverModelsOnDisk.
+        collection.AddSingleton<IModelManagementService>(sp => new ModelManagementService(
+            sp.GetRequiredService<HttpClient>(),
+            sp.GetRequiredService<ISystemResourceProbe>(),
+            ssdRoot));
         collection.AddSingleton<IDocumentOperationsService, DocumentOperationsService>();
         collection.AddSingleton<IChatService, ChatService>();
         collection.AddSingleton<IDcsBindingsImportService, DcsBindingsImportService>();
@@ -69,7 +74,8 @@ public partial class App : System.Windows.Application
             ssdRoot,
             staticFilesRoot: null,
             docOps: sp.GetRequiredService<IDocumentOperationsService>(),
-            libraryManager: sp.GetRequiredService<DocumentLibraryManager>()));
+            libraryManager: sp.GetRequiredService<DocumentLibraryManager>(),
+            modelService: sp.GetRequiredService<IModelManagementService>()));
 
         // ActivatorUtilities resolves registered services automatically; ssdRoot is
         // the only non-DI parameter and is passed positionally.

@@ -19,6 +19,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
     private readonly IChatService _chatService;
     private readonly ISpeechToTextService _sttService;
     private readonly ITtsProvider _ttsProvider;
+    private readonly IModelManagementService? _modelService;
     private readonly IDocumentOperationsService? _docOps;
     private readonly DocumentLibraryManager? _libraryManager;
     private readonly SsdLogger? _logger;
@@ -36,11 +37,13 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         string? ssdRoot = null,
         string? staticFilesRoot = null,
         IDocumentOperationsService? docOps = null,
-        DocumentLibraryManager? libraryManager = null)
+        DocumentLibraryManager? libraryManager = null,
+        IModelManagementService? modelService = null)
     {
         _chatService = chatService;
         _sttService = sttService;
         _ttsProvider = ttsProvider;
+        _modelService = modelService;
         _docOps = docOps;
         _libraryManager = libraryManager;
         _logger = logger;
@@ -156,13 +159,29 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
 
         api.MapGet("/models", () =>
         {
-            var models = config.Models
-                .Where(m => m.Status == ModelInstallStatus.Installed)
-                .Select(m => m.Name)
-                .Where(n => !string.IsNullOrWhiteSpace(n))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            // MAC33: prefer disk truth via IModelManagementService when injected.
+            // Fallback to config.Models for back-compat with older test harnesses
+            // and any caller that constructs the service without the model
+            // service. Both paths produce the same shape on a healthy SSD.
+            List<string> models;
+            if (_modelService is not null)
+            {
+                models = _modelService.GetInstalledModelNames(config)
+                    .Where(n => !string.IsNullOrWhiteSpace(n))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+            else
+            {
+                models = config.Models
+                    .Where(m => m.Status == ModelInstallStatus.Installed)
+                    .Select(m => m.Name)
+                    .Where(n => !string.IsNullOrWhiteSpace(n))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
 
             return Results.Ok(new { models });
         });

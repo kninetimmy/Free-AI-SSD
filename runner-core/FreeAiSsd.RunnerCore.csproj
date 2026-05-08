@@ -11,6 +11,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\shared\FreeAiSsd.Shared.csproj" />
+    <!-- MAC33: ModelOperations.DiscoverModelsOnDisk is the disk-truth source
+         for the runner's model picker. Mac sidecar can't write back to the
+         encrypted config after pulls, so runner-core enumerates the on-disk
+         manifest tree directly via the helper MAC29 added in prep-core. -->
+    <ProjectReference Include="..\prep-core\FreeAiSsd.PrepCore.csproj" />
   </ItemGroup>
 
   <!--
