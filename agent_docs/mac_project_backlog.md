@@ -2690,4 +2690,301 @@ the 2026-05-08 product call, encryption becomes a security
   `NetworkModeEncryptionRequiredMessage` at save time (existing
   test should still pass; add an integration test if needed).
 
+### MAC31 - Pull UX: cancel button, single progress line, preserve partial-download progress
+
+**Status:** filed 2026-05-08 from v1.3.10 mac field test. Not yet
+  in flight.
+**Scope:** medium — three discrete sub-bugs across both PrepApps
+  + the prep-core ConsumeAsync log filter. Cross-OS.
+**Risk:** Low for sub-bugs (b) and (c); medium for (a) — wiring
+  Cancel into the actual ollama process kill path needs care
+  around partial-blob cleanup so a cancelled pull leaves disk
+  in a state Ollama's resume logic can pick up.
+**Dependencies:** None. Independent of MAC29/MAC30/MAC33.
+**Goal:** A 5GB pull on a slow connection presents as a single
+  progress line that climbs monotonically, the user can cancel
+  it without trashing the partial blobs, and clicking Retry
+  picks up from where it left off rather than redownloading
+  from 0%.
+
+**Driver:** v1.3.10 mac field test, 8B model on a slow
+connection. Three observed problems (in priority order):
+
+**(a) No abort/cancel button during pull.** Both PrepApps go
+modal during `pull-model` with a 30-min timeout
+(`mac-prep-app/Sources/PrepViewModel.swift:388` —
+`hostController.send("pull-model \(tag)", timeout: 1800)`).
+The user has no way to bail out short of force-quitting the
+app, which orphans Ollama partial blobs in an undefined state.
+
+**(b) Log pane spams `pulling <hash>... NN%` lines.** Ollama's
+TUI uses ANSI cursor-rewrite escapes (`[?25h[?25l[2K[1G[A`)
+to overwrite the progress line in place in a real terminal.
+MAC28's `OllamaServerHandle.ConsumeAsync` captures stdout
+line-by-line and forwards each tick to `onLog`, but doesn't
+strip or coalesce the rewrite escapes. Result: the log pane
+gets a fresh `pulling <hash>... 43%` line every progress tick
+(roughly 1Hz × 16 chunks = a flood) and the literal escape
+codes appear as garbage at end-of-line. Looks like a restart
+loop, isn't.
+
+**(c) Visual progress resets to 0% on retry.** Ollama IS
+resumable — partial blobs persist as
+`<ssd>/models/blobs/sha256-<hex>-partial-N` and get
+re-validated on the next `pull`. But our progress display
+reads only the live `ollama pull` stdout, so on a fresh
+invocation the bar starts at 0% and climbs through Ollama's
+re-validation phase before resuming downloads. Confusing
+because users expect "Retry" to mean "pick up from where I
+was."
+
+**Fix architecture:**
+
+1. **Cancel button (sub-bug a):**
+   - Mac PrepApp: add a Cancel button to the Models step's
+     pulling UI. Hold a `Task` handle to the active pull
+     operation; on Cancel, call `task.cancel()` and send
+     `cancel-pull` to the sidecar.
+   - `mac-prep-host/HostLifetime.cs`: add `cancel-pull` arm
+     that signals the active pull's CancellationToken. The
+     existing `ModelOperations.PullModelAsync` already
+     registers a kill-process-tree on `ct.Register` (line 340),
+     so the pipe-back wire-up is the missing piece.
+   - Windows PrepApp: same Cancel button on the pulling step.
+     `shared/ViewModels/PrepViewModel.cs` already passes ct
+     into `_modelService.PullModelAsync`; UI just needs a
+     Cancel command bound to a CancellationTokenSource.
+   - Partial-blob cleanup: leave them on disk. Ollama's resume
+     logic re-validates on next pull, so abandoned partials
+     are not corruption — they're cached progress.
+
+2. **Single progress line (sub-bug b):** in
+   `prep-core/OllamaServerHandle.ConsumeAsync` (or a sibling
+   helper), pre-process each line:
+   - Strip ANSI cursor-rewrite escape sequences (a small
+     regex catches `[?25h`, `[?25l`, `[2K`, `[1G`, `[A`, etc.).
+   - Coalesce: if the cleaned line matches `pulling <hash>...
+     NN%` (Ollama's progress format), suppress it from the
+     `[ollama serve stdout]` stream and emit it on a separate
+     dedicated channel that PrepApp UIs render as a single
+     line that overwrites in place.
+   - Keep `[ollama serve stderr]` lines (errors, stalls)
+     forwarded as-is — those are exactly the diagnostics
+     MAC28 added.
+   - Tests in `OllamaServerHandleConsumeTests.cs`: pin the
+     ANSI strip + the progress-line coalesce against
+     captured Ollama TUI output.
+
+3. **Preserve partial progress on retry (sub-bug c):** before
+   spawning `ollama pull`, scan `<ssd>/models/blobs/` for
+   `*-partial-*` files matching the model's expected blob
+   digest. Sum their sizes against the manifest's total layer
+   size and seed the progress display with that fraction.
+   First progress tick from `ollama pull` then takes over.
+   Cosmetic but materially improves "is this stuck or just
+   resuming?" perception.
+
+**Affected files:**
+- Mac PrepApp Cancel UI: `mac-prep-app/Sources/main.swift`
+  (Models step view), `mac-prep-app/Sources/PrepViewModel.swift`
+  (cancel task wire-up).
+- Windows PrepApp Cancel UI: `shared/ViewModels/PrepViewModel.cs`
+  + `prep-app/MainWindow.xaml`.
+- Sidecar cancel arm: `mac-prep-host/HostLifetime.cs`.
+- Log filter: `prep-core/OllamaServerHandle.cs` ConsumeAsync.
+- Resume seeding: helper in `prep-core/ModelOperations.cs`,
+  called by both Windows and Mac pull paths.
+- Tests: extend `OllamaServerHandleConsumeTests.cs`.
+
+**Cross-OS review pass:**
+- Both PrepApps need the Cancel UI per the 2026-05-07 dual-OS
+  rule; both already have Cancel-style buttons elsewhere
+  (drive-erase confirm) for visual reference.
+- ConsumeAsync filter is shared in prep-core, so it benefits
+  both OSes' pull paths automatically.
+- Resume seeding is also a shared prep-core helper.
+
+**Acceptance / smoke:**
+- 5GB pull on a slow connection shows one progress line that
+  monotonically climbs.
+- Mid-pull Cancel button stops the process, leaves partial
+  blobs on disk, returns user to a state where Retry resumes
+  from the partial position rather than 0%.
+- Cross-OS roundtrip: Mac-cancelled pull resumes correctly
+  when the SSD is plugged into Windows and pull is re-run
+  from Windows Runner (validates the partial-blob format is
+  shared, not a Mac-only artifact).
+
+### MAC32 - PrepApp Finish button is a no-op
+
+**Status:** filed 2026-05-08 from v1.3.10 mac field test. Not yet
+  in flight. **Needs product call** before code lands.
+**Scope:** small — one Swift handler + one C# command. Cross-OS.
+**Risk:** Trivial. Pure UI plumbing.
+**Dependencies:** None.
+**Goal:** Clicking Finish on the readiness page does *something*
+  that signals "you're done with prep, here's what to do next."
+
+**Driver:** v1.3.10 mac field test: user prepped a Mac SSD,
+readiness all-green, clicked Finish, nothing happened. Window
+stayed on the readiness page with no indication of what to do
+next.
+
+**Product call needed.** Three options:
+
+**Option (a) — close the app.** Simplest. Mirrors what most
+"setup wizard" apps do at completion. User then double-clicks
+Runner.app on the SSD to start using it. Risk: feels abrupt;
+no confirmation; the user may not realize the SSD is ready
+because the app vanished.
+
+**Option (b) — show a "you're done" page with a Quit
+button.** A final-step view explaining: "Your SSD is ready.
+Open Runner.app on the SSD to start chatting. Quit when ready."
+Clearer; one extra click. Probably the right answer.
+
+**Option (c) — auto-launch Runner.** Most user-friendly but
+risky: the Mac Runner unlock flow is broken (MAC33), so
+auto-launching would make MAC33 immediately visible without
+giving the user a chance to read the readiness summary.
+Skip until MAC33 is fixed.
+
+**Recommendation:** option (b). Add a final `.done` step
+view that congratulates and instructs. Window stays open so
+the user can review readiness; Quit is explicit.
+
+**Affected files:**
+- Mac PrepApp: `mac-prep-app/Sources/main.swift` (new
+  `DoneStepView`), `mac-prep-app/Sources/PrepViewModel.swift`
+  (`finish()` action transitions to `.done` step).
+- Windows PrepApp: `shared/ViewModels/PrepViewModel.cs`
+  (Finish command), `prep-app/MainWindow.xaml` (final step).
+
+**Cross-OS review pass:** simultaneous on both PrepApps per
+the 2026-05-07 dual-OS rule.
+
+**Acceptance / smoke:**
+- v1.4.x field test: complete prep on either OS, click Finish,
+  see a clear "you're done" view with a Quit button. Quit
+  closes the app cleanly.
+
+### MAC33 - Mac Runner shows zero selectable models on a Mac-prepped SSD
+
+**Status:** filed 2026-05-08 from v1.3.10 mac field test. **Top
+  priority — Mac is genuinely unusable end-to-end without
+  this.**
+**Scope:** small-medium — same shape as MAC29 but for the
+  Runner's model selector instead of ReadinessService.
+  Cross-platform-aware (the Windows Runner reading a Mac-prepped
+  SSD has the same problem).
+**Risk:** Low. Same fix architecture as MAC29 sub-bug (3): swap
+  config-pinned model enumeration for disk-truth via
+  `ModelOperations.DiscoverModelsOnDisk`.
+**Dependencies:** None. **Should ship before MAC30 + MAC31 +
+  MAC32** because nothing else matters until Mac users can
+  actually load and chat with a model from their prepped SSD.
+**Goal:** A user who unlocks a Mac-prepped SSD in Mac Runner
+  (or Windows Runner) sees the starter models they pulled in
+  the model picker and can select one for chat.
+
+**Driver:** v1.3.10 mac field test: user prepped Mac SSD,
+pulled `llama3.2:1b` successfully, readiness all-green
+(MAC29 win), opened Runner.app off the SSD, entered passphrase,
+unlock appeared to succeed, but the model selector showed zero
+options. Re-selecting the SSD and re-entering the passphrase
+did nothing different. Zero post-prep usability.
+
+**Root cause (almost certainly the same as MAC29 bug 3 in a
+different consumer).** The Mac sidecar's `pull-model` arm at
+`mac-prep-host/HostLifetime.cs:237` doesn't write back to the
+encrypted config — the Swift caller at
+`mac-prep-app/Sources/PrepViewModel.swift:388` discards the
+result's `sha256`/`sizeBytes`, and the encryption flow zeroizes
+the passphrase before pulls run, so re-deriving the key for
+each pull is too expensive to bolt on. As a result,
+`config.Models` is empty in the encrypted blob even after a
+successful pull.
+
+MAC29 fixed `prep-core/Services/ReadinessService.cs` by reading
+disk truth via `ModelOperations.DiscoverModelsOnDisk` +
+`FindModelBlobForModel`. **The Mac Runner's "Available
+Models" picker is a different consumer of installed-model
+state** that almost certainly still reads
+`config.Models.Where(m => m.Status == ModelInstallStatus.Installed)`,
+which is empty on a Mac-prepped SSD → empty picker.
+
+**Verification step before code (kickoff):**
+1. Grep the runner-core / mac-runner-host / runner WPF for
+   the model-selector data source. Likely candidates:
+   `runner-core/Services/`, `runner/ViewModels/`,
+   `mac-runner-host/`.
+2. Confirm it reads `config.Models` rather than enumerating
+   disk. If so, the fix is clear.
+3. If multiple consumers read `config.Models` for installed
+   state, decide whether to (a) factor a shared
+   `IInstalledModelDiscovery` interface backed by
+   `ModelOperations.DiscoverModelsOnDisk`, or (b) keep the
+   fix local to the model picker and leave other consumers
+   on config-pinned (e.g. settings-page model management
+   probably does want config-pinned because it lets users
+   un-install / re-install per-model).
+
+**Fix architecture (preliminary — refine after kickoff
+verification):**
+
+1. **Disk-truth model enumeration in the Runner picker.** Same
+   pattern as MAC29: `ModelOperations.DiscoverModelsOnDisk(modelsRoot)`
+   returns the set of `name:tag` strings, and
+   `FindModelBlobForModel` resolves each to its primary blob
+   for size/availability metadata. The picker shows what's
+   on disk, regardless of whether config.Models has a pinned
+   entry.
+2. **Unification opportunity.** If Windows Runner's picker
+   uses the same data source, the disk-truth swap fixes both
+   automatically. If they diverged (likely — Windows Runner
+   was written against the Windows path where pulls *do* write
+   back to config), unify around the disk-truth path. MAC29's
+   plaintext-config branch already exists; this just adds it
+   to the Runner's model-selector code path.
+3. **Optional: opportunistic config rebuild on unlock.** When
+   the Runner unlocks an encrypted config and notices
+   `config.Models` is empty but disk has models, write back to
+   the encrypted config now (we have the unlocked
+   `UnlockMaterial` in scope at unlock time). Then config and
+   disk agree from that point forward. This is the Runner-side
+   solution to the "Mac sidecar can't write back" problem from
+   MAC29.
+
+**Affected files (best guesses, confirm at kickoff):**
+- Runner model picker source — TBD by grep.
+- `prep-core/ModelOperations.cs` — already has
+  `DiscoverModelsOnDisk` and `FindModelBlobForModel` from
+  MAC29; no new API likely needed.
+- New tests covering: encrypted config + model on disk →
+  picker shows the model; multiple models on disk → all
+  appear; unlock-time rebuild persists the disk-truth
+  enumeration into config.
+
+**Cross-OS review pass:**
+- **Mac surfaces:** picker populates correctly on a
+  Mac-prepped SSD. The intended end-to-end Mac flow finally
+  works.
+- **Windows surfaces:** Mac-prepped SSD plugged into a
+  Windows machine — same fix, same story. Already-prepped
+  Windows SSDs continue to work because their config.Models
+  was being written back correctly; the disk-truth fallback
+  just becomes redundant for them, not wrong.
+- Bundle both OSes in one PR.
+
+**Acceptance / smoke:**
+- v1.4.x mac field run: prep SSD → pull `llama3.2:1b` → eject
+  → unmount/remount → open Runner.app → unlock → model
+  picker shows `llama3.2:1b` → select → send a chat → response
+  arrives.
+- Cross-OS roundtrip: same SSD plugged into Windows machine
+  → Windows Runner shows the same model in its picker → chat
+  works.
+- Tests pin the disk-truth read on both encrypted and
+  plaintext config paths.
+
 
