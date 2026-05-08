@@ -234,9 +234,12 @@ public sealed class ArtifactStagingService : IArtifactStagingService
     private static bool DirectoryContainsCompanion(string path)
         => Directory.Exists(path) && File.Exists(Path.Combine(path, "FreeAiSsd.Companion.exe"));
 
-    private static string? ResolveBundledFile(string relativePath)
+    internal static string? ResolveBundledFile(string relativePath)
+        => ResolveBundledFile(AppContext.BaseDirectory, relativePath);
+
+    internal static string? ResolveBundledFile(string baseDirectory, string relativePath)
     {
-        foreach (var contentRoot in EnumerateBundledContentRoots())
+        foreach (var contentRoot in EnumerateBundledContentRoots(baseDirectory))
         {
             var candidate = Path.Combine(contentRoot, relativePath);
             if (File.Exists(candidate))
@@ -247,8 +250,28 @@ public sealed class ArtifactStagingService : IArtifactStagingService
     }
 
     private static IEnumerable<string> EnumerateBundledContentRoots()
+        => EnumerateBundledContentRoots(AppContext.BaseDirectory);
+
+    private static IEnumerable<string> EnumerateBundledContentRoots(string baseDirectory)
     {
-        yield return AppContext.BaseDirectory;
-        yield return Path.Combine(AppContext.BaseDirectory, "payload");
+        yield return baseDirectory;
+        yield return Path.Combine(baseDirectory, "payload");
+
+        // MAC23: mirror MAC22 — Mac PrepApp's mac-prep-host sidecar runs from
+        // PrepApp.app/Contents/Resources/prep-host/, so AppContext.BaseDirectory
+        // is *not* the bundle root and the bundled artifacts under
+        // <bundle>/payload/mac/ live several levels up. Walk a bounded number
+        // of ancestors. Backward-compatible: Windows finds bundles on the
+        // first or second candidate above and never enters this loop.
+        DirectoryInfo? cursor;
+        try { cursor = new DirectoryInfo(baseDirectory); }
+        catch { yield break; }
+
+        for (var i = 0; i < 6 && cursor?.Parent is not null; i++)
+        {
+            cursor = cursor.Parent;
+            yield return cursor.FullName;
+            yield return Path.Combine(cursor.FullName, "payload");
+        }
     }
 }
