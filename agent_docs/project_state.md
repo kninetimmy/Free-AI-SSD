@@ -1,30 +1,30 @@
 # Project State
 
-Last updated: 2026-05-08 (MAC27 in flight on `kninetimmy/mac27-pull-temp-server`; v1.3.7 mac field test surfaced a parity gap — Mac sidecar never starts `ollama serve` before pulls)
+Last updated: 2026-05-08 (MAC28 in flight on `kninetimmy/mac28-server-startup-timeout`; v1.3.8 mac field test cleared the MAC27 "could not connect" error but tripped a 15s health-poll timeout while the Gatekeeper "Verifying 'Ollama'" modal was still on screen)
 
-Last released: **v1.3.7** (2026-05-08; MAC26 — Mac Ollama runtime spawns inner `Ollama.app/Contents/Resources/ollama` directly, bypassing the LaunchServices shim that stripped env and SIGKILL'd the daemon on v1.3.6). Both Win + Mac artifacts shipped. **v1.3.7 mac field test failed at first model pull with `Error: could not connect to ollama app, is it running?` — MAC27 fix in progress.**
+Last released: **v1.3.8** (2026-05-08; MAC27 — Mac sidecar lazily starts a temp `ollama serve` before each pull batch and disposes on shutdown, mirroring `PrepViewModel.cs:782`). Both Win + Mac artifacts shipped. **v1.3.8 mac field test got past the "could not connect" error (MAC27 working as designed); next layer down is MAC28 — `Ollama server on 127.0.0.1:53376 did not become healthy within 15 seconds`. Cold-start chain (Gatekeeper signature verify + Go runner discovery) exceeds the 15s budget written when Windows was the only target.**
 
 > v1.2.7 tag exists on `af77abc` but has no GH release artifact; v1.2.8 supersedes it.
 
-**MAC26 cleared the architectural Mac field-blocker** but v1.3.7
-field test surfaced a follow-on parity gap: the Mac sidecar's
-`pull-model` arm never started a temp `ollama serve`, so the CLI
-fails immediately with "could not connect to ollama app, is it
-running?". **MAC27** fixes this by mirroring the Windows pattern
-(`shared/ViewModels/PrepViewModel.cs:782` starts
-`StartTemporaryServerAsync` before the pull batch and disposes in
-`finally`). Once MAC27 ships, **F2a** (sort selector + ScrollView
-fill-window) and the **encryption-required policy** decision
-return to top-of-queue. The cleanup follow-up to fold
-`MacArtifactAvailability` / `ArtifactStagingService` /
-`PrereqService` ancestor-walk enumerators into a shared
-`prep-core/BundleContentRoots` helper remains overdue. **MAC20**
-(cross-platform ZIP layout rework) and **X18** (ingest
-observability) remain queued. **MAC11** (signing + notarization)
-remains back-burnered until the user's Apple Developer cert
-renews.
+**MAC26 + MAC27 + MAC28 are the v1.3.x Mac model-pull layer cake.**
+MAC26 (v1.3.7) routed the sidecar at the right binary;
+MAC27 (v1.3.8) added the missing `ollama serve` before pulls;
+MAC28 (in flight) bumps the health-poll budget past the cold-start
+window and surfaces the inner ollama's stdout/stderr in the
+PrepApp log instead of discarding it. Once MAC28 ships, **F2a**
+(sort selector + ScrollView fill-window) and the
+**encryption-required policy** decision return to top-of-queue.
+The cleanup follow-up to fold `MacArtifactAvailability` /
+`ArtifactStagingService` / `PrereqService` ancestor-walk
+enumerators into a shared `prep-core/BundleContentRoots` helper
+remains overdue. **MAC20** (cross-platform ZIP layout rework) and
+**X18** (ingest observability) remain queued. **MAC11** (signing
++ notarization) remains back-burnered until the user's Apple
+Developer cert renews.
 
 ## Recently shipped
+
+- **PR #213 — MAC27 Mac sidecar starts a temp ollama serve before pull-model — merged `4b70758` (2026-05-08).** Released as **v1.3.8**. Parity gap MAC26 didn't cover: `ollama pull` is a thin client and needs a daemon at `OLLAMA_HOST`. Windows had this at `shared/ViewModels/PrepViewModel.cs:782` (`StartTemporaryServerAsync` before the pull batch, disposed in `finally`); the Mac sidecar's `pull-model` arm just called `ollama pull` against the handshake-supplied default host where nothing was listening, producing v1.3.7's `Error: could not connect to ollama app, is it running?`. Fix: switch `_ollamaPackage` / `_modelService` to interfaces (test seam), new `IOllamaServerHandle? _ollamaServer` field, lazy-start on first non-test-mode `pull-model`, reuse across the batch, dispose in `DisposeAsync`. Five new lifecycle tests in `MacPrepHostPullLifecycleTests.cs` pin: first-pull starts server + uses temp host (the field-bug pin), three pulls share one server start, dispose kills the handle, test-mode stays server-free, resolver-null fails before server start. CI green on first run; v1.3.8 dispatched immediately, all four jobs green (`mac-prep-build` 57s, `mac-runner-build` 46s, `windows-build` 4m41s, `package-release` 3m02s); `Free-AI-SSD-win.zip` 335 MB and `Free-AI-SSD-beta-crossplatform.zip` 644 MB shipped. v1.3.8 mac field test confirmed the new `Starting temporary Ollama server on 127.0.0.1:<port>...` log line fires correctly — but exposed MAC28 (next-layer-down 15s health-poll timeout during Gatekeeper-held first launch).
 
 - **PR #212 — MAC26 Mac Ollama runtime spawns inner Ollama.app/Contents/Resources/ollama directly — merged `1a9c50b` (2026-05-08).** Released as **v1.3.7**. Architectural fix for the v1.3.6 field-blocker: macOS Ollama distribution is a GUI desktop app, not a CLI server; pre-MAC26 staging copied the 119 KB LaunchServices shim onto the SSD, which stripped env (`OLLAMA_MODELS` never propagated) and SIGKILL'd Ollama.app when headlessly-launched. Fix: `ArtifactStagingService.StageMacOllamaAsync` validates `Ollama.app/Contents/Resources/ollama` exists, deletes the top-level shim, passes the inner path to `MacOllamaStagingPipeline.VerifyAndAttest`. New `OllamaPackageService.ResolveMacOllamaExe` returns the inner path strictly (no recursive walk on Mac so a stray shim cannot win). `ReadinessService` + `MacOllamaLifecycleService` (Network Mode) + Swift `mac-runner` local-mode all updated to the inner path. Four new tests in `OllamaPackageServiceResolveTests` pin the new resolver including the field-bug shape (inner wins over sibling shim at bundle root); `MacOllamaLifecycleServiceTests` suffix updated. **Kickoff verification on the v1.3.6 staged SSD (before code):** `OLLAMA_MODELS=/tmp/test-... .../Ollama.app/Contents/Resources/ollama serve` — env propagated (`blobs/` dir created), runners loaded with default CWD (`Dynamic LLM libraries: [metal cpu_avx cpu_avx2]`), no `OLLAMA_RUNNERS_DIR` needed. CI green on first run: `windows-build` 3m1s, `mac-runner-build` 56s, `mac-prep-build` 49s; `package-release` 2m41s on dispatch with both artifacts shipped.
 
@@ -46,7 +46,7 @@ renews.
 
 ## Next up
 
-1. **MAC27** (in flight) — Mac sidecar must start a temp `ollama serve` before `pull-model`. Branch `kninetimmy/mac27-pull-temp-server`, code + tests landed; PR + CI pending.
+1. **MAC28** (in flight) — `OllamaServerHandle.WaitForHealthyAsync` budget too tight (15s) for the Mac cold-start chain (Gatekeeper signature verify + Go runner discovery); `DrainAsync` silently discards inner ollama's startup output. Branch `kninetimmy/mac28-server-startup-timeout`, code + tests landed; PR + CI pending.
 2. **F2a** — Model picker UX gaps surfaced on the v1.3.5 field test. (1) No sort across the 399-entry catalog (alphabetize / size / tier). (2) Mac `EncryptionSetupStepView`'s ScrollView is locked at `.frame(minHeight: 120, maxHeight: 240)` (`mac-prep-app/Sources/main.swift:294`), so the picker stays at 240px when the user resizes the window. Bundle both OSes per the parity rule. Detailed entry in `project_backlog.md`.
 3. **Encryption-required policy decision.** v1.3.5 field test surfaced user pushback: "this version forces you to encrypt. you cant pull the models unless you set an encryption password. that shouldnt be forced." Conflicts with the MAC5 / MAC17a-#6 stance ("plaintext-mode prep is out of scope" — the encryption Toggle was deliberately removed in MAC17a because the codepath behind it threw `failed`). Needs the user's product call before any code lands — see Open questions. Likely paths: (a) keep encryption mandatory, document the rationale in user-facing docs; or (b) restore a working plaintext path with a `NoOpEncryptedConfigWriter`, ensuring `RunnerLocalApi` and Companion still authenticate, and a UX call about how the passphrase prompt is presented as optional.
 4. **MAC20** — Cross-platform release ZIP layout rework. Filed 2026-05-07 from v1.3.1 field test: root currently scatters loose Windows DLLs + PDBs alongside `payload/`; user wants `windows/` + `mac/` + `QUICKSTART.txt` + `LICENSE` at root. Medium; touches CI release-assembly + PrepApp sidecar paths.
