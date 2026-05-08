@@ -1424,3 +1424,49 @@ acceptance criteria.
 **Supersedes.** Replaces the MAC17a-#6 stance ("plaintext-mode
 prep is out of scope"). MAC5's plaintext invariant narrows from
 "no plaintext config" to "no plaintext API key".
+
+## 2026-05-08 — Disk-truth is the canonical source for installed-model state on the SSD
+
+**Decision.** `<ssdRoot>/models/manifests/registry.ollama.ai/library/<model>/<tag>`
+is the source of truth for "what models are installed". Both runner-core C#
+(`ModelManagementService.GetInstalledModelNames`, `GetModelSizingWarnings`,
+`RunnerLocalApiService` `/models` endpoint) and the Mac SwiftUI runner
+(`mac-runner/Sources/main.swift` `applyConfigToUi`) enumerate the manifest
+tree directly via `ModelOperations.DiscoverModelsOnDisk`. `config.Models` is
+no longer the canonical filter for installed status. Any new consumer asking
+"what's installed?" must read disk truth, not config, and must accept
+`ssdRoot` (or capture it on a service ctor) to do so.
+
+**Why.** The Mac PrepApp sidecar pulls models against an unlocked encrypted
+config, but the unlock material is zeroized before the long-running pull runs
+(security posture: minimize key residency). Re-deriving the key per pull
+would be expensive and would touch the encryption hot path. The result is
+`config.Models` stays empty post-pull on Mac even when the blob is on disk.
+MAC29 fixed `ReadinessService` by reading disk; MAC33 then surfaced three
+more C# consumers and one Swift consumer that had to make the same swap.
+Fixing at every read site means the sidecar never needs to write back, which
+keeps the MAC5 plaintext-config invariant simple and the encryption code
+path narrow.
+
+**Cross-language symmetry required.** The Mac SwiftUI runner reads
+`config["models"]` directly from the in-memory dict — *not* via the LAN
+endpoint. Any future consumer added on the Swift side has the same
+obligation: enumerate `<ssdRoot>/models/manifests/...` directly rather than
+filter the dict. Verify with a kickoff grep before locking the architecture
+on any future source-of-truth swap.
+
+**Exit ramps.** Re-open if any of:
+
+1. Profiling shows disk enumeration is a meaningful read-path cost (almost
+   certainly isn't — it's small directory walks) and a cache or writeback
+   becomes warranted.
+2. A future feature legitimately needs config-pinned status that disk can't
+   represent (e.g. "user uninstalled this in settings, hide it from the
+   picker"). Add a layered model: disk gives the universe, config-pinned
+   status filters out user-hidden entries.
+3. MAC30 ships and the encryption-write hot path becomes trivial enough that
+   opportunistic config writeback at unlock time becomes worth restoring.
+
+**Implementation reference.** PR #215 (MAC29, `ReadinessService`) +
+PR #218 (MAC33, runner-core + Swift). Helper:
+`prep-core/ModelOperations.cs:103` `DiscoverModelsOnDisk`.
