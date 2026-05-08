@@ -1922,3 +1922,234 @@ or similar.
 - Existing Windows tests still pass; new Mac filename test passes.
 - v1.3.6 mac field run reaches readiness checks for the first
   time.
+
+**Status update 2026-05-08 (post-v1.3.6 field test):** MAC25 fix
+shipped and the resolver now picks `ollama` correctly on Mac, but
+the field test surfaced a deeper architectural issue (MAC26) — the
+binary the resolver finds is the wrong one. Acceptance criteria
+above are blocked by MAC26.
+
+### MAC26 - Mac Ollama staging picks the wrong binary; pulls cannot land on the SSD
+
+**Status:** planned 2026-05-08 (field-reported via v1.3.6 mac
+  screenshot; replaces MAC25 as the actual blocker for first
+  successful model pull on Mac).
+**Scope:** medium — staging path + resolver + verification pipeline,
+  with new tests pinning that the inner-Resources binary is what
+  ships.
+**Risk:** Medium — the fix changes which Mach-O the runtime executes
+  and how its env propagates. Backward-compatible to Windows
+  (untouched); changes Mac runtime behavior fundamentally.
+**Dependencies:** None. Top of queue. User decision recorded:
+  must NOT require user-managed Ollama install — the project
+  bundles Ollama and the fix has to run a server self-contained,
+  not via the user's own daemon.
+**Goal:** Mac field run completes a starter-model pull and the
+  model bytes land at `<ssd>/models/blobs/...` per the
+  `OLLAMA_MODELS` env var the sidecar already sets.
+
+**Driver:** v1.3.6 mac field test (post-MAC25). User attempted
+two starter-model pulls. qwen2.5:7b reported exit code 137; the
+"other model seemed to pull correctly" per the UI. Direct
+inspection of the SSD afterwards (PrepApp still running with
+spinner stuck on "pulling starter models"):
+
+- `/Volumes/FREEAI/models/blobs/` — empty.
+- `/Volumes/FREEAI/models/manifests/` — does not exist.
+- `~/.ollama/models/` — does not exist (no fallback location either).
+- No partial blobs anywhere on the system (`/tmp`,
+  `/private/var/folders`, FREEAI). No `sha256-*` files period.
+- Total used on the 1 TB SSD: 941 MB — that's just stage-runner +
+  ollama package + prereqs. Zero model bytes were ever written.
+- Host log (`/Volumes/FREEAI/logs/macos-prep-host-*.log`) stops
+  cleanly at the prereqs-staged line; no log entries for catalog
+  refresh, encryption setup, or any pull attempt.
+- `pgrep ollama` → no process. `pgrep -fl PrepApp` → still alive,
+  18 minutes idle, sidecar (`mac-prep-host` PID 46443) hung in
+  `await` after the first failure with no `ollama` child.
+- `lsof -p <sidecar>` → no SSD paths open. Sidecar not flushing
+  to its log file; just stdin/stdout pipes back to Swift parent.
+
+**Root cause:** The package the project downloads is
+`https://github.com/ollama/ollama/releases/download/v0.5.7/ollama-darwin.zip`.
+On macOS Ollama ships as a desktop GUI distribution, not a
+self-contained CLI server. The zip contains:
+
+- `ollama` (119 KB) — Electron-style **CLI shim** that talks to a
+  running server via localhost:11434 / unix socket. If no server
+  is up, the shim launches `Ollama.app` via **LaunchServices**.
+- `Ollama.app/Contents/MacOS/Ollama` (119 KB) — Electron launcher
+  for the GUI desktop app.
+- `Ollama.app/Contents/Resources/ollama` (**53 MB**) — the actual
+  Go-based Ollama CLI server. Mach-O universal (x86_64 + arm64),
+  Developer ID signed (Identifier=`ollama`, TeamID=3MU9H2V9Y9).
+  Supports `serve`, `pull`, `run`, all the same subcommands as
+  Linux/Windows.
+- `Ollama.app/Contents/Resources/lib/ollama/runners/{cpu_avx,cpu_avx2}/ollama_llama_server`
+  — model-runner subprocesses the server invokes when running
+  inference. Required at runtime for actual model use.
+
+`ArtifactStagingService.StageMacOllamaAsync`
+(`prep-core/Services/ArtifactStagingService.cs:88-158`) extracts
+the zip, then at lines 123-127:
+
+```csharp
+var cliPath = Directory.EnumerateFiles(ollamaDir, "ollama",
+    SearchOption.AllDirectories).FirstOrDefault()
+    ?? throw new FileNotFoundException(...);
+var finalCliPath = Path.Combine(ollamaDir, "ollama");
+File.Copy(cliPath, finalCliPath, overwrite: true);
+```
+
+`EnumerateFiles` returns whichever `ollama` (case-insensitive on
+exFAT) it walks first. On the user's SSD the result is the
+top-level **119 KB shim** copied to
+`/Volumes/FREEAI/mac/tools/ollama/ollama`. That's what
+`OllamaPackageService.ResolveOllamaExe` (post-MAC25) finds and
+hands to `pull-model`.
+
+`MacOllamaStagingPipeline.VerifyAndAttest` then validates the
+shim — it has an arm64 slice, the archive SHA matches, and it's
+Developer-ID signed — so staging "succeeds." But the binary
+that lands on the SSD is the **wrong tool for the job**.
+
+When the sidecar runs `ollama pull <tag>`:
+1. The 119 KB shim tries to connect to localhost:11434 → no
+   server.
+2. macOS Ollama's documented fallback is to launch `Ollama.app`
+   via LaunchServices.
+3. **LaunchServices launches GUI apps in a clean environment** —
+   the `OLLAMA_MODELS=/Volumes/FREEAI/models` and `OLLAMA_HOST`
+   env vars set by `ModelOperations.PullModelAsync`
+   (`prep-core/ModelOperations.cs:25-32`) **do not propagate** to
+   the spawned daemon. So even when a pull does succeed, models
+   would land in `Ollama.app`'s default location, not the SSD.
+4. Headlessly-launched `Ollama.app` from the unusual
+   `/Volumes/FREEAI/mac/tools/ollama/Ollama.app/` path can be
+   killed by macOS (TCC, jetsam, signing/quarantine quirks). The
+   exit 137 (= SIGKILL = signal 9) on qwen2.5:7b is consistent
+   with this.
+5. The sidecar's `RunProcessStreamingAsync` then hangs after the
+   shim exits, because the shim returned 0 (it successfully
+   handed off to LaunchServices) but the daemon it dispatched to
+   was killed before any progress streamed back. PrepApp sits
+   forever with the spinner.
+
+**Why the user's "first pull seemed correct":** UI illusion. With
+no `~/.ollama` directory existing on this Mac and zero blobs on
+the SSD, **neither pull succeeded**. The shim probably reported
+exit 0 (handed off to LaunchServices cleanly) and the UI flipped
+to "done" before the daemon failed.
+
+**Fix architecture (option 1, per user 2026-05-08 product call —
+"don't make the user manually install ollama"):** stop using the
+shim; run the inner self-contained server directly as a sidecar
+child process. Concretely:
+
+1. **Staging** (`ArtifactStagingService.StageMacOllamaAsync`):
+   - After extraction, leave `Ollama.app/` intact (do NOT copy
+     `ollama` out to `<ollamaDir>/ollama` — that step at
+     lines 126-127 is the bug). Removing the copy preserves the
+     code-signed `Ollama.app` bundle as Apple distributes it,
+     which avoids quarantine / signing fragility.
+   - Optionally remove the top-level 119 KB shim from the staged
+     dir to make it impossible to invoke by accident.
+2. **Resolver** (`OllamaPackageService.ResolveOllamaExe`):
+   - On Mac, return
+     `<ollamaDir>/Ollama.app/Contents/Resources/ollama`
+     (the 53 MB self-contained server). On Windows, keep the
+     existing `ollama.exe` walk — no change.
+   - Keep the `internal static (dir, fileName)` MAC25 seam; add
+     a `(dir)` Mac overload that walks to the bundle path.
+3. **Spawn semantics** (`ModelOperations` already correct):
+   - The sidecar invokes the resolved binary via
+     `Process.Start(...)` with explicit `Environment[OLLAMA_MODELS]`
+     and `Environment[OLLAMA_HOST]`. Direct child processes
+     **do** inherit env. This bypasses LaunchServices entirely.
+   - Working directory: set CWD to
+     `<ollamaDir>/Ollama.app/Contents/Resources/` so the server
+     finds its `lib/ollama/runners/` adjacents. Or set
+     `OLLAMA_RUNNERS_DIR=<ollamaDir>/Ollama.app/Contents/Resources/lib/ollama/runners`
+     explicitly.
+   - The server is `serve`-capable, so the sidecar can either
+     (a) start a long-lived `ollama serve` and run `ollama pull`
+     against `OLLAMA_HOST=http://127.0.0.1:11434` like the
+     Windows path does via `OllamaServerHandle`, or (b) call
+     `ollama pull` directly — recent ollama versions auto-spawn
+     a server when pull is invoked without one. **Prefer the
+     explicit serve handle** for parity with Windows
+     (`StartTemporaryServerAsync` already handles teardown).
+4. **Verification pipeline**
+   (`MacOllamaStagingPipeline.VerifyAndAttest`):
+   - Validate the inner 53 MB binary's arm64 slice and codesign
+     state, not the top-level shim. Update the test fixtures
+     (`MacOllamaStagingPipelineTests.cs`) to drive synthesized
+     `Ollama.app/Contents/Resources/ollama` layouts.
+5. **Sidecar protocol** (`mac-prep-host/HostLifetime.cs`
+   PullModel arm at line 195): no protocol change needed if the
+   resolver returns the right path. Consider adding a timeout
+   so a hung pull doesn't park the UI spinner indefinitely (the
+   18-minute idle session this field test produced is its own
+   small bug).
+
+**Affected files:**
+- `prep-core/Services/ArtifactStagingService.cs` — drop the
+  `File.Copy(cliPath, finalCliPath, ...)` that lifts the wrong
+  binary; let the .app bundle stay as-is.
+- `prep-core/Services/OllamaPackageService.cs` — Mac branch of
+  `ResolveOllamaExe` returns the inner-Resources path.
+- `shared/Services/MacOllamaStagingPipeline.cs` — verify the
+  inner server binary, not the shim.
+- `tests/MacOllamaStagingPipelineTests.cs` — synthesize the
+  `Ollama.app/Contents/Resources/ollama` layout in
+  `WriteBinary` helpers; the existing `WriteBinary(root,
+  "ollama", ...)` calls need to write under
+  `Ollama.app/Contents/Resources/`.
+- `tests/OllamaPackageServiceResolveTests.cs` — add a Mac case
+  that asserts the resolver picks the inner-Resources binary
+  even when a shim exists at the bundle root.
+- (Maybe) `prep-core/Services/OllamaServerHandle.cs` (if it
+  exists; resolution earlier showed no such file on disk —
+  `OllamaServerHandle` may be defined inline in
+  `OllamaPackageService.cs`; verify before editing).
+
+**Cross-OS review pass:**
+- **Windows surfaces:** completely untouched. Windows still
+  resolves `ollama.exe`, still uses `OllamaServerHandle`, still
+  passes env to the child process. No behavior change.
+- **Mac surfaces:** the daemon is now a direct child process of
+  the sidecar (not a LaunchServices-spawned GUI app), so env
+  propagates and `OLLAMA_MODELS` actually points pulls at the
+  SSD. No more SIGKILL-on-headless-launch. No more env-stripped
+  daemon. No reliance on the user having Ollama installed.
+- **Decision:** Bundle (single shared-core helper change; both
+  OSes use the same code path with OS-aware filename + path
+  selection).
+
+**Acceptance criteria:**
+- Mac field run completes a starter-model pull and the model
+  lands at `<ssd>/models/blobs/sha256-...` with a populated
+  `<ssd>/models/manifests/registry.ollama.ai/library/...`.
+- `pgrep ollama` shows the server child of the sidecar during
+  the pull; gone after pull-model completes.
+- Sidecar log `<ssd>/logs/macos-prep-host-*.log` shows pull
+  progress lines, not a clean stop at the prereqs step.
+- qwen2.5:7b pulls successfully when memory permits; if it
+  still 137s, that's a real OOM diagnostic and gets its own
+  follow-up — but the smaller starter model (e.g.
+  `llama3.2:3b`) must complete.
+- Existing Windows tests still pass; new Mac tests pin the
+  inner-Resources resolver and the staging-leaves-bundle-intact
+  invariant.
+- v1.3.7 mac field run reaches readiness checks for the first
+  time.
+
+**Open question for kickoff:** confirm
+`Ollama.app/Contents/Resources/lib/ollama/runners/` is on the
+default search path of the inner server binary when CWD is
+`Contents/Resources/`. If not, set `OLLAMA_RUNNERS_DIR`
+explicitly. Easy to verify on the staged SSD with a manual
+`OLLAMA_MODELS=/tmp/test-ollama \
+  /Volumes/FREEAI/mac/tools/ollama/Ollama.app/Contents/Resources/ollama \
+  pull llama3.2:1b`
+before any code lands.

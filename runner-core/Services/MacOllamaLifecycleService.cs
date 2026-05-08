@@ -7,7 +7,8 @@ namespace FreeAiSsd.Runner.Services;
 /// macOS implementation of <see cref="IOllamaLifecycleService"/>. Mirrors the
 /// Windows lifecycle service's security posture (trust attestation gate, loopback
 /// bind, OLLAMA_MODELS env var, stdout/stderr capture, exit-event wiring) but
-/// resolves the binary at <c>mac/tools/ollama/ollama</c>, validates the macOS
+/// resolves the binary at <c>mac/tools/ollama/Ollama.app/Contents/Resources/ollama</c>
+/// (the inner self-contained CLI server — see MAC26), validates the macOS
 /// trust attestation, and lives in <c>runner-core/</c> so it builds plain
 /// <c>net8.0</c> with no Windows-only packages.
 /// </summary>
@@ -131,13 +132,15 @@ public sealed class MacOllamaLifecycleService : IOllamaLifecycleService
     }
 
     /// <summary>
-    /// Resolves the macOS Ollama binary path from the SSD root. The Mac
-    /// payload is staged under <c>mac/tools/ollama/ollama</c> regardless of
-    /// the Windows-flavored <see cref="PortableConfig.OllamaRelativePath"/>
-    /// default.
+    /// Resolves the macOS Ollama binary path from the SSD root. MAC26: the
+    /// upstream Mac distribution is a GUI app bundle; the self-contained CLI
+    /// server is at <c>Ollama.app/Contents/Resources/ollama</c>. PrepApp's
+    /// staging code now leaves the bundle intact and deletes the top-level
+    /// LaunchServices shim, so this resolver points directly at the inner
+    /// binary.
     /// </summary>
     public static string ResolveBinaryPath(string ssdRoot) =>
-        Path.Combine(ssdRoot, SsdLayout.MacOllama, "ollama");
+        Path.Combine(ssdRoot, SsdLayout.MacOllama, "Ollama.app", "Contents", "Resources", "ollama");
 
     private static int ResolvePort(int preferred)
     {

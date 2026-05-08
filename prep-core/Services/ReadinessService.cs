@@ -40,10 +40,13 @@ public sealed class ReadinessService : IReadinessService
             ? ReadinessItem.Pass("Windows Ollama executable present")
             : ReadinessItem.Warn("Windows Ollama executable present", "ollama.exe missing under SSD/windows/tools/ollama (ok if mac-only prep)."));
 
-        var macOllamaExe = Path.Combine(root, SsdLayout.MacOllama, "ollama");
+        // MAC26: the macOS Ollama distribution is a GUI app bundle. The
+        // self-contained CLI server lives at
+        // Ollama.app/Contents/Resources/ollama, not at the bundle root.
+        var macOllamaExe = Path.Combine(root, SsdLayout.MacOllama, "Ollama.app", "Contents", "Resources", "ollama");
         checks.Add(File.Exists(macOllamaExe)
             ? ReadinessItem.Pass("macOS Ollama executable present")
-            : ReadinessItem.Warn("macOS Ollama executable present", "ollama missing under SSD/mac/tools/ollama (ok if Windows-only prep)."));
+            : ReadinessItem.Warn("macOS Ollama executable present", "Ollama.app/Contents/Resources/ollama missing under SSD/mac/tools/ollama (ok if Windows-only prep)."));
 
         var modelsDir = Path.Combine(root, SsdLayout.Models);
         checks.Add(Directory.Exists(modelsDir)

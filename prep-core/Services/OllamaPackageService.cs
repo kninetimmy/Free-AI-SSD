@@ -52,7 +52,9 @@ public sealed class OllamaPackageService : IOllamaPackageService
     }
 
     public string? ResolveOllamaExe(string ollamaDir)
-        => ResolveOllamaExe(ollamaDir, GetOllamaFileName());
+        => OperatingSystem.IsWindows()
+            ? ResolveOllamaExe(ollamaDir, GetOllamaFileName())
+            : ResolveMacOllamaExe(ollamaDir);
 
     internal static string GetOllamaFileName()
         => OperatingSystem.IsWindows() ? "ollama.exe" : "ollama";
@@ -61,6 +63,20 @@ public sealed class OllamaPackageService : IOllamaPackageService
     {
         if (!Directory.Exists(ollamaDir)) return null;
         return Directory.EnumerateFiles(ollamaDir, fileName, SearchOption.AllDirectories).FirstOrDefault();
+    }
+
+    // MAC26: on Mac the upstream `ollama-darwin.zip` ships an Ollama.app GUI
+    // bundle. The top-level `ollama` binary is a LaunchServices shim (strips
+    // env, SIGKILL-prone). The self-contained CLI server is buried at
+    // Ollama.app/Contents/Resources/ollama. ArtifactStagingService deletes the
+    // shim, so this resolver returns the inner path directly rather than
+    // walking arbitrary subdirectories — that walk is what let the shim win
+    // pre-MAC26.
+    internal static string? ResolveMacOllamaExe(string ollamaDir)
+    {
+        if (!Directory.Exists(ollamaDir)) return null;
+        var inner = Path.Combine(ollamaDir, "Ollama.app", "Contents", "Resources", "ollama");
+        return File.Exists(inner) ? inner : null;
     }
 
     private static void ExtractOllamaZip(string zipPath, string destination)
