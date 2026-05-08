@@ -3,6 +3,7 @@ using FreeAiSsd.MacPrepHost.Services;
 using FreeAiSsd.PrepApp;
 using FreeAiSsd.PrepApp.Services;
 using FreeAiSsd.Shared;
+using FreeAiSsd.Shared.Services;
 
 namespace FreeAiSsd.MacPrepHost;
 
@@ -30,11 +31,18 @@ internal sealed class HostLifetime : IAsyncDisposable
     private readonly SsdLogger? _logger;
 
     private readonly ArtifactStagingService _artifactStaging = new();
-    private readonly OllamaPackageService _ollamaPackage;
-    private readonly ModelService _modelService = new();
+    private readonly IOllamaPackageService _ollamaPackage;
+    private readonly IModelService _modelService;
     private readonly PrereqService _prereqService;
     private readonly ReadinessService _readinessService;
     private readonly ILiveModelCatalogService _liveCatalogService;
+
+    // MAC27: lazily started on the first pull-model command and reused
+    // across the batch, mirroring the Windows PrepViewModel pattern at
+    // shared/ViewModels/PrepViewModel.cs:782. Without this, `ollama pull`
+    // has no daemon to talk to and fails with
+    // "could not connect to ollama app, is it running?".
+    private IOllamaServerHandle? _ollamaServer;
 
     private static readonly JsonSerializerOptions ResultOptions = new()
     {
@@ -42,6 +50,24 @@ internal sealed class HostLifetime : IAsyncDisposable
     };
 
     public HostLifetime(string ssdRoot, string ollamaHost, TextWriter stdout, TextWriter stderr, bool testMode = false)
+        : this(ssdRoot, ollamaHost, stdout, stderr, ollamaPackage: null, modelService: null, testMode: testMode)
+    {
+    }
+
+    /// <summary>
+    /// Test seam: allows MAC27 lifecycle tests to substitute fake services
+    /// for <see cref="IOllamaPackageService"/> (so the temp-server start
+    /// path can be exercised without a real Ollama binary on disk) and
+    /// <see cref="IModelService"/> (so PullModelAsync doesn't try to spawn
+    /// the real CLI). Production wiring goes through the public ctor and
+    /// always passes null for both, falling back to the concrete services.
+    /// </summary>
+    internal HostLifetime(
+        string ssdRoot, string ollamaHost,
+        TextWriter stdout, TextWriter stderr,
+        IOllamaPackageService? ollamaPackage,
+        IModelService? modelService,
+        bool testMode = false)
     {
         _ssdRoot = ssdRoot;
         _ollamaHost = ollamaHost;
@@ -62,7 +88,8 @@ internal sealed class HostLifetime : IAsyncDisposable
         }
 
         var dialogService = new NoOpDialogService();
-        _ollamaPackage = new OllamaPackageService();
+        _ollamaPackage = ollamaPackage ?? new OllamaPackageService();
+        _modelService = modelService ?? new ModelService();
         _prereqService = new PrereqService(dialogService);
         _readinessService = new ReadinessService(_modelService);
         _liveCatalogService = new LiveModelCatalogService();
@@ -128,6 +155,21 @@ internal sealed class HostLifetime : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await StopAsync();
+
+        // MAC27: shut the temp Ollama server down before the sidecar
+        // exits so a `ollama serve` orphan can never outlive the parent
+        // process. Mirrors the `serverHandle?.Dispose()` finally on
+        // shared/ViewModels/PrepViewModel.cs:820.
+        try
+        {
+            _ollamaServer?.Dispose();
+        }
+        catch
+        {
+            // Best-effort cleanup; the process may have already exited.
+        }
+        _ollamaServer = null;
+
         if (_liveCatalogService is IDisposable disposable)
         {
             disposable.Dispose();
@@ -212,8 +254,20 @@ internal sealed class HostLifetime : IAsyncDisposable
             ?? throw new FileNotFoundException(
                 $"Mac Ollama binary missing at the expected path under {ollamaDir}; staging may have failed silently.");
 
+        // MAC27: lazily start the temp Ollama server on first pull so
+        // `ollama pull` has a daemon to talk to. Without this the CLI
+        // fails immediately with "could not connect to ollama app, is it
+        // running?" — which is exactly what v1.3.7 hit in the field. The
+        // handle is reused across every pull in the same sidecar
+        // lifetime and disposed in DisposeAsync.
+        if (_ollamaServer is null)
+        {
+            _ollamaServer = await _ollamaPackage.StartTemporaryServerAsync(
+                ollamaExe, modelsRoot, EmitLog, ct);
+        }
+
         var result = await _modelService.PullModelAsync(
-            ollamaExe, modelsRoot, modelTag, EmitLog, ct, _ollamaHost);
+            ollamaExe, modelsRoot, modelTag, EmitLog, ct, _ollamaServer.Host);
 
         EmitResult("pull-model", new
         {

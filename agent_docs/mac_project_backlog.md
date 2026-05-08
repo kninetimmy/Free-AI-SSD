@@ -1931,19 +1931,34 @@ above are blocked by MAC26.
 
 ### MAC26 - Mac Ollama staging picks the wrong binary; pulls cannot land on the SSD
 
-**Status:** planned 2026-05-08 (field-reported via v1.3.6 mac
-  screenshot; replaces MAC25 as the actual blocker for first
-  successful model pull on Mac).
-**Scope:** medium — staging path + resolver + verification pipeline,
-  with new tests pinning that the inner-Resources binary is what
-  ships.
+**Status:** **done** — merged 2026-05-08 (PR #212, squash commit
+  `1a9c50b`). Released as **v1.3.7**. Implementation matched the
+  filed plan: `ArtifactStagingService.StageMacOllamaAsync` validates
+  the inner-Resources binary exists, deletes the top-level
+  LaunchServices shim, passes the inner path to
+  `MacOllamaStagingPipeline.VerifyAndAttest`. New
+  `OllamaPackageService.ResolveMacOllamaExe` returns the inner path
+  strictly (no recursive walk on Mac so a stray shim can't win).
+  `ReadinessService` + `MacOllamaLifecycleService.ResolveBinaryPath`
+  (Network Mode) + Swift `mac-runner` local-mode all updated to the
+  inner path. Four new resolver tests + updated lifecycle suffix
+  pin the new behavior. Kickoff CLI verification on the staged
+  v1.3.6 SSD before code landed: `OLLAMA_MODELS=/tmp/test-...
+  <inner-path>/ollama serve` → env propagated, runners loaded with
+  default CWD (`Dynamic LLM libraries: [metal cpu_avx cpu_avx2]`),
+  no `OLLAMA_RUNNERS_DIR` needed. CI green on first run
+  (`windows-build` 3m1s, `mac-runner-build` 56s, `mac-prep-build`
+  49s; `package-release` 2m41s on dispatch). Manual smoke (real
+  model pull writing to `<ssd>/models/blobs/`) deferred to the
+  v1.3.7 mac field test.
+**Scope:** medium — touched five source files + two test files.
 **Risk:** Medium — the fix changes which Mach-O the runtime executes
   and how its env propagates. Backward-compatible to Windows
   (untouched); changes Mac runtime behavior fundamentally.
-**Dependencies:** None. Top of queue. User decision recorded:
-  must NOT require user-managed Ollama install — the project
-  bundles Ollama and the fix has to run a server self-contained,
-  not via the user's own daemon.
+**Dependencies:** None. User decision recorded: must NOT require
+  user-managed Ollama install — the project bundles Ollama and the
+  fix has to run a server self-contained, not via the user's own
+  daemon.
 **Goal:** Mac field run completes a starter-model pull and the
   model bytes land at `<ssd>/models/blobs/...` per the
   `OLLAMA_MODELS` env var the sidecar already sets.
@@ -2153,3 +2168,111 @@ explicitly. Easy to verify on the staged SSD with a manual
   /Volumes/FREEAI/mac/tools/ollama/Ollama.app/Contents/Resources/ollama \
   pull llama3.2:1b`
 before any code lands.
+
+### MAC27 - Mac sidecar must start a temporary `ollama serve` before pulling
+
+**Status:** filed 2026-05-08 from v1.3.7 mac field test. In implementation
+  on `kninetimmy/mac27-pull-temp-server`.
+**Scope:** small — one production file (`mac-prep-host/HostLifetime.cs`)
+  + one new test file. No protocol or UI changes.
+**Risk:** Low. The fix mirrors a well-trodden Windows pattern via the
+  existing cross-platform `IOllamaPackageService.StartTemporaryServerAsync`
+  / `OllamaServerHandle` seam; no new processes spawned in test mode; no
+  Windows behavior change.
+**Dependencies:** MAC26 must have shipped (it did, v1.3.7) — without
+  the inner-Resources binary as the resolver target, starting a temp
+  server points at the LaunchServices shim and the field bug returns.
+**Goal:** First Mac field model pull lands bytes at
+  `<ssd>/models/blobs/sha256-...`.
+
+**Driver:** v1.3.7 mac field test. User reported PrepApp gets to the
+"Pulling starter models..." step, the macOS Gatekeeper "Verifying
+'Ollama'" modal pops up briefly (first-launch signature check on the
+inner binary), then the pull fails with:
+
+```
+Pulling Llama3.2:1b
+Error: could not connect to ollama app, is it running?
+[stderr] Command failed (`pull-model llama3.2:1b`):
+  Failed to pull model llama3.2:1b. Exit code: 1
+```
+
+**Root cause:** parity gap MAC26 didn't cover. `ollama pull` is a thin
+client; it requires a daemon at `OLLAMA_HOST`. Windows
+(`shared/ViewModels/PrepViewModel.cs:782`) explicitly starts a
+controlled temp server via `_ollamaPackageService.StartTemporaryServerAsync`
+before the pull loop, then passes `serverHandle.Host` as the
+`OLLAMA_HOST` env to every `PullModelAsync`, then disposes in
+`finally`. The Mac sidecar's `pull-model` arm
+(`mac-prep-host/HostLifetime.cs:195` pre-MAC27) skipped the entire
+server-start block — it just called `_modelService.PullModelAsync(...,
+_ollamaHost)` with `_ollamaHost` pointing at the handshake-supplied
+default (typically `http://127.0.0.1:11434`) where nothing is
+listening, so the CLI emits the "could not connect" error and exits
+non-zero. The Gatekeeper popup is unrelated to the failure — it's
+macOS first-launch verification of the inner Ollama binary; after it
+dismisses, the binary runs `pull` immediately and immediately fails.
+
+**Fix:** lazily start a temp server on the first non-test-mode
+`pull-model` and reuse it across all pulls in the same sidecar
+lifetime. Symmetric to Windows.
+
+1. `mac-prep-host/HostLifetime.cs`:
+   - Switch `_ollamaPackage` and `_modelService` field types to the
+     `IOllamaPackageService` / `IModelService` interfaces (already
+     used elsewhere in the codebase) so tests can substitute fakes.
+   - Add an internal test-seam ctor accepting nullable
+     `IOllamaPackageService?` + `IModelService?`; the public ctor
+     forwards null to keep production wiring unchanged.
+   - Add `private IOllamaServerHandle? _ollamaServer;`
+   - In `PullModelAsync` (after the `_testMode` short-circuit and
+     after `ResolveOllamaExe` succeeds): if `_ollamaServer is null`,
+     `_ollamaServer = await _ollamaPackage.StartTemporaryServerAsync(
+       ollamaExe, modelsRoot, EmitLog, ct);`. Pass
+     `_ollamaServer.Host` (not `_ollamaHost`) to
+     `_modelService.PullModelAsync`.
+   - In `DisposeAsync`: best-effort `_ollamaServer?.Dispose();
+     _ollamaServer = null;` before the live-catalog dispose, so a
+     sidecar exit can never leak an orphan `ollama serve`.
+
+2. `tests/MacPrepHostPullLifecycleTests.cs` (new):
+   - `PullModel_FirstCall_StartsTemporaryServerAndPassesItsHost`:
+     non-test-mode pull invokes `StartTemporaryServerAsync` once and
+     the inner `PullModelAsync` receives the temp host
+     (`127.0.0.1:54321`), not `_ollamaHost`. This is the field-bug
+     pin.
+   - `PullModel_MultipleCallsInSameLifetime_ReuseSingleServerHandle`:
+     three sequential `pull-model` commands → one server start,
+     three pulls all sharing the same host.
+   - `DisposeAsync_DisposesTemporaryServerHandle`: dispose must kill
+     the temp server (the no-orphan invariant).
+   - `PullModel_TestMode_DoesNotStartServer`: existing test-mode
+     short-circuit stays server-free.
+   - `PullModel_ResolveOllamaExeReturnsNull_DoesNotStartServer`:
+     defense-in-depth — if Ollama staging silently failed, fail
+     loudly *before* starting a temp server; otherwise the field
+     error shape changes from "binary missing" (clear) to "ollama
+     serve crashed" (confusing).
+
+**Affected files:**
+- `mac-prep-host/HostLifetime.cs` — lazy temp-server lifecycle.
+- `tests/MacPrepHostPullLifecycleTests.cs` — new test file.
+
+**Cross-OS review pass:**
+- **Windows surfaces:** untouched. Windows already starts a temp
+  server in `PrepViewModel.DownloadModelsAsync` and disposes it in
+  `finally`. No code changes outside `mac-prep-host/`.
+- **Mac surfaces:** same exact pattern (temp `ollama serve` on a
+  random localhost port, OLLAMA_HOST passed to every pull, disposed
+  on sidecar exit). The seam (`OllamaServerHandle.StartAsync`) was
+  already cross-platform via `ProcessStartInfo` (no LaunchServices),
+  so no Mac-specific spawn logic needed.
+
+**Acceptance / smoke:**
+- CI green: `windows-build` (runs the new lifecycle tests),
+  `mac-runner-build`, `mac-prep-build`.
+- v1.3.8 mac field run: starter model pulls, `<ssd>/models/blobs/`
+  populates, `<ssd>/models/manifests/registry.ollama.ai/library/...`
+  materializes, sidecar log captures pull progress lines.
+- After sidecar exit (`shutdown` over stdin or process termination),
+  no orphan `ollama` process — `pgrep -fl ollama` empty.
