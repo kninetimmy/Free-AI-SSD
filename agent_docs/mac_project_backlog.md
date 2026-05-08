@@ -2870,9 +2870,7 @@ the 2026-05-07 dual-OS rule.
 
 ### MAC33 - Mac Runner shows zero selectable models on a Mac-prepped SSD
 
-**Status:** filed 2026-05-08 from v1.3.10 mac field test. **Top
-  priority — Mac is genuinely unusable end-to-end without
-  this.**
+**Status:** **done** — PR #218 merged on `bf3a923` (2026-05-08); v1.3.11 release dispatch pending. Three runner-core consumers (`ModelManagementService.GetInstalledModelNames`, `GetModelSizingWarnings`, `RunnerLocalApiService.cs:160` `/models` endpoint) plus the Mac SwiftUI picker (`mac-runner/Sources/main.swift:415` `applyConfigToUi`, which reads `config["models"]` directly from the in-memory dict — *not* the LAN endpoint as the execution prompt initially assumed) all swapped to disk-truth via `ModelOperations.DiscoverModelsOnDisk`. `ModelManagementService` captures `ssdRoot` on ctor; `RunnerLocalApiService` injects `IModelManagementService` (back-compat fallback retained); both DI graphs wire the new ctor; Swift mirrors the manifest walk so all four consumers agree. Persistent writeback at unlock time was dropped — disk-truth reads at every consumer make it unnecessary and avoiding it keeps the MAC5 plaintext-config invariant simple. Five new unit tests pin the disk-truth scenarios. v1.3.11 mac field run is the manual smoke pin: prep + pull `llama3.2:1b` → unlock Runner → picker shows the model → chat works.
 **Scope:** small-medium — same shape as MAC29 but for the
   Runner's model selector instead of ReadinessService.
   Cross-platform-aware (the Windows Runner reading a Mac-prepped
