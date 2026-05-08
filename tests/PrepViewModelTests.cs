@@ -356,6 +356,94 @@ public class PrepViewModelTests
         Assert.Equal(string.Empty, vm.ProfileSelectionWarning);
     }
 
+    /// MAC34: pin the API-key generation that closes the
+    /// "API key is required by configuration but not set on host" 503
+    /// trap. Pre-MAC34 finalize wrote `NetworkApiKey = ""` with
+    /// `NetworkRequireApiKey = true`, so any LAN-bound request 503'd. This
+    /// test asserts a non-empty 64-char lowercase-hex key is set on the
+    /// config that flows through `SaveConfigAsync`.
+    [Fact]
+    public async Task FinalizeCommand_GeneratesNetworkApiKey_WhenEmpty()
+    {
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        _ollamaPackageService
+            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
+        _prereqService
+            .Setup(s => s.StagePrerequisitesAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _artifactStagingService
+            .Setup(s => s.StageRunnerAsync(It.IsAny<string>(), It.IsAny<Action<string>>()))
+            .Returns(Task.CompletedTask);
+        _readinessService
+            .Setup(s => s.RunReadinessChecksAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ReadinessItem> { ReadinessItem.Pass("Runner payload") });
+
+        var config = new PortableConfig
+        {
+            Models =
+            {
+                new ModelConfigEntry { Name = "llama3.2:3b", Status = ModelInstallStatus.Installed }
+            }
+        };
+        Assert.Equal(string.Empty, config.NetworkApiKey);
+        _modelService.Setup(m => m.LoadConfigAsync(It.IsAny<string>())).ReturnsAsync(config);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.SelectedProfile = UserProfile.GeneralAssistant;
+
+        vm.FinalizeCommand.Execute(null);
+        await WaitForCommandAsync(vm.FinalizeCommand);
+
+        Assert.False(string.IsNullOrWhiteSpace(config.NetworkApiKey));
+        Assert.Equal(64, config.NetworkApiKey.Length);
+        Assert.Matches("^[0-9a-f]{64}$", config.NetworkApiKey);
+    }
+
+    /// MAC34: confirms `FinalizeCommand` is idempotent on `NetworkApiKey` —
+    /// re-finalizing an already-prepped drive must not rotate the key, since
+    /// that would invalidate any companions/clients already paired with it.
+    [Fact]
+    public async Task FinalizeCommand_PreservesExistingNetworkApiKey()
+    {
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        _ollamaPackageService
+            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
+        _prereqService
+            .Setup(s => s.StagePrerequisitesAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _artifactStagingService
+            .Setup(s => s.StageRunnerAsync(It.IsAny<string>(), It.IsAny<Action<string>>()))
+            .Returns(Task.CompletedTask);
+        _readinessService
+            .Setup(s => s.RunReadinessChecksAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ReadinessItem> { ReadinessItem.Pass("Runner payload") });
+
+        const string preExistingKey = "deadbeef" + "deadbeef" + "deadbeef" + "deadbeef" + "deadbeef" + "deadbeef" + "deadbeef" + "deadbeef";
+        var config = new PortableConfig
+        {
+            NetworkApiKey = preExistingKey,
+            Models =
+            {
+                new ModelConfigEntry { Name = "llama3.2:3b", Status = ModelInstallStatus.Installed }
+            }
+        };
+        _modelService.Setup(m => m.LoadConfigAsync(It.IsAny<string>())).ReturnsAsync(config);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.SelectedProfile = UserProfile.GeneralAssistant;
+
+        vm.FinalizeCommand.Execute(null);
+        await WaitForCommandAsync(vm.FinalizeCommand);
+
+        Assert.Equal(preExistingKey, config.NetworkApiKey);
+    }
+
     [Fact]
     public void StatusText_Changes_RaisesPropertyChanged()
     {

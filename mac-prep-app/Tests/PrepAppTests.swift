@@ -270,6 +270,44 @@ struct PrepAppTestsMain {
             try expect(PrepFlowStep.failed(message: "a") != .failed(message: "b"))
         }
 
+        // MARK: MAC34 — InitialPortableConfigPayload generates a non-empty
+        // 64-hex network API key by default. Pre-MAC34 this defaulted to
+        // `""` which fail-closed every chat request through the LAN API
+        // path with `503 API key is required by configuration but not set
+        // on host.` See agent_docs/mac_project_backlog.md MAC34.
+
+        runner.test("MAC34: InitialPortableConfigPayload generates 64-hex networkApiKey by default") {
+            let a = InitialPortableConfigPayload()
+            try expect(!a.networkApiKey.isEmpty,
+                       "default networkApiKey should not be empty")
+            try expect(a.networkApiKey.count == 64,
+                       "expected 64 hex chars, got \(a.networkApiKey.count): \(a.networkApiKey)")
+            // Must be lowercase hex.
+            let allowed = Set("0123456789abcdef")
+            for ch in a.networkApiKey {
+                try expect(allowed.contains(ch),
+                           "non-hex char \(ch) in key \(a.networkApiKey)")
+            }
+        }
+
+        runner.test("MAC34: InitialPortableConfigPayload key differs between instances") {
+            // Defense check that the default isn't a baked-in constant —
+            // every freshly-constructed payload should pull fresh OS RNG.
+            let a = InitialPortableConfigPayload()
+            let b = InitialPortableConfigPayload()
+            try expect(a.networkApiKey != b.networkApiKey,
+                       "two payloads produced the same networkApiKey: \(a.networkApiKey)")
+        }
+
+        runner.test("MAC34: InitialPortableConfigPayload allows explicit override") {
+            // The MAC17 fixture writer hands `networkApiKey: ""` deliberately
+            // so the cross-language fixture stays bit-stable. Confirm an
+            // explicit override still wins over the default generator.
+            let a = InitialPortableConfigPayload(networkApiKey: "")
+            try expect(a.networkApiKey == "",
+                       "explicit '' override should win, got '\(a.networkApiKey)'")
+        }
+
         // MARK: PrepHostController cancel-path tests (MAC17a Issue #1)
         //
         // Pin the bug fix: on timeout the pending continuation slot must
