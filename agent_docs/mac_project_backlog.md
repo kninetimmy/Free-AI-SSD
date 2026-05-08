@@ -2171,8 +2171,19 @@ before any code lands.
 
 ### MAC27 - Mac sidecar must start a temporary `ollama serve` before pulling
 
-**Status:** filed 2026-05-08 from v1.3.7 mac field test. In implementation
-  on `kninetimmy/mac27-pull-temp-server`.
+**Status:** **done** — merged 2026-05-08 (PR #213, squash commit
+  `4b70758`). Released as **v1.3.8**. Implementation matched the
+  filed plan: `_ollamaPackage` and `_modelService` fields switched
+  to interface types; new internal test-seam ctor; lazy
+  `IOllamaServerHandle? _ollamaServer` field starts on first
+  non-test-mode `pull-model` and is reused across the batch;
+  `DisposeAsync` shuts the temp server down. Five new lifecycle
+  tests in `MacPrepHostPullLifecycleTests.cs`. CI green on first
+  run; v1.3.8 dispatched immediately, all four jobs green. v1.3.8
+  mac field test confirmed `Starting temporary Ollama server on
+  127.0.0.1:<port>...` log line fires correctly — but exposed
+  MAC28 (15s health-poll budget too tight for the Mac cold-start
+  chain).
 **Scope:** small — one production file (`mac-prep-host/HostLifetime.cs`)
   + one new test file. No protocol or UI changes.
 **Risk:** Low. The fix mirrors a well-trodden Windows pattern via the
@@ -2279,8 +2290,20 @@ lifetime. Symmetric to Windows.
 
 ### MAC28 - OllamaServerHandle startup timeout + stream stderr
 
-**Status:** filed 2026-05-08 from v1.3.8 mac field test. In implementation
-  on `kninetimmy/mac28-server-startup-timeout`.
+**Status:** **done** — merged 2026-05-08 (PR #214, squash commit
+  `09b5f1b`). Released as **v1.3.9**. Implementation matched the
+  filed plan: `WaitForHealthyAsync.maxAttempts` 30 → 120 (15s →
+  60s); `DrainAsync` renamed `ConsumeAsync(reader, onLog,
+  streamLabel)` and flipped to `internal static`; each non-empty
+  line forwarded as `[ollama serve <streamLabel>] <line>`; a
+  throwing `onLog` cannot abort the drain. Four new tests in
+  `OllamaServerHandleConsumeTests.cs`. CI green on first run;
+  v1.3.9 dispatched immediately. **v1.3.9 mac field test pulled
+  `llama3.2:1b` successfully — first ever Mac starter-model pull
+  to write blobs to `<ssd>/models/blobs/sha256-...`.** The v1.3.6
+  → v1.3.9 layer cake (MAC25 → MAC26 → MAC27 → MAC28) clears
+  end-to-end Mac model-pull. Surfaced MAC29 (readiness
+  false-negatives on a working drive).
 **Scope:** small — one production file (`prep-core/OllamaServerHandle.cs`)
   + one new test file. Cross-platform (touches Windows + Mac).
 **Risk:** Low. Bumps a constant from 30 to 120 (15s → 60s health-poll
@@ -2364,3 +2387,307 @@ through `onLog` would have made this field test self-diagnosing.
   out at server startup; `<ssd>/models/blobs/sha256-...` populates;
   sidecar log includes `[ollama serve stderr]` lines confirming the
   Go server bound the port and discovered runners.
+
+### MAC29 - Mac-aware readiness checks (config + installed-model)
+
+**Status:** **DONE — PR #215 merged `4657347` (2026-05-08).**
+  Awaiting release dispatch. Field-test smoke deferred until the
+  next release ships. CI green run 2 (run 1 needed a fix-forward
+  `6f99de1` adding `using FreeAiSsd.PrepApp;` to the test file —
+  `ModelOperations` lives in the root prep-core namespace).
+**Scope:** small-medium — three changes in two files
+  (`shared/PortableConfig.cs`, `prep-core/Services/ReadinessService.cs`)
+  + one new test file. Cross-platform.
+**Risk:** Low. The disk-truth model check is more rigorous than the
+  config-pinned check it replaces (Ollama blobs are content-addressed
+  by filename, so the self-consistency test catches the same
+  "blob-tampered" failure mode). The path fix corrects a latent
+  Windows bug too — Windows tolerates double-backslash mid-path but
+  it's still wrong.
+**Dependencies:** None. Independent of the encryption-required
+  policy decision (MAC29 makes the readiness layer correct
+  regardless of which policy lands).
+**Goal:** A successfully-prepped Mac SSD (encrypted config +
+  starter model on disk) shows all-green readiness on the final
+  page. v1.3.9 field test reproduced exactly this scenario as
+  two false-negative reds (`Config.json valid` Fail +
+  `≥1 installed model` Fail) on an SSD that was actually ready
+  to use.
+
+**Driver:** v1.3.9 mac field test screenshot. The drive worked —
+model downloaded, blob materialized at `<ssd>/models/blobs/sha256-...`,
+manifest at `<ssd>/models/manifests/...` — but the readiness page
+flagged two reds:
+
+- `Config.json valid` — Fail. "Config missing or unreadable; defaults loaded."
+- `≥1 installed model` — Fail. "No models marked Installed in config."
+
+**Root causes (three layered):**
+
+1. **`ConfigRelativePath` uses Windows-style backslashes**
+   (`shared/PortableConfig.cs:196`):
+   ```csharp
+   public string ConfigRelativePath => @"config\\portable-config.json";
+   ```
+   The verbatim string `@"\\"` is two literal backslashes. On
+   Windows, `Path.Combine` collapses `\\` mid-path so it works by
+   accident. On macOS, `Path.Combine` treats `\\` as part of a
+   filename — `Path.Combine("/Volumes/FREEAI", "config\\portable-config.json")`
+   yields `/Volumes/FREEAI/config\\portable-config.json`, a request
+   for a file literally named `config\\portable-config.json` in the
+   root. `File.Exists()` returns false → readiness fails before it
+   ever opens the real config.
+
+2. **Mac PrepApp writes only an encrypted config (MAC5 invariant);
+   readiness checks plaintext path.** When encryption is enabled
+   (mandatory on Mac per MAC17a), the Swift writer creates
+   `portable-config.encrypted.json`, NOT `portable-config.json`
+   (`shared/SsdEncryption.cs:41` defines the encrypted filename
+   constant). `ReadinessService.RunReadinessChecksAsync` line 31-36
+   loads the plaintext path via `PortableConfig.LoadWithValidationAsync`,
+   which has no decryption path. Even with bug #1 fixed, the
+   plaintext file by design never exists on a Mac-prepped SSD.
+
+3. **Mac sidecar's `pull-model` arm doesn't update the encrypted
+   config.** `mac-prep-app/Sources/PrepViewModel.swift:388` discards
+   the sidecar's pull-model result (which carries `sha256` + `sizeBytes`
+   per `mac-prep-host/HostLifetime.cs:218-224`). Windows
+   (`shared/ViewModels/PrepViewModel.cs:794-797`) calls
+   `_modelService.UpdateModelStatusAsync(... ModelInstallStatus.Installed,
+   result.Sha256, ...)` after each pull; Swift skipped that step
+   because the encryption flow zeroizes the passphrase before pulls
+   run (`PrepViewModel.swift:359`), and re-deriving the key for each
+   pull would either need to keep the passphrase live or re-prompt.
+   So even when a Mac model pull succeeds, no
+   `ModelInstallStatus.Installed` entry exists in any config.
+
+**Fix architecture (three changes):**
+
+1. **`shared/PortableConfig.cs:196`** — flip to forward slash:
+   ```csharp
+   public string ConfigRelativePath => "config/portable-config.json";
+   ```
+   `Path.Combine` normalizes `/` correctly on both OSes. One line,
+   zero behavior change on Windows (the pre-fix double-backslash
+   was tolerated by the kernel, not relied on).
+
+2. **`prep-core/Services/ReadinessService.cs` — "Config.json valid"
+   accepts encrypted OR plaintext.** Check both paths:
+   `<root>/config/portable-config.encrypted.json` (preferred when
+   encryption enabled) OR `<root>/config/portable-config.json`
+   (plaintext fallback). For the encrypted file, validate via
+   `JsonDocument.Parse` that it's well-formed JSON with the
+   expected `scheme` field matching `SsdEncryption.SchemeName`
+   — full integrity without needing the passphrase. For the
+   plaintext file, keep the existing `LoadWithValidationAsync`
+   roundtrip. Pass if either is valid; fail only if neither
+   exists or both are corrupt.
+
+3. **`prep-core/Services/ReadinessService.cs` — "≥1 installed
+   model" switches to disk-truth.** Replace the
+   `config.Models.Where(m => m.Status == ModelInstallStatus.Installed)`
+   loop with disk-state inspection via the existing
+   `ModelOperations.DiscoverModelsOnDisk(modelsRoot)` (already used
+   by the `discover-models` sidecar arm). For each discovered model:
+   - Locate its blob via `ModelOperations.FindModelBlobForModel`.
+   - **If the loaded config contains a pinned SHA for that model**,
+     verify against it (existing strict check). This preserves the
+     Windows path's full integrity guarantee.
+   - **If no config pin exists** (the Mac case post-MAC29 + the
+     plaintext-prep case if the encryption-required policy lands
+     option-b), verify the blob's content SHA-256 matches its
+     filename digest (`sha256-<hex>` → SHA-256(file) == hex). Ollama
+     blobs are content-addressed by filename, so this is a real
+     integrity check — it catches blob-tampering even without a
+     pinned config hash.
+   - Pass if at least one model verifies; Fail with the list of
+     bad models otherwise.
+
+**Affected files:**
+- `shared/PortableConfig.cs` — one-line `ConfigRelativePath` flip.
+- `prep-core/Services/ReadinessService.cs` — config-presence check
+  + disk-truth model check.
+- `tests/ReadinessServiceTests.cs` (new) — four states pinned:
+  encrypted-config + ≥1 installed model on disk → all-green
+  (the v1.3.9 field-test scenario, the regression pin); encrypted
+  config + zero installed models → only the model check fails;
+  plaintext config + models on disk → matches Windows behavior
+  unchanged; no config at all → both fail clearly.
+
+**Cross-OS review pass:**
+- **Windows surfaces:** path fix is silently correct (Windows kernel
+  tolerated the prior double-backslash, no behavior change). Config
+  check still passes against plaintext `portable-config.json`. Model
+  check now uses disk-state but if the config pin exists, it's still
+  applied — Windows users who pulled via the existing flow keep their
+  full-strength integrity verification. New users (or
+  encryption-required-mode-on-Windows once that ships) get the
+  self-consistency fallback — strictly better than the pre-fix Fail.
+- **Mac surfaces:** Both readiness checks pass on a successfully
+  prepped + pulled SSD, which is the field-test goal. Mac PrepApp
+  remains encrypted-config-only per MAC5; bug #3 (Swift not
+  recording installed models) becomes a UX-only issue (config doesn't
+  list the model) rather than a readiness blocker. A future MAC30
+  could close bug #3 by either keeping the derived key live across
+  the pull batch or moving to a `installed-models.manifest.json`
+  plaintext sidecar.
+
+**Acceptance / smoke:**
+- CI green (`windows-build` runs the new ReadinessServiceTests;
+  `mac-prep-build`, `mac-runner-build` unchanged).
+- v1.4.0 (or v1.3.10) mac field run on a freshly-prepped SSD shows
+  all-green readiness with at least one starter model pulled.
+- Same SSD plugged into a Windows PC also shows all-green
+  readiness against the encrypted config.
+
+### MAC30 - Encryption optional (default OFF, opt-in passphrase) cross-OS
+
+**Status:** filed 2026-05-08. Resolves the long-standing
+  "Encryption-required policy" open question. **Product call
+  (2026-05-08):** encryption becomes opt-in with the toggle
+  defaulting OFF on both PrepApps. The passphrase prompt is
+  framed as an optional security upgrade, not a gate.
+**Scope:** medium — cross-OS, multi-layer:
+  - Restore the `!enableEncryption` codepath that MAC17a-#6
+    deleted (it threw `failed` because the writer was missing).
+  - New `NoOpEncryptedConfigWriter` (Swift) that writes the
+    plaintext `portable-config.json` instead of
+    `portable-config.encrypted.json`.
+  - Confirm `RunnerLocalApi` + Companion still authenticate when
+    the encrypted-config secret bag is absent (read API key from
+    plaintext config when no encrypted blob exists).
+  - UX rework of the passphrase step on both Windows and Mac
+    PrepApp: encryption toggle visible, default OFF, with a
+    clear inline explainer ("Encrypts your portable-config.json
+    so the API key and library metadata are unreadable on a
+    lost SSD. Recommended if you enable Network Mode.").
+  - Cross-OS per 2026-05-07 dual-OS rule.
+**Risk:** Medium. Touches the MAC5 plaintext invariant explicitly:
+  pre-MAC30, "no plaintext config containing secrets ever
+  written" was a hard rule; post-MAC30, plaintext is allowed
+  *unless Network Mode + Require API Key are both on*, which
+  the existing `NetworkModeEncryptionRequiredMessage` guard at
+  `shared/PortableConfig.cs:275` already enforces. So the
+  invariant tightens to "API key is never written in plaintext"
+  rather than "no plaintext config at all" — a narrower and
+  more defensible posture.
+**Dependencies:** MAC29 should ship first so the readiness
+  layer correctly handles both encrypted and plaintext configs;
+  MAC30 then exercises the plaintext path it added.
+**Goal:** A user who taps "Skip encryption" on either PrepApp
+  reaches Drive ready with no passphrase friction; the resulting
+  SSD's `portable-config.json` is readable plaintext (no API key
+  written; Network Mode toggle is off by default); a Windows
+  Runner / Mac Runner unlocks the SSD without a passphrase
+  prompt.
+
+**Driver:** v1.3.5 mac field test pushback ("you cant pull the
+models unless you set an encryption password. that shouldnt be
+forced.") + v1.3.9 confirming the user still wants this. Per
+the 2026-05-08 product call, encryption becomes a security
+*upgrade*, not a gate.
+
+**Fix architecture (rough sketch — refine at execution time):**
+
+1. **Swift PrepApp — restore the toggle:**
+   - `mac-prep-app/Sources/main.swift` `EncryptionSetupStepView`:
+     re-add the `Toggle("Encrypt SSD config", isOn: $enableEncryption)`,
+     default OFF. When OFF, the passphrase fields hide and the
+     primary button reads "Continue without encryption". When ON,
+     the existing passphrase + confirm flow shows.
+   - `mac-prep-app/Sources/PrepViewModel.swift` `applyEncryption()`:
+     branch on `enableEncryption`. ON branch unchanged (uses
+     `EncryptedConfigWriter`). OFF branch invokes a new
+     `PlaintextConfigWriter` (or just calls `SsdEncryption`'s
+     plaintext save path) that writes
+     `portable-config.json` directly.
+
+2. **C# Windows PrepApp — flip the default:**
+   - `prep-app/Views/EncryptionSetupView.xaml(.cs)` (or wherever
+     the toggle lives — verify at execution time): default the
+     toggle to `IsChecked = false`. Keep the explainer text.
+   - Verify `PrepViewModel.SaveEncryptedConfigAsync` and the
+     non-encrypted save path both still work — both probably do
+     since Windows never lost the toggle, but pin via test.
+
+3. **Plaintext-config write path (cross-OS):**
+   - C#: `PortableConfig.SaveAsync` already handles plaintext;
+     the `NetworkModeEncryptionRequiredMessage` guard prevents
+     writing an API key in plaintext, which is the narrower
+     invariant.
+   - Swift: new `PlaintextConfigWriter` mirroring
+     `EncryptedConfigWriter` shape. Writes
+     `<ssdRoot>/config/portable-config.json` via JSONEncoder
+     with the same camelCase contract as the C# JsonNamingPolicy.
+     Same `Sendable` posture for the `Task.detached` hop.
+
+4. **Runner unlock flow:**
+   - Windows: `EncryptionService.TryLoadEncryptedConfigAsync`
+     returns null when the encrypted file is absent → caller
+     falls back to plaintext load. Verify this path still works
+     end-to-end.
+   - Mac runner (`mac-runner-host` + Swift `mac-runner`): same
+     fallback. The current Mac Runner refuses encrypted SSDs
+     with "mac unlock not supported yet" anyway, so plaintext
+     should be the primary supported path on Mac for now.
+
+5. **Companion auth:**
+   - Companion authenticates against Runner via Bearer token
+     stored in the *encrypted* config currently. With plaintext
+     opt-in, the existing
+     `NetworkModeEncryptionRequiredMessage` guard already
+     blocks Network Mode + Require API Key + plaintext config.
+     So Companion-on-LAN remains an encrypted-config feature.
+     Document this in the UX explainer.
+
+**Affected files (preliminary):**
+- `mac-prep-app/Sources/main.swift` — restore encryption toggle
+  in `EncryptionSetupStepView`.
+- `mac-prep-app/Sources/PrepViewModel.swift` — branch on
+  `enableEncryption`.
+- `mac-prep-app/Sources/PlaintextConfigWriter.swift` (new) —
+  Swift sibling of `EncryptedConfigWriter`.
+- `prep-app/Views/EncryptionSetupView.xaml(.cs)` — flip default,
+  refresh explainer text.
+- `shared/ViewModels/PrepViewModel.cs` — confirm both save
+  paths route correctly when toggle off.
+- `tests/PortableConfigSaveAsyncTests.cs` (or new) — pin the
+  `NetworkModeEncryptionRequiredMessage` guard still fires on
+  the plaintext path.
+- `tests/PlaintextConfigWriter…` (Swift) — round-trip the
+  default payload through the plaintext writer; matches what a
+  C# `PortableConfig.LoadAsync` would parse.
+- `README.md` + `docs/QUICKSTART.txt` — update encryption
+  framing from "required" to "optional, recommended for
+  Network Mode".
+
+**Cross-OS review pass:**
+- **Windows surfaces:** toggle default flips OFF. Encrypted
+  path unchanged for users who keep it on. Plaintext save path
+  was always there; no behavior change for users who were
+  already opting out on Windows.
+- **Mac surfaces:** toggle restored after MAC17a-#6 removed it.
+  Plaintext path is new. Encrypted path unchanged.
+- **Encryption-required-mode triggers:** Network Mode + Require
+  API Key still demands encryption per the
+  `NetworkModeEncryptionRequiredMessage` guard. Document this
+  path explicitly.
+
+**Acceptance / smoke:**
+- CI green: new tests pin both save branches + the API-key
+  guard.
+- Windows field run: PrepApp encryption toggle defaults OFF,
+  user clicks through → plaintext config on SSD → Runner reads
+  it without passphrase.
+- Mac field run: PrepApp encryption toggle defaults OFF, user
+  clicks through → plaintext config on SSD → Mac Runner reads
+  it without passphrase.
+- Cross-OS roundtrip: Mac-prepped plaintext SSD reads on
+  Windows Runner; Windows-prepped plaintext SSD reads on Mac
+  Runner.
+- Network Mode regression: enabling Network Mode + Require
+  API Key on a plaintext config triggers
+  `NetworkModeEncryptionRequiredMessage` at save time (existing
+  test should still pass; add an integration test if needed).
+
+
