@@ -152,7 +152,20 @@ Notes on the unsupported cells:
 
 **Stable (recommended):** Download `Free-AI-SSD-win.zip` from [Releases](../../releases). Extract anywhere on Windows. Run `FreeAiSsd.PrepApp.exe`.
 
-**Beta cross-platform bundle:** `Free-AI-SSD-beta-crossplatform.zip` includes the Mac PrepApp (`PrepApp.app`) and Mac Runner beta (`Runner.app`) alongside the Windows artifacts. The macOS builds are currently unsigned/not notarized — expect Gatekeeper prompts.
+**Beta cross-platform bundle:** `Free-AI-SSD-beta-crossplatform.zip` includes the Mac PrepApp (`PrepApp.app`) and Mac Runner beta (`Runner.app`) alongside the Windows artifacts. The macOS builds are currently unsigned/not notarized — see [macOS first launch](#macos-first-launch-gatekeeper-unblock) below before opening either app.
+
+#### macOS first launch (Gatekeeper unblock)
+
+Until the signed/notarized release ships, the unsigned ad-hoc Mac apps trip Gatekeeper as soon as Safari stamps the downloaded ZIP with a quarantine xattr. The dialog reads `"FreeAiSsd is damaged and can't be opened. You should move it to the Trash."` even though nothing is corrupted — and right-click → Open / "Allow apps from anywhere" do **not** clear this state.
+
+Strip the quarantine xattr once in Terminal, replacing the path with wherever you extracted the bundle:
+
+```bash
+xattr -dr com.apple.quarantine /path/to/PrepApp.app
+xattr -dr com.apple.quarantine /path/to/Runner.app
+```
+
+Both apps then launch normally on double-click. This workaround goes away with the next signed release.
 
 **CI artifacts:** Available from GitHub Actions for validation and testing. Prefer Releases for normal use.
 
@@ -171,7 +184,7 @@ On **Windows**:
 
 On **Mac**:
 
-1. Open `PrepApp.app` from the cross-platform bundle (right-click → Open the first time to bypass Gatekeeper, since the build is unsigned/not notarized)
+1. Open `PrepApp.app` from the cross-platform bundle. First launch only: run the [Gatekeeper unblock](#macos-first-launch-gatekeeper-unblock) `xattr` command above — the build is unsigned/not notarized, so Safari quarantine makes Gatekeeper claim the app is "damaged" until that bit is cleared
 2. Pick your target external SSD and choose target compatibility (Mac-only or cross-platform — Windows-only NTFS is not available from a Mac host)
 3. Confirm the destructive erase in the native confirmation dialog. PrepApp drives `diskutil` directly to format the drive as exFAT and lay out the canonical SSD directory structure
 4. Stage the runner, Ollama, and prereq payloads; pull a starter model

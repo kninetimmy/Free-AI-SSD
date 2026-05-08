@@ -18,6 +18,13 @@
 3) Run the prep tool for your host OS:
      - Windows host: FreeAiSsd.PrepApp.exe
      - Mac host:     PrepApp.app  (from the cross-platform bundle)
+   *** Mac users: the current beta is unsigned, so Gatekeeper will say
+       "FreeAiSsd is damaged and can't be opened" the first time. Run
+       once in Terminal to unblock, then double-click as normal:
+         xattr -dr com.apple.quarantine /path/to/PrepApp.app
+         xattr -dr com.apple.quarantine /path/to/Runner.app
+       This goes away with the next signed release. See "macOS first
+       launch" below for details.  ***
    Select your SSD. Choose target compatibility (Windows-only / Mac-only
    / cross-platform). Format the drive (the prep tool picks the right
    filesystem from your target choice — see matrix below). Pull one
@@ -275,10 +282,20 @@ Everything below is optional and layered on top of that baseline.
    voice to your VR headset while keeping system audio on desktop
    speakers.
 
- macOS: Gatekeeper blocks the app
-   The beta macOS build is currently unsigned / not notarized. Allow
-   it from System Settings > Privacy & Security, or right-click ->
-   Open the first time.
+ macOS: "FreeAiSsd is damaged" / Gatekeeper blocks the app
+   The beta macOS apps are unsigned / not notarized, so when Safari
+   downloads the ZIP it stamps the .app bundles with a quarantine
+   xattr. The combination of "ad-hoc signature" + "quarantine bit"
+   makes Gatekeeper claim the bundle is *damaged* even though it is
+   not — right-click -> Open and "Allow apps from anywhere" do not
+   help in this state.
+
+   The fix is to strip the quarantine xattr once. Open Terminal and
+   run, replacing the path with where you extracted the bundle:
+     xattr -dr com.apple.quarantine /path/to/PrepApp.app
+     xattr -dr com.apple.quarantine /path/to/Runner.app
+   After that both apps double-click open like any other. This step
+   goes away with the next signed/notarized release.
 
  macOS: document management and voice features are missing
    Expected in the current beta. The Swift runner is not yet a full Windows
