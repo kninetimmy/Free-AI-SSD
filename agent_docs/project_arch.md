@@ -80,30 +80,49 @@ commands, NDJSON streaming. Not an in-process console host for Runner;
 talks to a running Runner instance over HTTP. Binary ships alongside
 Runner via `build.ps1`.
 
-### Mac Runner sidecar host (`mac-runner-host/`) [MAC6]
-Net8.0 console exe spawned by the Swift `mac-runner` when Network Mode
-is on. Links `runner-core/` directly and reuses `RunnerLocalApiService`
-byte-for-byte; the Swift parent owns Ollama lifecycle and encrypted-config
-IO, the sidecar consumes both via a stdin handshake. Self-contained
-single-file publish for `osx-arm64`; lives at
+### Mac Runner sidecar host (`mac-runner-host/`) [MAC6, MAC34]
+Net8.0 console exe spawned by the Swift `mac-runner` automatically when
+the SSD is unlocked. Links `runner-core/` directly and reuses
+`RunnerLocalApiService` byte-for-byte; the Swift parent owns Ollama
+lifecycle and encrypted-config IO, the sidecar consumes both via a stdin
+handshake. Self-contained single-file publish for `osx-arm64`; lives at
 `<ssdRoot>/mac/runner-host/FreeAiSsd.MacRunnerHost` on a staged SSD.
 
-**Lifecycle.**
-- Spawn — Swift app writes one JSON line to the host's stdin:
+**Lifecycle (MAC34: coupled to unlocked session, not the LAN toggle).**
+- Auto-spawn — at unlock, `ensureLocalChatStackRunning()` in
+  `mac-runner/Sources/main.swift` starts ollama (idempotently) and the
+  sidecar bound to 127.0.0.1 by default. Wired into both `attemptUnlock`
+  success and the plaintext `loadConfig` path. Pre-MAC34 the sidecar
+  only ran when the user toggled Network Mode on; that toggle now
+  controls bind address only.
+- Spawn handshake — Swift writes one JSON line to stdin:
   `{ "ssdRoot": "...", "ollamaHost": "...", "config": { ...PortableConfig dictionary... } }`.
-  The host parses, builds its DI container, calls `RunnerLocalApiService.StartAsync`,
-  and emits `ready: <baseUrl>` on stdout once Kestrel is listening.
+  The host parses, builds its DI container, calls
+  `RunnerLocalApiService.StartAsync`, and emits `ready: <baseUrl>` on
+  stdout once Kestrel is listening.
 - Steady state — every log message from `RunnerLocalApiService` is mirrored
   to stdout as `log: <line>` so the Swift status pane can surface API
   events; stderr carries fatal failures.
+- Bind-address change — flipping the "Expose API on LAN" toggle calls
+  `restartHostSidecar()`: shutdown, mutate `networkBindAddress` (OFF
+  forces 127.0.0.1, ON uses configured value), respawn with the new
+  config dictionary.
 - Config update — `config-update <json>` on stdin restarts the API with
   the new config (e.g., the user toggled `NetworkRequireApiKey`).
 - Shutdown — `shutdown\n` on stdin, or stdin EOF, triggers a graceful
   `RunnerLocalApiService.StopAsync` followed by exit 0.
 - Lock semantics — when the user locks the encrypted SSD, backgrounds
-  the app, or terminates it, the Swift app shuts the sidecar down BEFORE
-  zeroing the in-memory `UnlockMaterial`, so the host can never serve
-  requests using a config whose API key has been wiped.
+  the app, or terminates it, the Swift app shuts the sidecar AND ollama
+  down BEFORE zeroing the in-memory `UnlockMaterial`, so neither process
+  can outlive an unlocked session.
+
+**API key backfill (MAC34).** If the unlocked config's `networkApiKey`
+is empty (legacy v1.3.12-and-earlier SSDs), `restartHostSidecar`
+generates a fresh 32-byte hex key inline, mirrors it into the in-memory
+`portableConfig`, and persists it via `saveConfig`. Future SSDs are
+prepped with a key set at first encrypted-config write (Mac
+`EncryptedConfigWriter` + Windows `PrepViewModel.FinalizeAsync`), so the
+runtime backfill is a self-heal path for legacy drives only.
 
 **Plaintext-config invariant (preserved from MAC5).** The Swift app
 must never write the in-memory PortableConfig dictionary to disk to pass

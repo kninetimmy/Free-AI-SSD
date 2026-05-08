@@ -1470,3 +1470,78 @@ on any future source-of-truth swap.
 **Implementation reference.** PR #215 (MAC29, `ReadinessService`) +
 PR #218 (MAC33, runner-core + Swift). Helper:
 `prep-core/ModelOperations.cs:103` `DiscoverModelsOnDisk`.
+
+---
+
+## 2026-05-08 — Mac Runner sidecar auto-spawns at unlock; "Network Mode" toggle is LAN-exposure only [MAC34]
+
+Pre-MAC34, the `mac-runner-host` sidecar started/stopped in lockstep with
+the user-facing "Network Mode (LAN API)" toggle. Because Mac chat
+architecturally routes through that sidecar (the C# RAG pipeline lives
+there, not in Swift), local-only chat falsely required toggling Network
+Mode on — and once toggled on, the auth gate 503'd because PrepApp shipped
+`networkApiKey: ""`.
+
+**Decision (locked):** the sidecar is now part of the unlocked-session
+lifecycle on Mac. It auto-spawns at unlock (`ensureLocalChatStackRunning`
+in `mac-runner/Sources/main.swift`, called from both `attemptUnlock`
+success and `loadConfig` plaintext path), bound to 127.0.0.1 by default,
+and tears down at lock before the unlock material is zeroized. The
+toggle's role narrows to runtime bind-address control: OFF forces
+loopback regardless of what `networkBindAddress` says in config; ON uses
+the configured `networkBindAddress` (still defaults to 127.0.0.1, so
+toggling ON with default config is currently a no-op — actual LAN exposure
+requires editing the JSON, same as Windows per the existing TODO at
+`runner/MainWindow.xaml.cs:2176`). UI label changes from "Network Mode
+(LAN API)" to "Expose API on LAN".
+
+The persisted PortableConfig field stays `networkModeEnabled` for
+cross-OS schema compatibility; only the Mac runtime semantics shifted.
+Windows Runner runs runner-core in-process and is unaffected.
+
+The Start/Stop buttons in the Mac Runner UI were removed because ollama
+auto-starts at unlock and stops at lock. Manual control would re-introduce
+the bug shape this decision exists to close.
+
+Won't be revisited unless we move RAG to a Swift implementation (would
+remove the architectural reason for a sidecar at all).
+
+---
+
+## 2026-05-08 — Runtime API-key backfill in Mac Runner over loopback bypass in runner-core [MAC34]
+
+While fixing the v1.3.12 field-test 503 ("API key is required by
+configuration but not set on host"), considered two paths to make local
+chat work despite an empty `networkApiKey`:
+
+**Path A (rejected): loopback bypass in `RunnerLocalApiService`.** Skip
+the API-key check when `context.Connection.RemoteIpAddress` is loopback.
+Auth on 127.0.0.1 is trivially defeatable by any process already on the
+machine, so the bypass *is* defensible in isolation — but grep showed
+the existing `ApiKeyEnforcement_BlocksChatWithoutKey` test exercises a
+real loopback connection and would silently start passing under the
+bypass. Drafted, then reverted.
+
+**Path B (accepted): runtime backfill in Mac Runner.** Generate a fresh
+32-byte hex key inline in `restartHostSidecar` when the unlocked config's
+`networkApiKey` is empty, mirror it into the in-memory `portableConfig`
+(so `apiKeyForLocalApiRequest()` agrees with the sidecar), and persist it
+via `saveConfig` so subsequent unlocks reuse the same key. Cross-OS PrepApp
+generation (Mac `EncryptedConfigWriter`, Windows `PrepViewModel.FinalizeAsync`)
+ensures *future* SSDs have the key from first prep; the runtime backfill
+heals legacy v1.3.12-prepped SSDs that already shipped with empty keys.
+
+**Why Path B wins:**
+- Auth posture stays uniform — every connection still verifies the key,
+  whether loopback or LAN. Future changes to the auth gate don't have to
+  re-reason about "when does loopback skip apply."
+- No test churn — `ApiKeyEnforcement_BlocksChatWithoutKey` (and the other
+  auth tests) pin real behavior on real loopback connections, and they
+  keep working because nothing in `RunnerLocalApiService` changed.
+- Legacy SSDs self-heal without a config-format migration.
+- The cross-OS PrepApp generation is a clean parallel fix on the
+  Windows side that closes a latent Windows bug too (Windows users who
+  enabled Network Mode by hand-editing JSON would have hit the same 503).
+
+Won't be revisited unless we move auth to a transport-level mechanism
+(mTLS) where address-based gates become natural.
