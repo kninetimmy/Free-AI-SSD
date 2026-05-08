@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MAC21 fixture: diskutil list -plist external output for a partitioned
+  exFAT external SSD, post-format. Mirrors what `diskutil eraseDisk
+  ExFAT FREEAI MBR disk4` produces — MBR scheme, single child partition
+  disk4s1 mounted at /Volumes/FREEAI. Parent disk4 has empty
+  MountPoint / VolumeName (this is the bug shape — the volume is on
+  the child, not the parent).
+
+  Hand-crafted from the documented diskutil plist schema. To
+  regenerate from a real disk on a Mac:
+      diskutil list -plist external > diskutil-list-partitioned.plist
+  (sanitize any DiskUUID / VolumeUUID values that leak in).
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>AllDisks</key>
+    <array>
+        <string>disk4</string>
+        <string>disk4s1</string>
+    </array>
+    <key>AllDisksAndPartitions</key>
+    <array>
+        <dict>
+            <key>Content</key>
+            <string>FDisk_partition_scheme</string>
+            <key>DeviceIdentifier</key>
+            <string>disk4</string>
+            <key>OSInternal</key>
+            <false/>
+            <key>Partitions</key>
+            <array>
+                <dict>
+                    <key>Content</key>
+                    <string>Microsoft Basic Data</string>
+                    <key>DeviceIdentifier</key>
+                    <string>disk4s1</string>
+                    <key>MountPoint</key>
+                    <string>/Volumes/FREEAI</string>
+                    <key>Size</key>
+                    <integer>32014270464</integer>
+                    <key>VolumeName</key>
+                    <string>FREEAI</string>
+                </dict>
+            </array>
+            <key>Size</key>
+            <integer>32016367616</integer>
+        </dict>
+    </array>
+    <key>VolumesFromDisks</key>
+    <array>
+        <string>FREEAI</string>
+    </array>
+    <key>WholeDisks</key>
+    <array>
+        <string>disk4</string>
+    </array>
+</dict>
+</plist>

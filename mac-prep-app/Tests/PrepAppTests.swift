@@ -12,10 +12,12 @@ import Foundation
 //         -o /tmp/mac-prep-tests && /tmp/mac-prep-tests
 //
 // We intentionally limit the test surface to the *pure*, non-UI types
-// (DiskutilFormatCommand + PrepFlowStep). DiskutilDriveService, PrepHostController,
-// and PrepViewModel are exercised end-to-end on the published binary in CI,
-// where a real macOS environment is available — pure-builder tests here are
-// the parity-pin against the C# DiskutilFormatCommandTests and would fail
+// (DiskutilFormatCommand + PrepFlowStep + the static parseCandidates seam
+// on DiskutilDriveService). PrepHostController and PrepViewModel are
+// exercised end-to-end on the published binary in CI, where a real macOS
+// environment is available. Pure-builder tests here are the parity-pin
+// against the C# DiskutilFormatCommandTests and the regression pin
+// against the MAC21 post-format mount-discovery bug — both would fail
 // fast on any drift.
 
 @main
@@ -118,6 +120,146 @@ struct PrepAppTestsMain {
             let built = try DiskutilFormatCommand.build(
                 diskIdentifier: "disk2", label: "///\\\\:::", fileSystem: "ExFAT")
             try expect(built.arguments[2] == " ", "label arg was '\(built.arguments[2])'")
+        }
+
+        // MARK: MAC21 — DiskutilDriveService.parseCandidates fixtures
+        //
+        // Pin the post-format mount-discovery fix: after `diskutil
+        // eraseDisk` lays down a partition table + ExFAT volume, the
+        // new volume mounts on a child partition and the parent's own
+        // MountPoint stays empty. Pre-fix the parser only read
+        // MountPoint from the parent — the post-format flow tripped
+        // "Selected drive has no mount point after format." every
+        // time. These fixtures exercise the static parser seam without
+        // a real disk.
+
+        runner.test("MAC21: partitioned disk surfaces child partition mount") {
+            let data = try loadDiskutilFixture("diskutil-list-partitioned.plist")
+            let infoLookup: (String) -> [String: Any]? = { id in
+                guard id == "disk4" else { return nil }
+                // Parent's info post-format: VolumeName / MountPoint
+                // empty (the volume is on the child), but Internal,
+                // Ejectable, TotalSize, MediaName are populated.
+                return [
+                    "Internal": false,
+                    "Ejectable": true,
+                    "Removable": true,
+                    "TotalSize": Int64(32_016_367_616),
+                    "MediaName": "USB SSD Media",
+                    "IORegistryEntryName": "USB SSD",
+                    "VolumeName": "",
+                    "MountPoint": "",
+                    "Content": "FDisk_partition_scheme"
+                ] as [String: Any]
+            }
+            let candidates = try DiskutilDriveService.parseCandidates(
+                listPlistData: data, infoLookup: infoLookup)
+            try expect(candidates.count == 1, "expected 1 candidate, got \(candidates.count)")
+            let c = candidates[0]
+            try expect(c.identifier == "disk4", "parent identifier was \(c.identifier)")
+            try expect(c.totalSizeBytes == 32_016_367_616, "size was \(c.totalSizeBytes)")
+            try expect(c.mountedPartition?.identifier == "disk4s1",
+                       "expected child disk4s1, got \(String(describing: c.mountedPartition?.identifier))")
+            try expect(c.mountedPartition?.mountPoint.path == "/Volumes/FREEAI",
+                       "child mount path was \(String(describing: c.mountedPartition?.mountPoint.path))")
+            try expect(c.mountedPartition?.volumeName == "FREEAI",
+                       "child volume name was \(String(describing: c.mountedPartition?.volumeName))")
+            try expect(c.mountedPartition?.sizeBytes == 32_014_270_464,
+                       "child size was \(String(describing: c.mountedPartition?.sizeBytes))")
+            // Computed mountPoint should mirror the child's mount —
+            // PrepViewModel.runStaging reads this directly.
+            try expect(c.mountPoint?.path == "/Volumes/FREEAI",
+                       "computed mountPoint was \(String(describing: c.mountPoint?.path))")
+            // Display name falls back to the child's volume name when
+            // the parent's VolumeName is empty post-format.
+            try expect(c.displayName == "FREEAI",
+                       "display name was \(c.displayName)")
+        }
+
+        runner.test("MAC21: whole-disk volume falls back to parent mount") {
+            let data = try loadDiskutilFixture("diskutil-list-wholedisk.plist")
+            let infoLookup: (String) -> [String: Any]? = { id in
+                guard id == "disk5" else { return nil }
+                return [
+                    "Internal": false,
+                    "Ejectable": true,
+                    "TotalSize": Int64(500_107_862_016),
+                    "MediaName": "External Portable SSD",
+                    "VolumeName": "PORTABLE",
+                    "MountPoint": "/Volumes/PORTABLE"
+                ] as [String: Any]
+            }
+            let candidates = try DiskutilDriveService.parseCandidates(
+                listPlistData: data, infoLookup: infoLookup)
+            try expect(candidates.count == 1, "expected 1 candidate, got \(candidates.count)")
+            let c = candidates[0]
+            try expect(c.identifier == "disk5")
+            // Whole-disk fallback: mounted partition takes the parent
+            // identifier so format calls (which use `c.identifier`) and
+            // staging calls (which use `c.mountPoint`) both target the
+            // right thing.
+            try expect(c.mountedPartition?.identifier == "disk5",
+                       "expected parent fallback id, got \(String(describing: c.mountedPartition?.identifier))")
+            try expect(c.mountPoint?.path == "/Volumes/PORTABLE")
+            try expect(c.displayName == "PORTABLE")
+        }
+
+        runner.test("MAC21: internal disks excluded") {
+            // Inline-synthesized list output containing one external +
+            // one internal entry. Internal must be filtered.
+            let listData = try plistFromAllDisks([
+                ["DeviceIdentifier": "disk2"],
+                ["DeviceIdentifier": "disk3"]
+            ])
+            let infoLookup: (String) -> [String: Any]? = { id in
+                if id == "disk2" {
+                    return ["Internal": true, "TotalSize": Int64(1_000_000_000)] as [String: Any]
+                }
+                if id == "disk3" {
+                    return [
+                        "Internal": false,
+                        "TotalSize": Int64(2_000_000_000),
+                        "VolumeName": "EXT",
+                        "MountPoint": "/Volumes/EXT"
+                    ] as [String: Any]
+                }
+                return nil
+            }
+            let candidates = try DiskutilDriveService.parseCandidates(
+                listPlistData: listData, infoLookup: infoLookup)
+            try expect(candidates.count == 1, "expected 1 (Internal disk2 filtered), got \(candidates.count)")
+            try expect(candidates[0].identifier == "disk3")
+        }
+
+        runner.test("MAC21: unmounted partitioned disk yields nil mountedPartition") {
+            // Pre-format raw disk: partitions exist but none are
+            // mounted yet (e.g. fresh-out-of-box drive). Parser must
+            // return a candidate with mountedPartition=nil so the UI
+            // surfaces "format required" without claiming a phantom
+            // mount.
+            let listData = try plistFromAllDisks([
+                [
+                    "DeviceIdentifier": "disk6",
+                    "Size": Int64(64_000_000_000),
+                    "Partitions": [
+                        ["DeviceIdentifier": "disk6s1", "MountPoint": "", "Size": Int64(63_900_000_000)]
+                    ]
+                ]
+            ])
+            let infoLookup: (String) -> [String: Any]? = { id in
+                guard id == "disk6" else { return nil }
+                return [
+                    "Internal": false,
+                    "TotalSize": Int64(64_000_000_000),
+                    "MediaName": "Cheap USB Drive"
+                ] as [String: Any]
+            }
+            let candidates = try DiskutilDriveService.parseCandidates(
+                listPlistData: listData, infoLookup: infoLookup)
+            try expect(candidates.count == 1)
+            try expect(candidates[0].mountedPartition == nil,
+                       "expected nil mount, got \(String(describing: candidates[0].mountedPartition))")
+            try expect(candidates[0].mountPoint == nil)
         }
 
         // MARK: PrepFlowStep equality / case-coverage smoke
@@ -287,6 +429,30 @@ func writeMac17PrepFixture(outDir: URL) throws {
     let writer = EncryptedConfigWriter()
     try writer.writeInitialEncryptedConfig(
         ssdRoot: outDir, payload: payload, passphrase: mac17FixturePassword)
+}
+
+// MARK: - MAC21 fixture helpers
+
+/// Resolve a fixture under `mac-prep-app/Tests/Fixtures/` relative to
+/// this file's compile-time path. `#filePath` bakes the absolute path
+/// in at compile time, so the test binary finds fixtures regardless of
+/// the cwd at runtime (CI runs the binary from the repo root after
+/// building it from the same workspace).
+private func loadDiskutilFixture(_ name: String) throws -> Data {
+    let testFile = URL(fileURLWithPath: #filePath)
+    let fixtureDir = testFile.deletingLastPathComponent().appendingPathComponent("Fixtures")
+    let url = fixtureDir.appendingPathComponent(name)
+    return try Data(contentsOf: url)
+}
+
+/// Wrap a list of AllDisksAndPartitions[] entries into a binary plist
+/// matching what `diskutil list -plist external` emits at the root
+/// level. Used for inline-synthesized test cases that don't warrant
+/// their own XML fixture file.
+private func plistFromAllDisks(_ disks: [[String: Any]]) throws -> Data {
+    let root: [String: Any] = ["AllDisksAndPartitions": disks]
+    return try PropertyListSerialization.data(
+        fromPropertyList: root, format: .binary, options: 0)
 }
 
 // MARK: - Test runner harness (mirrors mac-runner/Tests/SsdEncryptionTests.swift)
