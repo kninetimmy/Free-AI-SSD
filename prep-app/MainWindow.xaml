@@ -597,16 +597,23 @@
                 <Border Grid.Row="1" Style="{StaticResource NeumorphicCard}" Padding="10">
                     <DockPanel>
                         <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <!-- MAC31: in-place pull progress line. Empty between
+                                     pulls so the row collapses via TextBlock visibility. -->
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="Log"
+                            <TextBlock Grid.Row="0" Grid.Column="0"
+                                       Text="Log"
                                        Style="{StaticResource H2Text}"
                                        FontSize="14"
                                        Margin="0"/>
-                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                            <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                                 <ProgressBar Width="160"
                                              Style="{StaticResource GradientProgressBar}"
                                              Value="{Binding ProgressValue}"
@@ -616,6 +623,18 @@
                                            VerticalAlignment="Center"
                                            Margin="8,0,0,0"/>
                             </StackPanel>
+                            <!-- MAC31: ANSI-stripped pull progress lines from
+                                 ModelOperations.Consume's onProgress channel land
+                                 here. Single-line, monospaced, hidden when empty
+                                 so the layout doesn't shift between pulls. -->
+                            <TextBlock Grid.Row="1" Grid.ColumnSpan="3"
+                                       Text="{Binding PullProgressLine}"
+                                       FontFamily="Consolas, Menlo, monospace"
+                                       FontSize="12"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       TextTrimming="CharacterEllipsis"
+                                       Margin="0,4,0,0"
+                                       Visibility="{Binding PullProgressLine, Converter={StaticResource EmptyToVisibilityConverter}, ConverterParameter=Inverted}"/>
                         </Grid>
                         <Grid>
                             <!--  ListBox keeps its internal ScrollViewer so UI virtualization

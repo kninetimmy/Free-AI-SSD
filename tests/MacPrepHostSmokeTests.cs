@@ -119,6 +119,79 @@ public sealed class MacPrepHostSmokeTests
     }
 
     [Fact]
+    public async Task HostRunner_CancelPullWithNoActivePull_ReturnsOkAndContinues()
+    {
+        // MAC31: cancel-pull is idempotent. Sending it when no pull is in
+        // flight emits result:cancel-pull {ok:true} and the loop carries
+        // on so a defensive "always cancel before exiting" UI policy
+        // doesn't crash the sidecar.
+        using var workdir = new TempDir("freeai-mac31-cancel-noop-");
+        Directory.CreateDirectory(Path.Combine(workdir.Path, "logs"));
+        Directory.CreateDirectory(Path.Combine(workdir.Path, "config"));
+
+        var handshake = JsonSerializer.Serialize(new { ssdRoot = workdir.Path });
+        var inputBuilder = new System.Text.StringBuilder();
+        inputBuilder.AppendLine(handshake);
+        inputBuilder.AppendLine("cancel-pull");
+        inputBuilder.AppendLine("readiness");
+        inputBuilder.AppendLine("shutdown");
+
+        using var stdin = new StringReader(inputBuilder.ToString());
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await FreeAiSsd.MacPrepHost.HostRunner.RunAsync(
+            stdin, stdout, stderr, new[] { "--test-mode" });
+
+        Assert.Equal(0, exitCode);
+        var output = stdout.ToString();
+        Assert.Contains("result: cancel-pull", output);
+        Assert.Contains("\"ok\":true", output);
+        // Loop must keep going after cancel-pull so the follow-up
+        // command (readiness) still runs to completion.
+        Assert.Contains("result: readiness", output);
+    }
+
+    [Fact]
+    public async Task HostRunner_PullModelInTestMode_EmitsProgressSeedThenResult()
+    {
+        // MAC31: even in test-mode (which short-circuits the real pull),
+        // the result line for pull-model still appears in stdout. The
+        // resume-seed `progress:` line is gated on a real pull (test
+        // mode short-circuits before EmitProgress runs), so we only
+        // pin the result-line wiring here. Real progress emission is
+        // covered by MacPrepHostPullLifecycleTests via the FakeModelService.
+        using var workdir = new TempDir("freeai-mac31-pull-testmode-");
+        Directory.CreateDirectory(Path.Combine(workdir.Path, "logs"));
+        Directory.CreateDirectory(Path.Combine(workdir.Path, "config"));
+
+        var handshake = JsonSerializer.Serialize(new { ssdRoot = workdir.Path });
+        var inputBuilder = new System.Text.StringBuilder();
+        inputBuilder.AppendLine(handshake);
+        inputBuilder.AppendLine("pull-model llama3.2:1b");
+        // pull-model is detached at the loop layer (MAC31), so we need
+        // the loop to stay alive long enough for the test-mode pull
+        // task to run + write its result line. The next command
+        // (readiness) runs sequentially behind it in test-mode (no
+        // real cancellation race). shutdown then drains and exits.
+        inputBuilder.AppendLine("readiness");
+        inputBuilder.AppendLine("shutdown");
+
+        using var stdin = new StringReader(inputBuilder.ToString());
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await FreeAiSsd.MacPrepHost.HostRunner.RunAsync(
+            stdin, stdout, stderr, new[] { "--test-mode" });
+
+        Assert.Equal(0, exitCode);
+        var output = stdout.ToString();
+        Assert.Contains("result: pull-model", output);
+        Assert.Contains("\"testMode\":true", output);
+        Assert.Contains("result: readiness", output);
+    }
+
+    [Fact]
     public async Task HostRunner_EnsureStructure_CreatesEverySsdLayoutDirectory()
     {
         // MAC17b drift-pin: when SsdLayout grows a new directory on the

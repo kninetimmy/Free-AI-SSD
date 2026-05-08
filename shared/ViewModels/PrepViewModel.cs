@@ -28,6 +28,11 @@ public class PrepViewModel : BaseViewModel
     private double _progressValue;
     private bool _progressIsIndeterminate;
     private bool _isModelOperationRunning;
+    // MAC31: receives ANSI-stripped pull progress lines from
+    // ModelOperations.Consume's onProgress channel so the view can
+    // render a single in-place progress label rather than letting
+    // Ollama's TUI rewrite ticks scroll the log surface.
+    private string _pullProgressLine = string.Empty;
     private string _modelTagInput = string.Empty;
     private string _ollamaUrl = OllamaPackageTrustPolicy.DefaultWindowsPackage.Url;
     private bool _prepareWindows = true;
@@ -164,6 +169,18 @@ public class PrepViewModel : BaseViewModel
                 RaiseAllCommandsCanExecuteChanged();
             }
         }
+    }
+
+    /// <summary>
+    /// MAC31: latest pull progress line (ANSI-stripped, coalesced from
+    /// Ollama's TUI rewrites). Bound to a single Text element so a
+    /// long pull renders as one in-place line rather than spamming
+    /// the log surface. Empty between pulls.
+    /// </summary>
+    public string PullProgressLine
+    {
+        get => _pullProgressLine;
+        private set => SetProperty(ref _pullProgressLine, value);
     }
 
     public string ModelTagInput
@@ -789,10 +806,28 @@ public class PrepViewModel : BaseViewModel
                 StatusText = $"Downloading {model}...";
                 AppendLog($"Downloading {model}...");
 
+                // MAC31: seed the in-place progress line with a "Resuming
+                // from NN%..." message when partial blobs already exist
+                // for this tag. Without this, a retry after a cancelled
+                // pull starts visually at 0% even though Ollama IS
+                // resumable — which made cancel-and-retry feel broken
+                // in the v1.3.10 mac field test.
+                var seed = _modelService.EstimatePartialPullProgress(modelsRoot, model);
+                PullProgressLine = seed > 0
+                    ? $"Resuming {model} from {seed:P0}…"
+                    : $"Pulling {model}…";
+
                 try
                 {
                     var result = await _modelService.PullModelAsync(
-                        ollamaExe, modelsRoot, model, AppendLog, _modelOperationCts.Token, serverHandle.Host);
+                        ollamaExe, modelsRoot, model, AppendLog, _modelOperationCts.Token, serverHandle.Host,
+                        // MAC31: route Ollama's TUI ticks (ANSI-stripped
+                        // by OllamaPullProgressFilter) into the single
+                        // in-place label instead of the scrolling log.
+                        // SetPullProgressLineSafe dispatches via the UI
+                        // sync context because the lambda fires from
+                        // ModelOperations.Consume's drain thread.
+                        onProgress: SetPullProgressLineSafe);
 
                     await _modelService.UpdateModelStatusAsync(configPath, model, ModelInstallStatus.Installed, result.Sha256, result.SizeBytes, DateTime.UtcNow);
                     AppendLog($"Downloaded {model} ({FormatSize(result.SizeBytes)}). Sha256 {result.Sha256[..8]}...");
@@ -819,6 +854,9 @@ public class PrepViewModel : BaseViewModel
         {
             serverHandle?.Dispose();
             ProgressIsIndeterminate = false;
+            // MAC31: clear the in-place progress label when the batch
+            // ends so the next pull starts from a known-empty state.
+            PullProgressLine = string.Empty;
             SetModelOperationState(false, StatusText);
             _modelOperationCts?.Dispose();
             _modelOperationCts = null;
@@ -1603,6 +1641,28 @@ public class PrepViewModel : BaseViewModel
         }
 
         _logService.AppendLog(message);
+    }
+
+    /// <summary>
+    /// MAC31: thread-safe setter for <see cref="PullProgressLine"/>.
+    /// Mirrors <see cref="AppendLog"/>'s dispatch pattern because the
+    /// onProgress lambda fires from <c>ModelOperations.Consume</c>'s
+    /// stdout-drain thread, not the UI thread. WPF binding can usually
+    /// route a string PropertyChanged across threads on its own, but
+    /// going through the sync context keeps the entire VM consistent
+    /// and avoids surprising the binding engine when the surrounding
+    /// SetProperty triggers other reactive code.
+    /// </summary>
+    private void SetPullProgressLineSafe(string line)
+    {
+        if (_uiSyncContext is null || SynchronizationContext.Current == _uiSyncContext)
+        {
+            PullProgressLine = line;
+        }
+        else
+        {
+            _uiSyncContext.Post(_ => PullProgressLine = line, null);
+        }
     }
 
     private void RaiseAllCommandsCanExecuteChanged()

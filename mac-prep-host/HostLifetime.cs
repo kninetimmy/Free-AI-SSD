@@ -44,6 +44,15 @@ internal sealed class HostLifetime : IAsyncDisposable
     // "could not connect to ollama app, is it running?".
     private IOllamaServerHandle? _ollamaServer;
 
+    // MAC31: holds the linked CTS for the currently-running pull-model
+    // command so the `cancel-pull` arm can signal it without touching
+    // unrelated commands' tokens. Production wiring detaches pull-model
+    // at the Program.cs loop (so the loop can read `cancel-pull` while
+    // a pull is in flight); this field is the only shared state between
+    // the in-flight pull task and the cancel arm.
+    private readonly object _pullCtsLock = new();
+    private CancellationTokenSource? _activePullCts;
+
     private static readonly JsonSerializerOptions ResultOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -131,6 +140,10 @@ internal sealed class HostLifetime : IAsyncDisposable
                 break;
             case "pull-model":
                 await PullModelAsync(payload, ct);
+                break;
+            case "cancel-pull":
+                CancelActivePull();
+                EmitResult("cancel-pull", new { ok = true });
                 break;
             case "verify-model":
                 await VerifyModelAsync(payload, ct);
@@ -254,28 +267,103 @@ internal sealed class HostLifetime : IAsyncDisposable
             ?? throw new FileNotFoundException(
                 $"Mac Ollama binary missing at the expected path under {ollamaDir}; staging may have failed silently.");
 
-        // MAC27: lazily start the temp Ollama server on first pull so
-        // `ollama pull` has a daemon to talk to. Without this the CLI
-        // fails immediately with "could not connect to ollama app, is it
-        // running?" — which is exactly what v1.3.7 hit in the field. The
-        // handle is reused across every pull in the same sidecar
-        // lifetime and disposed in DisposeAsync.
-        if (_ollamaServer is null)
+        // MAC31: linked CTS lets the cancel-pull arm signal this pull
+        // without touching any other command's token. Stored under
+        // _pullCtsLock so the cancel arm can read it from another
+        // command-loop iteration while this task is still in flight.
+        using var pullCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        lock (_pullCtsLock)
         {
-            _ollamaServer = await _ollamaPackage.StartTemporaryServerAsync(
-                ollamaExe, modelsRoot, EmitLog, ct);
+            // Defensive: Swift never issues two pulls in parallel, but
+            // if it ever does, the older pull keeps its cancel slot;
+            // the newer one runs uncancelable to completion. We never
+            // overwrite an in-flight slot.
+            _activePullCts ??= pullCts;
         }
 
-        var result = await _modelService.PullModelAsync(
-            ollamaExe, modelsRoot, modelTag, EmitLog, ct, _ollamaServer.Host);
-
-        EmitResult("pull-model", new
+        try
         {
-            ok = true,
-            modelTag,
-            sha256 = result.Sha256,
-            sizeBytes = result.SizeBytes,
-        });
+            // MAC31: surface a "Resuming from NN%..." seed before kicking
+            // off the pull so retry after a cancelled pull doesn't show
+            // 0%. EstimatePartialProgress reads only the manifest +
+            // partial-blob sizes; no network, no process spawn.
+            var seed = ModelOperations.EstimatePartialProgress(modelsRoot, modelTag);
+            EmitProgress(seed > 0
+                ? $"Resuming {modelTag} from {seed:P0}…"
+                : $"Pulling {modelTag}…");
+
+            // MAC27: lazily start the temp Ollama server on first pull so
+            // `ollama pull` has a daemon to talk to. Without this the CLI
+            // fails immediately with "could not connect to ollama app,
+            // is it running?" — which is exactly what v1.3.7 hit in the
+            // field. The handle is reused across every pull in the same
+            // sidecar lifetime and disposed in DisposeAsync.
+            if (_ollamaServer is null)
+            {
+                _ollamaServer = await _ollamaPackage.StartTemporaryServerAsync(
+                    ollamaExe, modelsRoot, EmitLog, pullCts.Token);
+            }
+
+            // MAC31: onProgress lambda routes Ollama's TUI ticks to the
+            // dedicated `progress: ...` stdout channel so the PrepApp
+            // renders them as a single in-place line instead of spamming
+            // the log surface with cursor-rewrite garbage.
+            var result = await _modelService.PullModelAsync(
+                ollamaExe, modelsRoot, modelTag, EmitLog, pullCts.Token, _ollamaServer.Host,
+                onProgress: EmitProgress);
+
+            EmitResult("pull-model", new
+            {
+                ok = true,
+                modelTag,
+                sha256 = result.Sha256,
+                sizeBytes = result.SizeBytes,
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            EmitLog($"Pull cancelled for {modelTag}.");
+            EmitResult("pull-model", new { ok = false, modelTag, cancelled = true });
+        }
+        finally
+        {
+            lock (_pullCtsLock)
+            {
+                if (ReferenceEquals(_activePullCts, pullCts))
+                {
+                    _activePullCts = null;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// MAC31: signals the active pull-model's linked CTS so the
+    /// in-flight <c>ollama pull</c> process tree gets killed and the
+    /// pull task observes <see cref="OperationCanceledException"/>.
+    /// Idempotent — safe to call when no pull is in flight.
+    /// </summary>
+    private void CancelActivePull()
+    {
+        CancellationTokenSource? toCancel;
+        lock (_pullCtsLock)
+        {
+            toCancel = _activePullCts;
+        }
+        if (toCancel is null)
+        {
+            return;
+        }
+        try
+        {
+            toCancel.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // CTS may have been disposed between the read and the cancel
+            // (the pull-model finally block races with us). Safe to
+            // ignore — the pull is no longer in flight.
+        }
     }
 
     private async Task VerifyModelAsync(string payload, CancellationToken ct)
@@ -426,6 +514,21 @@ internal sealed class HostLifetime : IAsyncDisposable
     {
         _logger?.Info(message);
         WriteLineSafe($"log: {message}");
+    }
+
+    /// <summary>
+    /// MAC31: writes a <c>progress: ...</c> line that the Swift side
+    /// routes to a dedicated single-line UI element. Separate channel
+    /// from <c>log:</c> so the PrepApp can render the latest progress
+    /// state in one Text view that overwrites in place, rather than
+    /// scrolling the log surface with per-tick rewrites. Logged at
+    /// Info level so the SSD log captures the full sequence for
+    /// post-mortem.
+    /// </summary>
+    private void EmitProgress(string message)
+    {
+        _logger?.Info($"progress: {message}");
+        WriteLineSafe($"progress: {message}");
     }
 
     private void EmitResult(string command, object payload)

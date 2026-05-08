@@ -47,6 +47,13 @@ final class PrepHostController: @unchecked Sendable {
     var onStatusChange: ((Status) -> Void)?
     var onLogLine: ((String) -> Void)?
 
+    /// MAC31: receives `progress: ...` lines emitted by the sidecar's
+    /// pull-model arm. The PrepApp routes these to a single in-place
+    /// progress label rather than the scrolling log so Ollama's TUI
+    /// rewrite escapes don't look like a restart loop. Optional —
+    /// callers that don't bind it get the legacy log-only behavior.
+    var onPullProgress: ((String) -> Void)?
+
     private(set) var status: Status = .stopped {
         didSet {
             if let cb = onStatusChange {
@@ -330,6 +337,23 @@ final class PrepHostController: @unchecked Sendable {
         if trimmed.hasPrefix("log: ") {
             let msg = String(trimmed.dropFirst("log: ".count))
             if let cb = onLogLine { DispatchQueue.main.async { cb(msg) } }
+            return
+        }
+
+        // MAC31: dedicated channel for ollama-pull TUI ticks. The
+        // sidecar already strips ANSI cursor-rewrite escapes via
+        // OllamaPullProgressFilter; we just need to route the cleaned
+        // line to the PrepApp's single-line progress label so the log
+        // surface stays for diagnostics. Falls back to onLogLine if no
+        // pull-progress handler is bound (e.g. an older PrepViewModel
+        // build without the MAC31 wiring).
+        if trimmed.hasPrefix("progress: ") {
+            let msg = String(trimmed.dropFirst("progress: ".count))
+            if let cb = onPullProgress {
+                DispatchQueue.main.async { cb(msg) }
+            } else if let logCb = onLogLine {
+                DispatchQueue.main.async { logCb(msg) }
+            }
             return
         }
 

@@ -45,10 +45,13 @@ public sealed class ModelService : IModelService
     public IReadOnlyCollection<string> DiscoverModelsOnDisk(string modelsRoot)
         => ModelOperations.DiscoverModelsOnDisk(modelsRoot);
 
+    public double EstimatePartialPullProgress(string modelsRoot, string modelTag)
+        => ModelOperations.EstimatePartialProgress(modelsRoot, modelTag);
+
     public async Task<ModelPullResult> PullModelAsync(string ollamaExe, string modelsRoot, string modelTag,
-        Action<string> onLog, CancellationToken ct, string? ollamaHost = null)
+        Action<string> onLog, CancellationToken ct, string? ollamaHost = null, Action<string>? onProgress = null)
     {
-        var result = await _modelOperations.PullModelAsync(ollamaExe, modelsRoot, modelTag, onLog, ct, ollamaHost);
+        var result = await _modelOperations.PullModelAsync(ollamaExe, modelsRoot, modelTag, onLog, ct, ollamaHost, onProgress);
         return new ModelPullResult(result.Sha256, result.SizeBytes);
     }
 

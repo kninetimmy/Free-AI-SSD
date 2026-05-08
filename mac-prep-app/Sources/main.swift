@@ -39,7 +39,7 @@ struct ContentView: View {
                 case .formatting:        ProgressLogStepView(vm: vm, title: "Formatting drive…")
                 case .staging:           ProgressLogStepView(vm: vm, title: "Staging artifacts…")
                 case .encryptionSetup:   EncryptionSetupStepView(vm: vm)
-                case .modelPull:         ProgressLogStepView(vm: vm, title: "Pulling starter models…")
+                case .modelPull:         ModelPullStepView(vm: vm)
                 case .readiness:         ProgressLogStepView(vm: vm, title: "Running readiness checks…")
                 case .done:              DoneStepView(vm: vm)
                 case .failed(let msg):   FailedStepView(message: msg, vm: vm)
@@ -323,6 +323,75 @@ struct ProgressLogStepView: View {
                 Text(title).font(.headline)
                 if vm.isBusy { ProgressView().controlSize(.small) }
             }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        ForEach(Array(vm.logLines.enumerated()), id: \.offset) { idx, line in
+                            Text(line)
+                                .font(.system(.caption, design: .monospaced))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .id(idx)
+                        }
+                    }
+                    .padding(8)
+                }
+                .background(Color(NSColor.textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .onChange(of: vm.logLines.count) { _ in
+                    if let last = vm.logLines.indices.last {
+                        withAnimation { proxy.scrollTo(last, anchor: .bottom) }
+                    }
+                }
+            }
+            .frame(maxHeight: .infinity)
+        }
+    }
+}
+
+// MARK: - Model pull
+//
+// MAC31: dedicated step view for the pull batch. Differs from
+// ProgressLogStepView in two ways:
+//   1. A single in-place "progress" Text view bound to
+//      vm.pullProgressLine receives the sidecar's `progress: ...`
+//      ticks (cleaned of ANSI cursor-rewrite escapes by
+//      OllamaPullProgressFilter on the C# side). The scrolling log
+//      still surfaces stalls and other diagnostics from
+//      [ollama serve stderr] etc.
+//   2. A Cancel button gated on vm.canCancelPull lets the user
+//      bail out of a slow pull without force-quitting the app.
+//      Cancellation preserves partial blobs on disk so a Retry
+//      resumes from where it stopped (sub-bug c).
+
+struct ModelPullStepView: View {
+    @ObservedObject var vm: PrepViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Pulling starter models…").font(.headline)
+                if vm.isBusy { ProgressView().controlSize(.small) }
+                Spacer()
+                if vm.canCancelPull {
+                    Button("Cancel") { vm.cancelPull() }
+                        .controlSize(.regular)
+                }
+            }
+
+            // Single in-place progress line. Falls back to a placeholder
+            // before the first sidecar tick so the view doesn't jump
+            // when the first `progress: Pulling <tag>…` arrives.
+            Text(vm.pullProgressLine.isEmpty ? "Preparing pull…" : vm.pullProgressLine)
+                .font(.system(.body, design: .monospaced))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Color(NSColor.textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {

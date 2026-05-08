@@ -208,7 +208,8 @@ public sealed class MacPrepHostPullLifecycleTests : IDisposable
 
         public Task<ModelPullResult> PullModelAsync(
             string ollamaExe, string modelsRoot, string modelTag,
-            Action<string> onLog, CancellationToken ct, string? ollamaHost = null)
+            Action<string> onLog, CancellationToken ct, string? ollamaHost = null,
+            Action<string>? onProgress = null)
         {
             PullCalls.Add(new PullCall(ollamaExe, modelsRoot, modelTag, ollamaHost));
             return Task.FromResult(new ModelPullResult("0".PadRight(64, '0'), 1234));
@@ -223,6 +224,7 @@ public sealed class MacPrepHostPullLifecycleTests : IDisposable
         public void UpsertModel(List<ModelConfigEntry> models, string name, ModelInstallStatus status) => throw new NotImplementedException();
         public Task UpdateModelStatusAsync(string configPath, string modelName, ModelInstallStatus status, string? sha256 = null, long? sizeBytes = null, DateTime? lastVerifiedUtc = null) => throw new NotImplementedException();
         public IReadOnlyCollection<string> DiscoverModelsOnDisk(string modelsRoot) => throw new NotImplementedException();
+        public double EstimatePartialPullProgress(string modelsRoot, string modelTag) => 0.0;
         public Task<bool> VerifyModelAsync(string modelsRoot, string modelTag, string expectedHash, Action<string> onLog, CancellationToken ct) => throw new NotImplementedException();
         public Task DeleteModelAsync(string ollamaExe, string modelsRoot, string modelTag, Action<string> onLog, CancellationToken ct, string? ollamaHost = null) => throw new NotImplementedException();
         public List<string> GetSizingWarnings(string modelTag, int? freeDiskGb, int? systemRamGb, int? gpuVramGb) => throw new NotImplementedException();
