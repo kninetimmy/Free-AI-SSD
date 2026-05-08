@@ -125,6 +125,31 @@ public static class MacArtifactAvailability
     {
         yield return appDirectory;
         yield return Path.Combine(appDirectory, "payload");
+
+        // MAC22: Mac PrepApp's mac-prep-host sidecar runs from inside
+        // PrepApp.app/Contents/Resources/prep-host/, so AppContext.BaseDirectory
+        // is *not* the bundle root — the bundle root containing
+        // payload/mac/mac-artifacts.manifest.json lives several levels up.
+        // Walk a bounded number of ancestors so the lookup finds the
+        // manifest from inside the .app bundle. Backward-compatible: the
+        // Windows PrepApp finds the manifest on the second candidate above
+        // and never enters this loop.
+        DirectoryInfo? cursor;
+        try
+        {
+            cursor = new DirectoryInfo(appDirectory);
+        }
+        catch
+        {
+            yield break;
+        }
+
+        for (var i = 0; i < 6 && cursor?.Parent is not null; i++)
+        {
+            cursor = cursor.Parent;
+            yield return cursor.FullName;
+            yield return Path.Combine(cursor.FullName, "payload");
+        }
     }
 
     /// <summary>JSON schema for the macOS artifacts manifest file.</summary>
