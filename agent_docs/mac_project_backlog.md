@@ -1348,9 +1348,11 @@ New `tests/MacArtifactAvailabilityTests.cs` with five cases:
 
 ### MAC23 - ArtifactStagingService bundled-file lookup walks ancestors
 
-**Status:** planned 2026-05-07 (field-reported by user same session;
-  caught in v1.3.3 field test the moment MAC22 unblocked the
-  manifest-presence check).
+**Status:** done 2026-05-08 (PR #208, squash `0382acb`). Bundled
+  with MAC19 docs. Symmetric mirror of MAC22 in
+  `ArtifactStagingService.EnumerateBundledContentRoots`. Released
+  as v1.3.4. Field test cleared `stage-runner` then immediately
+  tripped on a 4th `BaseDirectory`-only lookup — see MAC24 below.
 **Scope:** small — symmetric mirror of the MAC22 fix; extend
   `prep-core/Services/ArtifactStagingService.EnumerateBundledContentRoots`
   to walk parent directories + add unit tests.
@@ -1517,7 +1519,16 @@ relative lookup.
 
 ### MAC19 - Mac install docs + xattr quarantine workaround
 
-**Status:** planned 2026-05-07 (field-reported by user same session)
+**Status:** done 2026-05-08 (PR #208, squash `0382acb`). Bundled
+  with MAC23. README + `docs/QUICKSTART.txt` rewritten with the
+  actual `xattr -dr com.apple.quarantine` workaround replacing the
+  stale "right-click → Open" instruction (right-click and "Allow
+  apps from anywhere" don't clear the quarantine bit on
+  ad-hoc-signed bundles, contrary to the prior docs). Optional
+  helper script skipped — Compress-Archive on Windows CI doesn't
+  preserve Unix exec bits, so a `.command` file would need
+  `chmod +x` first which is worse UX than pasting one line.
+  Obsoletes once MAC11 ships.
 **Scope:** small — release-bundle docs + a one-line install helper script.
 **Risk:** Low
 **Dependencies:** None. Lands before MAC11 specifically because it
@@ -1790,3 +1801,124 @@ when there is concrete user demand on Mac.
 top of the queue per `agent_docs/project_state.md`. Cross-platform
 from the start — execution prompt drafted at
 `agent_docs/f2_execution_prompt.md`.
+
+---
+
+### MAC24 - PrereqService bundled folder lookup walks ancestors
+
+**Status:** done 2026-05-08 (PR #209, squash `0e86c47`). Released
+  as v1.3.5. Fourth occurrence of the MAC22 / MAC23 ancestor-walk
+  pattern, in `prep-core/Services/PrereqService.ResolveBundledPrereqDirectory`.
+  v1.3.4 mac field test surfaced it the moment MAC23 unblocked
+  `stage-runner` — flow advanced to `stage-prereqs` and tripped
+  with `"Bundled prerequisites folder is missing: …/prep-host/
+  payload/windows/tools/prereqs"`. Same root cause: helper only
+  checked `<base>/<prereqs>` and `<base>/payload/<prereqs>`,
+  neither of which hit when `AppContext.BaseDirectory` is the
+  Mac sidecar 5 levels deep inside the bundle. Fix flipped to
+  `internal static` with a `baseDirectory` overload, walked up to
+  6 ancestors, preserved the canonical `<base>/payload/<prereqs>`
+  fall-through path so the `Directory.Exists` failure mode message
+  stays identical when the folder genuinely is missing. Four
+  fixture-driven tests in `tests/PrereqBundledLookupTests.cs`
+  mirror the MAC22 / MAC23 coverage shape (Windows-equiv layout,
+  Mac sidecar layout, no folder anywhere returns conventional
+  diagnostic path, bounded-depth at 8 levels deep doesn't escape
+  the 6-ancestor walk). Audit at fix time confirmed no 5th
+  `AppContext.BaseDirectory`-only lookup remains in prep-core
+  (`FindRepoRoot(AppContext.BaseDirectory)` already walks
+  ancestors looking for `FreeAiSsd.sln`, dev-time fallback only).
+  CI green on first run.
+
+**Cleanup follow-up (now overdue):** three identical ancestor-walk
+enumerators live across `MacArtifactAvailability.EnumerateContentRoots`,
+`ArtifactStagingService.EnumerateBundledContentRoots`, and
+`PrereqService.EnumerateBundleRoots`. Fold into a shared
+`prep-core/BundleContentRoots` helper before any new
+`AppContext.BaseDirectory`-relative bundled-file lookup gets added.
+
+---
+
+### MAC25 - OllamaPackageService.ResolveOllamaExe Mac binary name
+
+**Status:** planned 2026-05-08 (field-reported via v1.3.5
+  screenshot; immediate field-blocker the moment MAC24 unblocked
+  the staging chain).
+**Scope:** small — single helper + tests.
+**Risk:** Low — backward-compatible (Windows lookup keeps finding
+  `ollama.exe`).
+**Dependencies:** None. Top of queue.
+**Goal:** Mac PrepApp's `pull-model` sidecar arm succeeds against
+  the Mac-staged Ollama binary, so users actually reach a
+  populated `models/` directory instead of bouncing off a
+  misleading "Run stage-ollama first" message.
+
+**Driver:** v1.3.5 mac field test cleared format → ensure-structure
+→ stage-runner → stage-ollama → stage-prereqs → 399-model catalog
+refresh → encryption setup, then tripped on first model pull:
+
+```
+[stderr] Command failed ("pull-model" llama3.2:3b): Mac Ollama
+  binary not found under /Volumes/FREEAI/mac/tools/ollama. Run
+  stage-ollama first.
+```
+
+Misleading hint — `stage-ollama` *did* run and reported `"Staged
+macOS Ollama runtime and wrote trust attestation."` Root cause at
+`prep-core/Services/OllamaPackageService.cs:54-58`:
+
+```csharp
+public string? ResolveOllamaExe(string ollamaDir)
+{
+    if (!Directory.Exists(ollamaDir)) return null;
+    return Directory.EnumerateFiles(ollamaDir, "ollama.exe", SearchOption.AllDirectories).FirstOrDefault();
+}
+```
+
+Hardcodes `ollama.exe`. `StageMacOllamaAsync`
+(`prep-core/Services/ArtifactStagingService.cs:126`) writes the
+binary as `<ssd>/mac/tools/ollama/ollama` (no extension — that's
+the macOS upstream convention). Mac sidecar `pull-model` and
+`verify-model` arms call the same resolver → returns `null` →
+`pull-model` throws.
+
+**Fix:** OS-aware filename in `ResolveOllamaExe`:
+
+```csharp
+public string? ResolveOllamaExe(string ollamaDir)
+{
+    if (!Directory.Exists(ollamaDir)) return null;
+    var fileName = OperatingSystem.IsWindows() ? "ollama.exe" : "ollama";
+    return Directory.EnumerateFiles(ollamaDir, fileName, SearchOption.AllDirectories).FirstOrDefault();
+}
+```
+
+While in this file, audit the misleading error message in
+`mac-prep-host/HostLifetime.cs:213` — "Run stage-ollama first" is
+wrong when stage-ollama already ran; reword to "Mac Ollama binary
+missing at the expected path; staging may have failed silently."
+or similar.
+
+**Affected files:**
+- `prep-core/Services/OllamaPackageService.cs` — pick filename
+  by OS.
+- `mac-prep-host/HostLifetime.cs` — clearer error message when
+  the binary is missing.
+- `tests/` — new test pinning Mac filename resolution against a
+  synthesized `<dir>/ollama` layout; existing Windows callers
+  exercise the .exe path.
+
+**Cross-OS review pass:**
+- **Windows surfaces:** Runner / Companion / Windows PrepApp keep
+  finding `ollama.exe`. No behavior change.
+- **Mac surfaces:** `pull-model` and `verify-model` sidecar arms
+  resolve, unblocking the model-pull stage of the Mac field test.
+- **Decision:** Bundle (single shared-core helper, both OSes use
+  same code path).
+
+**Acceptance criteria:**
+- Mac field run completes a starter-model pull (e.g.
+  `llama3.2:3b`) and the model lands in `<ssd>/models/`.
+- Existing Windows tests still pass; new Mac filename test passes.
+- v1.3.6 mac field run reaches readiness checks for the first
+  time.
