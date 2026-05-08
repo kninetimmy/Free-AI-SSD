@@ -22,7 +22,7 @@ public sealed class ModelOperations
     /// <param name="onLog">Callback for streaming pull progress to the UI.</param>
     /// <param name="ct">Cancellation token for aborting the download.</param>
     /// <returns>Pull result containing the SHA-256 hash and file size of the model blob.</returns>
-    public async Task<PullModelResult> PullModelAsync(string ollamaExe, string modelRoot, string modelTag, Action<string> onLog, CancellationToken ct, string? ollamaHost = null)
+    public async Task<PullModelResult> PullModelAsync(string ollamaExe, string modelRoot, string modelTag, Action<string> onLog, CancellationToken ct, string? ollamaHost = null, Action<string>? onProgress = null)
     {
         var env = new Dictionary<string, string>
         {
@@ -31,7 +31,12 @@ public sealed class ModelOperations
         if (ollamaHost is not null)
             env["OLLAMA_HOST"] = ollamaHost;
 
-        var exitCode = await RunProcessStreamingAsync(ollamaExe, BuildOllamaArgs("pull", modelTag), Path.GetDirectoryName(ollamaExe)!, env, onLog, ct);
+        // MAC31: onProgress is opt-in. When set, Ollama's TUI progress
+        // lines (after ANSI strip) are routed there instead of onLog so
+        // the PrepApp can render a single in-place progress line. When
+        // null, callers see the legacy behavior (every tick lands in the
+        // log surface) so existing call sites don't have to change.
+        var exitCode = await RunProcessStreamingAsync(ollamaExe, BuildOllamaArgs("pull", modelTag), Path.GetDirectoryName(ollamaExe)!, env, onLog, ct, onProgress);
         if (exitCode != 0)
         {
             throw new InvalidOperationException($"Failed to pull model {modelTag}. Exit code: {exitCode}");
@@ -310,7 +315,7 @@ public sealed class ModelOperations
     /// Uses ArgumentList (not Arguments string) for safe argument passing.
     /// Registers a cancellation callback that kills the process tree on cancellation.
     /// </summary>
-    private static async Task<int> RunProcessStreamingAsync(string fileName, IReadOnlyList<string> arguments, string workingDirectory, IDictionary<string, string> env, Action<string> onOutput, CancellationToken ct)
+    private static async Task<int> RunProcessStreamingAsync(string fileName, IReadOnlyList<string> arguments, string workingDirectory, IDictionary<string, string> env, Action<string> onOutput, CancellationToken ct, Action<string>? onProgress = null)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -355,8 +360,8 @@ public sealed class ModelOperations
         // Consume stdout and stderr concurrently to prevent buffer deadlocks.
         // Consume uses ReadLineAsync (not the blocking EndOfStream property),
         // so both tasks yield immediately and resume on the caller's sync context.
-        var outputTask = Consume(process.StandardOutput, onOutput, ct);
-        var errorTask = Consume(process.StandardError, onOutput, ct);
+        var outputTask = Consume(process.StandardOutput, onOutput, ct, onProgress);
+        var errorTask = Consume(process.StandardError, onOutput, ct, onProgress);
 
         await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync());
         ct.ThrowIfCancellationRequested();
@@ -368,16 +373,47 @@ public sealed class ModelOperations
     /// for each non-empty line until EOF.
     /// Uses ReadLineAsync (returns null at EOF) instead of the EndOfStream property,
     /// which is synchronous and blocks the calling thread when no data is available.
+    ///
+    /// MAC31: when <paramref name="onProgress"/> is provided, the line is
+    /// run through <see cref="OllamaPullProgressFilter"/> first.
+    /// Lines that match Ollama's progress shape (<c>pulling &lt;hash&gt;... NN%</c>)
+    /// are routed to onProgress instead of onOutput so the PrepApp UI can
+    /// render them as a single in-place progress line. ANSI cursor-rewrite
+    /// escapes are always stripped before forwarding so the log surface
+    /// stays human-readable. A throwing onProgress is contained so a
+    /// misbehaving UI dispatcher cannot leave the pipe unread.
     /// </summary>
-    private static async Task Consume(StreamReader reader, Action<string> onOutput, CancellationToken ct)
+    private static async Task Consume(StreamReader reader, Action<string> onOutput, CancellationToken ct, Action<string>? onProgress = null)
     {
         try
         {
             while (await reader.ReadLineAsync(ct) is { } line)
             {
-                if (!string.IsNullOrWhiteSpace(line))
+                var cleaned = onProgress is null
+                    ? line
+                    : OllamaPullProgressFilter.Clean(line);
+
+                if (string.IsNullOrWhiteSpace(cleaned))
                 {
-                    onOutput(line);
+                    continue;
+                }
+
+                if (onProgress is not null && OllamaPullProgressFilter.IsProgressLine(cleaned))
+                {
+                    try { onProgress(cleaned); }
+                    catch
+                    {
+                        // A misbehaving onProgress must not stop the
+                        // consumer — same invariant as the onLog catch
+                        // in OllamaServerHandle.ConsumeAsync.
+                    }
+                    continue;
+                }
+
+                try { onOutput(cleaned); }
+                catch
+                {
+                    // Same containment as onProgress above.
                 }
             }
         }
@@ -385,6 +421,137 @@ public sealed class ModelOperations
         {
             // Process killed or cancellation requested; stop reading.
         }
+    }
+
+    /// <summary>
+    /// MAC31: estimates the fraction of <paramref name="modelTag"/>'s
+    /// expected blob payload that's already on disk as
+    /// <c>sha256-&lt;hex&gt;-partial-N</c> files under
+    /// <c>&lt;modelsRoot&gt;/blobs/</c>. Used to seed the PrepApp's
+    /// progress display before invoking <c>ollama pull</c> so a retry
+    /// after a cancelled or interrupted pull surfaces "Resuming from
+    /// 43%..." instead of starting at 0% (which is what the user sees
+    /// today even though Ollama IS resumable).
+    ///
+    /// Returns 0.0 if no manifest exists yet, if the manifest is
+    /// malformed, or if the blobs directory is missing. Returns 1.0
+    /// when every layer has a fully-downloaded blob present. The model
+    /// tag is validated against an allowlist so this method cannot be
+    /// coerced into a path-traversal read via a hostile tag.
+    /// </summary>
+    public static double EstimatePartialProgress(string modelsRoot, string modelTag)
+    {
+        if (string.IsNullOrWhiteSpace(modelsRoot) || !Directory.Exists(modelsRoot))
+        {
+            return 0.0;
+        }
+
+        if (!IsSafeModelTag(modelTag))
+        {
+            return 0.0;
+        }
+
+        if (!TryParseModelReference(modelTag, out var modelName, out var manifestTag))
+        {
+            return 0.0;
+        }
+
+        var manifestPath = Path.Combine(modelsRoot, "manifests", "registry.ollama.ai", "library", modelName, manifestTag);
+        if (!File.Exists(manifestPath))
+        {
+            return 0.0;
+        }
+
+        long totalBytes = 0;
+        long downloadedBytes = 0;
+        var blobsDir = Path.Combine(modelsRoot, "blobs");
+        var blobsDirExists = Directory.Exists(blobsDir);
+
+        try
+        {
+            var content = File.ReadAllText(manifestPath);
+            using var doc = JsonDocument.Parse(content);
+            if (!doc.RootElement.TryGetProperty("layers", out var layersElement) || layersElement.ValueKind != JsonValueKind.Array)
+            {
+                return 0.0;
+            }
+
+            foreach (var layer in layersElement.EnumerateArray())
+            {
+                if (!layer.TryGetProperty("size", out var sizeElement) || !sizeElement.TryGetInt64(out var layerSize) || layerSize <= 0)
+                {
+                    continue;
+                }
+                totalBytes += layerSize;
+
+                if (!blobsDirExists)
+                {
+                    continue;
+                }
+
+                if (!layer.TryGetProperty("digest", out var digestElement) || digestElement.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+                var digestRaw = digestElement.GetString();
+                if (string.IsNullOrEmpty(digestRaw) || !digestRaw.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                var digestSuffix = "sha256-" + digestRaw["sha256:".Length..].ToLowerInvariant();
+
+                var fullBlob = Path.Combine(blobsDir, digestSuffix);
+                if (File.Exists(fullBlob))
+                {
+                    downloadedBytes += new FileInfo(fullBlob).Length;
+                    continue;
+                }
+
+                // Partial blobs Ollama writes mid-download. Multiple
+                // partials per layer are possible (parallel chunks); sum
+                // them all but cap at the layer's expected size so a
+                // ragged retry can't produce > 100%.
+                long partialSum = 0;
+                foreach (var partial in Directory.EnumerateFiles(blobsDir, digestSuffix + "-partial*"))
+                {
+                    try { partialSum += new FileInfo(partial).Length; }
+                    catch { /* best-effort; race with Ollama is fine */ }
+                }
+                downloadedBytes += Math.Min(partialSum, layerSize);
+            }
+        }
+        catch
+        {
+            // Malformed manifest, IO error, or partial-file race — fall
+            // through to a 0.0 seed. The pull still works; the user
+            // just sees the bar start at 0% and climb from there.
+            return 0.0;
+        }
+
+        if (totalBytes <= 0) return 0.0;
+        var fraction = (double)downloadedBytes / totalBytes;
+        return Math.Clamp(fraction, 0.0, 1.0);
+    }
+
+    /// <summary>
+    /// MAC31: bounds <see cref="EstimatePartialProgress"/>'s path
+    /// construction to the same character set Ollama tags use
+    /// (lowercase alphanumerics, dot, underscore, hyphen, optional
+    /// <c>:tag</c> suffix). Anything outside that — including <c>..</c>,
+    /// path separators, or whitespace — fails closed. Mirrors the
+    /// PathGuards posture for user-supplied path segments.
+    /// </summary>
+    private static bool IsSafeModelTag(string modelTag)
+    {
+        if (string.IsNullOrWhiteSpace(modelTag)) return false;
+        foreach (var c in modelTag)
+        {
+            var ok = (c >= 'a' && c <= 'z')
+                  || (c >= '0' && c <= '9')
+                  || c == '.' || c == '_' || c == '-' || c == ':';
+            if (!ok) return false;
+        }
+        return !modelTag.Contains("..", StringComparison.Ordinal);
     }
 }
 

@@ -49,10 +49,26 @@ final class PrepViewModel: ObservableObject {
     // Readiness
     @Published var readinessItems: [ReadinessRow] = []
 
+    // MAC31: pull UX state. canCancelPull gates the Cancel button on
+    // the model-pull step view; pullProgressLine receives sidecar
+    // `progress: ...` ticks so the picker shows a single in-place
+    // status string rather than scrolling Ollama's TUI rewrite spam.
+    @Published var canCancelPull: Bool = false
+    @Published var pullProgressLine: String = ""
+
     // Services (deliberately non-@Published — these are stable references)
     private let driveService = DiskutilDriveService()
     private let hostController = PrepHostController()
     private let encryptedConfigWriter = EncryptedConfigWriter()
+
+    // MAC31: held for the duration of the pull batch so cancelPull()
+    // can interrupt the for-loop in pullStarterModels(). Cancelling
+    // the Task unblocks any in-flight hostController.send via the
+    // withTaskCancellationHandler in awaitCommandResult; we *also*
+    // dispatch a `cancel-pull` to the sidecar so the underlying
+    // ollama process gets killed (without that, the daemon would
+    // keep downloading even though Swift stopped awaiting).
+    private var activePullTask: Task<Void, Never>?
 
     init() {
         // Default starter selection is set after discoverCatalog() runs
@@ -60,6 +76,12 @@ final class PrepViewModel: ObservableObject {
         // not from a hardcoded array — F2).
         hostController.onLogLine = { [weak self] line in
             Task { @MainActor in self?.appendLog(line) }
+        }
+        // MAC31: route the sidecar's pull-progress channel to the
+        // single in-place label. The closure already hops to main via
+        // PrepHostController, so we just assign it.
+        hostController.onPullProgress = { [weak self] line in
+            Task { @MainActor in self?.pullProgressLine = line }
         }
     }
 
@@ -376,24 +398,62 @@ final class PrepViewModel: ObservableObject {
 
         isBusy = true
         defer { isBusy = false }
+        canCancelPull = true
+        defer { canCancelPull = false }
 
-        // Mac Ollama lifecycle for MVP: the user starts Mac Runner
-        // separately and the model pull happens against that running
-        // instance. For now, attempt the pull; on failure surface a
-        // friendly message rather than a hard fail — model pull can be
-        // re-attempted from the Mac Runner.
-        for tag in selectedStarterModels {
-            appendLog("Pulling \(tag)…")
-            do {
-                _ = try await hostController.send("pull-model \(tag)", timeout: 1800)
-                appendLog("Pulled \(tag).")
-            } catch {
-                appendLog("Pull failed for \(tag): \(error.localizedDescription)")
-                appendLog("(This is non-fatal — you can pull models later from Mac Runner.)")
+        // MAC31: wrap the pull batch in a Task so cancelPull() can
+        // interrupt the hostController.send await. The for-loop checks
+        // Task.isCancelled between pulls so a cancel during model N
+        // doesn't silently start downloading model N+1.
+        // Strong capture of self is safe because we `await task.value`
+        // immediately, bounding the task's lifetime to this method.
+        let tags = Array(selectedStarterModels)
+        let task = Task { @MainActor in
+            for tag in tags {
+                if Task.isCancelled { break }
+                self.pullProgressLine = "Pulling \(tag)…"
+                self.appendLog("Pulling \(tag)…")
+                do {
+                    _ = try await self.hostController.send("pull-model \(tag)", timeout: 1800)
+                    self.appendLog("Pulled \(tag).")
+                } catch is CancellationError {
+                    self.appendLog("Pull cancelled for \(tag).")
+                    break
+                } catch {
+                    self.appendLog("Pull failed for \(tag): \(error.localizedDescription)")
+                    self.appendLog("(This is non-fatal — you can pull models later from Mac Runner.)")
+                }
             }
         }
+        activePullTask = task
+        await task.value
+        activePullTask = nil
+        pullProgressLine = ""
+
         currentStep = .readiness
         await runReadiness()
+    }
+
+    /// MAC31: cancel the active pull batch. Cancels the Swift Task so
+    /// the for-loop's `hostController.send` await unblocks (raises
+    /// CancellationError via awaitCommandResult's task-cancellation
+    /// handler), AND dispatches a `cancel-pull` to the sidecar so the
+    /// underlying `ollama pull` process tree is killed — otherwise the
+    /// download would continue silently in the daemon even though
+    /// Swift stopped awaiting it.
+    ///
+    /// Idempotent: safe to call when no pull is in flight; the sidecar
+    /// arm is a no-op in that case.
+    func cancelPull() {
+        guard canCancelPull else { return }
+        appendLog("Cancelling pull…")
+        activePullTask?.cancel()
+        let host = self.hostController
+        Task {
+            // Short timeout — cancel-pull just signals a CTS and
+            // returns; long timeouts here would mask a hung sidecar.
+            _ = try? await host.send("cancel-pull", timeout: 5)
+        }
     }
 
     private func runReadiness() async {

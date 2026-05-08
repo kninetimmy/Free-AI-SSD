@@ -75,6 +75,13 @@ namespace FreeAiSsd.MacPrepHost
                 return 3;
             }
 
+            // MAC31: tracks the most-recent detached pull-model task so
+            // shutdown can drain it before tearing the lifetime down.
+            // Without this drain, a fire-and-forget pull task may still
+            // be writing its result line to stdout when the lifetime
+            // disposes — which closes the writer mid-write.
+            Task? activePullTask = null;
+
             // Command loop. Treat stdin EOF as shutdown so an orphaned host always exits.
             while (true)
             {
@@ -105,6 +112,40 @@ namespace FreeAiSsd.MacPrepHost
                     break;
                 }
 
+                // MAC31: detach pull-model so the command loop can read
+                // the next stdin line — specifically `cancel-pull` —
+                // while the pull is still in flight. HandleCommandAsync
+                // emits its own result line for both success and
+                // cancellation paths, so the parent's awaitCommandResult
+                // continuation still resolves correctly. All other
+                // commands stay sequential because the prep flow
+                // depends on their ordering (ensure-structure must
+                // finish before stage-runner runs, etc.) and Swift
+                // never issues two of them in parallel anyway.
+                if (IsPullModelCommand(line))
+                {
+                    var pullLine = line;
+                    activePullTask = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await lifetime.HandleCommandAsync(pullLine);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            // PullModelAsync's catch already wrote
+                            // the cancelled result line; nothing to
+                            // surface to stderr.
+                        }
+                        catch (Exception ex)
+                        {
+                            try { await stderr.WriteLineAsync($"Command failed ('{pullLine}'): {ex.Message}"); }
+                            catch { /* parent likely gone; loop will observe stdin EOF and exit */ }
+                        }
+                    });
+                    continue;
+                }
+
                 try
                 {
                     await lifetime.HandleCommandAsync(line);
@@ -113,6 +154,28 @@ namespace FreeAiSsd.MacPrepHost
                 {
                     await stderr.WriteLineAsync($"Command failed ('{line}'): {ex.Message}");
                 }
+            }
+
+            // MAC31: drain the in-flight pull task before disposing.
+            // Cancel first so a real pull doesn't make shutdown wait for
+            // the full download — cancel-pull is idempotent so it's safe
+            // even if the task already completed. Then wait up to 5s for
+            // the task's finally block to run (writes the cancelled
+            // result line, releases the CTS slot). The lifetime's
+            // _ollamaServer.Dispose() in DisposeAsync below kills the
+            // process tree as a backstop if the cancel signal didn't
+            // propagate in time.
+            if (activePullTask is not null && !activePullTask.IsCompleted)
+            {
+                try { await lifetime.HandleCommandAsync("cancel-pull"); }
+                catch { /* best-effort */ }
+                try { await activePullTask.WaitAsync(TimeSpan.FromSeconds(5)); }
+                catch { /* timeout or fault — DisposeAsync's server kill is the backstop */ }
+            }
+            else if (activePullTask is not null)
+            {
+                // Already complete — just await to surface any fault for visibility.
+                try { await activePullTask; } catch { }
             }
 
             try
@@ -126,6 +189,25 @@ namespace FreeAiSsd.MacPrepHost
             }
 
             return 0;
+        }
+
+        /// <summary>
+        /// MAC31: detects whether a stdin command line is a pull-model
+        /// invocation. We dispatch those off the loop's await so a
+        /// follow-up <c>cancel-pull</c> can be received while the pull
+        /// is in flight. Case-insensitive to match
+        /// <see cref="HostLifetime.HandleCommandAsync"/>'s own
+        /// normalization.
+        /// </summary>
+        private static bool IsPullModelCommand(string line)
+        {
+            var trimmed = line.TrimStart();
+            const string pullModel = "pull-model";
+            if (!trimmed.StartsWith(pullModel, StringComparison.OrdinalIgnoreCase)) return false;
+            // Must be either "pull-model" exactly or "pull-model <payload>"
+            // — never something like "pull-modelfoo".
+            if (trimmed.Length == pullModel.Length) return true;
+            return trimmed[pullModel.Length] == ' ' || trimmed[pullModel.Length] == '\t';
         }
     }
 }
