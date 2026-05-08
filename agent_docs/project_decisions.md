@@ -1355,3 +1355,72 @@ one-line CLI test of the inner server pulling against
 
 **Supersedes.** No prior decision — first explicit lock on Mac
 Ollama runtime architecture.
+
+## 2026-05-08 — Encryption is opt-in (default OFF) on both PrepApps
+
+**Decision.** SSD config encryption becomes opt-in across Windows
+and Mac PrepApp. The toggle is visible on the encryption setup
+step, defaulted to OFF, framed as an optional security upgrade
+rather than a gate. A user who taps "Continue without encryption"
+proceeds to model pull without any passphrase friction. The
+plaintext path writes `<root>/config/portable-config.json`
+directly; the encrypted path writes
+`<root>/config/portable-config.encrypted.json` as before. **MAC30
+is the implementation issue.**
+
+**Why.** Field pushback from v1.3.5 (carried through v1.3.9):
+"this version forces you to encrypt. you cant pull the models
+unless you set an encryption password. that shouldnt be forced."
+The MAC17a-#6 stance ("plaintext-mode prep is out of scope") was
+made for engineering tractability — the `!enableEncryption`
+codepath threw `failed` because the plaintext writer was missing
+on Mac. That's a fixable engineering gap, not a product
+constraint.
+
+**The narrowed invariant.** Pre-MAC30, MAC5 said "no plaintext
+config containing secrets ever written." Post-MAC30, the
+invariant tightens to "**the API key is never written in
+plaintext**" — narrower and more defensible. The existing
+`shared/PortableConfig.cs:275`
+`NetworkModeEncryptionRequiredMessage` guard already enforces
+this: enabling Network Mode + Require API Key on a plaintext
+config throws at save time. So Companion-on-LAN remains an
+encrypted-config feature; everything else (local chat, RAG, DCS
+bindings, voice) is fine on plaintext.
+
+**Threat model the user accepts on plaintext.** A lost or
+stolen unencrypted SSD reveals: model list with hashes, document
+library metadata, PTT keybinds, UI preferences. It does NOT
+reveal: API keys (guard above), document content (lives in
+`docs/` and `models/blobs/`, addressed separately). For most
+single-user offline workflows this is an acceptable posture.
+Users who plug into a multi-user PC or carry the SSD across
+trust boundaries are exactly who the encryption upgrade is for
+— and the explainer text on the toggle should say so.
+
+**Cross-OS scope.** Both PrepApps. Windows kept its toggle
+through MAC17a; Mac lost it. MAC30 restores Mac and flips both
+defaults to OFF in the same PR per the 2026-05-07 dual-OS rule.
+
+**Exit ramps.** Re-open if any of:
+
+1. Field testing reveals a leak vector through plaintext config
+   the threat model above doesn't cover (e.g. cached prompt
+   metadata containing user secrets).
+2. Network Mode usage rises high enough that "Companion needs
+   encryption" becomes a major friction — at which point we'd
+   either (a) auto-prompt for encryption on the first Network
+   Mode toggle, or (b) move the API key out of the encrypted
+   config to a separate keychain-backed store.
+3. A regulatory or compliance posture lands that requires
+   encryption-at-rest for offline AI deployments — flip the
+   default back to ON.
+
+**Implementation owners.** MAC30 backlog entry in
+`mac_project_backlog.md` carries the file-by-file plan, the
+threat-model framing for the user-facing explainer, and
+acceptance criteria.
+
+**Supersedes.** Replaces the MAC17a-#6 stance ("plaintext-mode
+prep is out of scope"). MAC5's plaintext invariant narrows from
+"no plaintext config" to "no plaintext API key".
