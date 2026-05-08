@@ -1,23 +1,29 @@
 # Project State
 
-Last updated: 2026-05-07 (MAC21 merged `a3a2ff1`; wrap-up follow-up in flight)
+Last updated: 2026-05-07 (v1.3.2 cut + field test surfaced MAC22; MAC22 fix in flight)
 
-Last released: **v1.2.9** (2026-04-19). Last field-tested: v1.2.5. v1.3.1 is the user's local cross-platform build under test; it surfaced MAC19/MAC20/MAC21 today.
+Last released: **v1.3.2** (2026-05-07, GH release ID `Free-AI-SSD-beta-crossplatform.zip`). Last field-tested: v1.3.2 same day, which surfaced MAC22 immediately after MAC21 unblocked the format step. v1.3.1 was the prior field-test build that surfaced MAC19/MAC20/MAC21.
 
 > v1.2.7 tag exists on `af77abc` but has no GH release artifact; v1.2.8 supersedes it.
 
-**MAC21 merged at `a3a2ff1` (PR #204).** `DiskCandidate` reshaped
-to track parent identifier + new `PartitionMount` (volume the user
-actually writes into); partition walk in `listExternalCandidates`
-plus parent-mount fallback for the whole-disk-format case; static
-`parseCandidates` seam + two hand-crafted plist fixtures + four
-new tests pinning the parser. CI green on first run. Wrap-up
-docs-only follow-up in flight; **MAC19** (Gatekeeper xattr docs)
-and **MAC20** (cross-platform ZIP layout rework) are the next two
-blockers in the same field-test queue. **MAC11** (signing +
+**v1.3.2 released `c4fb92e`** with MAC21 + F2 + MAC18 + MAC17b/a +
+MAC10b. Mac field test against the released build immediately
+surfaced **MAC22** — `prep-core/MacArtifactAvailability.Evaluate`
+called with `AppContext.BaseDirectory`, which on the Mac sidecar
+resolves to `PrepApp.app/Contents/Resources/prep-host/` (5 levels
+deep inside `payload/mac/`); the lookup only walked downward
+(`<base>/mac`, `<base>/payload/mac`), missed the manifest sitting
+5 levels up at the bundle root, and the sidecar reported "macOS
+preparation is available in the Cross-platform Beta download."
+on every `stage-runner` call. **MAC22 fix in flight on
+`kninetimmy/mac22-artifact-lookup-from-sidecar`** — extend
+`EnumerateContentRoots` to walk a bounded number of ancestors;
+new `tests/MacArtifactAvailabilityTests.cs` pins both layouts.
+**MAC19** (Gatekeeper xattr docs) and **MAC20** (cross-platform
+ZIP layout rework) remain queued behind. **MAC11** (signing +
 notarization) remains back-burnered until the user's Apple
 Developer cert renews. **X18** execution prompt at
-`agent_docs/x18_execution_prompt.md` queued behind the three Mac
+`agent_docs/x18_execution_prompt.md` queued behind the Mac
 blockers.
 
 ## Recently shipped
@@ -62,12 +68,13 @@ blockers.
 
 ## Next up
 
-1. **MAC19** — Mac install docs + xattr quarantine workaround. Filed 2026-05-07 from v1.3.1 field test: Safari-downloaded unsigned `.app` bundles fail Gatekeeper with "damaged → move to trash" until MAC11 ships. Small, ship-soon doc fix.
-2. **MAC20** — Cross-platform release ZIP layout rework. Filed 2026-05-07 same session: root currently scatters loose Windows DLLs + PDBs alongside `payload/`; user wants `windows/` + `mac/` + `QUICKSTART.txt` + `LICENSE` at root. Medium; touches CI release-assembly + PrepApp sidecar paths.
-3. **X18** — Ingest observability (first item in the v1.3.x RAG audit sequence X18 → X22 → X15 → X19 → X20 → X23). Execution prompt drafted at `agent_docs/x18_execution_prompt.md`. Bundle-cross-OS by default per the strengthened 2026-05-07 dual-OS review pass rule.
-4. **MAC11** — Signing + notarization. **Back-burnered** until the user's Apple Developer account renews on payday. MAC10b already landed the bundle metadata so MAC11 is plumbing-ready when the cert returns.
-5. **X4** unblocked from the host side: only needs SPA assets at `runner-core/wwwroot/chat/`. After F2 demonstrated the cross-OS bundle pattern works cleanly, X4 is a natural next bundled-cross-OS pick.
-6. For other non-Mac work, pick from `B2` (LAN discovery — Stage 1 done, Stages 2-4 pending), `F4` (FTUE Stage 2-4), `H3`, or `R1` follow-up (RunnerCli `/docs`+`/reindex` slash-commands).
+1. **MAC22** — Mac sidecar manifest lookup walks ancestors. Filed 2026-05-07 from v1.3.2 field test (immediate field-blocker; MAC21 unblocked the format step then this tripped on `stage-runner`). PR open on `kninetimmy/mac22-artifact-lookup-from-sidecar`. Once merged, cut v1.3.3 with mac artifacts so the user can resume the field test.
+2. **MAC19** — Mac install docs + xattr quarantine workaround. Filed 2026-05-07 from v1.3.1 field test: Safari-downloaded unsigned `.app` bundles fail Gatekeeper with "damaged → move to trash" until MAC11 ships. Small, ship-soon doc fix.
+3. **MAC20** — Cross-platform release ZIP layout rework. Filed 2026-05-07 same session: root currently scatters loose Windows DLLs + PDBs alongside `payload/`; user wants `windows/` + `mac/` + `QUICKSTART.txt` + `LICENSE` at root. Medium; touches CI release-assembly + PrepApp sidecar paths.
+4. **X18** — Ingest observability (first item in the v1.3.x RAG audit sequence X18 → X22 → X15 → X19 → X20 → X23). Execution prompt drafted at `agent_docs/x18_execution_prompt.md`. Bundle-cross-OS by default per the strengthened 2026-05-07 dual-OS review pass rule.
+5. **MAC11** — Signing + notarization. **Back-burnered** until the user's Apple Developer account renews on payday. MAC10b already landed the bundle metadata so MAC11 is plumbing-ready when the cert returns.
+6. **X4** unblocked from the host side: only needs SPA assets at `runner-core/wwwroot/chat/`. After F2 demonstrated the cross-OS bundle pattern works cleanly, X4 is a natural next bundled-cross-OS pick.
+7. For other non-Mac work, pick from `B2` (LAN discovery — Stage 1 done, Stages 2-4 pending), `F4` (FTUE Stage 2-4), `H3`, or `R1` follow-up (RunnerCli `/docs`+`/reindex` slash-commands).
 
 **RAG audit backlog:** X17-X23 cover audit findings; X10/X13/X15 scope expansions recorded. Plan: `C:\Users\Kninetimmy\.claude\plans\okay-i-want-to-glowing-galaxy.md`. v1.3.x sequence: X18 -> X15 (expanded) -> X19 -> X20 -> X22 -> X23. X17 reduced to Stage 1 textless-page diagnostic (full OCR deferred -- workload is text-layer PDFs).
 

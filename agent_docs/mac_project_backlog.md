@@ -1217,6 +1217,135 @@ already-formatted SSD.
 
 ---
 
+### MAC22 - Mac sidecar manifest lookup walks ancestors
+
+**Status:** planned 2026-05-07 (field-reported by user same session;
+  caught immediately after MAC21 unblocked the format step in the
+  v1.3.2 field test).
+**Scope:** small — extend
+  `prep-core/MacArtifactAvailability.EnumerateContentRoots` to
+  walk parent directories + add unit tests.
+**Risk:** Low — backward-compatible (Windows still hits the
+  manifest on the original second candidate); all changes confined
+  to a single static helper plus tests.
+**Dependencies:** None. Top of the queue (immediate field-blocker)
+  the moment MAC21 ships.
+**Goal:** Mac PrepApp's `stage-runner` / `stage-ollama` /
+  `stage-prereqs` sidecar arms succeed instead of failing with
+  "macOS preparation is available in the Cross-platform Beta
+  download." when the sidecar is run from inside the .app bundle.
+
+**Driver:** v1.3.2 field test, immediately after stripping the
+quarantine xattr to clear MAC19. Format succeeded (MAC21 fix
+working), then `runStaging` hung at the staging step:
+
+```
+[stderr] Command failed ("stage-runner"): macOS preparation is
+available in the Cross-platform Beta download.
+```
+
+Diagnosed at `prep-core/Services/ArtifactStagingService.cs:64`:
+
+```csharp
+var macAvailability = MacArtifactAvailability.Evaluate(AppContext.BaseDirectory);
+```
+
+`AppContext.BaseDirectory` resolves to:
+- **Windows PrepApp.exe**: bundle root (`Free-AI-SSD-beta-crossplatform/`).
+  `EnumerateContentRoots` yields `<root>` then `<root>/payload`; the
+  manifest at `<root>/payload/mac/mac-artifacts.manifest.json` is
+  found on the second candidate. ✓
+- **Mac mac-prep-host sidecar**:
+  `Free-AI-SSD-beta-crossplatform/payload/mac/PrepApp.app/Contents/Resources/prep-host/`.
+  Both candidates miss; manifest is **5 levels up**, not down.
+  Pre-MAC22 the lookup never walks up, so every Mac field-prep run
+  reports "macOS preparation is available in the Cross-platform
+  Beta download." even though the manifest is sitting right there
+  at the bundle root. ✗
+
+The bug had been latent since MAC17 shipped — manual smoke on a
+real Mac + external SSD was the deferred validation that MAC21
+finally unblocked, and MAC22 was the immediate next thing it caught.
+
+**Fix:**
+
+Extend `EnumerateContentRoots(string appDirectory)` in
+`prep-core/MacArtifactAvailability.cs` to also walk a bounded
+number of ancestors after the existing two candidates:
+
+```csharp
+DirectoryInfo? cursor;
+try { cursor = new DirectoryInfo(appDirectory); }
+catch { yield break; }
+
+for (var i = 0; i < 6 && cursor?.Parent is not null; i++)
+{
+    cursor = cursor.Parent;
+    yield return cursor.FullName;
+    yield return Path.Combine(cursor.FullName, "payload");
+}
+```
+
+Bounded depth of 6 is enough to escape
+`PrepApp.app/Contents/Resources/prep-host/` (5 levels) plus a
+margin. Backward-compatible with Windows (its original second
+candidate still wins on the first iteration, before the loop runs).
+
+**Test (new fixture-driven coverage):**
+
+New `tests/MacArtifactAvailabilityTests.cs` with five cases:
+1. Windows layout — `Evaluate(<bundleRoot>)` finds the manifest at
+   `<bundleRoot>/payload/mac/mac-artifacts.manifest.json` (preserves
+   the existing behavior the Windows PrepApp depends on).
+2. Mac sidecar layout — `Evaluate(<bundleRoot>/payload/mac/PrepApp.app/Contents/Resources/prep-host/)`
+   finds the same manifest by walking ancestors (the regression pin).
+3. Manifest absent anywhere up the chain — returns Unavailable
+   with the canonical missing-manifest message.
+4. Manifest present but referenced artifact missing — returns
+   Unavailable with the IncompleteManifestMessage.
+5. Bounded-depth sanity — 8-level-deep sidecar path doesn't escape
+   into a parent fixture (the 6-ancestor cap holds).
+
+**Affected files:**
+- `prep-core/MacArtifactAvailability.cs` — extend
+  `EnumerateContentRoots`. ~20 added lines.
+- `tests/MacArtifactAvailabilityTests.cs` — new test class.
+
+**Cross-OS review pass:**
+- **Windows surfaces:** `MacArtifactAvailability.Evaluate` is called
+  by Windows PrepApp's `ArtifactStagingService` to gate cross-platform
+  staging. The change preserves the original 2-candidate lookup
+  order, so the Windows path is hit on the same first iteration.
+  No behavior change.
+- **Mac surfaces:** `MacArtifactAvailability.Evaluate` is called by
+  the mac-prep-host sidecar via the same `ArtifactStagingService`.
+  Ancestor walk lets the sidecar find the manifest from inside the
+  .app bundle.
+- **Decision:** Bundle (single shared-core fix; both OSes benefit
+  from the same code path).
+
+**Out of scope:**
+- MAC20 ZIP layout rework (that puts the manifest closer to the
+  apps but doesn't make the lookup itself robust).
+- Runtime config plumbing of bundle-root path through the handshake
+  (`mac-prep-host` could be told its bundle root explicitly), which
+  is more invasive and unnecessary if the lookup walks ancestors.
+
+**Acceptance criteria:**
+- v1.3.3 Mac field run reaches the encryption-setup step instead of
+  failing at `stage-runner` with the missing-manifest message.
+- All five new tests pass on CI.
+- Existing windows-build / mac-runner-build / mac-prep-build all
+  pass — backward-compatible by construction.
+
+**Tests:**
+- New unit tests above.
+- Manual smoke deferred to the same real-Mac + external-SSD loop
+  the user is exercising right now; MAC22 + MAC21 together should
+  let prep run end-to-end through staging into encryption setup.
+
+---
+
 ### MAC19 - Mac install docs + xattr quarantine workaround
 
 **Status:** planned 2026-05-07 (field-reported by user same session)
