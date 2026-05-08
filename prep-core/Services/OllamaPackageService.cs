@@ -42,7 +42,7 @@ public sealed class OllamaPackageService : IOllamaPackageService
         OllamaPackageTrustPolicy.WriteTrustAttestation(root, sourceValidation.Metadata);
         onLog("Ollama package staged.");
 
-        return ResolveOllamaExe(ollamaDir) ?? throw new FileNotFoundException($"Unable to locate ollama.exe under {ollamaDir}");
+        return ResolveOllamaExe(ollamaDir) ?? throw new FileNotFoundException($"Unable to locate Ollama binary under {ollamaDir}");
     }
 
     public async Task<IOllamaServerHandle> StartTemporaryServerAsync(
@@ -52,9 +52,15 @@ public sealed class OllamaPackageService : IOllamaPackageService
     }
 
     public string? ResolveOllamaExe(string ollamaDir)
+        => ResolveOllamaExe(ollamaDir, GetOllamaFileName());
+
+    internal static string GetOllamaFileName()
+        => OperatingSystem.IsWindows() ? "ollama.exe" : "ollama";
+
+    internal static string? ResolveOllamaExe(string ollamaDir, string fileName)
     {
         if (!Directory.Exists(ollamaDir)) return null;
-        return Directory.EnumerateFiles(ollamaDir, "ollama.exe", SearchOption.AllDirectories).FirstOrDefault();
+        return Directory.EnumerateFiles(ollamaDir, fileName, SearchOption.AllDirectories).FirstOrDefault();
     }
 
     private static void ExtractOllamaZip(string zipPath, string destination)

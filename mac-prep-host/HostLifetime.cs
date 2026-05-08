@@ -210,7 +210,7 @@ internal sealed class HostLifetime : IAsyncDisposable
         var ollamaDir = Path.Combine(_ssdRoot, SsdLayout.MacOllama);
         var ollamaExe = _ollamaPackage.ResolveOllamaExe(ollamaDir)
             ?? throw new FileNotFoundException(
-                $"Mac Ollama binary not found under {ollamaDir}. Run stage-ollama first.");
+                $"Mac Ollama binary missing at the expected path under {ollamaDir}; staging may have failed silently.");
 
         var result = await _modelService.PullModelAsync(
             ollamaExe, modelsRoot, modelTag, EmitLog, ct, _ollamaHost);
