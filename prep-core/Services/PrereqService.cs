@@ -185,12 +185,45 @@ public sealed class PrereqService : IPrereqService
         };
     }
 
-    private static string ResolveBundledPrereqDirectory()
-    {
-        var rootCandidate = Path.Combine(AppContext.BaseDirectory, SsdLayout.Prereqs);
-        if (Directory.Exists(rootCandidate))
-            return rootCandidate;
+    internal static string ResolveBundledPrereqDirectory()
+        => ResolveBundledPrereqDirectory(AppContext.BaseDirectory);
 
-        return Path.Combine(AppContext.BaseDirectory, "payload", SsdLayout.Prereqs);
+    internal static string ResolveBundledPrereqDirectory(string baseDirectory)
+    {
+        // MAC24: mirror MAC22 / MAC23. Mac PrepApp's mac-prep-host sidecar
+        // runs from PrepApp.app/Contents/Resources/prep-host/, so
+        // AppContext.BaseDirectory is *not* the bundle root and the bundled
+        // windows/tools/prereqs/ folder lives several levels up. Walk a
+        // bounded number of ancestors. Backward-compatible: Windows finds
+        // the prereqs folder on the first or second candidate and never
+        // enters the loop. Returns the first candidate that exists; if
+        // none exist, returns the canonical "<base>/payload/<prereqs>"
+        // path so the caller's Directory.Exists check produces the same
+        // diagnostic error message as before.
+        foreach (var contentRoot in EnumerateBundleRoots(baseDirectory))
+        {
+            var candidate = Path.Combine(contentRoot, SsdLayout.Prereqs);
+            if (Directory.Exists(candidate))
+                return candidate;
+        }
+
+        return Path.Combine(baseDirectory, "payload", SsdLayout.Prereqs);
+    }
+
+    private static IEnumerable<string> EnumerateBundleRoots(string baseDirectory)
+    {
+        yield return baseDirectory;
+        yield return Path.Combine(baseDirectory, "payload");
+
+        DirectoryInfo? cursor;
+        try { cursor = new DirectoryInfo(baseDirectory); }
+        catch { yield break; }
+
+        for (var i = 0; i < 6 && cursor?.Parent is not null; i++)
+        {
+            cursor = cursor.Parent;
+            yield return cursor.FullName;
+            yield return Path.Combine(cursor.FullName, "payload");
+        }
     }
 }
