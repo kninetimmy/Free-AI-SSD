@@ -1346,6 +1346,175 @@ New `tests/MacArtifactAvailabilityTests.cs` with five cases:
 
 ---
 
+### MAC23 - ArtifactStagingService bundled-file lookup walks ancestors
+
+**Status:** planned 2026-05-07 (field-reported by user same session;
+  caught in v1.3.3 field test the moment MAC22 unblocked the
+  manifest-presence check).
+**Scope:** small — symmetric mirror of the MAC22 fix; extend
+  `prep-core/Services/ArtifactStagingService.EnumerateBundledContentRoots`
+  to walk parent directories + add unit tests.
+**Risk:** Low — backward-compatible (Windows still hits the
+  bundled files on the original first/second candidate); change
+  confined to a single static helper plus tests.
+**Dependencies:** None. Top of the queue (immediate field-blocker)
+  the moment the user resumes the Mac field test.
+**Goal:** Mac PrepApp's `stage-runner` / `stage-ollama` sidecar
+  arms succeed at copying `Runner.app.zip` / `ollama-darwin.zip` /
+  `mac-tools-manifest.json` from the bundle into the SSD layout,
+  instead of failing with `"Bundled macOS Runner.app archive was
+  not found."` immediately after the manifest-presence check passes.
+
+**Driver:** v1.3.3 field test, immediately after MAC22 fixed the
+manifest-presence check. PrepApp launched, format succeeded
+(MAC21), `MacArtifactAvailability.Evaluate` returned Available
+(MAC22), then the very next line in `StageMacRunnerAsync` tripped:
+
+```
+SSD layout created.
+[stderr] Command failed ("stage-runner"): Bundled macOS Runner.app archive was not found.
+```
+
+Diagnosed at `prep-core/Services/ArtifactStagingService.cs:72-73`:
+
+```csharp
+var sourceRunnerZip = ResolveBundledFile(Path.Combine("mac", "Runner.app.zip"))
+    ?? throw new FileNotFoundException("Bundled macOS Runner.app archive was not found.");
+```
+
+`ResolveBundledFile` (line 237) iterates `EnumerateBundledContentRoots`
+which yields only `AppContext.BaseDirectory` and `<base>/payload` —
+the **same** 2-candidate pattern MAC22 just fixed in
+`MacArtifactAvailability.EnumerateContentRoots`, in a sibling
+helper. On the Mac sidecar `AppContext.BaseDirectory` is
+`PrepApp.app/Contents/Resources/prep-host/`, so neither candidate
+finds `payload/mac/Runner.app.zip` 4 levels up.
+
+The same enumerator is used for three Mac staging arms:
+- Line 72:  `ResolveBundledFile("mac/Runner.app.zip")`
+- Line 98:  `ResolveBundledFile("mac/tools/ollama/ollama-darwin.zip")`
+- Line 143: `ResolveBundledFile("mac/tools/ollama/mac-tools-manifest.json")`
+
+So fixing `EnumerateBundledContentRoots` once unblocks all three.
+
+**Fix:**
+
+Mirror the MAC22 fix exactly. In
+`prep-core/Services/ArtifactStagingService.cs:249`:
+
+```csharp
+private static IEnumerable<string> EnumerateBundledContentRoots()
+{
+    yield return AppContext.BaseDirectory;
+    yield return Path.Combine(AppContext.BaseDirectory, "payload");
+
+    // MAC23: mirror MAC22 — Mac PrepApp's mac-prep-host sidecar
+    // runs from PrepApp.app/Contents/Resources/prep-host/, so
+    // AppContext.BaseDirectory is *not* the bundle root and the
+    // bundled artifacts at <bundle>/payload/mac/ live several
+    // levels up. Walk a bounded number of ancestors. Backward-
+    // compatible: Windows finds bundles on the first or second
+    // candidate above and never enters this loop.
+    DirectoryInfo? cursor;
+    try { cursor = new DirectoryInfo(AppContext.BaseDirectory); }
+    catch { yield break; }
+
+    for (var i = 0; i < 6 && cursor?.Parent is not null; i++)
+    {
+        cursor = cursor.Parent;
+        yield return cursor.FullName;
+        yield return Path.Combine(cursor.FullName, "payload");
+    }
+}
+```
+
+**Cleanup opportunity (out of scope for MAC23 itself):**
+`MacArtifactAvailability.EnumerateContentRoots` and
+`ArtifactStagingService.EnumerateBundledContentRoots` are now
+doing the same thing. After MAC23 ships, fold them into a single
+shared helper (e.g., `prep-core/BundleContentRootEnumerator`) so
+this pattern doesn't drift. File as a follow-up cleanup item;
+not load-bearing for the field unblock.
+
+**Test (mirror MAC22 coverage):**
+
+New `tests/ArtifactStagingBundledFileLookupTests.cs` covering:
+1. Windows-equivalent layout — `ResolveBundledFile` finds an
+   artifact at `<bundleRoot>/payload/mac/Runner.app.zip` from
+   `BaseDir = bundleRoot`.
+2. Mac sidecar layout — `ResolveBundledFile` finds the same file
+   from `BaseDir = bundleRoot/payload/mac/PrepApp.app/Contents/Resources/prep-host/`.
+3. Missing file — returns null after exhausting all candidates.
+4. Bounded-depth cap — 8-level-deep BaseDir doesn't escape into
+   parent fixtures.
+
+Note: `ResolveBundledFile` is `private static` today. To test
+without test-only API surface, either:
+- Make it `internal static` + extend `InternalsVisibleTo` to
+  `FreeAiSsd.Tests` (mirror what MAC16's prep-core wiring did
+  for ModelOperations), OR
+- Wrap test calls through the public `StageMacRunnerAsync` /
+  `AreMacArtifactsAvailable` paths and assert the staging
+  succeeds against a synthesized bundle tree.
+
+The first option is cleaner and matches the MAC16 precedent.
+
+**Affected files:**
+- `prep-core/Services/ArtifactStagingService.cs` — extend
+  `EnumerateBundledContentRoots` (~20 added lines); flip
+  `ResolveBundledFile` to `internal static` for testability.
+- `prep-core/FreeAiSsd.PrepCore.csproj` —
+  `<InternalsVisibleTo Include="FreeAiSsd.Tests" />` already
+  added in MAC16; verify it's still there and skip if so.
+- `tests/ArtifactStagingBundledFileLookupTests.cs` — new test class.
+
+**Cross-OS review pass:**
+- **Windows surfaces:** `ResolveBundledFile` is called from the Mac
+  staging arms only — Windows staging uses
+  `ResolveRunnerPublishDirectory` / `ResolveCompanionPublishDirectory`
+  which look at `<base>/runner-publish` and `<base>/companion-publish`.
+  No Windows behavior change. The Windows PrepApp's own arming code
+  (which resolves `Runner.app.zip` for cross-platform Mac inclusion)
+  was already working pre-MAC23 because `AppContext.BaseDirectory`
+  on Windows is the bundle root — the lookup wins on the first
+  iteration.
+- **Mac surfaces:** All three Mac staging arms (`stage-runner`,
+  `stage-ollama` payload, `stage-ollama` manifest) gain the
+  ability to resolve bundled files from inside the .app bundle.
+- **Decision:** Bundle (single shared-core fix; both OSes use
+  the same code path).
+
+**Out of scope:**
+- The cleanup-into-shared-helper item flagged above.
+- MAC20 ZIP layout rework.
+- Notarization (MAC11).
+
+**Acceptance criteria:**
+- v1.3.4 Mac field run: `stage-runner` succeeds, then
+  `stage-ollama` succeeds, then `stage-prereqs` succeeds, and the
+  flow advances into encryption setup.
+- All four new tests pass on CI.
+- Existing windows-build / mac-runner-build / mac-prep-build all
+  pass — backward-compatible by construction.
+
+**Tests:**
+- New unit tests above.
+- Manual smoke deferred to the same real-Mac + external-SSD loop
+  the user is exercising; MAC21 + MAC22 + MAC23 together should
+  let prep run end-to-end through staging into encryption setup.
+
+**Field-test pattern observed:** MAC21 → MAC22 → MAC23 is a chain
+of latent bugs that all share the same root cause — prep-core was
+written assuming `AppContext.BaseDirectory` is the bundle root
+(Windows-true, Mac-false because the sidecar lives 5 levels deep).
+Each fix unblocks the next layer down, which surfaces the next
+one. The deep-cleanup follow-up (centralize bundle-root resolution)
+becomes worthwhile after MAC23 to prevent a MAC24/MAC25 in any
+future Mac-staging code path that adds a fourth `AppContext.BaseDirectory`-
+relative lookup.
+
+---
+
 ### MAC19 - Mac install docs + xattr quarantine workaround
 
 **Status:** planned 2026-05-07 (field-reported by user same session)
