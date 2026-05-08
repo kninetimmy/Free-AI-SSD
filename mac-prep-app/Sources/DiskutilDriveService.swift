@@ -12,15 +12,29 @@ import Darwin
 // is built by DiskutilFormatCommand.swift, which mirrors the C# sibling
 // (DiskutilFormatCommand.cs) for cross-language unit testability.
 
+// MAC21: model split. The parent disk identifier ("disk4") is what
+// `diskutil eraseDisk` consumes; the mounted volume after format
+// lives on a child partition ("disk4s1" for MBR/ExFAT, "disk4s2" for
+// GPT) and that's what the staging step needs to write into. Track
+// both so the post-format flow doesn't trip on parent.MountPoint=="".
+struct PartitionMount: Hashable, Sendable {
+    let identifier: String           // "disk4s1" — or parent id for whole-disk fallback
+    let volumeName: String?
+    let mountPoint: URL
+    let sizeBytes: Int64?
+}
+
 struct DiskCandidate: Identifiable, Hashable {
-    let identifier: String        // canonical "diskN" form
-    let displayName: String       // e.g. "FREEAI"
-    let mediaName: String?        // hardware label from diskutil info
+    let identifier: String              // parent: "disk4" — fed to diskutil eraseDisk
+    let displayName: String             // e.g. "FREEAI"
+    let mediaName: String?              // hardware label from diskutil info
     let totalSizeBytes: Int64
     let removable: Bool
-    let mountPoint: URL?
+    let mountedPartition: PartitionMount?   // nil pre-format / when no volume is mounted
 
     var id: String { identifier }
+
+    var mountPoint: URL? { mountedPartition?.mountPoint }
 
     var sizeDisplay: String {
         let gb = Double(totalSizeBytes) / 1_073_741_824.0
@@ -67,12 +81,27 @@ final class DiskutilDriveService: @unchecked Sendable {
         // ejectable (defense in depth — `external` already filters by the
         // most important criterion).
         let listOutput = try runDiskutil(["list", "-plist", "external"])
+        return try Self.parseCandidates(listPlistData: listOutput, infoLookup: { [weak self] id in
+            guard let self else { return nil }
+            return try? self.infoForDisk(id)
+        })
+    }
+
+    /// Pure parser seam (MAC21). Takes the bytes of
+    /// `diskutil list -plist external` plus a closure that returns
+    /// `diskutil info -plist <id>` dictionaries on demand. Tests
+    /// inject hand-crafted plist fixtures + a stubbed lookup so the
+    /// partition-walk + whole-disk-fallback logic runs without a real
+    /// disk.
+    static func parseCandidates(
+        listPlistData: Data,
+        infoLookup: (String) -> [String: Any]?
+    ) throws -> [DiskCandidate] {
         guard let plist = try? PropertyListSerialization.propertyList(
-            from: listOutput, options: [], format: nil) as? [String: Any]
+            from: listPlistData, options: [], format: nil) as? [String: Any]
         else {
             throw DiskutilDriveServiceError.parseFailed("list root is not a dictionary")
         }
-
         guard let allDisksAndPartitions = plist["AllDisksAndPartitions"] as? [[String: Any]] else {
             return []
         }
@@ -85,30 +114,82 @@ final class DiskutilDriveService: @unchecked Sendable {
             // accidental destructive op there is catastrophic.
             if identifier == "disk0" || identifier == "disk1" { continue }
 
-            let info = try? infoForDisk(identifier)
+            let info = infoLookup(identifier)
             let isInternal = (info?["Internal"] as? Bool) ?? false
             if isInternal { continue }
 
-            let size = (info?["TotalSize"] as? Int64) ?? (info?["Size"] as? Int64) ?? 0
+            let parentSize = (info?["TotalSize"] as? Int64)
+                ?? (info?["Size"] as? Int64)
+                ?? (entry["Size"] as? Int64)
+                ?? 0
             let mediaName = info?["MediaName"] as? String
-            let mountPath = info?["MountPoint"] as? String
-            let mountUrl = (mountPath?.isEmpty == false) ? URL(fileURLWithPath: mountPath!) : nil
-            let displayName = (info?["VolumeName"] as? String)
-                ?? (info?["IORegistryEntryName"] as? String)
-                ?? mediaName
-                ?? identifier
             let removable = (info?["Ejectable"] as? Bool) ?? true
+
+            // MAC21: walk the parent's Partitions[] for the first child
+            // with a non-empty MountPoint. After diskutil eraseDisk lays
+            // down a partition table + ExFAT volume, the new volume
+            // mounts on the child partition (disk4s1 for MBR / disk4s2
+            // for GPT) — the parent's own MountPoint stays empty. Pre-fix
+            // we read MountPoint from the parent only and tripped the
+            // "Selected drive has no mount point after format." failure
+            // every time.
+            var mounted: PartitionMount? = nil
+            if let partitions = entry["Partitions"] as? [[String: Any]] {
+                for p in partitions {
+                    guard let pid = p["DeviceIdentifier"] as? String else { continue }
+                    guard let mountStr = p["MountPoint"] as? String, !mountStr.isEmpty else { continue }
+                    mounted = PartitionMount(
+                        identifier: pid,
+                        volumeName: nonEmpty(p["VolumeName"] as? String),
+                        mountPoint: URL(fileURLWithPath: mountStr),
+                        sizeBytes: p["Size"] as? Int64)
+                    break
+                }
+            }
+
+            // Whole-disk fallback (pre-format raw exFAT volumes the user
+            // already had mounted before opening PrepApp): if no child
+            // partition is mounted but the parent itself reports a
+            // MountPoint (either in the list output or via info), surface
+            // that mount with the parent identifier.
+            if mounted == nil {
+                let parentMount = nonEmpty(entry["MountPoint"] as? String)
+                    ?? nonEmpty(info?["MountPoint"] as? String)
+                if let mountStr = parentMount {
+                    mounted = PartitionMount(
+                        identifier: identifier,
+                        volumeName: nonEmpty(entry["VolumeName"] as? String)
+                            ?? nonEmpty(info?["VolumeName"] as? String),
+                        mountPoint: URL(fileURLWithPath: mountStr),
+                        sizeBytes: parentSize > 0 ? parentSize : nil)
+                }
+            }
+
+            // Display-name chain: prefer parent volume name, then the
+            // mounted child's volume name (post-format, parent's
+            // VolumeName is often empty until diskutil propagates), then
+            // IO registry / media-name, then identifier.
+            let displayName = nonEmpty(info?["VolumeName"] as? String)
+                ?? mounted?.volumeName
+                ?? nonEmpty(info?["IORegistryEntryName"] as? String)
+                ?? nonEmpty(mediaName)
+                ?? identifier
 
             candidates.append(DiskCandidate(
                 identifier: identifier,
                 displayName: displayName,
                 mediaName: mediaName,
-                totalSizeBytes: size,
+                totalSizeBytes: parentSize,
                 removable: removable,
-                mountPoint: mountUrl
+                mountedPartition: mounted
             ))
         }
         return candidates
+    }
+
+    private static func nonEmpty(_ s: String?) -> String? {
+        guard let s, !s.isEmpty else { return nil }
+        return s
     }
 
     /// Run `diskutil eraseDisk` with the argv built by DiskutilFormatCommand.

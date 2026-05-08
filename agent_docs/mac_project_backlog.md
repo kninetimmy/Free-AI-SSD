@@ -1053,6 +1053,367 @@ direction. CI green on first run.
 
 ---
 
+### MAC21 - Mac PrepApp post-format mount discovery (DiskCandidate model split)
+
+**Status:** done 2026-05-07 (PR forthcoming — branch
+  `kninetimmy/mac21-post-format-mount-discovery`). Manual smoke
+  on a real Mac + external SSD remains as the field validation;
+  CI exercises the parser via fixture-driven tests.
+**Scope:** small-medium — reshape `DiskCandidate` model + partition
+  walk in `listExternalCandidates` + new test fixture + unit test.
+**Risk:** Low — fix is isolated to `mac-prep-app/Sources/`; no
+  shared-core or sidecar changes.
+**Dependencies:** None. Top of the queue because without it Mac
+  PrepApp can't complete a single end-to-end prep, blocking all
+  Mac field testing.
+**Goal:** A user who launches Mac PrepApp, picks an external SSD,
+  and confirms the destructive erase reaches the staging step
+  successfully — instead of hitting "Selected drive has no mount
+  point after format." after a successful format.
+
+**Driver:** v1.3.1 download test on 2026-05-07 (after the MAC19
+  xattr unblock for the same session) reproduced the failure
+  end-to-end:
+- `diskutil eraseDisk` succeeds (log shows "Mounting disk",
+  "Finished erase on disk", "Format complete.").
+- `formatSelected()` (`PrepViewModel.swift:182`) calls
+  `refreshCandidates()` to pick up the new mount.
+- `listExternalCandidates` (`DiskutilDriveService.swift:63-112`)
+  reads `MountPoint` only from the parent disk's
+  `diskutil info -plist <parent>` output. After
+  `diskutil eraseDisk` lays down a GPT partition table + exFAT
+  volume, the new volume mounts on the **child partition** (e.g.,
+  `disk4s2` at `/Volumes/FREEAI`), not the parent (`disk4`). The
+  parent's `MountPoint` field stays empty.
+- Refreshed `DiskCandidate` for `disk4` therefore has
+  `mountPoint = nil`. `runStaging()` (`PrepViewModel.swift:195`)
+  hits the `guard let mount = selectedCandidate?.mountPoint`,
+  trips into `.failed(message: "Selected drive has no mount point
+  after format.")`, and renders the "Something went wrong" modal
+  with a Restart button.
+
+  CI didn't catch this because `listExternalCandidates` runs against
+  real `diskutil` output only — there's no recorded plist fixture in
+  `tests/`. Lives in MAC17's "deferred manual smoke on a real Mac +
+  external SSD" gap, which the user is now exercising.
+
+**Fix (complete, no bandaid):**
+
+Reshape `DiskCandidate` in `mac-prep-app/Sources/DiskutilDriveService.swift`
+to track both the parent identifier (what `diskutil eraseDisk`
+needs) and the mounted partition state (what `runStaging` needs):
+
+```swift
+struct DiskCandidate: Identifiable, Sendable {
+    let identifier: String              // parent: "disk4" — fed to eraseDisk
+    let displayName: String
+    let mediaName: String?
+    let totalSizeBytes: Int64
+    let removable: Bool
+    let mountedPartition: PartitionMount?   // nil until first mount
+    var id: String { identifier }
+    var mountPoint: URL? { mountedPartition?.mountPoint }
+}
+
+struct PartitionMount: Sendable {
+    let identifier: String      // "disk4s2"
+    let volumeName: String?
+    let mountPoint: URL
+    let sizeBytes: Int64?
+}
+```
+
+Computed `mountPoint` keeps existing call sites working (`mainwindow.swift:192`
+`drive.mountPoint?.path`, `PrepViewModel.swift:67`/`195`/`329`) without
+churn while making the partition identity available to anything that
+needs it later.
+
+Update `listExternalCandidates` to walk `entry["Partitions"]` (the
+partitions array already in `diskutil list -plist external` output)
+and emit a `PartitionMount` from the first partition with a non-empty
+`MountPoint`. Schema: each `Partitions[]` entry has
+`DeviceIdentifier`, `Content`, `VolumeName`, `MountPoint`, `Size`.
+Falls back to the parent's `MountPoint` if non-empty (whole-disk
+format case — pre-format raw exFAT volumes), so the pre-format drive
+selection step still surfaces a mount when the user plugged in an
+already-formatted SSD.
+
+**Test (new fixture-driven coverage):**
+
+- New fixture `mac-prep-app/Tests/Fixtures/diskutil-list-partitioned.plist`:
+  recorded `diskutil list -plist external` output for a partitioned
+  exFAT disk (`disk4` parent + `disk4s1` EFI + `disk4s2` Microsoft
+  Basic Data with mount). Capture from the user's actual disk via
+  `diskutil list -plist external > diskutil-list-partitioned.plist`
+  (sanitize serial numbers if any leak in).
+- New fixture `…/diskutil-list-wholedisk.plist` for the rare whole-
+  disk-format case (pre-format raw exFAT, no partition table).
+- New unit test `PrepAppTests.swift` arm
+  `ListExternalCandidates_PartitionedDisk_ReturnsChildPartitionMount`:
+  feeds the partitioned plist through a `DiskutilDriveService` whose
+  `runDiskutil` is stubbed to return the fixture bytes, asserts the
+  returned `DiskCandidate.mountedPartition` carries the child
+  identifier + mount URL, and that the parent identifier on
+  `DiskCandidate.identifier` is preserved (so format calls still
+  target the parent).
+- Mirror test for the whole-disk fixture (asserts parent mount falls
+  back when there are no partitions).
+- Existing `DiskutilFormatCommandTests.cs` unaffected (format argv
+  still uses the parent identifier).
+
+**Affected files:**
+- `mac-prep-app/Sources/DiskutilDriveService.swift` —
+  `DiskCandidate` reshape, new `PartitionMount` struct, partition-
+  walking in `listExternalCandidates`, computed `mountPoint`.
+- `mac-prep-app/Sources/PrepViewModel.swift` — minor: nothing
+  required if computed `mountPoint` keeps the existing API. Optional:
+  log the partition identifier alongside the parent in
+  `appendLog("Formatting … as exFAT")` so future field reports
+  identify both halves.
+- `mac-prep-app/Sources/main.swift:192` — uses `mountPoint` directly;
+  unaffected by computed property.
+- `mac-prep-app/Tests/Fixtures/` — new fixture plist files (new dir).
+- `mac-prep-app/Tests/PrepAppTests.swift` — new fixture-driven cases.
+- `mac-prep-app/build-tests.sh` (or wherever the test swiftc
+  invocation lives) — extend the input list if `Fixtures/` needs
+  bundling for the test runner.
+
+**Cross-OS review pass:**
+- **Mac surfaces:** `DiskutilDriveService.swift`, `PrepViewModel.swift`
+  (incidental), `main.swift` (incidental, computed property).
+- **Windows surfaces:** None. Windows PrepApp uses a separate
+  `IDriveService` implementation backed by WMI / PowerShell
+  `Format-Volume`; its candidate model is independent of the Mac one.
+- **Decision:** Single-OS Mac fix. Justification: the Windows code
+  path doesn't share data structures with the Mac one, and the bug
+  is rooted in `diskutil`'s parent/partition split which has no
+  Windows analog (Windows surfaces volumes directly).
+
+**Out of scope:**
+- Auto-eject on completion.
+- Multi-volume / multi-partition handling beyond first-mounted.
+  exFAT format yields a single mounted volume; if a user picks a
+  pre-existing multi-partition disk, first-mounted is the right
+  pick because the format will collapse it to one anyway.
+- Whole-disk-format capability for prep itself (we always partition).
+- Reshape of WPF `IDriveService` to match — Windows works.
+
+**Acceptance criteria:**
+- Plug in an external SSD, launch Mac PrepApp, pick the drive,
+  confirm erase, format completes, staging step proceeds without
+  the "no mount point" failure.
+- New unit tests pass on CI (mac-prep-build job runs them).
+- Format-then-stage path works for both: previously partitioned
+  disk and whole-disk-format raw exFAT disk.
+- No regression in pre-format drive selection — disks the user
+  already mounted before opening PrepApp still surface their mount
+  in the selection list.
+
+**Tests:**
+- New unit tests above.
+- Manual smoke deferred to a real Mac + external SSD (the same
+  loop the user just exercised — should now succeed end-to-end
+  through staging into encryption setup).
+
+---
+
+### MAC19 - Mac install docs + xattr quarantine workaround
+
+**Status:** planned 2026-05-07 (field-reported by user same session)
+**Scope:** small — release-bundle docs + a one-line install helper script.
+**Risk:** Low
+**Dependencies:** None. Lands before MAC11 specifically because it
+  unblocks Mac field testing today; MAC11 makes it obsolete.
+**Goal:** A Mac user who downloads the cross-platform release ZIP
+  in 2026-05-07 state can launch `Runner.app` / `PrepApp.app`
+  without bouncing off the misleading "damaged → move to trash"
+  Gatekeeper error.
+
+**Driver:** v1.3.1 download (2026-05-07) reproduced the issue end-
+  to-end on the user's real Mac:
+- `codesign -dv` reports `Signature=adhoc`, `TeamIdentifier=not set`
+  on both bundles (expected — MAC11 hasn't landed).
+- `xattr -l` shows `com.apple.quarantine: 0083;…;Safari;…` on both
+  bundles after Safari download.
+- Combination = Gatekeeper rejection with the misleading
+  "FreeAiSsd is damaged and can't be opened. You should move it
+  to the Trash." message. Users who don't know the standard macOS
+  workaround assume the build is broken and bounce.
+
+**Fix:**
+- **Bundle root file** `MAC-INSTALL.txt` (or section inside the
+  existing `QUICKSTART.txt` — pick at execution start) explaining:
+  - Why the "damaged" message appears (unsigned ad-hoc app +
+    Safari quarantine bit, until MAC11 ships).
+  - The two-line workaround:
+    ```
+    xattr -dr com.apple.quarantine /path/to/Runner.app
+    xattr -dr com.apple.quarantine /path/to/PrepApp.app
+    ```
+  - Note that this is a temporary unblock and goes away with the
+    next signed/notarized release.
+- **Optional helper script** `mac/unblock-apps.command` (one
+  double-click → strips quarantine from both bundles in the same
+  folder, prints success). `.command` is a Terminal-launchable
+  shell script; standard macOS pattern. Keep it under 20 lines and
+  avoid `sudo`.
+- **README update** with a one-paragraph "Mac users: first launch"
+  callout pointing at MAC-INSTALL.txt.
+
+**Out of scope:**
+- Self-signing instructions for the user's own Apple Developer cert
+  (advanced; MAC11 is the right answer).
+- Any change to bundle layout (MAC20 owns that).
+- Modifying the existing CI Mac bundle assembly (MAC20 owns that).
+
+**Acceptance criteria:**
+- Cross-platform release ZIP contains `MAC-INSTALL.txt` (or an
+  enriched QUICKSTART.txt section) explaining the workaround.
+- README has the "first launch on Mac" callout.
+- A user who follows the doc launches both apps successfully on a
+  fresh Mac with default Safari-downloaded ZIP.
+
+**Tests:** Doc review + manual smoke on a fresh Mac.
+
+---
+
+### MAC20 - Cross-platform release ZIP layout rework
+
+**Status:** planned 2026-05-07 (field-reported by user same session)
+**Scope:** medium — touches CI release-assembly script + likely
+  PrepApp sidecar-discovery paths.
+**Risk:** Medium — restructuring publish layout can break PrepApp's
+  staging if the sidecar paths it reads from move.
+**Dependencies:** None hard, but coordinates with MAC11 (signing) —
+  if MAC11 lands first the layout work can fold in the
+  notarization-stable `.app.zip` framing cleanly.
+**Goal:** Restructure the cross-platform release ZIP so a user
+  unzipping it sees a clean, OS-segregated tree, not a folder of
+  loose Windows DLLs with a `payload/` subfolder hiding everything
+  useful.
+
+**Driver:** v1.3.1 cross-platform download (2026-05-07, user
+  feedback): root currently shows `FreeAiSsd.PrepApp.exe` plus a
+  scatter of `D3DCompiler_47_cor3.dll` / `e_sqlite3.dll` /
+  `PenImc_cor3.dll` / `PresentationNative_cor3.dll` /
+  `vcruntime140_cor3.dll` / `wpfgfx_cor3.dll` / `*.pdb` symbol
+  files / `Resources/` (WPF assets). Mac apps live three folders
+  deep at `payload/mac/Runner.app`. A Mac user opening this looks
+  like a Windows-only build. User direction:
+
+  > "i'd like 4 things at root. a windows folder with relevant
+  > apps. and a mac folder with relevant apps. there can be a
+  > resources folder at root too thats fine. and id like the
+  > quickstart.txt. this doesn't mean duplicate things and hide
+  > them id like it restructured so its cleaner and doesn't have
+  > random files like you can see in the folder now."
+
+**Target layout:**
+
+```
+Free-AI-SSD-beta-crossplatform/
+├── windows/
+│   ├── PrepApp.exe              (was FreeAiSsd.PrepApp.exe at root)
+│   ├── *.dll                    (WPF runtime DLLs that were at root)
+│   ├── Resources/               (WPF resources)
+│   ├── runner-publish/          (was payload/runner-publish/)
+│   ├── companion/               (was payload/companion/)
+│   └── tools/                   (was payload/windows/)
+├── mac/
+│   ├── Runner.app
+│   ├── Runner.app.zip
+│   ├── PrepApp.app
+│   ├── PrepApp.app.zip
+│   ├── runner-host/
+│   ├── tools/
+│   └── mac-artifacts.manifest.json
+├── QUICKSTART.txt
+└── LICENSE
+```
+
+Four root entries (`windows/`, `mac/`, `QUICKSTART.txt`, `LICENSE`)
+matching the user's "4 things at root" call. The user's "Resources
+folder at root is fine" is honored by the alternative of leaving
+`Resources/` at root if moving it into `windows/` proves to break
+WPF asset resolution (PrepApp.exe expects `Resources/` next to it
+by default). Pick at execution start; lean toward moving inside
+`windows/` to keep root spotless.
+
+**Hard part — sidecar path coupling:** Today's PrepApp.exe stages
+  the Windows runner / Companion / Windows tools onto the SSD by
+  reading `./payload/runner-publish/`, `./payload/companion/`,
+  `./payload/windows/` (relative to the running PrepApp.exe).
+  Moving PrepApp.exe into `windows/` shifts those to
+  `./runner-publish/`, `./companion/`, `./tools/` (sibling paths,
+  not parent). Need to either:
+  - **Option A:** Update the staging path constants in `prep-core`
+    (`shared/Services/ArtifactStaging.cs` or wherever the relative
+    paths live) so they look at sibling folders. Simplest; any
+    out-of-tree integrators that copied the layout will break, but
+    there shouldn't be any.
+  - **Option B:** Symlink / hardlink `payload/` -> `.` inside the
+    new `windows/` folder so old paths keep working. Rejected
+    because Windows ZIP extraction doesn't preserve symlinks.
+  - **Option C:** Make the staging paths configurable via
+    PrepApp's existing args / config so both layouts work during
+    a transition.
+
+  Recommendation: **Option A**. Single PR, single layout, single
+  truth. No shipped-to-users dependency on the old layout exists.
+
+**Fix:**
+- Update `.github/workflows/build.yml` `Assemble distributables`
+  step to produce the new tree.
+- Update `prep-core` staging path constants (and any defensive
+  fallbacks) to read sibling folders rather than `payload/`.
+- Update the existing `Validate release payload` CI step to assert
+  the new shape (no loose DLLs at root, both `windows/` and `mac/`
+  exist, no PrepApp.exe duplication, etc.).
+- Update `README.md` walkthrough to match the new structure.
+- Update `docs/QUICKSTART.txt` ASCII tree if it has one.
+- **Cross-OS:** Mac side is already structurally clean (everything
+  under `payload/mac/` moves wholesale to `mac/`); only the
+  `mac-artifacts.manifest.json` `relativePath` values need to drop
+  the `mac/` prefix or stay path-relative-to-bundle-root depending
+  on whether anything reads them.
+
+**Out of scope:**
+- Splitting into separate `Free-AI-SSD-windows-*.zip` +
+  `Free-AI-SSD-macos-*.zip` artifacts (a real cross-platform
+  release-pipeline conversation; defer until MAC11 + MAC15 land
+  and beta framing is replaced).
+- `.dmg` packaging for Mac (a notarization-era item).
+- Removing `*.pdb` debug symbols from the Windows publish (small
+  cleanup, fold in if cheap; otherwise its own item).
+
+**Acceptance criteria:**
+- Unzipped tree has exactly four root entries: `windows/`, `mac/`,
+  `QUICKSTART.txt`, `LICENSE` (plus `Resources/` if execution-time
+  call is to keep it at root).
+- No loose `*.dll`, `*.pdb`, or `*.exe` files at root.
+- Windows-only download path: user double-clicks
+  `windows/PrepApp.exe`, prep flow works end-to-end against an
+  external SSD (no path-not-found errors).
+- Mac download path: user opens `mac/PrepApp.app` (after MAC19's
+  xattr unblock until MAC11 ships), prep flow works.
+- CI `Validate release payload` step passes.
+
+**Tests:**
+- CI guardrail asserting the new shape (no loose root files except
+  the four whitelisted entries).
+- Manual smoke on Windows: prep an SSD with the relocated
+  PrepApp.exe.
+- Manual smoke on Mac: prep an SSD with the relocated PrepApp.app.
+
+**Risk mitigations:**
+- Do this on its own PR; don't combine with other release-related
+  work. CI artifact diffing is the primary safety net.
+- Keep the old layout's CI guard line (`payload/FreeAiSsd.PrepApp.exe`
+  duplicate check) updated rather than deleted, so any regression
+  back to the old shape fails CI.
+
+---
+
 ### MAC15 - Supported Mac release docs
 
 **Status:** planned
@@ -1086,7 +1447,26 @@ prep parity tracks are complete. Specifically:
   cluster), MAC17b (ensure-structure sidecar), MAC18 (compatibility
   docs + matrix) all done.
 
-**Only one Mac item remains before a real signed beta cut:**
+**Three Mac field-blockers surfaced 2026-05-07 by the v1.3.1 download
+test (filed same day, ordered by user direction):**
+- **MAC21** — Mac PrepApp post-format mount discovery (DiskCandidate
+  model split). Top of queue. Without this, Mac PrepApp can't
+  complete a single end-to-end prep — `listExternalCandidates`
+  reads `MountPoint` from the parent disk only, but
+  `diskutil eraseDisk` mounts the new volume on the child
+  partition. Caught during MAC17's deferred manual smoke.
+- **MAC19** — Mac install docs + xattr quarantine workaround.
+  Small. Lands before MAC11 to unblock Mac field testing today
+  ("damaged → move to trash" Gatekeeper rejection on
+  Safari-downloaded unsigned bundles). Goes obsolete the day
+  MAC11 ships but is the right interim.
+- **MAC20** — Cross-platform release ZIP layout rework. Medium.
+  Restructures the bundle root to `windows/` + `mac/` +
+  `QUICKSTART.txt` + `LICENSE` so Mac users don't see a
+  Windows-DLL-and-PDB scatter at root. Touches the CI release-
+  assembly script and PrepApp's sidecar-discovery paths.
+
+**One Mac item remains before a real signed beta cut:**
 - **MAC11** — Signing + notarization. Back-burnered until the
   user's Apple Developer account renews on payday. MAC10b already
   landed the bundle metadata (`CFBundleIconFile`,

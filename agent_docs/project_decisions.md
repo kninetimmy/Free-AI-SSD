@@ -1148,17 +1148,31 @@ User established the rule explicitly 2026-05-07 after MAC18 wrapped
 up the cross-platform PrepApp parity track: *"from now on when one
 os gets work done it needs to also get looked at on the other os
 and see if the work needs to be done there as well i dont want to
-miss things on os to os."*
+miss things on os to os."* User strengthened it later the same day
+after F2 surfaced a Mac UI parity gap that a planning-phase review
+would have caught earlier: *"going forward we need to ensure all
+tasks have a dual os review pass to ensure we are touching all
+things we need or setting up a follow on task if needed."*
 
 **Decision (workflow rule, applies to all future work):**
 
-After completing a task that touches one OS, before declaring it
-done, perform a cross-OS audit. The audit asks:
-- Does the surface this task touched exist on the other OS?
-- Does the other OS's adapter / UI / docs need a corresponding
-  change?
-- If yes, surface it as a follow-up backlog item or PR rather than
-  letting it drift.
+Every task plan (execution prompt, ad-hoc plan, pre-coding sketch)
+must include an explicit **Dual-OS review pass** during planning,
+not just an audit after merge. The pass:
+- Enumerates surfaces touched on Windows (WPF runner / PrepApp /
+  Companion) and Mac (Swift runner / Swift PrepApp / sidecars).
+- Picks one outcome: **bundle** both OSes in the same PR, **split**
+  (ship one platform first; file the second-platform follow-up
+  before merging the first), or **single-OS** with a one-line
+  justification for why the other platform is unaffected.
+- Lives in the execution prompt so future agents reading it cold
+  see the check happened. Convention: a `## Dual-OS review pass`
+  section near the top, right after `## Goal` / `## Why now`.
+
+After completing the task, still flag the audit outcome in the
+user-facing summary ("checked Windows side — no mirror needed
+because X") so the user sees the planned decision held up against
+implementation reality.
 
 **Two execution patterns are both acceptable.** Pick whichever fits
 the change shape:

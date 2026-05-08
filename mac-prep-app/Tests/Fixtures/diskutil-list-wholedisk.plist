@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MAC21 fixture: diskutil list -plist external output for a whole-disk
+  exFAT volume (no partition table, parent is the volume). This is the
+  pre-format case where the user plugged in an SSD that was already
+  whole-disk-formatted exFAT (e.g. on a Windows host with default
+  Format-Volume which sometimes elides the MBR scheme). The MAC21
+  parser falls back to the parent's own MountPoint here so the
+  drive-selection step still surfaces a usable mount.
+
+  Hand-crafted from the documented diskutil plist schema.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>AllDisks</key>
+    <array>
+        <string>disk5</string>
+    </array>
+    <key>AllDisksAndPartitions</key>
+    <array>
+        <dict>
+            <key>Content</key>
+            <string></string>
+            <key>DeviceIdentifier</key>
+            <string>disk5</string>
+            <key>MountPoint</key>
+            <string>/Volumes/PORTABLE</string>
+            <key>OSInternal</key>
+            <false/>
+            <key>Size</key>
+            <integer>500107862016</integer>
+            <key>VolumeName</key>
+            <string>PORTABLE</string>
+        </dict>
+    </array>
+    <key>VolumesFromDisks</key>
+    <array>
+        <string>PORTABLE</string>
+    </array>
+    <key>WholeDisks</key>
+    <array>
+        <string>disk5</string>
+    </array>
+</dict>
+</plist>
