@@ -237,9 +237,22 @@ No "list documents" or "reindex" endpoint exists today. See Stage 2.
 
 ### F2 â€” Live model list fetch (HuggingFace / Ollama library)
 
-**Status:** **done** — merged 2026-05-07 (PR #202, squash commit `dbc2510`). Bundled both OSes in one PR per the cross-OS parity rule: prep-core service + Windows wiring + Mac sidecar arms (`discover-catalog` for bundled, `refresh-catalog` for live) + Mac UI uplift (rich Windows-parity picker replacing the 2-string toggle list). HTML-scrape `ollama.com/library` chosen over HuggingFace API (HF returns HF model IDs, not Ollama-pullable tags) — verified at execution start; decision recorded in `project_decisions.md` 2026-05-07 with exit ramps. CI required 3 runs: 2 fix-forwards (CS0103 missing `using FreeAiSsd.PrepApp;` for `StarterModelCatalogLoader`, CS0121 ambiguous `StubHandler` constructors), neither touched core logic. Manual smoke deferred to a real Mac + a Windows machine (see `project_state.md` Open questions). Original execution prompt: `agent_docs/f2_execution_prompt.md`.
+**Status:** **done** — merged 2026-05-07 (PR #202, squash commit `dbc2510`). Bundled both OSes in one PR per the cross-OS parity rule: prep-core service + Windows wiring + Mac sidecar arms (`discover-catalog` for bundled, `refresh-catalog` for live) + Mac UI uplift (rich Windows-parity picker replacing the 2-string toggle list). HTML-scrape `ollama.com/library` chosen over HuggingFace API (HF returns HF model IDs, not Ollama-pullable tags) — verified at execution start; decision recorded in `project_decisions.md` 2026-05-07 with exit ramps. CI required 3 runs: 2 fix-forwards (CS0103 missing `using FreeAiSsd.PrepApp;` for `StarterModelCatalogLoader`, CS0121 ambiguous `StubHandler` constructors), neither touched core logic. v1.3.5 mac field test 2026-05-08 confirmed Refresh works and pulls 399 entries from `ollama.com/library`; two UX gaps surfaced and split out as **F2a**.
 **Scope:** One-shot for v1 (cross-platform), bundled per the parity rule.
 **Model:** Sonnet 4.6
+
+---
+
+### F2a â€” Model picker UX gaps surfaced on v1.3.5 field test
+
+**Status:** planned 2026-05-08. Filed during the v1.3.5 mac field test that confirmed F2's live catalog refresh works (399 models pulled cleanly from `ollama.com/library`). Two UX gaps:
+
+1. **No sort.** 399 entries render in catalog order; user has no way to alphabetize, sort by size, or group by tier. Add a sort selector (Name / Size / Tier) to the picker header on both Windows + Mac. Tier already exists as a chip on each row, so a tier-grouping mode is cheap.
+2. **Picker doesn't fill the window.** Mac `EncryptionSetupStepView`'s ScrollView is locked at `.frame(minHeight: 120, maxHeight: 240)` (`mac-prep-app/Sources/main.swift:294`), so resizing the window leaves the picker stuck at 240px while everything else stretches. Replace the upper bound with `.frame(maxHeight: .infinity)` and let the parent VStack distribute space. Audit Windows MainWindow.xaml for the parallel issue (likely a `Grid.RowDefinitions` `Height="Auto"` or a fixed pixel height on the model panel).
+
+**Scope:** small / cosmetic. Bundle both OSes per the cross-OS parity rule.
+**Affected files:** `mac-prep-app/Sources/main.swift` (ScrollView frame + sort selector), `prep-app/MainWindow.xaml` (model grid sort + row height), shared sort helper if natural.
+**Model:** Sonnet 4.6.
 
 ---
 
