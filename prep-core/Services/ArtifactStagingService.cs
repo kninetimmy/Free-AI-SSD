@@ -120,18 +120,31 @@ public sealed class ArtifactStagingService : IArtifactStagingService
         Directory.CreateDirectory(ollamaDir);
         ZipFile.ExtractToDirectory(cacheArchive, ollamaDir, overwriteFiles: true);
 
-        var cliPath = Directory.EnumerateFiles(ollamaDir, "ollama", SearchOption.AllDirectories).FirstOrDefault()
-            ?? throw new FileNotFoundException("Could not locate macOS ollama binary after extraction.");
+        // MAC26: the macOS Ollama distribution is a GUI app bundle (Ollama.app),
+        // not a CLI server like Linux/Windows. The 119 KB binary at the zip's
+        // top level is a LaunchServices shim that strips env vars (so
+        // OLLAMA_MODELS doesn't propagate) and headlessly-launches Ollama.app
+        // via a SIGKILL-prone path. The actual self-contained 53 MB Go server
+        // lives at Ollama.app/Contents/Resources/ollama and runs cleanly as a
+        // direct child process. Stage that one; delete the top-level shim so
+        // it can never be invoked by accident.
+        var innerCliPath = Path.Combine(ollamaDir, "Ollama.app", "Contents", "Resources", "ollama");
+        if (!File.Exists(innerCliPath))
+            throw new FileNotFoundException(
+                $"Expected macOS Ollama server binary at {innerCliPath} after extraction; the upstream archive layout may have changed.");
 
-        var finalCliPath = Path.Combine(ollamaDir, "ollama");
-        File.Copy(cliPath, finalCliPath, overwrite: true);
+        var topLevelShim = Path.Combine(ollamaDir, "ollama");
+        if (File.Exists(topLevelShim))
+        {
+            try { File.Delete(topLevelShim); } catch { /* best effort */ }
+        }
 
         // Verify the staged payload (SHA-256 + arm64 slice) and write the
         // trust attestation that the runtime gate (Swift mac-runner +
         // MacOllamaLifecycleService) checks at launch. On failure, the
         // partially-staged directory is scrubbed so the next attempt starts
         // from a clean slate and the runtime gate keeps refusing to launch.
-        var pipeline = MacOllamaStagingPipeline.VerifyAndAttest(ssdRoot, cacheArchive, finalCliPath);
+        var pipeline = MacOllamaStagingPipeline.VerifyAndAttest(ssdRoot, cacheArchive, innerCliPath);
         if (!pipeline.Success)
         {
             var failure = pipeline.Failure!;

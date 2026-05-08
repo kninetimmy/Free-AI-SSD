@@ -1282,3 +1282,76 @@ the network surface. Mirrors `OllamaPackageTrustPolicy` posture.
    add HF as a second source behind the same interface.
 3. If scraping breaks faster than we can patch (>1x per quarter),
    degrade to bundled-only and remove the live path.
+
+---
+
+## 2026-05-08 — MAC26: Mac Ollama runtime spawns inner `Ollama.app/Contents/Resources/ollama` directly; bypass LaunchServices
+
+**Driver.** v1.3.6 mac field test (post-MAC25 ship) failed first
+model pull. Direct SSD inspection: zero blobs anywhere on the
+system, sidecar hung 18 minutes in `await`, host log stopped
+cleanly at the prereqs step, exit 137 (= SIGKILL) on qwen2.5:7b.
+Root cause turned out to be that the staged Mac Ollama binary is
+the 119 KB CLI shim from the macOS desktop distribution, not a
+self-contained server.
+
+**Decision.** On Mac, the project runs the **inner self-contained
+Go server** at `Ollama.app/Contents/Resources/ollama` (53 MB,
+Developer ID signed by Infra Technologies, identifier=`ollama`,
+supports `serve`/`pull`/`run` like Linux/Windows) directly as a
+child process of `mac-prep-host`. The 119 KB top-level CLI shim
+and the LaunchServices fallback path are abandoned. Staging keeps
+`Ollama.app/` intact (no copy out, no rewrite) — preserves Apple's
+code signing and the adjacent `lib/ollama/runners/` directory the
+server needs at inference time.
+
+**Why.** Three structural problems with the macOS Ollama
+distribution forced this:
+
+1. **macOS Ollama ships as a GUI desktop app, not a CLI server.**
+   `ollama-darwin.zip` is the Electron-based desktop bundle.
+   Linux/Windows ship a single self-contained CLI server binary;
+   macOS does not. The closest equivalent is buried inside
+   `Ollama.app/Contents/Resources/`.
+
+2. **LaunchServices launches GUI apps in a clean environment.**
+   The 119 KB shim's documented fallback is to launch `Ollama.app`
+   via LaunchServices when no daemon is up. LaunchServices does
+   not propagate env vars from the calling process. So
+   `OLLAMA_MODELS=/Volumes/FREEAI/models` set by
+   `ModelOperations.PullModelAsync` never reaches the spawned
+   daemon — even when a pull would succeed, models would land in
+   `Ollama.app`'s default location, never on the SSD.
+
+3. **Headlessly-launched `Ollama.app` from `/Volumes/FREEAI/...`
+   is SIGKILL-prone.** Field test exit code 137 (= signal 9) on
+   qwen2.5:7b is consistent with macOS killing the
+   headlessly-spawned GUI daemon (TCC, jetsam under memory
+   pressure, signing/quarantine quirks on the unusual SSD path).
+
+Direct child-process spawning (not via LaunchServices) inherits
+env naturally and avoids all three failure modes. The inner Go
+server is itself Developer ID signed and self-runnable.
+
+**Constraint locked.** Per user product call 2026-05-08: must not
+require user-managed Ollama install. The project bundles Ollama
+and the runtime fix has to run a self-contained server. Rules out
+the alternate "stop bundling, document manual install" path.
+
+**Exit ramps.** Re-open if any of:
+
+1. Ollama publishes a standalone darwin CLI server package without
+   the GUI wrapper — switch to that and drop the inner-bundle path.
+2. The inner server binary changes its runtime expectations (e.g.
+   requires the Electron parent for an operation hit at runtime).
+3. Apple changes signing / TCC / quarantine policy in a way that
+   breaks running GUI-bundle inner binaries as headless children.
+
+**Implementation owners.** MAC26 backlog entry in
+`mac_project_backlog.md` carries the file-by-file plan, cross-OS
+review, and acceptance criteria. Kickoff verification (manual
+one-line CLI test of the inner server pulling against
+`OLLAMA_MODELS`) gates the design before any code lands.
+
+**Supersedes.** No prior decision — first explicit lock on Mac
+Ollama runtime architecture.

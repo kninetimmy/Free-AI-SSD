@@ -437,8 +437,12 @@ final class RunnerViewModel: ObservableObject {
             return
         }
 
-        let ollama = root.appendingPathComponent("mac/tools/ollama/ollama")
-        guard FileManager.default.fileExists(atPath: ollama.path) else { status = "Missing mac/tools/ollama/ollama"; return }
+        // MAC26: the macOS Ollama distribution is a GUI app bundle. The real
+        // self-contained CLI server lives inside Ollama.app's Resources; the
+        // top-level LaunchServices shim is deleted at staging time so this is
+        // the only ollama binary on the SSD.
+        let ollama = root.appendingPathComponent("mac/tools/ollama/Ollama.app/Contents/Resources/ollama")
+        guard FileManager.default.fileExists(atPath: ollama.path) else { status = "Missing mac/tools/ollama/Ollama.app/Contents/Resources/ollama"; return }
 
         // MAC4: refuse to launch the staged binary unless the on-SSD trust
         // attestation matches the pinned URL + SHA-256. PrepApp writes this

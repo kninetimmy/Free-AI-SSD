@@ -14,11 +14,15 @@ namespace FreeAiSsd.Tests;
 public sealed class MacOllamaLifecycleServiceTests
 {
     [Fact]
-    public void ResolveBinaryPath_LivesUnderMacOllama()
+    public void ResolveBinaryPath_LivesInsideOllamaAppBundle()
     {
+        // MAC26: the macOS Ollama package is a GUI .app bundle; the
+        // self-contained CLI server is at Ollama.app/Contents/Resources/ollama.
+        // Pinning the inner-Resources suffix here so a regression that flips
+        // back to the top-level LaunchServices shim trips this test.
         using var ssd = new TempSsdRoot();
         var binary = MacOllamaLifecycleService.ResolveBinaryPath(ssd.Root);
-        var expectedSuffix = Path.Combine(SsdLayout.MacOllama, "ollama");
+        var expectedSuffix = Path.Combine(SsdLayout.MacOllama, "Ollama.app", "Contents", "Resources", "ollama");
         Assert.EndsWith(expectedSuffix, binary);
         Assert.DoesNotContain(".exe", binary, StringComparison.OrdinalIgnoreCase);
     }
