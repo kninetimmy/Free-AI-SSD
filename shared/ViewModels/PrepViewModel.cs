@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Security.Cryptography;
 using FreeAiSsd.Shared.Documents;
 using FreeAiSsd.Shared.Models;
 using FreeAiSsd.Shared.Mvvm;
@@ -1275,6 +1276,18 @@ public class PrepViewModel : BaseViewModel
             config.PreferredCompute = "cpu";
             config.IsEncrypted = false;
             config.EncryptionScheme = null;
+            // MAC34: ensure NetworkApiKey is populated before any persist.
+            // Pre-MAC34, this defaulted to "" with NetworkRequireApiKey=true,
+            // so toggling Network Mode would 503 every request via the
+            // RunnerLocalApiService fail-closed guard. Mirror the Mac
+            // PrepApp's EncryptedConfigWriter.generateRandomApiKey behavior:
+            // 32 bytes of OS RNG, hex-encoded, set once at first prep.
+            // Existing keys are preserved (idempotent re-finalize).
+            if (string.IsNullOrWhiteSpace(config.NetworkApiKey))
+            {
+                config.NetworkApiKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(32))
+                    .ToLowerInvariant();
+            }
             await _modelService.SaveConfigAsync(configPath, config);
             await RefreshModelStatusesAsync();
 

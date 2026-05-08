@@ -44,7 +44,16 @@ struct InitialPortableConfigPayload {
     var networkBindAddress: String = "127.0.0.1"
     var networkPort: Int = 41555
     var networkRequireApiKey: Bool = true
-    var networkApiKey: String = ""
+    /// MAC34: a fresh 32-byte random hex key generated at first-write.
+    /// Pre-MAC34 this defaulted to `""`, which made the LAN API path
+    /// fail-closed with `503 API key is required by configuration but
+    /// not set on host` the moment a user enabled Network Mode — there
+    /// was no UI to set the key and `""` triggers `RunnerLocalApiService`'s
+    /// fail-closed guard. Generating one at prep time means the key is
+    /// always non-empty for LAN exposure; loopback chat skips the gate
+    /// regardless via the MAC34 loopback bypass in
+    /// `RunnerLocalApiService`.
+    var networkApiKey: String = Self.generateRandomApiKey()
     var preferredCompute: String = "cpu"
 
     /// Render as the `[String: Any]` dictionary SsdEncryption expects.
@@ -62,6 +71,20 @@ struct InitialPortableConfigPayload {
             "preferredCompute": preferredCompute,
             "models": [],
         ]
+    }
+
+    /// MAC34: 32 bytes from `SecRandomCopyBytes`, hex-encoded. Falls back
+    /// to a UUID-derived hex if the OS RNG ever fails — that is a defense
+    /// posture, not a real fallback path; on Apple Silicon SecRandomCopyBytes
+    /// has no documented failure mode.
+    static func generateRandomApiKey() -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        if status == errSecSuccess {
+            return bytes.map { String(format: "%02x", $0) }.joined()
+        }
+        let fallback = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        return fallback + fallback
     }
 }
 

@@ -78,6 +78,13 @@ final class RunnerViewModel: ObservableObject {
     /// MAC6: Network Mode mirrors the Windows Runner toggle. When on, we spawn
     /// the net8.0 sidecar host and surface its base URL so RunnerCli /
     /// Companion clients can connect.
+    ///
+    /// MAC34: the sidecar is now always running after unlock — chat doesn't
+    /// depend on this toggle. The flag now controls bind address only:
+    /// OFF (default) → host bound to 127.0.0.1 (loopback chat works);
+    /// ON → host bound to `networkBindAddress` from config (LAN exposure).
+    /// The flag is still persisted as `networkModeEnabled` in PortableConfig
+    /// for cross-OS schema compatibility; only the runtime semantics shifted.
     @Published var networkModeEnabled: Bool = false
     @Published var networkApiStatus: String = "API stopped"
     @Published var networkApiBaseUrl: String? = nil
@@ -208,6 +215,11 @@ final class RunnerViewModel: ObservableObject {
         }
         portableConfig = parsed
         applyConfigToUi(parsed)
+        // MAC34: hydrate the LAN-exposure toggle from persisted config and
+        // bring up the local chat stack (ollama + sidecar bound to 127.0.0.1
+        // by default). Plaintext drives still hit this path during dev.
+        networkModeEnabled = (parsed["networkModeEnabled"] as? Bool) ?? false
+        ensureLocalChatStackRunning()
     }
 
     /// Called from the unlock dialog. Decrypts the on-SSD blob with the
@@ -247,22 +259,37 @@ final class RunnerViewModel: ObservableObject {
                 portableConfig = merged
                 applyConfigToUi(merged)
             }
+
+            // MAC34: hydrate LAN-exposure intent from the unlocked config and
+            // bring up the local chat stack. Pre-MAC34 the user had to click
+            // Start (started ollama, did nothing for chat) and toggle Network
+            // Mode (broken because the API key was empty) for chat to work.
+            // Now both happen automatically and chat just works on loopback.
+            networkModeEnabled =
+                (portableConfig?["networkModeEnabled"] as? Bool) ?? false
+            ensureLocalChatStackRunning()
         }
     }
 
     /// Zeroes the cached UnlockMaterial and drops the in-memory plaintext.
     /// Safe to call when no session is unlocked.
+    ///
+    /// MAC34: also tears down ollama. Pre-MAC34 ollama lifecycle was tied
+    /// to the manual Start/Stop buttons, so a Lock could leave ollama
+    /// running on 127.0.0.1 with no SSD-backed model directory after the
+    /// next unlock. With auto-spawn, both ollama and the sidecar belong to
+    /// the unlocked session and must be torn down together.
     func lockSession(reason: String = "Locked") {
         // MAC6: tear the LAN API down BEFORE we zero the unlock material so
         // the sidecar can never serve requests using a config whose API key
-        // has been wiped from this side. We always call shutdown() (it's a
-        // no-op if the host is stopped) and clear the toggle/status.
-        let wasNetworkOn = networkModeEnabled
-        if wasNetworkOn {
-            hostController.shutdown()
-            networkModeEnabled = false
-            networkApiBaseUrl = nil
-            networkApiStatus = "API stopped"
+        // has been wiped from this side.
+        hostController.shutdown()
+        networkApiBaseUrl = nil
+        networkApiStatus = "API stopped"
+        networkModeEnabled = false
+
+        if process != nil {
+            stopOllama()
         }
 
         guard unlockMaterial != nil || portableConfig != nil else { return }
@@ -279,56 +306,106 @@ final class RunnerViewModel: ObservableObject {
         log(reason)
     }
 
-    /// MAC6: Toggle the LAN API sidecar host on or off. Reads the in-memory
-    /// PortableConfig dictionary (so unlock material never touches disk) and
-    /// hands it to the spawned process via stdin.
-    func setNetworkMode(enabled: Bool) {
-        if enabled {
-            startNetworkMode()
-        } else {
-            stopNetworkMode(reason: "User toggled Network Mode off")
-        }
+    /// MAC34: UI toggle for "Expose API on LAN". The sidecar always runs
+    /// after unlock; this only flips the bind address between 127.0.0.1
+    /// (toggle off) and the configured `networkBindAddress` (toggle on).
+    func setExposeApiOnLan(_ exposed: Bool) {
+        networkModeEnabled = exposed
+        if isEncryptedLocked || ssdRoot == nil || portableConfig == nil { return }
+        restartHostSidecar()
     }
 
-    private func startNetworkMode() {
-        guard let root = ssdRoot else {
-            networkApiStatus = "Select an SSD root first"
-            networkModeEnabled = false
-            return
+    /// MAC34: bring up the local chat stack on unlock. Idempotent — safe to
+    /// call from both `attemptUnlock` (encrypted path) and `loadConfig`
+    /// (plaintext path). Refuses to do anything while the session is locked.
+    private func ensureLocalChatStackRunning() {
+        guard !isEncryptedLocked,
+              ssdRoot != nil,
+              portableConfig != nil
+        else { return }
+        startOllamaIfNotRunning()
+        restartHostSidecar()
+    }
+
+    /// MAC34: start ollama only when no process is currently tracked. Called
+    /// from the unlock-time auto-spawn path; safe to call repeatedly.
+    private func startOllamaIfNotRunning() {
+        if process != nil { return }
+        startOllama()
+    }
+
+    /// MAC34: stop and restart the sidecar so its bind address matches the
+    /// current `networkModeEnabled` flag. When the toggle is OFF, force
+    /// loopback regardless of `networkBindAddress` in config — that field
+    /// only takes effect when the user explicitly opts into LAN exposure.
+    ///
+    /// Also backfills `networkApiKey` if empty: legacy field-test SSDs were
+    /// prepped before the PrepApp generated a key, so their config has
+    /// `networkApiKey == ""` with `networkRequireApiKey == true`. Pre-MAC34
+    /// the sidecar would then 503 every chat request. We generate one for
+    /// this session so both the sidecar and `apiKeyForLocalApiRequest()`
+    /// agree on a non-empty key. The key is also persisted via
+    /// `saveConfig` so subsequent unlocks reuse it (and Windows Runner
+    /// would see the same key on the same SSD).
+    private func restartHostSidecar() {
+        guard let root = ssdRoot, var config = portableConfig else { return }
+
+        hostController.shutdown()
+
+        let storedKey = (config["networkApiKey"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if storedKey.isEmpty {
+            let generated = Self.generateRandomApiKeyHex()
+            config["networkApiKey"] = generated
+            // Mirror to in-memory so apiKeyForLocalApiRequest agrees, and
+            // queue a config persist so the key survives Lock/Unlock.
+            portableConfig?["networkApiKey"] = generated
+            saveConfig { current in
+                var next = current
+                next["networkApiKey"] = generated
+                return next
+            }
+            log("Generated missing networkApiKey for this session.")
         }
 
-        guard var config = portableConfig else {
-            networkApiStatus = "Unlock the SSD before enabling Network Mode"
-            networkModeEnabled = false
-            log("Network Mode refused: portable-config not loaded.")
-            return
+        let exposed = networkModeEnabled
+        let configuredBind = (config["networkBindAddress"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "127.0.0.1"
+        let effectiveBind: String
+        if exposed && !configuredBind.isEmpty {
+            effectiveBind = configuredBind
+        } else {
+            effectiveBind = "127.0.0.1"
         }
+        config["networkModeEnabled"] = exposed
+        config["networkBindAddress"] = effectiveBind
 
-        // The UI toggle is the user's runtime Network Mode intent. Keep the
-        // persisted PortableConfig untouched here, but make the sidecar's
-        // in-memory config match the toggle so it actually starts the API.
-        config["networkModeEnabled"] = true
-
-        let host = "127.0.0.1:\(hostPort)"
+        networkApiStatus = "Starting API…"
         do {
-            networkApiStatus = "Starting API…"
-            try hostController.start(ssdRoot: root, ollamaHost: host, config: config)
-            networkModeEnabled = true
-            log("Network Mode: spawned mac-runner-host.")
+            try hostController.start(
+                ssdRoot: root,
+                ollamaHost: "127.0.0.1:\(hostPort)",
+                config: config)
+            log("API host bound to \(effectiveBind).")
         } catch {
-            networkModeEnabled = false
             networkApiBaseUrl = nil
             networkApiStatus = "API failed: \(error.localizedDescription)"
-            log("Network Mode start failed: \(error.localizedDescription)")
+            log("API host start failed: \(error.localizedDescription)")
         }
     }
 
-    private func stopNetworkMode(reason: String) {
-        hostController.shutdown()
-        networkModeEnabled = false
-        networkApiBaseUrl = nil
-        networkApiStatus = "API stopped"
-        log("Network Mode: \(reason)")
+    /// MAC34: 32 bytes from `SecRandomCopyBytes`, hex-encoded. Mirrors the
+    /// Mac PrepApp's `EncryptedConfigWriter.generateRandomApiKey` helper —
+    /// kept inline here so the Runner has no compile-time dependency on
+    /// the PrepApp module.
+    private static func generateRandomApiKeyHex() -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        if status == errSecSuccess {
+            return bytes.map { String(format: "%02x", $0) }.joined()
+        }
+        let fallback = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        return fallback + fallback
     }
 
     private func handleHostStatusChange(_ status: MacRunnerHostController.Status) {
@@ -524,9 +601,12 @@ final class RunnerViewModel: ObservableObject {
 
         guard let baseUrl = networkApiBaseUrl,
               let url = URL(string: "\(baseUrl)/api/chat") else {
-            status = "Start Network Mode before sending chat"
-            networkApiStatus = "API required for RAG chat"
-            log("Chat refused: mac-runner-host is not running, direct Ollama chat would bypass RAG.")
+            // MAC34: post-auto-spawn this should be unreachable from the
+            // golden path — the chat host comes up at unlock. Surfacing it
+            // anyway so a sidecar crash mid-session shows up in the UI.
+            status = "Chat host not running. Lock and unlock to restart."
+            networkApiStatus = "API down"
+            log("Chat refused: mac-runner-host is not running.")
             return
         }
 
@@ -1048,8 +1128,6 @@ struct ContentView: View {
             Text(vm.status)
             HStack {
                 Button("Select SSD") { vm.pickSsdRoot() }
-                Button("Start") { vm.startOllama() }
-                Button("Stop") { vm.stopOllama() }
                 if !vm.isEncryptedLocked {
                     Button("Lock") { vm.lockSession(reason: "Manual lock") }
                 }
@@ -1077,13 +1155,18 @@ struct ContentView: View {
                 }
             }
 
-            // MAC6: Network Mode toggle. Spawns the net8.0 sidecar on switch-on
-            // and tears it down on switch-off / Lock / app exit.
+            // MAC34: the chat host is auto-spawned at unlock time and bound
+            // to 127.0.0.1 by default. This toggle now only controls whether
+            // the same host is also reachable from the LAN — when ON, the
+            // sidecar restarts bound to `networkBindAddress` from config
+            // (which the user must edit in JSON to actually expose; the
+            // default is still 127.0.0.1, so toggling ON with the default
+            // is a no-op for now).
             Divider()
             HStack {
-                Toggle("Network Mode (LAN API)", isOn: Binding(
+                Toggle("Expose API on LAN", isOn: Binding(
                     get: { vm.networkModeEnabled },
-                    set: { newValue in vm.setNetworkMode(enabled: newValue) }
+                    set: { newValue in vm.setExposeApiOnLan(newValue) }
                 ))
                 .disabled(vm.isEncryptedLocked)
                 Spacer()
