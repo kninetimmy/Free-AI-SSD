@@ -1545,3 +1545,97 @@ heals legacy v1.3.12-prepped SSDs that already shipped with empty keys.
 
 Won't be revisited unless we move auth to a transport-level mechanism
 (mTLS) where address-based gates become natural.
+
+---
+
+## 2026-05-09 — Cross-OS parity rule applies to user-visible behavior, not implementation shape [MAC32]
+
+The 2026-05-07 cross-OS parity rule (every single-OS task gets a
+dual-OS audit pass) does NOT mandate identical implementation
+shapes across OSes. MAC32 shipped a Mac `.done` step with a Quit
+button on one side and a Windows `ShowInfo` modal on the other —
+because Mac PrepApp is a step-machine SwiftUI flow with a natural
+terminal step, while Windows PrepApp is a tabbed XAML UI with no
+step machine. Mirroring would have meant either re-architecting
+Windows around steps or building a fake terminal-page overlay; both
+were larger surfaces for no user-visible benefit.
+
+What stays identical across OSes: the user-visible *message*. Both
+surfaces say "Your SSD is ready. Open Runner from this SSD to start
+chatting" — so cross-OS docs cite one phrase and field-test reports
+match across machines.
+
+Rule of thumb: when the parity audit surfaces a gap, the question is
+"does the user feel the same gap on both OSes?" — not "does the
+codepath look identical." If the answer is yes-on-Mac-no-on-Windows
+(or vice versa), only the gap-side ships code; the other side gets
+documented as already-correct in the PR description and a recon
+note. **MAC31a Windows side** (verified already correct because
+`CancelOperation` already returns the user to the Models tab where
+MAC31's resume seed populates "Resuming…") is a parallel example
+from the same PR.
+
+Established PR #225 (`179dfc0`).
+
+---
+
+## 2026-05-09 — Mac sidecar handshake hardcodes `networkModeEnabled = true`; LAN exposure is governed purely by `networkBindAddress` [MAC34a]
+
+After MAC34 the Swift comment said "the toggle now controls bind
+address only," but `restartHostSidecar` still passed the toggle's
+runtime value as the `networkModeEnabled` field of the C# handshake.
+That made the C# `RunnerLocalApiService.StartAsync` early-return at
+`if (!config.NetworkModeEnabled) return;` whenever the toggle was
+OFF, so the Mac sidecar refused to start on every unlock — chat
+dead until the user manually toggled it ON.
+
+The contract is now: Swift always sends `networkModeEnabled = true`
+in the handshake. The toggle's runtime effect is a single dimension
+— the bind address. Loopback when the toggle is OFF, the configured
+`networkBindAddress` when ON. The C# inner gate stays in the shared
+code path as defense-in-depth (Windows pre-gates externally in
+`MainWindow.xaml.cs:470` so it's also never reached there with
+false). Persisted `networkModeEnabled` in PortableConfig still
+reflects user intent across sessions and across OSes — only the
+runtime semantics decoupled from it.
+
+Why not the alternative — change C# to ignore `networkModeEnabled`
+on the Mac sidecar specifically: `RunnerLocalApiService` is shared
+between Mac and Windows; introducing a Mac-only branch would split
+the contract for one downstream consumer. Hardcoding true at the
+Swift→C# boundary is one line of code, preserves the C# contract,
+and keeps the existing `HostRunner_WithNetworkModeDisabled_FailsWithoutReadyLine`
+smoke valid as defense-in-depth.
+
+Established PR #226 (`95b62b5`).
+
+---
+
+## 2026-05-09 — Mac runner reclaims port 11434 by killing PIDs holding it, not by name-matching ollama processes [MAC34b]
+
+Field test of v1.3.13 surfaced silent `Ollama exited with code 1`
+followed by chat-host crashes when Ollama.app + a stray CLI ollama
+already held 127.0.0.1:11434. Windows side-steps the same scenario
+via `OllamaLifecycleService.ResolvePort` (scans preferred+20). Mac
+can't port-shift because the C# sidecar handshake takes a fixed
+host URL passed in from Swift, so reclaiming the port via process
+termination fits Mac's lifecycle better.
+
+The kill scope is "what is holding *our* port," not "anything
+named ollama." Implementation runs
+`lsof -nP -t -iTCP:<port> -sTCP:LISTEN` to enumerate PIDs, then
+SIGTERM → 0.6s grace → SIGKILL anything still alive. This means:
+- A sibling ollama serving a different model on a different port
+  (a parallel-workflow case) is left alone.
+- A non-ollama process accidentally holding 11434 still gets freed
+  up — the policy is "we own the staged port," not "we're polite
+  to ollama specifically."
+- Logs the reclaimed PIDs so the user has visibility (the user
+  reported "I had two running and had no idea" before the fix).
+
+Won't be revisited unless we move Mac to port-shifting (would
+require teaching the C# sidecar handshake to accept a
+runtime-resolved host URL — much larger surface for the same
+field-test outcome).
+
+Established PR #227 (merge hash pending v1.3.14 dispatch).
