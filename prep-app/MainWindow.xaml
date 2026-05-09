@@ -490,10 +490,15 @@
                                         </StackPanel>
                                         <CheckBox Margin="0,10,0,0"
                                                   Foreground="{StaticResource TextSecondaryBrush}"
-                                                  Content="Require passphrase to unlock SSD at runtime (encrypt portable config)"
+                                                  Content="Encrypt SSD config (optional, recommended for Network Mode)"
                                                   IsChecked="{Binding EnableEncryption, Mode=TwoWay}"
                                                   IsEnabled="{Binding CanMutateDrive}"
-                                                  ToolTip="Wrap the portable config with a passphrase-derived key. Prompted on every runner launch."/>
+                                                  ToolTip="Wrap portable-config.json with a passphrase-derived key. The runner will prompt for the passphrase on every launch. Required if you plan to expose the Runner API on your LAN — your API key is only stored encrypted."/>
+                                        <TextBlock Margin="22,4,0,0"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                                   TextWrapping="Wrap"
+                                                   Text="Off by default. Enable Network Mode requires this on (the LAN API key is never written in plaintext)."/>
                                     </StackPanel>
                                 </GroupBox>
 

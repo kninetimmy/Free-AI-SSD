@@ -59,9 +59,12 @@
  |           |                |            |   format NTFS)                   |
  +-----------+----------------+------------+----------------------------------+
 
- Bidirectional encrypted-config roundtrip: an SSD prepped on one OS
- unlocks cleanly on the other and vice versa. The on-disk encrypted
- format is identical on both platforms (AES-256-GCM + PBKDF2-SHA256).
+ Encryption is opt-in (off by default). Plaintext-prepped SSDs roundtrip
+ cleanly between OSes. Enabling encryption is recommended if you plan to
+ expose the Runner API on your LAN — your API key is only stored
+ encrypted, and Network Mode + Require API Key is enforced to require
+ encryption at save time. The on-disk encrypted format (AES-256-GCM +
+ PBKDF2-SHA256) is identical on both platforms when enabled.
 
  Notes:
  - APFS is a Mac-native filesystem; Windows cannot reliably create or

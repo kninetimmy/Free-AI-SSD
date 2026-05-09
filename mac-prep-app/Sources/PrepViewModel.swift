@@ -33,7 +33,10 @@ final class PrepViewModel: ObservableObject {
     @Published var logLines: [String] = []
     @Published var isBusy: Bool = false
 
-    // Encryption — mandatory for MAC17 MVP, no toggle. (MAC17a #6)
+    // Encryption — opt-in, default OFF (MAC30). When enableEncryption is
+    // false, the EncryptionSetupStepView hides the passphrase fields and
+    // writeConfigAndProceed() routes through PlaintextConfigWriter.
+    @Published var enableEncryption: Bool = false
     @Published var passphrase: String = ""
     @Published var passphraseConfirm: String = ""
 
@@ -60,6 +63,7 @@ final class PrepViewModel: ObservableObject {
     private let driveService = DiskutilDriveService()
     private let hostController = PrepHostController()
     private let encryptedConfigWriter = EncryptedConfigWriter()
+    private let plaintextConfigWriter = PlaintextConfigWriter()
 
     // MAC31: held for the duration of the pull batch so cancelPull()
     // can interrupt the for-loop in pullStarterModels(). Cancelling
@@ -354,7 +358,7 @@ final class PrepViewModel: ObservableObject {
         }
     }
 
-    func writeEncryptionAndProceed() async {
+    func writeConfigAndProceed() async {
         guard let mount = selectedCandidate?.mountPoint else {
             currentStep = .failed(message: "No mount point.")
             return
@@ -362,6 +366,17 @@ final class PrepViewModel: ObservableObject {
         isBusy = true
         defer { isBusy = false }
 
+        // MAC30: branch on the encryption toggle. OFF (default) writes a
+        // plaintext portable-config.json; ON keeps the MAC17a passphrase
+        // flow.
+        if enableEncryption {
+            await writeEncryptedAndAdvance(mount: mount)
+        } else {
+            await writePlaintextAndAdvance(mount: mount)
+        }
+    }
+
+    private func writeEncryptedAndAdvance(mount: URL) async {
         if passphrase.isEmpty || passphrase != passphraseConfirm {
             statusMessage = "Passphrases must match and not be empty."
             return
@@ -392,6 +407,23 @@ final class PrepViewModel: ObservableObject {
             await pullStarterModels()
         } catch {
             currentStep = .failed(message: "Encryption write failed: \(error.localizedDescription)")
+        }
+    }
+
+    private func writePlaintextAndAdvance(mount: URL) async {
+        let writer = self.plaintextConfigWriter
+        let payload = InitialPortableConfigPayload()
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try writer.writeInitialPlaintextConfig(
+                    ssdRoot: mount, payload: payload)
+            }.value
+            appendLog("Plaintext config written (encryption skipped).")
+
+            currentStep = .modelPull
+            await pullStarterModels()
+        } catch {
+            currentStep = .failed(message: "Config write failed: \(error.localizedDescription)")
         }
     }
 

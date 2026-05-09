@@ -222,18 +222,26 @@ struct EncryptionSetupStepView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Set up encryption")
                 .font(.headline)
-            // MAC17a #6: encryption is mandatory for MAC17 MVP; the
-            // toggle was wishful UI for a future plaintext mode that
-            // doesn't exist. Removed so the only way forward is to
-            // enter a passphrase.
-            Form {
-                SecureField("Passphrase", text: $vm.passphrase)
-                SecureField("Confirm passphrase", text: $vm.passphraseConfirm)
+            // MAC30: encryption is opt-in. Default OFF — most users want
+            // a frictionless plaintext config. Toggle ON re-shows the
+            // MAC17a passphrase flow.
+            Toggle("Encrypt SSD config", isOn: $vm.enableEncryption)
+                .toggleStyle(.checkbox)
+            if vm.enableEncryption {
+                Form {
+                    SecureField("Passphrase", text: $vm.passphrase)
+                    SecureField("Confirm passphrase", text: $vm.passphraseConfirm)
+                }
+                Text("The passphrase decrypts the SSD's config on every launch. Store it somewhere you won't lose it — there is no recovery path.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Encryption is optional. Recommended if you plan to expose the Runner API on your LAN — your API key is only stored encrypted. You can always re-prep the SSD later to enable it.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Text("The passphrase decrypts the SSD's config on every launch. Store it somewhere you won't lose it — there is no recovery path.")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
 
             Divider()
 
@@ -304,11 +312,12 @@ struct EncryptionSetupStepView: View {
 
             HStack {
                 Spacer()
-                Button("Write encryption & continue") {
-                    Task { await vm.writeEncryptionAndProceed() }
+                Button(vm.enableEncryption ? "Write encryption & continue" : "Continue without encryption") {
+                    Task { await vm.writeConfigAndProceed() }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(vm.passphrase.isEmpty || vm.passphrase != vm.passphraseConfirm)
+                .disabled(vm.enableEncryption &&
+                          (vm.passphrase.isEmpty || vm.passphrase != vm.passphraseConfirm))
             }
         }
     }
