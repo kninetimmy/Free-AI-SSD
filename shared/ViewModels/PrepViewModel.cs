@@ -35,7 +35,6 @@ public class PrepViewModel : BaseViewModel
     // Ollama's TUI rewrite ticks scroll the log surface.
     private string _pullProgressLine = string.Empty;
     private string _modelTagInput = string.Empty;
-    private string _ollamaUrl = OllamaPackageTrustPolicy.DefaultWindowsPackage.Url;
     private bool _prepareWindows = true;
     private bool _prepareMac;
     private bool _isMacPrepAvailable;
@@ -188,12 +187,6 @@ public class PrepViewModel : BaseViewModel
     {
         get => _modelTagInput;
         set => SetProperty(ref _modelTagInput, value);
-    }
-
-    public string OllamaUrl
-    {
-        get => _ollamaUrl;
-        set => SetProperty(ref _ollamaUrl, value);
     }
 
     public Action? OnPreferenceStateChanged { get; set; }
@@ -781,7 +774,7 @@ public class PrepViewModel : BaseViewModel
         try
         {
             var ollamaExe = await _ollamaPackageService.EnsureOllamaReadyAsync(
-                root, _ollamaUrl, AppendLog,
+                root, AppendLog,
                 new Progress<DownloadProgress>(p =>
                 {
                     ProgressIsIndeterminate = false;
@@ -961,7 +954,7 @@ public class PrepViewModel : BaseViewModel
             if (rowsPresentOnDrive.Count > 0)
             {
                 var ollamaExe = await _ollamaPackageService.EnsureOllamaReadyAsync(
-                    _selectedDrive.RootPath, _ollamaUrl, AppendLog, null, CancellationToken.None);
+                    _selectedDrive.RootPath, AppendLog, null, CancellationToken.None);
                 var modelsRoot = Path.Combine(_selectedDrive.RootPath, SsdLayout.Models);
 
                 // Start a controlled temporary server once for the whole batch.
@@ -1314,7 +1307,7 @@ public class PrepViewModel : BaseViewModel
 
             if (targets.HasFlag(PrepTargets.Windows))
             {
-                await _ollamaPackageService.EnsureOllamaReadyAsync(root, _ollamaUrl, AppendLog, null, CancellationToken.None);
+                await _ollamaPackageService.EnsureOllamaReadyAsync(root, AppendLog, null, CancellationToken.None);
 
                 StatusText = "Staging offline prerequisites...";
                 await _prereqService.StagePrerequisitesAsync(root, AppendLog, CancellationToken.None);

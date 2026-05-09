@@ -19,14 +19,17 @@ struct OllamaPackageTrustAttestation: Codable {
     let VerifiedAtUtc: String
 }
 
-/// Pinned Mac Ollama package metadata. Must match
-/// `OllamaPackageTrustPolicy.DefaultMacPackage` in shared/. If you bump one,
-/// bump both — the runtime gate compares the on-SSD attestation to these
-/// constants and refuses to launch on any mismatch.
-enum PinnedMacOllama {
-    static let url = "https://github.com/ollama/ollama/releases/download/v0.5.7/ollama-darwin.zip"
-    static let sha256 = "09ad6bb2edf7cb78619a0932c93c544c362c6ac738c7d5531b3b1b87ac619971"
+/// MAC38: trust anchor for the Mac Ollama runtime is now the on-SSD
+/// attestation file, not a hardcoded URL+SHA pair. PrepApp staging only
+/// writes the attestation after verifying the bundled archive against the
+/// upstream release's vendor-published `sha256sum.txt`. At launch we
+/// re-validate the attestation's URL is HTTPS to an allowlisted github.com
+/// host and that the recorded SHA-256 is well-formed. Re-hashing the
+/// 180MB+ binary on every launch is too slow; we trust the attestation as
+/// the staging gate's signed receipt.
+enum MacOllamaTrust {
     static let attestationFileName = "ollama-package-trust.json"
+    static let allowlistedHosts: Set<String> = ["github.com", "objects.githubusercontent.com"]
 }
 
 enum TrustGateResult {
@@ -1229,17 +1232,18 @@ final class RunnerViewModel: ObservableObject {
         }
     }
 
-    /// Reads `<ssdRoot>/mac/tools/ollama/ollama-package-trust.json` and
-    /// compares it to the pinned Mac Ollama metadata. Refuses launch when
-    /// the file is missing, malformed, or disagrees on URL / SHA-256.
-    /// Re-hashing the 180MB binary on every launch is too slow; we
-    /// cross-check the attestation against the embedded constants instead.
-    /// PrepApp staging is responsible for the actual SHA-256 verification
-    /// before this attestation is ever written.
+    /// MAC38: reads `<ssdRoot>/mac/tools/ollama/ollama-package-trust.json`
+    /// and validates it as the Mac Ollama trust anchor. The attestation is
+    /// PrepApp's signed receipt that the bytes on disk matched the upstream
+    /// release's vendor-published SHA-256 at staging time. Refuses launch
+    /// when the file is missing, malformed, points at a non-allowlisted
+    /// host, or carries a malformed digest. Re-hashing the 180MB+ binary on
+    /// every launch is too slow; the attestation's existence + integrity is
+    /// the gate.
     func evaluateTrustGate(ssdRoot: URL) -> TrustGateResult {
         let attestationURL = ssdRoot
             .appendingPathComponent("mac/tools/ollama")
-            .appendingPathComponent(PinnedMacOllama.attestationFileName)
+            .appendingPathComponent(MacOllamaTrust.attestationFileName)
 
         guard FileManager.default.fileExists(atPath: attestationURL.path) else {
             return .refused("Missing trust attestation. Re-stage the macOS Ollama bundle from PrepApp.")
@@ -1253,12 +1257,20 @@ final class RunnerViewModel: ObservableObject {
             return .refused("Trust attestation malformed. Re-stage the macOS Ollama bundle.")
         }
 
-        if attestation.Url != PinnedMacOllama.url {
-            return .refused("Trust attestation URL does not match the pinned Mac Ollama source. Re-stage from PrepApp.")
+        guard let url = URL(string: attestation.Url),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "https",
+              let host = url.host?.lowercased(),
+              MacOllamaTrust.allowlistedHosts.contains(host) else {
+            return .refused("Trust attestation URL is not from an allowlisted github.com host. Re-stage from PrepApp.")
         }
 
-        if attestation.Sha256.lowercased() != PinnedMacOllama.sha256.lowercased() {
-            return .refused("Trust attestation digest does not match the pinned Mac Ollama SHA-256. Re-stage from PrepApp.")
+        let sha = attestation.Sha256.lowercased()
+        let isValidSha = sha.count == 64 && sha.allSatisfy { ch in
+            ("0"..."9").contains(ch) || ("a"..."f").contains(ch)
+        }
+        guard isValidSha else {
+            return .refused("Trust attestation digest is malformed (not a 64-char SHA-256). Re-stage from PrepApp.")
         }
 
         return .allowed

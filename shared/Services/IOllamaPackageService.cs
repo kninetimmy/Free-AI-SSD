@@ -12,7 +12,14 @@ public interface IOllamaServerHandle : IDisposable
 
 public interface IOllamaPackageService
 {
-    Task<string> EnsureOllamaReadyAsync(string root, string ollamaUrl, Action<string> onLog, IProgress<DownloadProgress>? progress, CancellationToken ct);
+    /// <summary>
+    /// Ensures Ollama is staged on the SSD and ready to launch. On Windows
+    /// this dynamically resolves the latest upstream release via GitHub's
+    /// API + the release's <c>sha256sum.txt</c>, downloads, verifies, and
+    /// writes the trust attestation. On Mac the binary is bundled into the
+    /// release zip at CI time and copied from the bundle here.
+    /// </summary>
+    Task<string> EnsureOllamaReadyAsync(string root, Action<string> onLog, IProgress<DownloadProgress>? progress, CancellationToken ct);
     string? ResolveOllamaExe(string ollamaDir);
 
     /// <summary>

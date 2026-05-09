@@ -23,34 +23,33 @@ public static class MacOllamaStagingPipeline
 {
     /// <summary>
     /// Verifies the Mac Ollama archive at <paramref name="archivePath"/> matches
-    /// the pinned SHA-256, that the extracted binary at
-    /// <paramref name="extractedBinaryPath"/> contains an arm64 slice, and (on
-    /// success) writes the on-SSD trust attestation under
+    /// the SHA-256 carried in <paramref name="metadata"/>, that the extracted
+    /// binary at <paramref name="extractedBinaryPath"/> contains an arm64
+    /// slice, and (on success) writes the on-SSD trust attestation under
     /// <c>mac/tools/ollama/</c>. On failure no attestation is written and
     /// the caller should refuse to stage.
     /// </summary>
-    /// <param name="metadata">Pinned Mac package metadata. Defaults to
-    /// <see cref="OllamaPackageTrustPolicy.DefaultMacPackage"/>; tests pass a
-    /// substitute so they can exercise the pipeline against a synthetic
-    /// archive without re-downloading the 180MB upstream zip.</param>
+    /// <param name="metadata">Mac package metadata sourced from the bundled
+    /// <c>mac-tools-manifest.json</c> (which CI populated from the upstream
+    /// release's vendor-published <c>sha256sum.txt</c>).</param>
     public static MacOllamaStagingResult VerifyAndAttest(
         string ssdRoot,
         string archivePath,
         string extractedBinaryPath,
-        OllamaPackageMetadata? metadata = null)
+        OllamaPackageMetadata metadata)
     {
-        var pinned = metadata ?? OllamaPackageTrustPolicy.DefaultMacPackage;
+        if (metadata is null) throw new ArgumentNullException(nameof(metadata));
 
-        var sourceCheck = OllamaPackageTrustPolicy.ValidatePackageSource(pinned.Url);
+        var sourceCheck = OllamaPackageTrustPolicy.ValidatePackageSource(metadata.Url);
         if (!sourceCheck.IsTrusted) return MacOllamaStagingResult.Fail(sourceCheck);
 
-        var hashCheck = OllamaPackageTrustPolicy.ValidateDownloadedPackage(archivePath, pinned);
+        var hashCheck = OllamaPackageTrustPolicy.ValidateDownloadedPackage(archivePath, metadata);
         if (!hashCheck.IsTrusted) return MacOllamaStagingResult.Fail(hashCheck);
 
-        var armCheck = OllamaPackageTrustPolicy.ValidateArm64Slice(extractedBinaryPath, pinned);
+        var armCheck = OllamaPackageTrustPolicy.ValidateArm64Slice(extractedBinaryPath, metadata);
         if (!armCheck.IsTrusted) return MacOllamaStagingResult.Fail(armCheck);
 
-        OllamaPackageTrustPolicy.WriteMacTrustAttestation(ssdRoot, pinned);
+        OllamaPackageTrustPolicy.WriteMacTrustAttestation(ssdRoot, metadata);
         return MacOllamaStagingResult.Ok();
     }
 }

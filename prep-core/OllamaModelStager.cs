@@ -3,14 +3,15 @@ namespace FreeAiSsd.PrepApp;
 /// <summary>
 /// MAC35: Mac-only host-stage helper for Ollama model pulls.
 ///
-/// Driver: Ollama 0.5.7 hardcodes <c>numDownloadParts = 16</c> and exFAT
-/// FSKit on macOS 15+ cannot sustain 16 concurrent writers on a single
-/// blob. The v1.3.14 mac field test of <c>qwen2.5:7b</c> (4.7 GB)
-/// collapsed to ~5 MB/s with 290 stall events over 19 minutes and
-/// Ollama's UI bouncing 35-60 % → 6 % — chunks made local progress but
-/// the per-chunk byte-progress detector kept tripping and restarting
-/// them. Direct Ollama on Windows over the same connection downloads
-/// fine because NTFS handles the I/O pattern.
+/// Driver: Ollama hardcodes <c>numDownloadParts = 16</c>
+/// (re-verified upstream <c>server/download.go</c> through v0.23.2,
+/// 2026-05) and exFAT FSKit on macOS 15+ cannot sustain 16 concurrent
+/// writers on a single blob. The v1.3.14 mac field test of
+/// <c>qwen2.5:7b</c> (4.7 GB) collapsed to ~5 MB/s with 290 stall events
+/// over 19 minutes and Ollama's UI bouncing 35-60 % → 6 % — chunks made
+/// local progress but the per-chunk byte-progress detector kept tripping
+/// and restarting them. Direct Ollama on Windows over the same
+/// connection downloads fine because NTFS handles the I/O pattern.
 ///
 /// Strategy: pull into <c>~/Library/Caches/FreeAiSsd/ollama-staging</c>
 /// (host APFS — no exFAT contention) and then sequentially copy the

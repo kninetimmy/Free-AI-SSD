@@ -202,12 +202,35 @@ public static class PrereqResolver
     /// <param name="preferredAssetNames">Asset filenames to look for in the release,
     /// in priority order. Ollama capitalized the asset name in v0.20.7+ so we
     /// try both "Ollama-darwin.zip" and "ollama-darwin.zip".</param>
-    public static async Task<PrereqResolution> ResolveLatestOllamaMacAsync(
+    public static Task<PrereqResolution> ResolveLatestOllamaMacAsync(
         HttpClient http, CancellationToken ct = default,
-        IReadOnlyList<string>? preferredAssetNames = null)
+        IReadOnlyList<string>? preferredAssetNames = null) =>
+        ResolveLatestOllamaAsync(
+            http,
+            preferredAssetNames ?? new[] { "Ollama-darwin.zip", "ollama-darwin.zip" },
+            ct);
+
+    /// <summary>
+    /// Resolves the latest Ollama Windows x64 ZIP by querying the GitHub
+    /// releases API and fetching the release's sha256sum.txt asset. Mirrors
+    /// <see cref="ResolveLatestOllamaMacAsync"/> for the Windows side so
+    /// PrepApp's first-run download and CI bundling agree on a single source
+    /// of truth (vendor-published hash) without a hardcoded version pin.
+    /// </summary>
+    public static Task<PrereqResolution> ResolveLatestOllamaWindowsAsync(
+        HttpClient http, CancellationToken ct = default,
+        IReadOnlyList<string>? preferredAssetNames = null) =>
+        ResolveLatestOllamaAsync(
+            http,
+            preferredAssetNames ?? new[] { "ollama-windows-amd64.zip" },
+            ct);
+
+    private static async Task<PrereqResolution> ResolveLatestOllamaAsync(
+        HttpClient http,
+        IReadOnlyList<string> preferredAssetNames,
+        CancellationToken ct)
     {
         if (http is null) throw new ArgumentNullException(nameof(http));
-        preferredAssetNames ??= new[] { "Ollama-darwin.zip", "ollama-darwin.zip" };
 
         string releaseJson;
         try

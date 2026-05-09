@@ -306,7 +306,7 @@ public class PrepViewModelTests
         SetupDefaultMocks();
         _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
         _ollamaPackageService
-            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
+            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
         _prereqService
             .Setup(s => s.StagePrerequisitesAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
@@ -368,7 +368,7 @@ public class PrepViewModelTests
         SetupDefaultMocks();
         _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
         _ollamaPackageService
-            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
+            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
         _prereqService
             .Setup(s => s.StagePrerequisitesAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
@@ -411,7 +411,7 @@ public class PrepViewModelTests
         SetupDefaultMocks();
         _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
         _ollamaPackageService
-            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
+            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
         _prereqService
             .Setup(s => s.StagePrerequisitesAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
@@ -457,7 +457,7 @@ public class PrepViewModelTests
         SetupDefaultMocks();
         _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
         _ollamaPackageService
-            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
+            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
         _prereqService
             .Setup(s => s.StagePrerequisitesAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
@@ -506,7 +506,7 @@ public class PrepViewModelTests
         SetupDefaultMocks();
         _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
         _ollamaPackageService
-            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
+            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
         _prereqService
             .Setup(s => s.StagePrerequisitesAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
@@ -569,7 +569,7 @@ public class PrepViewModelTests
         SetupDefaultMocks();
         _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
         _ollamaPackageService
-            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
+            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
         _prereqService
             .Setup(s => s.StagePrerequisitesAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
