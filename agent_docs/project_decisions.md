@@ -1800,3 +1800,82 @@ Why not the alternatives:
   is built on. Not worth the complexity for one field.
 
 Established PR #233 (`0685cfd`), shipped v1.3.17.
+
+---
+
+## 2026-05-09 — Mac Runner: lock-on-blur removed as default [MAC36]
+
+The MAC5-era `NSApplication.willResignActiveNotification` →
+`lockSession(reason: "App backgrounded")` observer is no longer
+registered. With MAC30 making encryption opt-in (default OFF), a
+plaintext SSD has no key to zeroize on backgrounding and the
+auto-teardown forced the user to re-select the SSD on every alt-tab
+just to get the chat host back up. The v1.3.17 mac field test
+signal was unanimous.
+
+What stays:
+1. **Lock-on-quit** (`willTerminateNotification`) — derived AES key
+   never outlives the process, encrypted or plaintext.
+2. **Manual Lock button** — user-initiated zeroize remains the
+   first-class teardown.
+3. **Lock-on-deinit** — safety net for view-model release.
+
+Supersedes the lock-on-background bullet of the MAC5 invariant
+("derived AES key never outlives the user's active session"). The
+spirit of the invariant survives — quit + manual + deinit — but
+"active session" is now scoped to the process lifetime, not to the
+focus state of the Runner window.
+
+Users who *do* enable encryption and want lock-on-idle will get an
+explicit opt-in preference as part of F4 (FTUE Stage 2+). That
+preference will register the observer back when the toggle is on.
+
+Why not the alternatives:
+- **Keep blur-lock and ask users to disable it** — adds a setting
+  to make the default less hostile, which inverts the
+  default-should-be-fine principle. The setting belongs to the
+  encrypted-and-paranoid case, not the default case.
+- **Lock on blur only when encrypted** — encryption is a per-prep
+  toggle, not a runtime mode, and reading the on-disk encryption
+  state from the Runner each time the focus changes adds a fragile
+  coupling. The opt-in F4 preference is the cleaner shape.
+
+Established PR #235 (`567f49a`), shipped v1.3.18.
+
+---
+
+## 2026-05-09 — Mac streaming consumers use URLSessionDataDelegate, not bytes(for:) [MAC36]
+
+The `mac-runner/` and `mac-prep-app/` deployment target is
+`arm64-apple-macos11.0` (pinned in `.github/workflows/build.yml` —
+`-target` flag at lines 168, 175, 284, 392, 516; SsdEncryptionTests
+header documents it as the MAC1 baseline). `URLSession.bytes(for:)`
+and `URLSession.bytes(from:)` are macOS 12+ and will not compile on
+this target. All Mac streaming consumers must use
+`URLSessionDataDelegate.urlSession(_:dataTask:didReceive:)` with a
+buffered line-splitter.
+
+Existing references:
+- `mac-runner/Sources/NdjsonFrameBuffer.swift` (MAC36) — pure
+  helper for `\n`-terminated NDJSON frames; CRLF-tolerant; carries
+  trailing tail across chunks. The canonical pattern for any new
+  streaming consumer.
+- `mac-runner/Sources/main.swift` `handleNdjsonProgress` — older
+  buffered-then-replay path for `/api/library/{id}/files` and
+  sweep/rebuild progress. Acceptable when live progress isn't
+  needed; new code that needs token-level streaming should use the
+  delegate path.
+
+Per-call `URLSession` instances paired with the delegate must be
+invalidated (`finishTasksAndInvalidate()` on completion or
+`invalidateAndCancel()` on teardown) to break the
+URLSession-retains-delegate-strongly cycle. The delegate itself
+holds a `weak var owner` to the view-model.
+
+This decision unlocks if (a) the macOS deployment target bumps to
+12+ — at which point `bytes(for:)` becomes available and is
+preferred for new code — or (b) Mac drops streaming entirely. Until
+then, the delegate path is the only supported shape and is locked
+into the project.
+
+Established PR #235 (`567f49a`), shipped v1.3.18.
