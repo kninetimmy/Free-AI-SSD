@@ -1758,3 +1758,45 @@ harmless on Windows because no legitimate Ollama tag starts with
 `.`.
 
 Established PR #231 (`8f3b54e`), shipped v1.3.16.
+
+---
+
+## 2026-05-09 — Plaintext invariant narrows from "no plaintext config containing secrets" to "API key never written in plaintext" [MAC30]
+
+Pre-MAC30 (MAC5/MAC17a era): the rule was no plaintext config of
+any kind. MAC30 introduced an opt-out path; with the toggle OFF
+the SSD must still be safe to leave in someone else's hands. The
+narrowing is: `PortableConfig` may now be plaintext as long as
+`networkApiKey` is empty. Enforced at three sites:
+
+1. `mac-prep-app/Sources/PlaintextConfigWriter.swift` — strips
+   `networkApiKey` from the dictionary before
+   `JSONSerialization.data(...)` even if
+   `InitialPortableConfigPayload` generated one in memory. The
+   in-memory payload still generates a random key per MAC34 (so
+   the encrypted path stays correct), but the plaintext writer
+   refuses to land it on disk.
+2. `shared/PortableConfig.cs:275` `NetworkModeEncryptionRequiredMessage`
+   — fires at save time if Network Mode + Require API Key +
+   plaintext config combine. Both `ConfigStore.SaveAsync` and
+   `PortableConfig.SaveAsync` honor this guard.
+3. Mac Runner's MAC34 runtime API-key backfill only triggers on
+   the encrypted unlock path; a plaintext config that turns
+   Network Mode on hits the save-time guard before the runner
+   ever reaches the backfill site.
+
+Companion-on-LAN remains an encrypted-config feature. Plaintext
+is for local-only chat: loopback chat works with no key required
+because `RunnerLocalApiService`'s loopback bypass (also MAC34)
+allows requests from `127.0.0.1` through unauthenticated.
+
+Why not the alternatives:
+- **Refuse to write plaintext at all** — that's the pre-MAC30
+  rule, and it's why the user pushed back on encryption being
+  forced. The narrower invariant is what makes opt-out viable.
+- **Encrypt only the `networkApiKey` field inside an otherwise
+  plaintext config** — adds a second key-derivation surface and
+  blurs the "encrypted blob is the entire config" contract MAC5
+  is built on. Not worth the complexity for one field.
+
+Established PR #233 (`0685cfd`), shipped v1.3.17.

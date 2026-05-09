@@ -157,7 +157,7 @@ Do not weaken these controls. New process launches go through `ProcessRunner`; n
 ## Runtime layout (SSD)
 
 ```
-config/                   — portable-config.json (encrypted at rest)
+config/                   — portable-config.json (plaintext, default) or portable-config.encrypted.json (opt-in, MAC30)
 models/                   — Ollama model store
 models/whisper/           — ggml-*.bin STT models
 docs/libraries/           — RAG library files, manifests, SQLite index
