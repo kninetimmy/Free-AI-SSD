@@ -24,6 +24,16 @@ namespace FreeAiSsd.Tests;
 /// </summary>
 public sealed class MacRunnerHostSmokeTests
 {
+    /// <summary>
+    /// Pins the C# defense-in-depth gate inside <see cref="RunnerLocalApiService.StartAsync"/>.
+    /// MAC34a (2026-05-09): the Mac Swift runner now hardcodes
+    /// <c>networkModeEnabled = true</c> in the handshake so this gate is never
+    /// exercised in production — chat sidecar always runs after unlock; LAN
+    /// exposure is governed by <c>networkBindAddress</c> alone. The test stays
+    /// to guarantee that if a future caller (CLI smoke, fuzzing, regressed
+    /// Swift) ever passes false, the host fails closed instead of silently
+    /// hanging without a ready line.
+    /// </summary>
     [Fact]
     public async Task HostRunner_WithNetworkModeDisabled_FailsWithoutReadyLine()
     {

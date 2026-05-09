@@ -377,7 +377,14 @@ final class RunnerViewModel: ObservableObject {
         } else {
             effectiveBind = "127.0.0.1"
         }
-        config["networkModeEnabled"] = exposed
+        // MAC34a: the Mac sidecar's contract is "always run after unlock"
+        // (chat goes through it on loopback even when LAN exposure is off).
+        // RunnerLocalApiService.StartAsync still has a defensive
+        // `if (!config.NetworkModeEnabled) return;` gate inherited from the
+        // shared Windows code path, so we hardcode true in the handshake
+        // regardless of the user-facing toggle. LAN exposure is conveyed
+        // purely via `networkBindAddress` (loopback when toggle is OFF).
+        config["networkModeEnabled"] = true
         config["networkBindAddress"] = effectiveBind
 
         networkApiStatus = "Starting API…"
