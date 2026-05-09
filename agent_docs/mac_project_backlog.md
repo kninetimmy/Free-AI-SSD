@@ -2814,10 +2814,41 @@ was."
   from Windows Runner (validates the partial-blob format is
   shared, not a Mac-only artifact).
 
+### MAC31a - Cancel mid-pull falls through to readiness instead of offering Retry
+
+**Status:** **done** — PR #225 merged on `179dfc0` (2026-05-09); v1.3.13 release dispatched in same session. Bundled cross-OS with MAC32 per the 2026-05-07 dual-OS rule.
+**Scope:** small — Mac-only code change. Windows verified already correct.
+**Risk:** Low. Pure UI plumbing on the Mac side.
+**Dependencies:** Built on MAC31 (resume seed + Cancel button). Independent of MAC30/MAC32.
+**Goal:** A user who cancels a multi-GB pull mid-flight lands on a clear paused state with Retry / Skip / Start over, rather than silently advancing past the pull to readiness with no surface to resume the partially-downloaded model.
+
+**Driver:** v1.3.12 mac field test, 8B model on a slow connection. Per the v1.3.12 field-test screenshot, clicking Cancel during a stalled larger-model pull jumped straight to Finalize with no Retry button — even though MAC31's resume seed preserves partial blobs on disk under `<ssd>/models/blobs/sha256-<hex>-partial-N`. The on-disk preservation worked; the UX surface didn't expose it.
+
+**Root cause:** `pullStarterModels` in `mac-prep-app/Sources/PrepViewModel.swift:391` unconditionally set `currentStep = .readiness` after the pull `Task` ended — including the `catch is CancellationError` branch that just `break`ed and fell through. The step machine had no "paused" state to land on.
+
+**Fix architecture (Mac):**
+
+1. **New flow step:** `PrepFlowStep.swift` gains `case modelPullPaused(tag: String, progressSnapshot: String?)` between `.modelPull` and `.readiness`. Snapshot is a `String?` (the last in-memory `pullProgressLine` value) rather than a Double fraction — design call 2026-05-09 to avoid a sidecar roundtrip on Cancel; the snapshot is the same string the user just saw on screen.
+2. **Refactored pull loop:** `pullStarterModels` split into a public entry + a private `pullPendingTags`. Entry seeds `pendingPullTags` from `selectedStarterModels` only on first call; resume re-enters with `pendingPullTags` already populated (cancelled tag at index 0). Inside the loop, on `CancellationError` the cancelled tag + remaining queue are captured + transition routes to `.modelPullPaused`. On clean completion, queue clears and routes to `.readiness`.
+3. **New VM methods:** `resumePull()` (re-enters the loop with `pendingPullTags` intact), `skipRemainingPulls()` (clears queue, advances to readiness), reuse existing `restart()` for Start over. `restart()` updated to clear `pendingPullTags` + `pullProgressLine` so a post-failure restart doesn't carry stale state.
+4. **New step view:** `ModelPullPausedStepView` in `main.swift` shows headline + body explaining partial download is preserved, optional snapshot text in monospaced overlay (only if non-empty), three buttons: Retry (`.keyboardShortcut(.defaultAction)`) / Skip / Start over. Added to the `switch currentStep` in ContentView and the title-bar mapping ("5 / 6 — Pull paused").
+
+**Windows verified already correct:** `shared/ViewModels/PrepViewModel.cs` `CancelOperation` just calls `_modelOperationCts.Cancel()`; `PullModelsAsync` catches `OperationCanceledException`, logs "Download cancelled", clears `PullProgressLine`, and returns. The user stays on the Models tab and clicking Download again triggers MAC31's resume seed at line 818 (`PullProgressLine = seed > 0 ? $"Resuming {model} from {seed:P0}…" : ...`). The Windows tabbed UI without a step machine is a natural fit for "implicit retry" — explicit Retry surface would be visual noise. Per the 2026-05-09 cross-OS parity-rule decision, this asymmetry is acceptable because the user-visible *behavior* matches: cancel a pull, click Download again, see "Resuming…".
+
+**Affected files:**
+- `mac-prep-app/Sources/PrepFlowStep.swift` — new `.modelPullPaused` case.
+- `mac-prep-app/Sources/PrepViewModel.swift` — `pendingPullTags` state, `pullPendingTags` private, `resumePull` + `skipRemainingPulls` public, `restart` clears.
+- `mac-prep-app/Sources/main.swift` — `ModelPullPausedStepView`, ContentView switch arm, step-title mapping.
+- `mac-prep-app/Tests/PrepAppTests.swift` — 4 new MAC31a Equatable cases.
+
+**Acceptance / smoke (deferred to v1.3.13 mac field run):**
+- Multi-GB pull on a slow connection → Cancel mid-pull → land on paused step with snapshot text → Retry → "Resuming `<tag>` from NN%…" log line and pull continues from approximately where it stopped → eventual completion advances to readiness.
+- Skip from paused → readiness without finishing the cancelled tag.
+- Start over from paused → welcome with all state cleared.
+
 ### MAC32 - PrepApp Finish button is a no-op
 
-**Status:** filed 2026-05-08 from v1.3.10 mac field test. Not yet
-  in flight. **Needs product call** before code lands.
+**Status:** **done** — PR #225 merged on `179dfc0` (2026-05-09); v1.3.13 release dispatched in same session. Bundled cross-OS with MAC31a per the 2026-05-07 dual-OS rule. **(Mac)** `DoneStepView`'s Finish button silently called `vm.finalize()` (sidecar shutdown + log line) and left the window visibly frozen. Renamed to Quit; new `vm.quit()` calls `finalize()` then dispatches `NSApplication.shared.terminate(nil)`. Body copy now mirrors the Windows modal: "Your SSD is ready. Open `mac/Runner.app` on the SSD to start chatting. Quit when ready." **(Windows)** `FinalizeAsync` ended silently — added `_dialogService.ShowInfo("Your SSD is ready. Open Runner.exe on this SSD to start chatting.", "Setup complete")` on the full-success path only. `IDialogService.ShowInfo` already existed (used by `CheckReadinessAsync`). Asymmetric implementation per the 2026-05-09 decision: Mac is a step-machine flow with a natural terminal step; Windows is a tabbed XAML UI with no step machine — modal matches the user-visible message without re-architecting Windows. 3 new Windows tests pin modal-on-success / modal-NOT-on-no-profile / modal-NOT-on-readiness-failure. CI green on first run.
 **Scope:** small — one Swift handler + one C# command. Cross-OS.
 **Risk:** Trivial. Pure UI plumbing.
 **Dependencies:** None.
@@ -2986,7 +3017,7 @@ verification):**
 
 ### MAC34 - Mac Runner local chat works without Network Mode (auto-spawn sidecar + API key generation)
 
-**Status:** **in flight** — branch `mac34-local-chat-and-api-key`, PR pending. Closes the v1.3.12 mac field-test post-prep blocker: a small starter-model pull works, unlock works, but clicking Send returned `Chat failed: API key is required by configuration but not set on host.` and toggling Network Mode to "fix it" reproduced the same error. Two root causes stacked: (1) Mac chat is architecturally routed through the `mac-runner-host` sidecar (which is where the C# RAG pipeline lives) but the sidecar only ran when the user toggled "Network Mode" on — so local-only chat looked like it required LAN exposure even though that toggle is supposed to be optional. (2) The PrepApp shipped `networkApiKey: ""` with `networkRequireApiKey: true`, so the moment the sidecar came up, every non-loopback-ish request 503'd via the `RunnerLocalApiService` fail-closed guard; there was no UI to set a key.
+**Status:** **done** — PR #223 merged `e9c9a65` (2026-05-08), shipped in v1.3.13 cumulative bundle (2026-05-09). Two follow-ups filed from the v1.3.13 mac field test: **MAC34a** (Swift handshake regression — the `networkModeEnabled` toggle wasn't wired correctly into the C# sidecar startup gate) and **MAC34b** (port 11434 reclaim before staged ollama spawn). Closed the v1.3.12 mac field-test post-prep blocker: a small starter-model pull works, unlock works, but clicking Send returned `Chat failed: API key is required by configuration but not set on host.` and toggling Network Mode to "fix it" reproduced the same error. Two root causes stacked: (1) Mac chat is architecturally routed through the `mac-runner-host` sidecar (which is where the C# RAG pipeline lives) but the sidecar only ran when the user toggled "Network Mode" on — so local-only chat looked like it required LAN exposure even though that toggle is supposed to be optional. (2) The PrepApp shipped `networkApiKey: ""` with `networkRequireApiKey: true`, so the moment the sidecar came up, every non-loopback-ish request 503'd via the `RunnerLocalApiService` fail-closed guard; there was no UI to set a key.
 
 **Scope:** medium — Mac Runner UI + lifecycle refactor + cross-OS PrepApp API key generation. Cross-OS: PrepViewModel.cs gets a parallel API-key generation pass; `RunnerLocalApiService` is untouched (no security policy change). Windows Runner runs runner-core in-process, so the auto-spawn architecture is Mac-only.
 **Risk:** Low for the API key generation; medium for the Mac auto-spawn refactor (lifecycle gets coupled to unlock so any unlock-time crash now leaves both ollama and the sidecar in unknown states — Lock path mitigates by tearing both down).
@@ -3018,4 +3049,93 @@ verification):**
 - v1.3.13 mac field test: prep + pull `llama3.2:1b` → unlock Runner.app off the SSD → immediately type a prompt and click Send (no toggles) → response arrives. Click "Expose API on LAN" toggle ON → sidecar restarts, log shows the new bind address. Click Lock → ollama + sidecar both visibly stop in Activity Monitor.
 - Cross-OS roundtrip: same SSD plugged into Windows machine → Windows Runner unlocks → existing chat works (Windows Runner is unchanged). Open `portable-config.json` (decrypted) → confirm `networkApiKey` is a 64-char lowercase hex string.
 - Legacy SSD self-heal: an SSD prepped on v1.3.12 (empty key) opens correctly in v1.3.13 Runner; first unlock generates and persists a key; second unlock reuses the same key.
+
+### MAC34a - Mac sidecar handshake hardcodes `networkModeEnabled = true` so chat survives toggle OFF
+
+**Status:** **done** — PR #226 merged `95b62b5` (2026-05-09); slated for v1.3.14 hotfix bundle.
+**Scope:** trivial — one-line Swift change + comment-only test update.
+**Risk:** Low. Hardcoded value matches the documented MAC34 contract; persisted user intent unchanged.
+**Dependencies:** Built on MAC34. Independent of MAC30/MAC34b.
+**Goal:** Mac chat survives Lock/Unlock cycles regardless of the "Expose API on LAN" toggle state. Restore MAC34's "sidecar always runs after unlock" contract.
+
+**Driver:** v1.3.13 mac field test screenshot — chat dead with "Chat host not running. Lock and unlock to restart.", lock/unlock not recovering. `<ssdRoot>/logs/macos-runner.log` showed every unlock crashed the sidecar with `Mac runner host crashed: RunnerLocalApiService did not start. Ensure networkModeEnabled is true before spawning mac-runner-host.`
+
+**Root cause:** MAC34's documented contract said the toggle controls bind address only. But `restartHostSidecar` in `mac-runner/Sources/main.swift` still passed the toggle's runtime value as the `networkModeEnabled` field of the C# sidecar handshake. With the toggle OFF (the default after Lock), the C# `RunnerLocalApiService.StartAsync` early-returned at `if (!config.NetworkModeEnabled) return;` (`runner-core/Services/RunnerLocalApiService.cs:67`), `HostLifetime.StartAsync` threw on empty `CurrentBaseUrl` (`mac-runner-host/HostLifetime.cs:70`), host crashed.
+
+**Fix:** Hardcode `config["networkModeEnabled"] = true` in the handshake. LAN exposure is now governed purely by `networkBindAddress` (loopback when toggle OFF, configured address when ON). C# inner gate stays as defense-in-depth — Windows pre-gates externally in `MainWindow.xaml.cs:470` so it's never reached there with false either.
+
+**Why not the alternative — change C# to ignore `networkModeEnabled` on the Mac sidecar:** `RunnerLocalApiService` is shared between Mac and Windows; introducing a Mac-specific branch splits the contract for one downstream consumer. Hardcoding true at the Swift→C# boundary is one line of code, preserves the C# contract, and keeps the existing `HostRunner_WithNetworkModeDisabled_FailsWithoutReadyLine` smoke valid as defense-in-depth.
+
+**Affected files:**
+- `mac-runner/Sources/main.swift` — `restartHostSidecar` always sets `networkModeEnabled = true`.
+- `tests/MacRunnerHostSmokeTests.cs` — comment-only update on `HostRunner_WithNetworkModeDisabled_FailsWithoutReadyLine` clarifying its post-MAC34a defense-in-depth role.
+
+**Workaround offered live during diagnosis:** the user could toggle "Expose API on LAN" ON to satisfy the broken gate. PrepApp default `networkBindAddress = 127.0.0.1` meant ON didn't actually expose anything to LAN — but the workaround didn't survive Lock/Unlock so the fix landed same-session.
+
+**Acceptance / smoke (deferred to v1.3.14 mac field run):** prep SSD → unlock Runner.app → click Send (no toggles) → response arrives. Lock → unlock again without touching the toggle → Send still works. Toggle Expose API on LAN ON → log shows bind address swap; toggle OFF → bind back to loopback; chat works through both transitions.
+
+### MAC34b - Mac runner reclaims port 11434 by killing PIDs holding it before launching staged ollama
+
+**Status:** **in flight** — PR #227 open + CI green (2026-05-09); pending merge before v1.3.14 dispatch.
+**Scope:** small — one new Swift static helper + one call site.
+**Risk:** Low. Kill-by-PID via `lsof` is precise; SIGTERM → grace → SIGKILL is the standard escalation.
+**Dependencies:** Independent of MAC34/MAC34a (different code path; same field-test driver).
+**Goal:** Mac Runner auto-cleans up any preexisting ollama (Ollama.app or stray CLI server) that's holding port 11434 before launching its staged binary, with visibility for the user.
+
+**Driver:** v1.3.13 mac field test log surfaced silent `Ollama exited with code 1` immediately after `Started ollama`, blocking the C# sidecar from reaching ollama. Root cause: user had Ollama.app + a stray CLI ollama already bound to 127.0.0.1:11434. User's quote: "I had two running and had no idea." Windows side-steps the same scenario via `OllamaLifecycleService.ResolvePort` (scans preferred+20). Mac can't port-shift because the C# sidecar handshake takes a fixed host URL — kill-and-reclaim fits Mac's lifecycle better.
+
+**Architecture:**
+
+1. **New static helper `terminateProcessesListening(onPort:log:)`** in `RunnerViewModel`. Runs `/usr/sbin/lsof -nP -t -iTCP:<port> -sTCP:LISTEN` to enumerate PIDs, then `Darwin.kill(pid, SIGTERM)` for each, sleeps in 50ms increments up to 600ms total grace, then `SIGKILL` anything still alive. Logs `Found N existing process(es) on port 11434 (PIDs ...)` so the user has visibility. No-op when nothing is bound.
+2. **Call site:** invoked from `startOllama` after the trust-gate check + before `p.run()`. The kill scope is "what is holding *our* port," not "anything named ollama" — a sibling ollama serving a different model on a different port stays untouched.
+
+**Cross-OS parity note:** Windows is unaffected — `OllamaLifecycleService.ResolvePort` scans preferred+20 already, side-stepping the conflict instead of resolving it. Implementation diverges because the underlying mitigation differs by platform; user-visible outcome converges (chat works after launch).
+
+**Affected files:**
+- `mac-runner/Sources/main.swift` — new static `terminateProcessesListening`, `pidsListening`; one call from `startOllama`.
+
+**Acceptance / smoke (deferred to v1.3.14 mac field run):**
+- Launch Ollama.app, then launch Runner.app off the SSD → log shows "Found N existing process(es) on port 11434 (PIDs ...)" → bundled ollama starts cleanly → chat works.
+- Sibling-ollama edge: start a second ollama on port 11500, then launch Runner.app → log only mentions the 11434 PID; the 11500 process is untouched.
+- No-op smoke: launch Runner.app with no preexisting ollama → `lsof` returns empty stdout → `Found N existing` message does NOT appear → bundled ollama spawns directly.
+
+### MAC35 - Host-stage Ollama pull then sequential copy to SSD (Mac throughput fix)
+
+**Status:** in progress 2026-05-09 — PR open on branch `mac35-host-stage-then-merge`. **Scope reduction agreed during planning:** runner-side `ModelManagementService.PullEmbeddingModelAsync` (HTTP `/api/pull` against the long-running Mac daemon) is deferred from this PR. Restaging that surface would require restarting the in-process daemon mid-chat or running a parallel temp daemon; the embedding model is ~270 MB (single layer, ~1 min worst case at 5 MB/s) so the user-visible cost of the deferral is bounded and doesn't block plaintext-config field testing. Filed as a follow-up if the embedding-pull pathology actually surfaces in the field. Original scope filing on 2026-05-09 from v1.3.14 mac field test of `qwen2.5:7b` (4.7 GB).
+**Scope:** medium — one new helper class + 1 call-site swap + tests (runner-side swap deferred per above).
+**Risk:** Low–medium. The merge step is content-addressed and idempotent; cancel semantics need care during the copy phase.
+**Dependencies:** Lands before MAC30 — productive Mac field testing of plaintext-config requires reasonable model-pull throughput first.
+**Goal:** Mac model pulls finish at ~network speed instead of degrading to ~5 MB/s on exFAT, by pulling to host APFS first and then copying sequentially to the SSD.
+
+**Driver:** v1.3.14 mac field test pulling `qwen2.5:7b` (4.7 GB blob) on a 1 Gb line. Observed: 290 stall events over 19 minutes, effective ~5 MB/s (~4 % of available bandwidth), and Ollama's UI repeatedly dropping from 35-60 % back to ~6 %. Direct Ollama on Windows over the same connection downloads the same model fine. Root cause confirmed in `<ssdRoot>/logs/macos-prep-host-20260509.log`: Ollama's stderr emits `"downloading 2bada8a74506 in 16 292 MB part(s)"` and within seconds emits `part 0..15 stalled; retrying` — all 16 parallel chunks stalling *simultaneously*, which is the signature of a disk-write bottleneck rather than network failure (real network stalls are uncorrelated). exFAT FSKit on macOS 15+ cannot sustain 16 concurrent writers on a single blob; chunks make local progress but Ollama's per-chunk byte-progress detector trips, kills and restarts the chunk, and the displayed percentage drops back to that chunk's restart point. Bytes on disk persist across restarts (4.4 GB landed before the user cancelled at displayed-14 %), but the wall-clock cost is unacceptable. Ollama 0.5.7 hardcodes `numDownloadParts = 16` with no env var to override it (verified upstream `envconfig/config.go`, May 2026), so the bundled CLI cannot be tamed without forking. Windows is unaffected because NTFS handles the same I/O pattern.
+
+**Architecture:**
+
+1. **New helper `prep-core/OllamaModelStager.cs`.** Owns: (a) resolving a per-user host staging root (`~/Library/Caches/FreeAiSsd/ollama-staging` on Mac; reused for both Prep and Runner pulls), (b) ensuring `OLLAMA_MODELS` is set to that root before invoking `ollama pull`, (c) reading the post-pull manifest at `<staging>/manifests/registry.ollama.ai/library/<model>/<tag>` and enumerating the layer digests it references, (d) sequentially copying each referenced `<staging>/blobs/sha256-<hash>` to `<ssdModelsRoot>/blobs/` if the SSD copy is missing or size-mismatched, (e) copying the manifest tag dir last (so a partial blob set never appears resolvable). Skip-if-present is content-addressed so the merge is idempotent across retries.
+2. **Call-site swap in `mac-prep-host/HostLifetime.cs` `PullModelAsync`.** Today: passes `<ssd>/models` as both the temp-server's `OLLAMA_MODELS` and the pull's destination. New: passes the staging root to `StartTemporaryServerAsync` + `_modelService.PullModelAsync`, then on `result.Ok` invokes `OllamaModelStager.MergeToSsd(stagingRoot, ssdModelsRoot, modelTag, ct)` before `EmitResult("pull-model", ...)`. The `EstimatePartialProgress` seed shifts from reading SSD-side `partial-*` files to staging-side `partial-*` files (same logic, different root).
+3. **Call-site swap in `runner-core/Services/MacOllamaLifecycleService.cs`** for post-prep model pulls (chat-flow surface). Same shape as the prep change — pull into staging, merge to SSD, return.
+4. **Cancel semantics:** during the pull phase, `cancel-pull` works exactly as today (kills `ollama pull`'s process tree). During the merge/copy phase, cancel aborts the sequential copy mid-file; partially-copied blob files on the SSD are deleted before re-throw so a retry can't see a torn blob and treat it as resumable. Manifest is written last so a cancelled merge never leaves the SSD model "discoverable but corrupt".
+5. **Disk-space guardrail:** before starting the pull, check that the staging volume has at least `2 × estimatedModelSize` free (rough manifest-derived estimate, or a `5 GB` floor for unknown sizes). Surface a clear error early — failing mid-pull with a disk-full from APFS is a worse UX than failing the precheck.
+6. **Cross-OS:** Windows untouched. NTFS sustains 16 parallel writers; routing Windows pulls through a host-stage step would cost extra disk space without solving any observed problem. Justified asymmetry: same as MAC34b's lsof-vs-port-shift split — implementation diverges by platform constraint, user-visible outcome converges.
+
+**Affected files:**
+- `prep-core/OllamaModelStager.cs` — new (the merge logic; unit-testable without spawning real Ollama).
+- `prep-core/StagingPaths.cs` (or extend an existing path helper) — `~/Library/Caches/FreeAiSsd/ollama-staging` resolution.
+- `mac-prep-host/HostLifetime.cs` — `PullModelAsync` swap; pull-cts wraps both pull and merge phases.
+- `runner-core/Services/MacOllamaLifecycleService.cs` — runner-side pull path swap.
+- `prep-core/ModelOperations.cs` — `EstimatePartialProgress` parameter passes the staging root rather than assuming SSD.
+- `tests/OllamaModelStagerTests.cs` — new: manifest enumeration, blob-skip-if-present, manifest-written-last invariant, cancel-during-copy cleans up torn blobs.
+
+**Acceptance / smoke (Mac):**
+- Pull `qwen2.5:7b` (4.7 GB) via PrepApp on Mac with the SSD as exFAT → effective rate ≥ 50 MB/s on a 1 Gb line → completion in ≤ 3 minutes (vs current 15+ minutes / no completion).
+- Verify SSD layout post-pull is byte-identical to a Windows-prepped SSD's layout for the same model (manifest path, blob digests, sizes).
+- Re-run pull for the same tag → "Resuming…" seed fires from staging-side partial files; SSD-side existing blobs are short-circuited (no re-copy).
+- Cancel mid-pull → `<staging>` partials persist; `<ssdRoot>/models` shows no torn blob and no manifest for the cancelled tag.
+- Cancel mid-merge → re-running the same pull completes cleanly; SSD has the full model and no leftover torn blob files.
+- Disk-full precheck: staging volume with < 2× model size free → error surfaces before pull starts.
+
+**Acceptance / smoke (Windows):**
+- Existing pull behavior unchanged — verify a Windows pull of the same tag still goes direct-to-SSD with no staging detour.
+
+**Decision log entry to add at merge time:** "MAC35 (2026-05-XX): Mac model pulls stage to host APFS, then merge to exFAT SSD. Driver: Ollama 0.5.7 hardcodes 16 parallel chunks and exFAT FSKit cannot sustain that, producing a ~95 % throughput collapse vs Windows. Windows path unchanged because NTFS handles the same I/O pattern. Source-of-truth for installed models stays disk-truth on the SSD (MAC33 invariant preserved)."
 

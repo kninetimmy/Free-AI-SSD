@@ -53,13 +53,19 @@ internal sealed class HostLifetime : IAsyncDisposable
     private readonly object _pullCtsLock = new();
     private CancellationTokenSource? _activePullCts;
 
+    // MAC35: production resolves the staging root via
+    // OllamaModelStager.ResolveMacStagingRoot. Tests inject a per-test
+    // tempdir resolver so they don't pollute ~/Library/Caches and so
+    // multiple test fixtures don't share staging state.
+    private readonly Func<string> _stagingRootResolver;
+
     private static readonly JsonSerializerOptions ResultOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
     public HostLifetime(string ssdRoot, string ollamaHost, TextWriter stdout, TextWriter stderr, bool testMode = false)
-        : this(ssdRoot, ollamaHost, stdout, stderr, ollamaPackage: null, modelService: null, testMode: testMode)
+        : this(ssdRoot, ollamaHost, stdout, stderr, ollamaPackage: null, modelService: null, testMode: testMode, stagingRootResolver: null)
     {
     }
 
@@ -70,13 +76,16 @@ internal sealed class HostLifetime : IAsyncDisposable
     /// <see cref="IModelService"/> (so PullModelAsync doesn't try to spawn
     /// the real CLI). Production wiring goes through the public ctor and
     /// always passes null for both, falling back to the concrete services.
+    /// MAC35 adds <paramref name="stagingRootResolver"/> so tests can
+    /// redirect the host-stage cache to a per-test tempdir.
     /// </summary>
     internal HostLifetime(
         string ssdRoot, string ollamaHost,
         TextWriter stdout, TextWriter stderr,
         IOllamaPackageService? ollamaPackage,
         IModelService? modelService,
-        bool testMode = false)
+        bool testMode = false,
+        Func<string>? stagingRootResolver = null)
     {
         _ssdRoot = ssdRoot;
         _ollamaHost = ollamaHost;
@@ -102,6 +111,7 @@ internal sealed class HostLifetime : IAsyncDisposable
         _prereqService = new PrereqService(dialogService);
         _readinessService = new ReadinessService(_modelService);
         _liveCatalogService = new LiveModelCatalogService();
+        _stagingRootResolver = stagingRootResolver ?? OllamaModelStager.ResolveMacStagingRoot;
     }
 
     public void Start()
@@ -261,11 +271,21 @@ internal sealed class HostLifetime : IAsyncDisposable
             return;
         }
 
-        var modelsRoot = Path.Combine(_ssdRoot, SsdLayout.Models);
+        var ssdModelsRoot = Path.Combine(_ssdRoot, SsdLayout.Models);
         var ollamaDir = Path.Combine(_ssdRoot, SsdLayout.MacOllama);
         var ollamaExe = _ollamaPackage.ResolveOllamaExe(ollamaDir)
             ?? throw new FileNotFoundException(
                 $"Mac Ollama binary missing at the expected path under {ollamaDir}; staging may have failed silently.");
+
+        // MAC35: pull into a host APFS staging tree, then sequentially
+        // merge to the SSD. exFAT FSKit on macOS 15+ cannot sustain
+        // Ollama's hardcoded 16 parallel chunk writers; pulling direct
+        // to SSD collapsed to ~5 MB/s on the v1.3.14 field test of
+        // qwen2.5:7b. Staging eliminates the chunk-stall storm; the
+        // sequential merge writes the SSD at exFAT's actual speed.
+        var stagingRoot = _stagingRootResolver();
+        var sizing = ModelSizingCatalog.Suggest(modelTag);
+        OllamaModelStager.EnsureStagingFreeSpace(stagingRoot, sizing.ApproxDiskGb * 1024L * 1024 * 1024);
 
         // MAC31: linked CTS lets the cancel-pull arm signal this pull
         // without touching any other command's token. Stored under
@@ -283,25 +303,28 @@ internal sealed class HostLifetime : IAsyncDisposable
 
         try
         {
-            // MAC31: surface a "Resuming from NN%..." seed before kicking
-            // off the pull so retry after a cancelled pull doesn't show
-            // 0%. EstimatePartialProgress reads only the manifest +
-            // partial-blob sizes; no network, no process spawn.
-            var seed = ModelOperations.EstimatePartialProgress(modelsRoot, modelTag);
+            // MAC31 + MAC35: seed reads from the staging root because
+            // that's where partial-* blob files now live. After a
+            // cancelled pull, the staging tree retains progress and a
+            // retry surfaces "Resuming from NN%…" against staging
+            // bytes. SSD-side blobs are short-circuited by the merge's
+            // size-match check, but they don't affect the seed.
+            var seed = ModelOperations.EstimatePartialProgress(stagingRoot, modelTag);
             EmitProgress(seed > 0
                 ? $"Resuming {modelTag} from {seed:P0}…"
                 : $"Pulling {modelTag}…");
 
-            // MAC27: lazily start the temp Ollama server on first pull so
-            // `ollama pull` has a daemon to talk to. Without this the CLI
-            // fails immediately with "could not connect to ollama app,
-            // is it running?" — which is exactly what v1.3.7 hit in the
-            // field. The handle is reused across every pull in the same
-            // sidecar lifetime and disposed in DisposeAsync.
+            // MAC27 + MAC35: temp Ollama server is OLLAMA_MODELS-pinned
+            // to the staging root so `ollama pull` writes to host APFS,
+            // not the SSD. Same lazy-start + reuse pattern across the
+            // pull batch as before; OLLAMA_MODELS only takes effect at
+            // server start, so a single sidecar lifetime is locked to
+            // a single OLLAMA_MODELS — that's fine because every pull
+            // through this sidecar now stages.
             if (_ollamaServer is null)
             {
                 _ollamaServer = await _ollamaPackage.StartTemporaryServerAsync(
-                    ollamaExe, modelsRoot, EmitLog, pullCts.Token);
+                    ollamaExe, stagingRoot, EmitLog, pullCts.Token);
             }
 
             // MAC31: onProgress lambda routes Ollama's TUI ticks to the
@@ -309,9 +332,23 @@ internal sealed class HostLifetime : IAsyncDisposable
             // renders them as a single in-place line instead of spamming
             // the log surface with cursor-rewrite garbage.
             var result = await _modelService.PullModelAsync(
-                ollamaExe, modelsRoot, modelTag, EmitLog, pullCts.Token, _ollamaServer.Host,
+                ollamaExe, stagingRoot, modelTag, EmitLog, pullCts.Token, _ollamaServer.Host,
                 onProgress: EmitProgress);
 
+            // MAC35: sequential merge under the same pull CTS so a
+            // user cancel between pull-finish and merge-finish still
+            // tears down cleanly. The merge is content-addressed +
+            // manifest-written-last so a torn merge is invisible to
+            // DiscoverModelsOnDisk and a retry recovers without
+            // re-copying intact blobs.
+            EmitProgress($"Copying {modelTag} to SSD…");
+            await OllamaModelStager.MergeToSsdAsync(
+                stagingRoot, ssdModelsRoot, modelTag, EmitLog, pullCts.Token);
+
+            // The staging-side hash IS the SSD-side hash by
+            // construction (MergeToSsdAsync does byte-identical copies
+            // into content-addressed paths); reusing result.Sha256
+            // avoids a redundant ~30 s re-hash of a 4.7 GB blob.
             EmitResult("pull-model", new
             {
                 ok = true,

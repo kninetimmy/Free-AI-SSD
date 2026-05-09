@@ -22,12 +22,17 @@ namespace FreeAiSsd.Tests;
 public sealed class MacPrepHostPullLifecycleTests : IDisposable
 {
     private readonly string _tempRoot;
+    private readonly string _stagingRoot;
 
     public MacPrepHostPullLifecycleTests()
     {
         _tempRoot = Path.Combine(Path.GetTempPath(), "freeai-mac27-pull-lifecycle-" + Guid.NewGuid());
         Directory.CreateDirectory(_tempRoot);
         SsdLayout.EnsureStructure(_tempRoot);
+        // MAC35: per-test staging tempdir keeps the lifecycle pin
+        // hermetic — never reaches into ~/Library/Caches.
+        _stagingRoot = Path.Combine(_tempRoot, "staging");
+        Directory.CreateDirectory(_stagingRoot);
     }
 
     public void Dispose()
@@ -39,13 +44,14 @@ public sealed class MacPrepHostPullLifecycleTests : IDisposable
     public async Task PullModel_FirstCall_StartsTemporaryServerAndPassesItsHost()
     {
         var ollamaPackage = new FakeOllamaPackageService(resolvedExe: "/fake/ollama", host: "127.0.0.1:54321");
-        var modelService = new FakeModelService();
+        var modelService = new FakeModelService(_stagingRoot);
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
 
         await using var lifetime = new HostLifetime(
             _tempRoot, "http://127.0.0.1:11434", stdout, stderr,
-            ollamaPackage: ollamaPackage, modelService: modelService, testMode: false);
+            ollamaPackage: ollamaPackage, modelService: modelService, testMode: false,
+            stagingRootResolver: () => _stagingRoot);
         lifetime.Start();
 
         await lifetime.HandleCommandAsync("pull-model llama3.2:1b");
@@ -58,19 +64,35 @@ public sealed class MacPrepHostPullLifecycleTests : IDisposable
         Assert.Equal("127.0.0.1:54321", modelService.PullCalls[0].OllamaHost);
         Assert.Equal("llama3.2:1b", modelService.PullCalls[0].ModelTag);
         Assert.Equal("/fake/ollama", modelService.PullCalls[0].OllamaExe);
+
+        // MAC35: the temp server and the pull both target the staging
+        // root, NOT the SSD models root. Direct-to-SSD pulls collapse
+        // on exFAT; this assertion is the regression pin.
+        var ssdModelsRoot = Path.Combine(_tempRoot, SsdLayout.Models);
+        Assert.Equal(_stagingRoot, ollamaPackage.LastModelsRoot);
+        Assert.Equal(_stagingRoot, modelService.PullCalls[0].ModelsRoot);
+        Assert.NotEqual(ssdModelsRoot, modelService.PullCalls[0].ModelsRoot);
+
+        // MAC35: the merge must publish the model to the SSD after the
+        // pull completes — manifest at the canonical path is the
+        // discoverability gate (DiscoverModelsOnDisk reads manifests).
+        var ssdManifestPath = Path.Combine(ssdModelsRoot, "manifests", "registry.ollama.ai", "library", "llama3.2", "1b");
+        Assert.True(File.Exists(ssdManifestPath),
+            $"Expected merge to copy manifest to {ssdManifestPath}");
     }
 
     [Fact]
     public async Task PullModel_MultipleCallsInSameLifetime_ReuseSingleServerHandle()
     {
         var ollamaPackage = new FakeOllamaPackageService(resolvedExe: "/fake/ollama", host: "127.0.0.1:54321");
-        var modelService = new FakeModelService();
+        var modelService = new FakeModelService(_stagingRoot);
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
 
         await using var lifetime = new HostLifetime(
             _tempRoot, "http://127.0.0.1:11434", stdout, stderr,
-            ollamaPackage: ollamaPackage, modelService: modelService, testMode: false);
+            ollamaPackage: ollamaPackage, modelService: modelService, testMode: false,
+            stagingRootResolver: () => _stagingRoot);
         lifetime.Start();
 
         await lifetime.HandleCommandAsync("pull-model llama3.2:1b");
@@ -83,19 +105,22 @@ public sealed class MacPrepHostPullLifecycleTests : IDisposable
         Assert.Equal(1, ollamaPackage.StartTemporaryServerCallCount);
         Assert.Equal(3, modelService.PullCalls.Count);
         Assert.All(modelService.PullCalls, c => Assert.Equal("127.0.0.1:54321", c.OllamaHost));
+        // MAC35: every pull in the batch shares the same staging root.
+        Assert.All(modelService.PullCalls, c => Assert.Equal(_stagingRoot, c.ModelsRoot));
     }
 
     [Fact]
     public async Task DisposeAsync_DisposesTemporaryServerHandle()
     {
         var ollamaPackage = new FakeOllamaPackageService(resolvedExe: "/fake/ollama", host: "127.0.0.1:54321");
-        var modelService = new FakeModelService();
+        var modelService = new FakeModelService(_stagingRoot);
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
 
         var lifetime = new HostLifetime(
             _tempRoot, "http://127.0.0.1:11434", stdout, stderr,
-            ollamaPackage: ollamaPackage, modelService: modelService, testMode: false);
+            ollamaPackage: ollamaPackage, modelService: modelService, testMode: false,
+            stagingRootResolver: () => _stagingRoot);
         lifetime.Start();
 
         await lifetime.HandleCommandAsync("pull-model llama3.2:1b");
@@ -115,13 +140,14 @@ public sealed class MacPrepHostPullLifecycleTests : IDisposable
     public async Task PullModel_TestMode_DoesNotStartServer()
     {
         var ollamaPackage = new FakeOllamaPackageService(resolvedExe: "/fake/ollama", host: "127.0.0.1:54321");
-        var modelService = new FakeModelService();
+        var modelService = new FakeModelService(_stagingRoot);
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
 
         await using var lifetime = new HostLifetime(
             _tempRoot, "http://127.0.0.1:11434", stdout, stderr,
-            ollamaPackage: ollamaPackage, modelService: modelService, testMode: true);
+            ollamaPackage: ollamaPackage, modelService: modelService, testMode: true,
+            stagingRootResolver: () => _stagingRoot);
         lifetime.Start();
 
         await lifetime.HandleCommandAsync("pull-model llama3.2:1b");
@@ -143,13 +169,14 @@ public sealed class MacPrepHostPullLifecycleTests : IDisposable
         // bogus exe path and the field error would change shape from
         // "binary missing" (clear) to "ollama serve crashed" (confusing).
         var ollamaPackage = new FakeOllamaPackageService(resolvedExe: null, host: "127.0.0.1:54321");
-        var modelService = new FakeModelService();
+        var modelService = new FakeModelService(_stagingRoot);
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
 
         await using var lifetime = new HostLifetime(
             _tempRoot, "http://127.0.0.1:11434", stdout, stderr,
-            ollamaPackage: ollamaPackage, modelService: modelService, testMode: false);
+            ollamaPackage: ollamaPackage, modelService: modelService, testMode: false,
+            stagingRootResolver: () => _stagingRoot);
         lifetime.Start();
 
         await Assert.ThrowsAsync<FileNotFoundException>(
@@ -168,6 +195,9 @@ public sealed class MacPrepHostPullLifecycleTests : IDisposable
 
         public int StartTemporaryServerCallCount { get; private set; }
         public FakeOllamaServerHandle? LastHandle { get; private set; }
+        // MAC35: pin which modelsRoot the temp server was bound to so
+        // tests can confirm the OLLAMA_MODELS env var points at staging.
+        public string? LastModelsRoot { get; private set; }
 
         public FakeOllamaPackageService(string? resolvedExe, string host)
         {
@@ -185,6 +215,7 @@ public sealed class MacPrepHostPullLifecycleTests : IDisposable
             string ollamaExe, string modelsRoot, Action<string> onLog, CancellationToken ct)
         {
             StartTemporaryServerCallCount++;
+            LastModelsRoot = modelsRoot;
             LastHandle = new FakeOllamaServerHandle(_host);
             return Task.FromResult<IOllamaServerHandle>(LastHandle);
         }
@@ -204,7 +235,22 @@ public sealed class MacPrepHostPullLifecycleTests : IDisposable
 
     private sealed class FakeModelService : IModelService
     {
+        // MAC35: simulate a successful Ollama pull by writing a synthetic
+        // manifest + blob into the modelsRoot the sidecar passes us
+        // (which post-MAC35 is the staging root). The real
+        // OllamaModelStager.MergeToSsdAsync then reads from this tree
+        // and copies to the SSD modelsRoot, exercising the merge step
+        // in the lifecycle pin without spawning real Ollama.
+        private readonly string? _expectedStagingRoot;
+
         public List<PullCall> PullCalls { get; } = new();
+
+        public FakeModelService() : this(null) { }
+
+        public FakeModelService(string? expectedStagingRoot)
+        {
+            _expectedStagingRoot = expectedStagingRoot;
+        }
 
         public Task<ModelPullResult> PullModelAsync(
             string ollamaExe, string modelsRoot, string modelTag,
@@ -212,7 +258,41 @@ public sealed class MacPrepHostPullLifecycleTests : IDisposable
             Action<string>? onProgress = null)
         {
             PullCalls.Add(new PullCall(ollamaExe, modelsRoot, modelTag, ollamaHost));
+
+            // Synthesize the on-disk shape Ollama would have produced
+            // so the sidecar's subsequent MergeToSsdAsync call has
+            // something to copy. Without this, the merge fails with
+            // "Staging manifest missing" and the lifecycle pin can't
+            // assert the post-merge SSD layout.
+            if (_expectedStagingRoot is not null)
+            {
+                WriteSyntheticPullArtifacts(modelsRoot, modelTag);
+            }
+
             return Task.FromResult(new ModelPullResult("0".PadRight(64, '0'), 1234));
+        }
+
+        private static void WriteSyntheticPullArtifacts(string modelsRoot, string modelTag)
+        {
+            var colon = modelTag.LastIndexOf(':');
+            if (colon <= 0 || colon >= modelTag.Length - 1) return;
+            var modelName = modelTag[..colon];
+            var manifestTag = modelTag[(colon + 1)..];
+
+            var manifestDir = Path.Combine(modelsRoot, "manifests", "registry.ollama.ai", "library", modelName);
+            var blobsDir = Path.Combine(modelsRoot, "blobs");
+            Directory.CreateDirectory(manifestDir);
+            Directory.CreateDirectory(blobsDir);
+
+            // Per-tag deterministic synthetic digest so multiple pulls
+            // in one test don't collide on the same blob filename.
+            var digest = string.Concat(System.Security.Cryptography.SHA256
+                .HashData(System.Text.Encoding.UTF8.GetBytes(modelTag))
+                .Select(b => b.ToString("x2")));
+            File.WriteAllBytes(Path.Combine(blobsDir, "sha256-" + digest), new byte[256]);
+            File.WriteAllText(Path.Combine(manifestDir, manifestTag),
+                "{\"layers\":[{\"digest\":\"sha256:" + digest +
+                "\",\"size\":256,\"mediaType\":\"application/vnd.ollama.image.layer.model\"}]}");
         }
 
         // The MAC27 path under test only touches PullModelAsync. Every
