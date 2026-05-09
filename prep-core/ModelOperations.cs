@@ -116,6 +116,18 @@ public sealed class ModelOperations
         var discovered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var manifestPath in Directory.EnumerateFiles(manifestsPath, "*", SearchOption.AllDirectories))
         {
+            // MAC35a: macOS auto-creates AppleDouble companion files
+            // (`._<name>`) on filesystems without native xattr support
+            // (exFAT, FAT32, SMB). Their first byte is the AppleDouble
+            // magic 0x00 0x05 0x16 0x07, so JsonDocument.Parse on them
+            // crashes the readiness check. Skip any leaf starting with
+            // `._` — Ollama tag/name segments can't legally start with
+            // a dot, so we can never false-skip a real manifest.
+            if (IsAppleDoubleSidecar(manifestPath))
+            {
+                continue;
+            }
+
             var relative = Path.GetRelativePath(manifestsPath, manifestPath);
             var parts = relative.Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length < 2)
@@ -152,7 +164,15 @@ public sealed class ModelOperations
             return null;
         }
 
-        var manifest = Directory.EnumerateFiles(manifestsPath, manifestTag, SearchOption.TopDirectoryOnly).FirstOrDefault();
+        // MAC35a: skip AppleDouble sidecars (`._<tag>`). The pattern
+        // passed to EnumerateFiles is the literal tag, but on macOS-
+        // exFAT volumes the directory may also contain `._<tag>`
+        // companions; without the filter, a future code path using a
+        // wildcard pattern would resolve to the AppleDouble blob and
+        // its 0x00-prefixed contents would crash JsonDocument.Parse
+        // below. Belt-and-braces with the DiscoverModelsOnDisk filter.
+        var manifest = Directory.EnumerateFiles(manifestsPath, manifestTag, SearchOption.TopDirectoryOnly)
+            .FirstOrDefault(p => !IsAppleDoubleSidecar(p));
         if (manifest is null)
         {
             return null;
@@ -214,7 +234,22 @@ public sealed class ModelOperations
     {
         normalizedDigest = string.Empty;
 
-        using var doc = JsonDocument.Parse(manifestJson);
+        // MAC35a: a malformed or non-JSON manifest must not crash the
+        // caller. EstimatePartialProgress already wraps its parse in
+        // try/catch; mirror that here so readiness fails gracefully on
+        // a corrupt manifest instead of aborting the entire check.
+        JsonDocument doc;
+        try
+        {
+            doc = JsonDocument.Parse(manifestJson);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        using (doc)
+        {
         if (!doc.RootElement.TryGetProperty("layers", out var layersElement) || layersElement.ValueKind != JsonValueKind.Array)
         {
             return false;
@@ -275,6 +310,24 @@ public sealed class ModelOperations
         // Priority 3: Last layer (fallback when sizes are unknown).
         normalizedDigest = layers[^1].Digest;
         return true;
+        }
+    }
+
+    /// <summary>
+    /// MAC35a: returns true when <paramref name="path"/>'s leaf
+    /// filename starts with `._`, the AppleDouble companion-file
+    /// prefix macOS auto-creates on filesystems without native xattr
+    /// support (exFAT, FAT32, SMB). These files contain the
+    /// AppleDouble magic header (0x00 0x05 0x16 0x07) — first byte
+    /// 0x00 — so feeding them to <see cref="JsonDocument.Parse(string)"/>
+    /// throws "0x00 is an invalid start of a value". Ollama tag and
+    /// name segments cannot legally start with a dot, so this filter
+    /// can never false-skip a real manifest or blob.
+    /// </summary>
+    private static bool IsAppleDoubleSidecar(string path)
+    {
+        var name = Path.GetFileName(path);
+        return name.StartsWith("._", StringComparison.Ordinal);
     }
 
     /// <summary>

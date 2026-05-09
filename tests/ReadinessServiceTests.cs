@@ -82,6 +82,35 @@ public sealed class ReadinessServiceTests
     }
 
     [Fact]
+    public async Task ReadinessChecks_AppleDoubleSidecarsInManifestDir_AllGreen()
+    {
+        // MAC35a: pre-fix, an `._<tag>` AppleDouble companion file in
+        // the manifests directory got picked up by DiscoverModelsOnDisk
+        // and fed to JsonDocument.Parse, throwing
+        // "0x00 is an invalid start of a value" and aborting the entire
+        // readiness command. exFAT on macOS auto-creates these
+        // companion files for any file with extended attributes; the
+        // v1.3.15 field test of qwen2.5:7b reproduced this on the SSD.
+        // The fix must let readiness see the real manifest only.
+        using var tempRoot = new TempRoot();
+        WriteEncryptedConfigStub(tempRoot.Path);
+        var (modelName, _) = WriteContentAddressedModelOnDisk(tempRoot.Path, "qwen2.5:7b", "fake-qwen-bytes-for-readiness-applefile-test");
+
+        // Drop an AppleDouble sidecar next to the real manifest.
+        var manifestDir = Path.Combine(tempRoot.Path, SsdLayout.Models, "manifests", "registry.ollama.ai", "library", "qwen2.5");
+        File.WriteAllBytes(Path.Combine(manifestDir, "._7b"), new byte[] { 0x00, 0x05, 0x16, 0x07, 0x00, 0x02, 0x00, 0x00 });
+
+        var service = new ReadinessService(new ModelService());
+        var checks = await service.RunReadinessChecksAsync(tempRoot.Path, _ => { }, CancellationToken.None);
+
+        Assert.True(checks.Single(c => c.Check == "Config.json valid").Passed);
+        var modelCheck = checks.Single(c => c.Check == "≥1 installed model");
+        Assert.True(modelCheck.Passed,
+            $"≥1 installed model should pass when an AppleDouble sidecar sits next to the real manifest (was: {modelCheck.Result}).");
+        Assert.Contains(modelName, ModelOperations.DiscoverModelsOnDisk(Path.Combine(tempRoot.Path, SsdLayout.Models)));
+    }
+
+    [Fact]
     public async Task ReadinessChecks_NoConfigAtAll_BothChecksFail()
     {
         using var tempRoot = new TempRoot();
