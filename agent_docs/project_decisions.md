@@ -1710,3 +1710,51 @@ staging-cache disk usage becomes a user complaint and we need to
 add a post-merge cleanup pass.
 
 Established PR #229 (`0eecceb`), shipped v1.3.15.
+
+---
+
+## 2026-05-09 — Code that enumerates Ollama manifest/blob files on macOS-prepped SSDs must filter AppleDouble companion files (`._*`) [MAC35a]
+
+macOS auto-creates AppleDouble companion files (`._<name>`) next to
+any file with extended attributes when the destination filesystem
+lacks native xattr support. exFAT — the only filesystem usable
+cross-platform Win+Mac and therefore the default for our SSDs —
+qualifies. The companion file's first byte is the AppleDouble magic
+0x00 0x05 0x16 0x07, so handing one to `JsonDocument.Parse` raises
+"'0x00' is an invalid start of a value. LineNumber: 0".
+
+The v1.3.15 mac field test reproduced this end-to-end: a clean
+MAC35 stage+merge of `qwen2.5:7b` left a valid 858-byte `7b`
+manifest on the SSD AND a 4 KB `._7b` AppleDouble sidecar that the
+kernel injected during the merge. `DiscoverModelsOnDisk`'s
+wildcard enumeration picked up both, `FindModelBlobForModel`
+resolved to the sidecar, and the unhandled parse aborted readiness.
+
+The permanent rule: any code that enumerates files under
+`models/manifests/` or `models/blobs/` on a macOS-prepped SSD must
+filter out leaves starting with `._`. Ollama tag and name segments
+cannot legally start with `.`, so the filter can never false-skip
+a real manifest or blob. JSON parsers reading manifest contents
+should additionally wrap their `JsonDocument.Parse` call in
+try/catch so any future malformed manifest produces a clean
+failure rather than aborting the calling command — mirrors the
+catch already in `EstimatePartialProgress`.
+
+Why not the alternatives:
+- **Strip xattrs at write time** in `OllamaModelStager.MergeToSsdAsync`
+  via `xattr -c` after rename. Defensive but doesn't cover xattrs
+  other code paths might add (Quarantine, Spotlight metadata,
+  Finder tags). Filtering at read time is the universal fix.
+- **Use `dot_clean`** to scrub the SSD periodically. Indirect, racey,
+  and adds a moving part during prep.
+- **Format the SSD as APFS or NTFS.** APFS is Mac-only; NTFS isn't
+  natively writable on macOS without third-party drivers. exFAT
+  remains the only cross-platform option; `._*` files are a fact
+  of life on it.
+
+Windows path is unaffected — NTFS supports xattrs natively, so
+AppleDouble companion files never appear there. The filter is
+harmless on Windows because no legitimate Ollama tag starts with
+`.`.
+
+Established PR #231 (`8f3b54e`), shipped v1.3.16.

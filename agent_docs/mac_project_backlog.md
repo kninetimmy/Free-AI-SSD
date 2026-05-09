@@ -3101,7 +3101,7 @@ verification):**
 
 ### MAC35 - Host-stage Ollama pull then sequential copy to SSD (Mac throughput fix)
 
-**Status:** in progress 2026-05-09 — PR open on branch `mac35-host-stage-then-merge`. **Scope reduction agreed during planning:** runner-side `ModelManagementService.PullEmbeddingModelAsync` (HTTP `/api/pull` against the long-running Mac daemon) is deferred from this PR. Restaging that surface would require restarting the in-process daemon mid-chat or running a parallel temp daemon; the embedding model is ~270 MB (single layer, ~1 min worst case at 5 MB/s) so the user-visible cost of the deferral is bounded and doesn't block plaintext-config field testing. Filed as a follow-up if the embedding-pull pathology actually surfaces in the field. Original scope filing on 2026-05-09 from v1.3.14 mac field test of `qwen2.5:7b` (4.7 GB).
+**Status:** **done** — PR #229 merged `0eecceb` (2026-05-09), shipped v1.3.15. Throughput acceptance incidentally satisfied on the v1.3.15 field test (4.7 GB pulled in 1m24s ≈ 56 MB/s, exceeding ≥ 50 MB/s bar). Field test surfaced **MAC35a** (AppleDouble sidecars in `manifests/` crashing readiness) which shipped same week as v1.3.16. **Scope reduction (preserved for memory):** runner-side `ModelManagementService.PullEmbeddingModelAsync` (HTTP `/api/pull` against the long-running Mac daemon) was deferred from this PR. Restaging that surface would require restarting the in-process daemon mid-chat or running a parallel temp daemon; the embedding model is ~270 MB (single layer, ~1 min worst case at 5 MB/s) so the user-visible cost of the deferral is bounded and doesn't block plaintext-config field testing. Filed as a follow-up if the embedding-pull pathology actually surfaces in the field. Original scope filing on 2026-05-09 from v1.3.14 mac field test of `qwen2.5:7b` (4.7 GB).
 **Scope:** medium — one new helper class + 1 call-site swap + tests (runner-side swap deferred per above).
 **Risk:** Low–medium. The merge step is content-addressed and idempotent; cancel semantics need care during the copy phase.
 **Dependencies:** Lands before MAC30 — productive Mac field testing of plaintext-config requires reasonable model-pull throughput first.
@@ -3138,4 +3138,30 @@ verification):**
 - Existing pull behavior unchanged — verify a Windows pull of the same tag still goes direct-to-SSD with no staging detour.
 
 **Decision log entry to add at merge time:** "MAC35 (2026-05-XX): Mac model pulls stage to host APFS, then merge to exFAT SSD. Driver: Ollama 0.5.7 hardcodes 16 parallel chunks and exFAT FSKit cannot sustain that, producing a ~95 % throughput collapse vs Windows. Windows path unchanged because NTFS handles the same I/O pattern. Source-of-truth for installed models stays disk-truth on the SSD (MAC33 invariant preserved)."
+
+### MAC35a - Readiness skips AppleDouble companion files (`._*`) on exFAT-prepped Mac SSDs
+
+**Status:** **done** — PR #231 merged `8f3b54e` (2026-05-09), shipped v1.3.16.
+**Scope:** small — three protections in one file + 4 tests.
+**Risk:** Low. Filter targets a leaf-name prefix that no legitimate Ollama tag uses; defensive try/catch mirrors an existing pattern.
+**Dependencies:** Built on MAC35. Independent of MAC30.
+**Goal:** PrepApp readiness passes on exFAT-prepped Mac SSDs without crashing on the AppleDouble companion files macOS auto-injects next to manifest files.
+
+**Driver:** v1.3.15 mac field test of `qwen2.5:7b`. Pull + merge logged success; readiness then crashed with `Command failed ('readiness'): '0x00' is an invalid start of a value. LineNumber: 0`. User-side `xxd` confirmed `._7b` AppleDouble sidecar (4 KB, magic 0x00 0x05 0x16 0x07) sitting next to the real 858-byte `7b` manifest. macOS injects these on filesystems without native xattr support; exFAT qualifies. `DiscoverModelsOnDisk`'s wildcard enumeration picked up `._7b` as a separate model `qwen2.5:._7b`; `FindModelBlobForModel` resolved to the sidecar; `JsonDocument.Parse` aborted the entire readiness command.
+
+**Architecture:**
+1. `DiscoverModelsOnDisk` (`prep-core/ModelOperations.cs`) skips any leaf starting with `._`. Ollama tag/name segments cannot legally start with `.`, so this can never false-skip a real manifest.
+2. `FindModelBlobForModel` applies the same filter on the `EnumerateFiles` result.
+3. `TrySelectModelLayerDigest` wraps `JsonDocument.Parse` in `try/catch` returning `false` on `JsonException` — mirrors the catch already in `EstimatePartialProgress`.
+
+**Cross-OS parity note:** Windows is unaffected. NTFS supports xattrs natively; AppleDouble sidecars never appear. Filter is harmless because no legitimate Ollama tag starts with `.`.
+
+**Affected files:**
+- `prep-core/ModelOperations.cs` — three protections.
+- `tests/ModelOperationsTests.cs` — 3 unit cases (`DiscoverModelsOnDisk_SkipsAppleDoubleSidecars`, `FindModelBlobForModel_SkipsAppleDoubleSidecar`, `TrySelectModelLayerDigest_ReturnsFalseOnCorruptJson`).
+- `tests/ReadinessServiceTests.cs` — 1 end-to-end pin (`ReadinessChecks_AppleDoubleSidecarsInManifestDir_AllGreen`).
+
+**Acceptance / smoke (Mac, deferred to v1.3.16 mac field run):**
+- Plug existing v1.3.15-prepped SSD → launch v1.3.16 PrepApp → re-run readiness without re-prep → readiness now passes all-green (the stale `._7b` is ignored).
+- Fresh prep of `qwen2.5:7b` via v1.3.16 PrepApp on a different exFAT SSD → readiness passes immediately after merge.
 
