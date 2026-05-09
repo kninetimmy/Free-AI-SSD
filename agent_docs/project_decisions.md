@@ -1639,3 +1639,74 @@ runtime-resolved host URL — much larger surface for the same
 field-test outcome).
 
 Established PR #227 (merge hash pending v1.3.14 dispatch).
+
+---
+
+## 2026-05-09 — Mac model pulls stage to host APFS, then merge sequentially to the SSD; Windows stays direct-to-SSD [MAC35]
+
+Field test of v1.3.14 pulling `qwen2.5:7b` (4.7 GB on a 1 Gb line)
+collapsed to ~5 MB/s on exFAT — 290 stall events over 19 minutes,
+Ollama UI bouncing 35-60 % → 6 %. Direct Ollama on Windows over
+the same connection downloads fine. Root cause confirmed in
+`<ssdRoot>/logs/macos-prep-host-20260509.log`: Ollama 0.5.7
+hardcodes `numDownloadParts = 16` (verified upstream
+`envconfig/config.go`, May 2026 — no env var override) and exFAT
+FSKit on macOS 15+ cannot sustain 16 concurrent writers on a
+single blob. Chunks make local progress but Ollama's per-chunk
+byte-progress detector trips, kills and restarts the chunk, and
+the displayed percentage drops back to that chunk's restart point.
+
+Mac model pulls now stage into
+`~/Library/Caches/FreeAiSsd/ollama-staging` (host APFS — no exFAT
+contention) and then sequentially copy the manifest + referenced
+blobs to the SSD via `prep-core/OllamaModelStager.MergeToSsdAsync`.
+The merge is content-addressed (skip-if-size-match is the
+idempotent-retry path), per-blob atomic (tmp-then-rename so dest
+never holds partial bytes), and manifest-written-last (a torn
+merge is invisible to `DiscoverModelsOnDisk`, which enumerates
+manifests). Cancel during the merge cleans up the in-flight tmp
+file before re-throw. The same pull-CTS wraps both phases so a
+user cancel tears down cleanly regardless of which phase is in
+flight. A 2x-model-size disk-space precheck (5 GB floor for
+unknown sizes via `ModelSizingCatalog.Suggest`) refuses to start
+when the staging volume can't fit the pull, surfacing a clear
+error before the network round-trip.
+
+Windows path is **untouched** — NTFS sustains 16 parallel writers,
+so routing Windows pulls through a host-stage step would cost
+extra disk space without solving any observed problem. The
+asymmetry follows the same shape as MAC34b's `lsof`-vs-port-shift
+split: implementation diverges by platform constraint, user-visible
+outcome converges.
+
+Source-of-truth for installed models stays disk-truth on the SSD
+(MAC33 invariant preserved). The merge writes byte-identical
+layout to what a direct pull would produce — same manifest path,
+same `sha256-<hex>` blob filenames, same sizes — so
+`DiscoverModelsOnDisk` and the runner-side disk-truth read at
+`RunnerLocalApiService:160` continue to work without any awareness
+of the staging detour.
+
+Why not the alternatives:
+- **Fork Ollama to expose `numDownloadParts` as an env var.**
+  Larger surface to maintain per upstream version; the bundled
+  CLI would diverge from upstream behavior; users already on the
+  field would still hit the bug until they updated.
+- **Stage runner-side pulls through the same path
+  (`PullEmbeddingModelAsync`).** Deferred from this PR. The Mac
+  runner's HTTP `/api/pull` hits the long-running daemon;
+  restaging would require restarting the daemon mid-chat or
+  running a parallel temp daemon. The embedding model is ~270 MB
+  so the user-visible cost of deferral is bounded (~1 min worst
+  case at 5 MB/s). Filed as a follow-up if the pathology actually
+  surfaces.
+- **Single-chunk-mode flag at the Ollama HTTP level.** No such
+  flag exists in 0.5.7; we'd be back to forking.
+
+Ships unrevisited unless: (a) Ollama upstream adds a parallelism
+knob; (b) macOS gains a non-exFAT filesystem usable across
+Win+Mac that the user is willing to format the SSD as; (c) the
+staging-cache disk usage becomes a user complaint and we need to
+add a post-merge cleanup pass.
+
+Established PR #229 (`0eecceb`), shipped v1.3.15.

@@ -171,6 +171,33 @@ cache/                    — prep-time download cache
 
 `SsdLayout` in shared is the single source of truth for these paths — always use it rather than constructing paths manually.
 
+## Runtime layout (host-side, Mac)
+
+Mac model pulls stage outside the SSD before merging in. The bundled
+`ollama` CLI hardcodes 16 parallel chunk writers, which exFAT FSKit
+on macOS 15+ cannot sustain — pulls collapse to ~5 % of network
+bandwidth on a 1 Gb line. The fix (MAC35) routes the pull's
+`OLLAMA_MODELS` to a host-side cache, then `OllamaModelStager`
+merges sequentially to the SSD:
+
+```
+~/Library/Caches/FreeAiSsd/
+  ollama-staging/         — Mac PrepApp + (future) Mac Runner pull staging
+    manifests/...         — Ollama-shaped manifest tree (host APFS)
+    blobs/sha256-<hex>    — full blobs (and `…-partial-N` mid-pull)
+```
+
+The merge is content-addressed and idempotent — re-running a pull
+after cancellation reuses staged blobs and writes the SSD manifest
+last so a torn merge is invisible to `DiscoverModelsOnDisk`. Windows
+is unaffected (NTFS sustains the 16-chunk pattern fine) and pulls
+direct to the SSD with no staging detour. Same shape as MAC34b's
+`lsof`-vs-port-shift split: per-platform implementation, converged
+user-visible outcome.
+
+The staging cache is not auto-pruned today; it's safe to delete by
+hand between sessions if disk pressure becomes an issue.
+
 Network surface: Ollama is never exposed on LAN. `RunnerLocalApiService` is the
 only network endpoint. Post-MAC6 it serves identical wire shapes on Windows
 (in-process inside the WPF Runner) and macOS (the `mac-runner-host` sidecar
