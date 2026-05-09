@@ -70,6 +70,9 @@ final class RunnerViewModel: ObservableObject {
     @Published var usedRagContext: Bool = false
     @Published var ragWarning: String? = nil
     @Published var status: String = "Idle"
+    /// MAC36c: drives the Send button's spinner + disabled state while a
+    /// streaming chat request is in flight.
+    @Published var isSending: Bool = false
     @Published var isEncryptedLocked: Bool = false
     @Published var unlockDialogPresented: Bool = false
     @Published var unlockDialogPassword: String = ""
@@ -132,6 +135,14 @@ final class RunnerViewModel: ObservableObject {
     /// Notification observers retained so they can be removed on deinit.
     private var notificationObservers: [NSObjectProtocol] = []
 
+    /// MAC36b: in-flight `/api/chat/stream` task. Held so `lockSession`
+    /// can tear it down before the unlock material is zeroized — a
+    /// streaming response must not outlive the unlocked session.
+    private var activeChatTask: URLSessionDataTask?
+    /// Per-call session paired with `activeChatTask`. Invalidated on
+    /// completion to break the strong delegate-retention cycle.
+    private var activeChatSession: URLSession?
+
     init() {
         self.ssdRoot = inferSsdRoot()
         if ssdRoot == nil { pickSsdRoot() }
@@ -141,22 +152,29 @@ final class RunnerViewModel: ObservableObject {
 
     deinit {
         for o in notificationObservers { NotificationCenter.default.removeObserver(o) }
+        // MAC36b: drop the in-flight chat stream before the host process
+        // is torn down so the delegate doesn't fire callbacks against a
+        // half-released view-model.
+        activeChatTask?.cancel()
+        activeChatSession?.invalidateAndCancel()
         // MAC6: shut the sidecar before the unlock material is zeroized so the
         // host process never outlives an unlocked session.
         hostController.shutdown()
         unlockMaterial?.zeroize()
     }
 
-    /// Lock-on-background and lock-on-terminate so the derived AES key never
-    /// outlives the user's active session. Manual lock is wired through
-    /// `lockSession()`. The Network Mode sidecar (MAC6) shuts down on the
-    /// same set of events so the LAN API never serves traffic with a key
-    /// that has already been zeroized.
+    /// Lock on app quit so the derived AES key never outlives the
+    /// process. Manual lock is wired through `lockSession()`.
+    ///
+    /// MAC36a: the previous `willResignActiveNotification` (lock-on-blur)
+    /// observer was removed. With MAC30 making encryption opt-in, the
+    /// default-plaintext SSD has no key to zeroize and the auto-teardown
+    /// of the chat host on every alt-tab was pure friction — users had
+    /// to re-select the SSD to get back into a chat. Users who do enable
+    /// encryption and want lock-on-idle can request it as an explicit
+    /// FTUE preference (F4 follow-up).
     private func registerLifecycleHooks() {
         let nc = NotificationCenter.default
-        notificationObservers.append(nc.addObserver(
-            forName: NSApplication.willResignActiveNotification, object: nil, queue: .main
-        ) { [weak self] _ in self?.lockSession(reason: "App backgrounded") })
         notificationObservers.append(nc.addObserver(
             forName: NSApplication.willTerminateNotification, object: nil, queue: .main
         ) { [weak self] _ in self?.lockSession(reason: "App terminating") })
@@ -280,6 +298,14 @@ final class RunnerViewModel: ObservableObject {
     /// next unlock. With auto-spawn, both ollama and the sidecar belong to
     /// the unlocked session and must be torn down together.
     func lockSession(reason: String = "Locked") {
+        // MAC36b: cancel any in-flight chat stream first so its delegate
+        // can't push tokens into a view-model whose unlock material is
+        // about to be zeroized. The session is invalidated in the task's
+        // didCompleteWithError handler.
+        activeChatTask?.cancel()
+        activeChatTask = nil
+        isSending = false
+
         // MAC6: tear the LAN API down BEFORE we zero the unlock material so
         // the sidecar can never serve requests using a config whose API key
         // has been wiped from this side.
@@ -662,13 +688,19 @@ final class RunnerViewModel: ObservableObject {
         log("Stopped ollama")
     }
 
+    /// MAC36b: stream `/api/chat/stream` (NDJSON) instead of waiting for
+    /// the full `/api/chat` response so tokens land in the UI as they're
+    /// produced. The contract is documented at
+    /// `runner-core/Services/RunnerLocalApiService.cs:209-263`.
+    /// macOS 11 baseline rules out `URLSession.bytes(for:)` (12+); the
+    /// `URLSessionDataDelegate` chunk callback is the equivalent that
+    /// works on the pinned target.
     func sendPrompt() {
         guard !selectedModel.isEmpty else { return }
         guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        clearRagState()
 
         guard let baseUrl = networkApiBaseUrl,
-              let url = URL(string: "\(baseUrl)/api/chat") else {
+              let url = URL(string: "\(baseUrl)/api/chat/stream") else {
             // MAC34: post-auto-spawn this should be unreachable from the
             // golden path — the chat host comes up at unlock. Surfacing it
             // anyway so a sidecar crash mid-session shows up in the UI.
@@ -678,67 +710,126 @@ final class RunnerViewModel: ObservableObject {
             return
         }
 
+        // Tear any prior in-flight chat down before starting a new one.
+        activeChatTask?.cancel()
+        activeChatSession?.invalidateAndCancel()
+        activeChatTask = nil
+        activeChatSession = nil
+
+        // Reset the response box so streamed tokens don't append onto a
+        // stale answer.
+        response = ""
+        clearRagState()
+        isSending = true
+        status = "Sending..."
+
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.addValue("application/x-ndjson", forHTTPHeaderField: "Accept")
         if let apiKey = apiKeyForLocalApiRequest() {
             req.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
-        req.httpBody = try? JSONSerialization.data(withJSONObject: ["model": selectedModel, "prompt": prompt])
+        req.httpBody = try? JSONSerialization.data(
+            withJSONObject: ["model": selectedModel, "prompt": prompt])
 
-        URLSession.shared.dataTask(with: req) { [weak self] data, urlResponse, error in
-            guard let self else { return }
+        let delegate = ChatStreamDelegate(owner: self)
+        let session = URLSession(configuration: .default,
+                                 delegate: delegate,
+                                 delegateQueue: nil)
+        let task = session.dataTask(with: req)
+        activeChatSession = session
+        activeChatTask = task
+        task.resume()
+    }
 
-            if let error {
-                DispatchQueue.main.async {
-                    self.status = "Chat failed: \(error.localizedDescription)"
-                    self.clearRagState()
+    // MARK: - MAC36b: chat stream callbacks (invoked from delegate)
+
+    fileprivate func chatStreamDidReceiveLine(_ line: Data) {
+        guard let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+              let type = obj["type"] as? String else { return }
+        switch type {
+        case "start":
+            // Sources/usedRagContext on the start frame are placeholders
+            // (server emits authoritative values on `complete`). Nothing
+            // to surface here yet.
+            break
+        case "token":
+            if let token = obj["token"] as? String, !token.isEmpty {
+                DispatchQueue.main.async { [weak self] in
+                    self?.response.append(token)
                 }
-                return
             }
-
-            guard let httpResponse = urlResponse as? HTTPURLResponse else {
-                DispatchQueue.main.async {
-                    self.status = "Chat failed: invalid API response"
-                    self.clearRagState()
-                }
-                return
+        case "rag-warning":
+            let message = (obj["message"] as? String) ?? "RAG retrieval failed."
+            DispatchQueue.main.async { [weak self] in
+                self?.ragWarning = message
             }
-
-            guard (200..<300).contains(httpResponse.statusCode), let data else {
-                let message = self.apiErrorMessage(data: data, statusCode: httpResponse.statusCode)
-                DispatchQueue.main.async {
-                    self.status = message
-                    self.clearRagState()
-                }
-                return
-            }
-
-            guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let text = obj["responseText"] as? String else {
-                DispatchQueue.main.async {
-                    self.status = "Chat failed: malformed API response"
-                    self.clearRagState()
-                }
-                return
-            }
-
+        case "complete":
             let sources = (obj["sources"] as? [String]) ?? []
             let usedRag = (obj["usedRagContext"] as? Bool) ?? false
-            var warning = obj["ragWarning"] as? String
-            if warning == nil,
-               httpResponse.value(forHTTPHeaderField: "X-RAG-Status") == "retrieval-failed" {
-                warning = "RAG retrieval failed; answer used the base model only."
-            }
-
-            DispatchQueue.main.async {
-                self.response = text
+            // Authoritative final text from the server. Used as a
+            // fallback only — overwriting the streamed buffer would
+            // cause a visible flicker for the common case where every
+            // token frame already arrived.
+            let fallbackText = obj["responseText"] as? String
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
                 self.responseSources = sources
                 self.usedRagContext = usedRag
-                self.ragWarning = warning
+                if self.response.isEmpty, let fallbackText {
+                    self.response = fallbackText
+                }
                 self.status = usedRag ? "Answered with sources" : "Answered"
             }
-        }.resume()
+        case "error":
+            let message = (obj["message"] as? String) ?? "stream error"
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.status = "Chat failed: \(message)"
+                self.clearRagState()
+            }
+        default:
+            break
+        }
+    }
+
+    fileprivate func chatStreamDidComplete(error: Error?) {
+        // Always release the per-call session so the delegate retain
+        // cycle (URLSession -> delegate -> owner) is broken.
+        let session = activeChatSession
+        DispatchQueue.main.async { [weak self] in
+            guard let self else {
+                session?.finishTasksAndInvalidate()
+                return
+            }
+            self.activeChatTask = nil
+            self.activeChatSession = nil
+            self.isSending = false
+            if let error {
+                let nsError = error as NSError
+                if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+                    // Cancellation is initiated by Lock or by a fresh
+                    // sendPrompt — UI state is already where it needs
+                    // to be. No status overwrite.
+                } else {
+                    self.status = "Chat failed: \(error.localizedDescription)"
+                }
+            }
+            session?.finishTasksAndInvalidate()
+        }
+    }
+
+    fileprivate func chatStreamDidReceiveResponse(_ response: HTTPURLResponse) -> URLSession.ResponseDisposition {
+        if (200..<300).contains(response.statusCode) {
+            return .allow
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.status = "Chat failed: API returned \(response.statusCode)"
+            self.clearRagState()
+        }
+        return .cancel
     }
 
     private func clearRagState() {
@@ -1187,6 +1278,49 @@ final class RunnerViewModel: ObservableObject {
     }
 }
 
+/// MAC36b: NDJSON streaming delegate for `/api/chat/stream`. Holds a
+/// weak ref to the view-model so an outliving session (cancelled,
+/// not-yet-invalidated) doesn't keep the VM alive. Callbacks dispatch
+/// UI mutations to the main queue from inside the VM helpers.
+private final class ChatStreamDelegate: NSObject, URLSessionDataDelegate {
+    private weak var owner: RunnerViewModel?
+    private var buffer = NdjsonFrameBuffer()
+
+    init(owner: RunnerViewModel) {
+        self.owner = owner
+    }
+
+    func urlSession(_ session: URLSession,
+                    dataTask: URLSessionDataTask,
+                    didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        guard let http = response as? HTTPURLResponse else {
+            completionHandler(.cancel)
+            return
+        }
+        let disposition = owner?.chatStreamDidReceiveResponse(http) ?? .cancel
+        completionHandler(disposition)
+    }
+
+    func urlSession(_ session: URLSession,
+                    dataTask: URLSessionDataTask,
+                    didReceive data: Data) {
+        let lines = buffer.append(data)
+        for line in lines where !line.isEmpty {
+            owner?.chatStreamDidReceiveLine(line)
+        }
+    }
+
+    func urlSession(_ session: URLSession,
+                    task: URLSessionTask,
+                    didCompleteWithError error: Error?) {
+        if let tail = buffer.flush(), !tail.isEmpty {
+            owner?.chatStreamDidReceiveLine(tail)
+        }
+        owner?.chatStreamDidComplete(error: error)
+    }
+}
+
 struct ContentView: View {
     @StateObject var vm = RunnerViewModel()
 
@@ -1204,7 +1338,18 @@ struct ContentView: View {
                 ForEach(vm.modelNames, id: \.self) { Text($0).tag($0) }
             }
             TextEditor(text: $vm.prompt).frame(height: 120)
-            Button("Send") { vm.sendPrompt() }
+            // MAC36c: spinner + disabled state while a streaming chat is
+            // in flight. Disabled also gates on missing model/prompt so
+            // the button can't kick off a no-op request.
+            Button(action: { vm.sendPrompt() }) {
+                HStack(spacing: 6) {
+                    if vm.isSending { ProgressView().controlSize(.small) }
+                    Text("Send")
+                }
+            }
+            .disabled(vm.isSending
+                      || vm.selectedModel.isEmpty
+                      || vm.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             TextEditor(text: $vm.response).frame(height: 200)
             if let warning = vm.ragWarning {
                 Text(warning)
