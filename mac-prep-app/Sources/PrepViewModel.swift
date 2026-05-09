@@ -70,6 +70,13 @@ final class PrepViewModel: ObservableObject {
     // keep downloading even though Swift stopped awaiting).
     private var activePullTask: Task<Void, Never>?
 
+    // MAC31a: ordered tags still to pull when the batch is cancelled
+    // mid-flight. The first element is the tag that was in flight at
+    // the moment of cancel — `resumePull()` re-enters the pull loop
+    // with this list so MAC31's resume seed shows "Resuming `<tag>`
+    // from NN%…" for partial blobs already on disk.
+    private var pendingPullTags: [String] = []
+
     init() {
         // Default starter selection is set after discoverCatalog() runs
         // (the bundled list is loaded via the sidecar once it spawns,
@@ -391,26 +398,48 @@ final class PrepViewModel: ObservableObject {
     private func pullStarterModels() async {
         if selectedStarterModels.isEmpty {
             appendLog("No starter models selected; skipping model pull.")
+            pendingPullTags = []
             currentStep = .readiness
             await runReadiness()
             return
         }
 
+        // MAC31a: seed pending list from the user's selection on first
+        // entry. resumePull() re-enters with pendingPullTags already
+        // populated (cancelled tag at index 0), so we only seed when
+        // we're starting from scratch.
+        if pendingPullTags.isEmpty {
+            pendingPullTags = Array(selectedStarterModels)
+        }
+        await pullPendingTags()
+    }
+
+    /// MAC31a: pull whatever is currently in `pendingPullTags`, in
+    /// order. On cancellation, transitions to `.modelPullPaused` with
+    /// the still-pending list intact (cancelled tag remains at index 0
+    /// so resumePull picks it up first). On clean completion, clears
+    /// the list and advances to `.readiness`.
+    private func pullPendingTags() async {
         isBusy = true
         defer { isBusy = false }
         canCancelPull = true
         defer { canCancelPull = false }
 
-        // MAC31: wrap the pull batch in a Task so cancelPull() can
-        // interrupt the hostController.send await. The for-loop checks
-        // Task.isCancelled between pulls so a cancel during model N
-        // doesn't silently start downloading model N+1.
-        // Strong capture of self is safe because we `await task.value`
-        // immediately, bounding the task's lifetime to this method.
-        let tags = Array(selectedStarterModels)
+        // Snapshot the queue so we can compute the remaining list
+        // when a specific tag is cancelled mid-pull. The for-loop
+        // mutates a local copy via index so pendingPullTags only
+        // updates on cancel/completion (cleaner state for tests).
+        let queue = pendingPullTags
+        var cancelledTag: String?
+        var cancelledIndex: Int?
+
         let task = Task { @MainActor in
-            for tag in tags {
-                if Task.isCancelled { break }
+            for (index, tag) in queue.enumerated() {
+                if Task.isCancelled {
+                    cancelledTag = tag
+                    cancelledIndex = index
+                    break
+                }
                 self.pullProgressLine = "Pulling \(tag)…"
                 self.appendLog("Pulling \(tag)…")
                 do {
@@ -418,6 +447,8 @@ final class PrepViewModel: ObservableObject {
                     self.appendLog("Pulled \(tag).")
                 } catch is CancellationError {
                     self.appendLog("Pull cancelled for \(tag).")
+                    cancelledTag = tag
+                    cancelledIndex = index
                     break
                 } catch {
                     self.appendLog("Pull failed for \(tag): \(error.localizedDescription)")
@@ -428,8 +459,48 @@ final class PrepViewModel: ObservableObject {
         activePullTask = task
         await task.value
         activePullTask = nil
-        pullProgressLine = ""
 
+        if let tag = cancelledTag, let index = cancelledIndex {
+            // Capture the last progress snapshot before clearing it so
+            // the paused-step view can display "<tag> — NN% downloaded".
+            // Per the 2026-05-08 design call, we use the in-memory
+            // snapshot rather than re-querying the sidecar on cancel
+            // (avoids a roundtrip while the user is already waiting).
+            let snapshot = pullProgressLine.isEmpty ? nil : pullProgressLine
+            pendingPullTags = Array(queue[index...])
+            pullProgressLine = ""
+            currentStep = .modelPullPaused(tag: tag, progressSnapshot: snapshot)
+            return
+        }
+
+        pendingPullTags = []
+        pullProgressLine = ""
+        currentStep = .readiness
+        await runReadiness()
+    }
+
+    /// MAC31a: re-enter the pull loop after cancellation. The first
+    /// tag in `pendingPullTags` is the one that was cancelled, and
+    /// MAC31's resume seed (in mac-prep-host's pull-model arm) emits
+    /// "Resuming `<tag>` from NN%…" automatically when partial blobs
+    /// are present on disk.
+    func resumePull() async {
+        guard !pendingPullTags.isEmpty else {
+            currentStep = .readiness
+            await runReadiness()
+            return
+        }
+        currentStep = .modelPull
+        await pullPendingTags()
+    }
+
+    /// MAC31a: skip the remaining pulls and advance to readiness. The
+    /// already-downloaded models are still on disk (and in
+    /// `selectedStarterModels`), so readiness will report them
+    /// correctly via the MAC29 disk-truth path.
+    func skipRemainingPulls() async {
+        appendLog("Skipping remaining model pulls.")
+        pendingPullTags = []
         currentStep = .readiness
         await runReadiness()
     }
@@ -485,6 +556,19 @@ final class PrepViewModel: ObservableObject {
         appendLog("Drive ready. Launch Free AI SSD Runner from the SSD's mac/ folder.")
     }
 
+    /// MAC32: Done step's button calls this so prep cleanly exits after
+    /// shutdown. Pre-MAC32 the button called only `finalize()`, which
+    /// silently shut down the sidecar and appended a log line — the
+    /// window stayed open with no visible signal that anything had
+    /// happened, which the v1.3.10 mac field test reported as "Finish
+    /// is broken." Quit makes the completion explicit.
+    func quit() async {
+        await finalize()
+        #if canImport(AppKit)
+        await MainActor.run { NSApplication.shared.terminate(nil) }
+        #endif
+    }
+
     /// Reset to the welcome step after a failure so the user can retry
     /// from a clean slate. (More targeted re-entry — e.g. retry just
     /// staging — is a future MAC17 follow-up.)
@@ -497,6 +581,8 @@ final class PrepViewModel: ObservableObject {
         statusMessage = ""
         passphrase = ""
         passphraseConfirm = ""
+        pendingPullTags = []
+        pullProgressLine = ""
         currentStep = .welcome
     }
 

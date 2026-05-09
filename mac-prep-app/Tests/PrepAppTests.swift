@@ -270,6 +270,43 @@ struct PrepAppTestsMain {
             try expect(PrepFlowStep.failed(message: "a") != .failed(message: "b"))
         }
 
+        // MARK: MAC31a — .modelPullPaused state pins
+        //
+        // pullStarterModels at PrepViewModel.swift used to fall through to
+        // .readiness on cancellation, which buried MAC31's resume seed.
+        // The new step preserves the cancelled tag + last progress
+        // snapshot so the UI can offer Retry. Equatable comparing the
+        // associated values is what `currentStep == .modelPullPaused(...)`
+        // checks rely on for diffing.
+
+        runner.test("MAC31a: .modelPullPaused equality matches on tag + snapshot") {
+            let a = PrepFlowStep.modelPullPaused(tag: "llama3.2:1b",
+                                                 progressSnapshot: "Pulling llama3.2:1b… 42%")
+            let b = PrepFlowStep.modelPullPaused(tag: "llama3.2:1b",
+                                                 progressSnapshot: "Pulling llama3.2:1b… 42%")
+            try expect(a == b)
+        }
+
+        runner.test("MAC31a: .modelPullPaused inequality on tag drift") {
+            let a = PrepFlowStep.modelPullPaused(tag: "llama3.2:1b", progressSnapshot: nil)
+            let b = PrepFlowStep.modelPullPaused(tag: "llama3.2:3b", progressSnapshot: nil)
+            try expect(a != b)
+        }
+
+        runner.test("MAC31a: .modelPullPaused inequality on snapshot drift") {
+            let a = PrepFlowStep.modelPullPaused(tag: "x", progressSnapshot: "10%")
+            let b = PrepFlowStep.modelPullPaused(tag: "x", progressSnapshot: "20%")
+            let c = PrepFlowStep.modelPullPaused(tag: "x", progressSnapshot: nil)
+            try expect(a != b)
+            try expect(a != c)
+        }
+
+        runner.test("MAC31a: .modelPullPaused not equal to .modelPull or .readiness") {
+            let paused = PrepFlowStep.modelPullPaused(tag: "x", progressSnapshot: nil)
+            try expect(paused != .modelPull)
+            try expect(paused != .readiness)
+        }
+
         // MARK: MAC34 — InitialPortableConfigPayload generates a non-empty
         // 64-hex network API key by default. Pre-MAC34 this defaulted to
         // `""` which fail-closed every chat request through the LAN API
