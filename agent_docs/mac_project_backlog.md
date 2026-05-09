@@ -2542,7 +2542,8 @@ flagged two reds:
 
 ### MAC30 - Encryption optional (default OFF, opt-in passphrase) cross-OS
 
-**Status:** filed 2026-05-08. Resolves the long-standing
+**Status:** **done** — PR #233 merged `0685cfd` (2026-05-09); shipped v1.3.17. Mac side: new `mac-prep-app/Sources/PlaintextConfigWriter.swift` mirrors `EncryptedConfigWriter` shape and writes `<ssdRoot>/config/portable-config.json` via `JSONSerialization`, stripping `networkApiKey` before write. New `@Published var enableEncryption: Bool = false` on `PrepViewModel`; `writeEncryptionAndProceed()` renamed to `writeConfigAndProceed()` and branches on the toggle. `EncryptionSetupStepView` now shows the toggle, hides passphrase fields when OFF, button label adapts. **Windows-side surprise:** `_enableEncryption` already defaulted to `false` and the toggle was already TwoWay-bound — the original "flip default" sub-task was stale. Windows fix was UX text only on `MainWindow.xaml:494` (CheckBox label + tooltip + new explainer TextBlock). Plaintext invariant narrowed to "API key never written in plaintext" — see `project_decisions.md` 2026-05-09 entry. 3 new Swift tests + 1 new C# test pinning both branches; CI green on first run (mac-prep 47s, mac-runner 48s, windows 3m16s); v1.3.17 dispatched + shipped same session. Awaiting v1.3.17 Mac field test.
+**Original filing (preserved for context):** filed 2026-05-08. Resolves the long-standing
   "Encryption-required policy" open question. **Product call
   (2026-05-08):** encryption becomes opt-in with the toggle
   defaulting OFF on both PrepApps. The passphrase prompt is
@@ -3164,4 +3165,65 @@ verification):**
 **Acceptance / smoke (Mac, deferred to v1.3.16 mac field run):**
 - Plug existing v1.3.15-prepped SSD → launch v1.3.16 PrepApp → re-run readiness without re-prep → readiness now passes all-green (the stale `._7b` is ignored).
 - Fresh prep of `qwen2.5:7b` via v1.3.16 PrepApp on a different exFAT SSD → readiness passes immediately after merge.
+
+### MAC36 - Mac Runner UX bundle: drop auto-lock-on-blur + streaming chat + send-busy spinner
+
+**Status:** filed 2026-05-09 from v1.3.17 mac field test. Bundled per the 2026-05-07 cross-OS parity rule audit: Windows runner already has streaming + a busy state, and Windows lock-on-blur was never wired. So this is Mac-only catch-up — three small fixes that share a single `mac-runner/Sources/main.swift` PR.
+**Scope:** small — three discrete sub-bugs.
+**Risk:** Low. (a) is a notification removal; (b) is a known-good runner-core endpoint swap; (c) is `@Published var isSending` + `ProgressView`.
+**Dependencies:** Built on MAC30 (the auto-lock fix only matters once encryption is opt-in; with the v1.3.17 default-OFF toggle, the auto-lock-on-blur surfaces every alt-tab as a wholly-unnecessary teardown).
+**Goal:** Mac Runner doesn't lock when you alt-tab away. Sending a chat shows a spinner immediately. Tokens stream into the response box as they arrive — what users expect from any modern chat app.
+
+**Driver:** v1.3.17 mac field test. User-reported findings, verbatim:
+> "i still want to remove the mandatory encrption [done in MAC30] and i do not want it to auto lock when the runner app is no longer focused which is the current behavior, additionally when sending messages there is no indicator anything is happening until the response pops up. so maybe a spinning wheel? and id like text streaming so it feels more like what the user would be used too."
+
+**(a) Drop auto-lock on focus loss.** `mac-runner/Sources/main.swift:158` registers `NSApplication.willResignActiveNotification` → `lockSession(reason: "App backgrounded")`. This was a MAC5 security default for a world where every SSD was encrypted; with MAC30 making encryption opt-in, the default-plaintext SSD has no key to zeroize and the auto-lock just tears down the chat host every time the user switches windows. **Fix:** remove the `willResignActiveNotification` observer registration; keep the manual `Lock` button and `willTerminateNotification` (lock on app quit). For users who *do* enable encryption and want lock-on-blur, file a follow-up "Auto-lock on idle" preference in F4 (FTUE) — but the field-test signal is unanimous: lock-on-blur is wrong as a default.
+
+**(b) Streaming chat response.** `sendPrompt()` at `main.swift:665` posts to `POST /api/chat` (non-streaming) and writes the entire response string to `vm.response` once at completion. Runner-core already exposes `POST /api/chat/stream` (NDJSON frame stream — see `RunnerLocalApiService.cs:160` for the contract). **Fix:** swap to `URLSession.shared.bytes(for:)` (macOS 12+) or `URLSession.dataTask` with `URLSessionDataDelegate` for compatibility, parse NDJSON line-by-line, append `frame.token` to `vm.response` on each tick, surface `frame.sources` + `frame.usedRagContext` from the final frame. Cancel-on-Lock ties this back into MAC36(a) — locks should still tear down a streaming response.
+
+**(c) Send-busy spinner.** Send button has no busy state — user clicks, nothing visible happens until the (potentially many-second) response lands. **Fix:** new `@Published var isSending: Bool = false` on `RunnerViewModel`; `sendPrompt()` sets `true` on entry, `false` on completion/error/cancel. `ContentView`'s Send button: `Button(action: ...) { HStack { if vm.isSending { ProgressView().controlSize(.small) }; Text("Send") } }.disabled(vm.isSending)`. Pairs naturally with the streaming swap — the spinner shows while the first token arrives, then stays visible during streaming, then drops at completion.
+
+**Cross-OS parity audit (per 2026-05-07 rule):**
+- **Windows runner:** already streams via `/api/chat/stream`, already has a busy state on Send. No-op.
+- **Windows lock-on-blur:** Windows runner does not auto-lock on focus loss (verified by inspection — `MainWindow.xaml.cs` registers no equivalent of `willResignActiveNotification`). No-op.
+- **Conclusion:** Mac-only PR. The cross-OS audit is the deliverable, not a code change on Windows.
+
+**Affected files:**
+- `mac-runner/Sources/main.swift` — remove the `willResignActiveNotification` observer (≈3 lines); rewrite `sendPrompt()` for NDJSON streaming (≈50 lines); add `@Published var isSending` + UI gating.
+- `mac-runner/Tests/...` — add a smoke test pinning `lockSession` is NOT invoked on a synthesized resign-active (or just delete the corresponding existing test; check first). Streaming pin is harder without a fake server — see if existing runner-core stream tests cover the contract end of the wire.
+
+**Acceptance / smoke (deferred to a v1.3.18 Mac field run):**
+- Alt-tab away from Runner.app → SSD stays unlocked; alt-tab back → chat is still ready.
+- Click Send on a non-trivial prompt → spinner appears immediately on the Send button → tokens start appearing in the response box within a second or two → spinner clears when the response is complete.
+- Lock during a streaming response → response halts cleanly; SSD locks; no orphan sidecar.
+
+### MAC37 - Mac PrepApp finalize observability (long-running step shows progress)
+
+**Status:** filed 2026-05-09 from v1.3.17 mac field test. User report: "the final 'finalize' step took a very long time like more than 6 min. i think we should see if its timing out and coming back clean so its fine or if its actually doing something we should expose that so the user doesn think the app froze." User explicitly OK with this as a follow-up.
+**Scope:** small. Diagnostic first, then UX.
+**Risk:** Low. The finalize completed successfully — this is observability, not correctness.
+**Dependencies:** None. Independent of MAC30/MAC36.
+**Goal:** A user watching the Mac PrepApp's finalize step sees enough progress to trust the app isn't frozen. Whether that's a spinner, a step counter, or a log tail depends on what's actually slow.
+
+**Driver:** v1.3.17 Mac field test. Finalize took 6+ min with no UI feedback; the user wasn't sure if PrepApp had frozen. Investigate whether the finalize hang is:
+- A real workload (large readiness check, post-readiness sync, payload integrity verify);
+- A timeout in some sub-step that eventually returns clean (likely candidates: a network call to ollama.com that retries, an APFS sync, the `mac-prep-host` shutdown rendezvous);
+- Something silently retrying without surfacing.
+
+**Architecture (rough — refine after the diagnosis pass):**
+
+1. **Diagnose.** Add timing logs around each finalize sub-step in `mac-prep-app/Sources/PrepViewModel.swift` and `mac-prep-host/HostLifetime.cs`. Re-run a clean prep, capture the `<ssdRoot>/logs/macos-prep-host-*.log` and the PrepApp app log, find the slow span. Most likely candidates: post-readiness model save, sidecar shutdown wait, or some ollama-related stop.
+
+2. **Decide what to surface.** If it's a real workload, add a step-progress label ("Verifying payload…", "Saving config…", "Stopping ollama…") on the existing `DoneStepView`. If it's a timeout that should just be shorter, fix the timeout. If it's a sub-step that emits its own progress already (e.g. ollama shutdown), just route the existing log line into the visible status.
+
+3. **Cross-OS parity audit:** does Windows finalize have the same hang or is it instant? (Windows MAC32 added a "Setup complete" modal on success but didn't measure latency.) If Windows finalize is also slow, this becomes a cross-OS bundle; if not, Mac-only.
+
+**Affected files (preliminary, will firm up after diagnosis):**
+- `mac-prep-app/Sources/PrepViewModel.swift` — `finalize()` step instrumentation.
+- `mac-prep-app/Sources/main.swift` — `DoneStepView` progress label.
+- `mac-prep-host/HostLifetime.cs` — sub-step timing logs (if the slow span is host-side).
+
+**Acceptance / smoke:**
+- Re-run a clean Mac prep → finalize step shows progress text the entire time it's running → user can tell from the UI alone whether the app is making progress.
+- Wall-clock finalize time either drops (we identified and removed an unnecessary wait) or is justified by visible work (we surface what it's doing). Either outcome is fine.
 
