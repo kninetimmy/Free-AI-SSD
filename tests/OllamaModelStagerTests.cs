@@ -147,7 +147,13 @@ public sealed class OllamaModelStagerTests : IDisposable
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(() =>
+        // ThrowsAnyAsync — both OperationCanceledException and the
+        // TaskCanceledException subclass are valid signals. Which one
+        // surfaces depends on whether the throw came from
+        // ct.ThrowIfCancellationRequested (OCE) or from Stream.ReadAsync
+        // observing the token mid-copy (TCE). The pin is on cancellation
+        // semantics, not the exact derived type.
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             OllamaModelStager.MergeToSsdAsync(_staging, _ssd, "llama3.2:1b", _ => { }, cts.Token));
 
         var ssdBlobPath = Path.Combine(_ssd, "blobs", "sha256-" + digests[0]);
