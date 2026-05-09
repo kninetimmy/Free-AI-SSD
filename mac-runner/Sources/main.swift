@@ -408,6 +408,56 @@ final class RunnerViewModel: ObservableObject {
         return fallback + fallback
     }
 
+    /// MAC34b: enumerate PIDs holding a TCP listen on `port` via `lsof`, then
+    /// SIGTERM → wait → SIGKILL anything still alive. Empty no-op when
+    /// nothing is bound. The user reported v1.3.13 chat failures because
+    /// Ollama.app (and a stray CLI ollama) were holding 11434 in the
+    /// background, which made the staged binary exit immediately and the
+    /// only diagnostic was a single "Ollama exited with code 1" log line.
+    static func terminateProcessesListening(onPort port: Int, log: ((String) -> Void)? = nil) {
+        let pids = pidsListening(onPort: port)
+        guard !pids.isEmpty else { return }
+        log?("Found \(pids.count) existing process(es) on port \(port) (PIDs \(pids)). Terminating before starting bundled ollama.")
+        for pid in pids { _ = Darwin.kill(pid, SIGTERM) }
+        let termDeadline = Date().addingTimeInterval(0.6)
+        while Date() < termDeadline {
+            if pids.allSatisfy({ Darwin.kill($0, 0) != 0 }) { break }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        let stillAlive = pids.filter { Darwin.kill($0, 0) == 0 }
+        if !stillAlive.isEmpty {
+            log?("PIDs \(stillAlive) ignored SIGTERM; sending SIGKILL.")
+            for pid in stillAlive { _ = Darwin.kill(pid, SIGKILL) }
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+    }
+
+    /// `lsof -nP -t -iTCP:<port> -sTCP:LISTEN` returns one PID per line for
+    /// every process listening on the given TCP port. We resolve from PID
+    /// rather than a name match (`pgrep ollama`) so a sibling ollama serving
+    /// a different port (or a non-ollama process that happens to hold 11434)
+    /// is handled correctly: the former is left alone, the latter still gets
+    /// freed up.
+    private static func pidsListening(onPort port: Int) -> [pid_t] {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        proc.arguments = ["-nP", "-t", "-iTCP:\(port)", "-sTCP:LISTEN"]
+        let stdout = Pipe()
+        proc.standardOutput = stdout
+        proc.standardError = Pipe()
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+        } catch {
+            return []
+        }
+        let data = stdout.fileHandleForReading.readDataToEndOfFile()
+        guard let text = String(data: data, encoding: .utf8) else { return [] }
+        return text
+            .split(whereSeparator: { $0.isNewline })
+            .compactMap { pid_t($0.trimmingCharacters(in: .whitespaces)) }
+    }
+
     private func handleHostStatusChange(_ status: MacRunnerHostController.Status) {
         switch status {
         case .stopped:
@@ -559,6 +609,17 @@ final class RunnerViewModel: ObservableObject {
         case .allowed:
             break
         }
+
+        // MAC34b: free port 11434 before launching the staged ollama. Field
+        // test surfaced silent "Ollama exited with code 1" because Ollama.app
+        // (or a leftover CLI server) was already bound to 127.0.0.1:11434, so
+        // the staged binary never got to serve. Windows side-steps this with
+        // port-shifting (OllamaLifecycleService.ResolvePort scans preferred+20);
+        // we don't have that on Mac because the C# sidecar handshake hardcodes
+        // the host URL. Kill-by-PID via `lsof` so we only hit processes
+        // actually holding 11434 — a sibling ollama serving a different port
+        // for another use case stays untouched.
+        Self.terminateProcessesListening(onPort: hostPort, log: { [weak self] in self?.log($0) })
 
         let p = Process()
         p.executableURL = ollama
