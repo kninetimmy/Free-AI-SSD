@@ -3168,7 +3168,7 @@ verification):**
 
 ### MAC36 - Mac Runner UX bundle: drop auto-lock-on-blur + streaming chat + send-busy spinner
 
-**Status:** filed 2026-05-09 from v1.3.17 mac field test. Bundled per the 2026-05-07 cross-OS parity rule audit: Windows runner already has streaming + a busy state, and Windows lock-on-blur was never wired. So this is Mac-only catch-up — three small fixes that share a single `mac-runner/Sources/main.swift` PR.
+**Status:** done 2026-05-09 (PR #235 `567f49a`, shipped v1.3.18). Bundled per the 2026-05-07 cross-OS parity rule audit: Windows runner already has streaming + a busy state, and Windows lock-on-blur was never wired. Implementation notes: extracted `mac-runner/Sources/NdjsonFrameBuffer.swift` as a pure helper with 8 test pins (the only meaningful test surface — view-model behavior isn't unit-testable without restructuring). `URLSession.bytes(for:)` was off the table per the macOS 11 baseline; used `URLSessionDataDelegate.didReceive data:` instead — locked into `project_decisions.md` 2026-05-09 entry. Acceptance smoke deferred to v1.3.18 Mac field run.
 **Scope:** small — three discrete sub-bugs.
 **Risk:** Low. (a) is a notification removal; (b) is a known-good runner-core endpoint swap; (c) is `@Published var isSending` + `ProgressView`.
 **Dependencies:** Built on MAC30 (the auto-lock fix only matters once encryption is opt-in; with the v1.3.17 default-OFF toggle, the auto-lock-on-blur surfaces every alt-tab as a wholly-unnecessary teardown).
