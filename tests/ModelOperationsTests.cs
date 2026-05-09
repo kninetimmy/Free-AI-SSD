@@ -145,4 +145,96 @@ public sealed class ModelOperationsTests
         Assert.Equal("pull", args[0]);
         Assert.Equal(modelTag, args[1]);
     }
+
+    /// <summary>
+    /// MAC35a: macOS auto-creates AppleDouble companion files (`._&lt;name&gt;`)
+    /// alongside any file with extended attributes when written to a
+    /// filesystem without native xattr support (exFAT, FAT32, SMB).
+    /// Their first byte is the AppleDouble magic 0x00, so feeding one to
+    /// JsonDocument.Parse throws "0x00 is an invalid start of a value"
+    /// — which is what crashed readiness on the v1.3.15 mac field test.
+    /// Discovery must skip them so callers never end up reading one as
+    /// a manifest.
+    /// </summary>
+    [Fact]
+    public void DiscoverModelsOnDisk_SkipsAppleDoubleSidecars()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"freeaissd-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+        try
+        {
+            var manifestDir = Path.Combine(tempRoot, "manifests", "registry.ollama.ai", "library", "qwen2.5");
+            Directory.CreateDirectory(manifestDir);
+            File.WriteAllText(Path.Combine(manifestDir, "7b"), "{\"schemaVersion\":2,\"layers\":[]}");
+            File.WriteAllBytes(Path.Combine(manifestDir, "._7b"), new byte[] { 0x00, 0x05, 0x16, 0x07, 0x00, 0x02, 0x00, 0x00 });
+
+            var discovered = ModelOperations.DiscoverModelsOnDisk(tempRoot);
+
+            Assert.Contains("qwen2.5:7b", discovered);
+            Assert.DoesNotContain("qwen2.5:._7b", discovered);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// MAC35a: <see cref="ModelOperations.FindModelBlobForModel"/> must
+    /// resolve to the real manifest, not the AppleDouble sidecar, even
+    /// if the directory enumeration happens to surface the sidecar
+    /// first (`.` sorts before alphanumerics on some filesystems).
+    /// </summary>
+    [Fact]
+    public void FindModelBlobForModel_SkipsAppleDoubleSidecar()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"freeaissd-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+        try
+        {
+            var manifestDir = Path.Combine(tempRoot, "manifests", "registry.ollama.ai", "library", "qwen2.5");
+            Directory.CreateDirectory(manifestDir);
+            File.WriteAllText(Path.Combine(manifestDir, "7b"), """
+            {
+              "schemaVersion": 2,
+              "config": { "digest": "sha256:aaaaaaaa", "size": 1 },
+              "layers": [
+                { "mediaType": "application/vnd.ollama.image.layer.model", "digest": "sha256:cccccccc", "size": 20 }
+              ]
+            }
+            """);
+            File.WriteAllBytes(Path.Combine(manifestDir, "._7b"), new byte[] { 0x00, 0x05, 0x16, 0x07 });
+
+            var blobsDir = Path.Combine(tempRoot, "blobs");
+            Directory.CreateDirectory(blobsDir);
+            var modelBlob = Path.Combine(blobsDir, "sha256-cccccccc");
+            File.WriteAllText(modelBlob, "model");
+
+            var result = ModelOperations.FindModelBlobForModel(tempRoot, "qwen2.5:7b");
+
+            Assert.Equal(modelBlob, result);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// MAC35a: a malformed or non-JSON manifest must surface as
+    /// <c>false</c> from <see cref="ModelOperations.TrySelectModelLayerDigest"/>
+    /// rather than throwing — otherwise readiness aborts on the first
+    /// corrupt file under <c>manifests/</c> and surfaces the C#
+    /// JsonException to the user instead of a clean check failure.
+    /// </summary>
+    [Fact]
+    public void TrySelectModelLayerDigest_ReturnsFalseOnCorruptJson()
+    {
+        // AppleDouble magic header — first byte 0x00 — the exact shape
+        // that crashed readiness on the v1.3.15 field test.
+        var corrupt = " garbage";
+        var ok = ModelOperations.TrySelectModelLayerDigest(corrupt, out var digest);
+        Assert.False(ok);
+        Assert.Equal(string.Empty, digest);
+    }
 }
