@@ -22,8 +22,7 @@ public sealed class OllamaLifecycleService : IOllamaLifecycleService
 
     public (bool IsTrusted, string Message) ValidateTrust(string ssdRoot)
     {
-        var gate = OllamaPackageTrustPolicy.ValidateExecutionAttestation(
-            ssdRoot, OllamaPackageTrustPolicy.DefaultWindowsPackage.Url);
+        var gate = OllamaPackageTrustPolicy.ValidateExecutionAttestation(ssdRoot);
         return (gate.IsTrusted, gate.Message);
     }
 

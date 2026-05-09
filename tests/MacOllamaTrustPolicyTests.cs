@@ -5,23 +5,32 @@ namespace FreeAiSsd.Tests;
 /// <summary>
 /// Mac side of the Ollama trust policy. Mirrors
 /// <see cref="OllamaPackageTrustPolicyTests"/> but exercises the Mac
-/// attestation path under <c>mac/tools/ollama/</c>, the Mac default
-/// package, and the Apple Silicon (arm64) slice gate.
+/// attestation path under <c>mac/tools/ollama/</c> and the Apple Silicon
+/// (arm64) slice gate.
+///
+/// MAC38: no static pin — metadata constructed inline.
 /// </summary>
 public sealed class MacOllamaTrustPolicyTests
 {
-    /// <summary>
-    /// The Mac default URL must round-trip through ValidatePackageSource so
-    /// callers can use <see cref="OllamaPackageTrustPolicy.DefaultMacPackage"/>
-    /// without having to register the URL separately.
-    /// </summary>
+    private const string SampleMacUrl =
+        "https://github.com/ollama/ollama/releases/download/v0.20.0/Ollama-darwin.zip";
+    private const string SampleWindowsUrl =
+        "https://github.com/ollama/ollama/releases/download/v0.20.0/ollama-windows-amd64.zip";
+    private const string SampleSha256 =
+        "1111111111111111111111111111111111111111111111111111111111111111";
+
+    private static OllamaPackageMetadata SampleMacMetadata(string? sha = null) =>
+        new("v0.20.0", SampleMacUrl, sha ?? SampleSha256);
+
+    private static OllamaPackageMetadata SampleWindowsMetadata(string? sha = null) =>
+        new("v0.20.0", SampleWindowsUrl, sha ?? SampleSha256);
+
     [Fact]
-    public void ValidatePackageSource_AcceptsPinnedMacUrl()
+    public void ValidatePackageSource_AcceptsMacUrl()
     {
-        var result = OllamaPackageTrustPolicy.ValidatePackageSource(OllamaPackageTrustPolicy.DefaultMacPackage.Url);
+        var result = OllamaPackageTrustPolicy.ValidatePackageSource(SampleMacUrl);
 
         Assert.True(result.IsTrusted);
-        Assert.Equal(OllamaPackageTrustPolicy.DefaultMacPackage.Sha256, result.Metadata?.Sha256);
     }
 
     [Fact]
@@ -38,8 +47,7 @@ public sealed class MacOllamaTrustPolicyTests
     {
         using var ssd = new TempSsdRoot();
 
-        var result = OllamaPackageTrustPolicy.ValidateMacExecutionAttestation(
-            ssd.Root, OllamaPackageTrustPolicy.DefaultMacPackage.Url);
+        var result = OllamaPackageTrustPolicy.ValidateMacExecutionAttestation(ssd.Root);
 
         Assert.False(result.IsTrusted);
         Assert.Equal(OllamaPackageTrustFailureReason.AttestationMissing, result.Reason);
@@ -53,38 +61,36 @@ public sealed class MacOllamaTrustPolicyTests
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, "{ not valid json");
 
-        var result = OllamaPackageTrustPolicy.ValidateMacExecutionAttestation(
-            ssd.Root, OllamaPackageTrustPolicy.DefaultMacPackage.Url);
+        var result = OllamaPackageTrustPolicy.ValidateMacExecutionAttestation(ssd.Root);
 
         Assert.False(result.IsTrusted);
         Assert.Equal(OllamaPackageTrustFailureReason.AttestationMissing, result.Reason);
     }
 
     [Fact]
-    public void ValidateMacExecutionAttestation_BlocksOnUrlMismatch()
+    public void ValidateMacExecutionAttestation_BlocksOnNonAllowlistedAttestationUrl()
     {
         using var ssd = new TempSsdRoot();
-        // Write a Mac attestation that claims the Windows URL — the validator
-        // must refuse this because it's pinning to DefaultMacPackage.
-        var bogus = OllamaPackageTrustPolicy.DefaultWindowsPackage with { Sha256 = OllamaPackageTrustPolicy.DefaultMacPackage.Sha256 };
+        var bogus = new OllamaPackageMetadata(
+            "v0.20.0",
+            "https://evil.example.com/ollama-darwin.zip",
+            SampleSha256);
         OllamaPackageTrustPolicy.WriteMacTrustAttestation(ssd.Root, bogus);
 
-        var result = OllamaPackageTrustPolicy.ValidateMacExecutionAttestation(
-            ssd.Root, OllamaPackageTrustPolicy.DefaultMacPackage.Url);
+        var result = OllamaPackageTrustPolicy.ValidateMacExecutionAttestation(ssd.Root);
 
         Assert.False(result.IsTrusted);
-        Assert.Equal(OllamaPackageTrustFailureReason.AttestationUrlMismatch, result.Reason);
+        Assert.Equal(OllamaPackageTrustFailureReason.UrlHostNotAllowlisted, result.Reason);
     }
 
     [Fact]
-    public void ValidateMacExecutionAttestation_BlocksOnDigestMismatch()
+    public void ValidateMacExecutionAttestation_BlocksOnMalformedDigest()
     {
         using var ssd = new TempSsdRoot();
-        var tampered = OllamaPackageTrustPolicy.DefaultMacPackage with { Sha256 = new string('0', 64) };
+        var tampered = new OllamaPackageMetadata("v0.20.0", SampleMacUrl, "not-a-sha-256");
         OllamaPackageTrustPolicy.WriteMacTrustAttestation(ssd.Root, tampered);
 
-        var result = OllamaPackageTrustPolicy.ValidateMacExecutionAttestation(
-            ssd.Root, OllamaPackageTrustPolicy.DefaultMacPackage.Url);
+        var result = OllamaPackageTrustPolicy.ValidateMacExecutionAttestation(ssd.Root);
 
         Assert.False(result.IsTrusted);
         Assert.Equal(OllamaPackageTrustFailureReason.AttestationDigestMismatch, result.Reason);
@@ -94,12 +100,12 @@ public sealed class MacOllamaTrustPolicyTests
     public void ValidateMacExecutionAttestation_AllowsAfterAttestationWrite()
     {
         using var ssd = new TempSsdRoot();
-        OllamaPackageTrustPolicy.WriteMacTrustAttestation(ssd.Root, OllamaPackageTrustPolicy.DefaultMacPackage);
+        OllamaPackageTrustPolicy.WriteMacTrustAttestation(ssd.Root, SampleMacMetadata());
 
-        var result = OllamaPackageTrustPolicy.ValidateMacExecutionAttestation(
-            ssd.Root, OllamaPackageTrustPolicy.DefaultMacPackage.Url);
+        var result = OllamaPackageTrustPolicy.ValidateMacExecutionAttestation(ssd.Root);
 
         Assert.True(result.IsTrusted);
+        Assert.Equal(SampleMacUrl, result.Metadata?.Url);
     }
 
     /// <summary>
@@ -111,8 +117,8 @@ public sealed class MacOllamaTrustPolicyTests
     public void Mac_And_Windows_Attestations_Are_Independent()
     {
         using var ssd = new TempSsdRoot();
-        OllamaPackageTrustPolicy.WriteTrustAttestation(ssd.Root, OllamaPackageTrustPolicy.DefaultWindowsPackage);
-        OllamaPackageTrustPolicy.WriteMacTrustAttestation(ssd.Root, OllamaPackageTrustPolicy.DefaultMacPackage);
+        OllamaPackageTrustPolicy.WriteTrustAttestation(ssd.Root, SampleWindowsMetadata());
+        OllamaPackageTrustPolicy.WriteMacTrustAttestation(ssd.Root, SampleMacMetadata());
 
         var winPath = OllamaPackageTrustPolicy.GetTrustAttestationPath(ssd.Root);
         var macPath = OllamaPackageTrustPolicy.GetMacTrustAttestationPath(ssd.Root);
@@ -120,8 +126,8 @@ public sealed class MacOllamaTrustPolicyTests
         Assert.NotEqual(winPath, macPath);
         Assert.True(File.Exists(winPath));
         Assert.True(File.Exists(macPath));
-        Assert.True(OllamaPackageTrustPolicy.ValidateExecutionAttestation(ssd.Root, OllamaPackageTrustPolicy.DefaultWindowsPackage.Url).IsTrusted);
-        Assert.True(OllamaPackageTrustPolicy.ValidateMacExecutionAttestation(ssd.Root, OllamaPackageTrustPolicy.DefaultMacPackage.Url).IsTrusted);
+        Assert.True(OllamaPackageTrustPolicy.ValidateExecutionAttestation(ssd.Root).IsTrusted);
+        Assert.True(OllamaPackageTrustPolicy.ValidateMacExecutionAttestation(ssd.Root).IsTrusted);
     }
 
     [Fact]

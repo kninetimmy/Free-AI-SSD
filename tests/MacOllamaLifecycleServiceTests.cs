@@ -13,6 +13,19 @@ namespace FreeAiSsd.Tests;
 /// </summary>
 public sealed class MacOllamaLifecycleServiceTests
 {
+    private const string SampleMacUrl =
+        "https://github.com/ollama/ollama/releases/download/v0.20.0/Ollama-darwin.zip";
+    private const string SampleWindowsUrl =
+        "https://github.com/ollama/ollama/releases/download/v0.20.0/ollama-windows-amd64.zip";
+    private const string SampleSha256 =
+        "1111111111111111111111111111111111111111111111111111111111111111";
+
+    private static OllamaPackageMetadata SampleMacMetadata() =>
+        new("v0.20.0", SampleMacUrl, SampleSha256);
+
+    private static OllamaPackageMetadata SampleWindowsMetadata() =>
+        new("v0.20.0", SampleWindowsUrl, SampleSha256);
+
     [Fact]
     public void ResolveBinaryPath_LivesInsideOllamaAppBundle()
     {
@@ -87,7 +100,7 @@ public sealed class MacOllamaLifecycleServiceTests
     public void ValidateTrust_PassesWithMatchingMacAttestation()
     {
         using var ssd = new TempSsdRoot();
-        OllamaPackageTrustPolicy.WriteMacTrustAttestation(ssd.Root, OllamaPackageTrustPolicy.DefaultMacPackage);
+        OllamaPackageTrustPolicy.WriteMacTrustAttestation(ssd.Root, SampleMacMetadata());
 
         using var svc = new MacOllamaLifecycleService(logger: null);
         var (isTrusted, _) = svc.ValidateTrust(ssd.Root);
@@ -103,7 +116,7 @@ public sealed class MacOllamaLifecycleServiceTests
     public void ValidateTrust_FailsWhenOnlyWindowsAttestationPresent()
     {
         using var ssd = new TempSsdRoot();
-        OllamaPackageTrustPolicy.WriteTrustAttestation(ssd.Root, OllamaPackageTrustPolicy.DefaultWindowsPackage);
+        OllamaPackageTrustPolicy.WriteTrustAttestation(ssd.Root, SampleWindowsMetadata());
 
         using var svc = new MacOllamaLifecycleService(logger: null);
         var (isTrusted, _) = svc.ValidateTrust(ssd.Root);

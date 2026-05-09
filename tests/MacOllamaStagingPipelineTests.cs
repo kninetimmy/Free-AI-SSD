@@ -8,16 +8,25 @@ namespace FreeAiSsd.Tests;
 /// in temp directories and checks that the pipeline refuses bad archives
 /// (hash mismatch) and bad binaries (no arm64 slice) without writing the
 /// trust attestation, and writes the attestation only on the happy path.
+///
+/// MAC38: metadata is required (no static fallback) — the bundled
+/// mac-tools-manifest.json is the source of truth at staging time.
 /// </summary>
 public sealed class MacOllamaStagingPipelineTests
 {
+    private const string SampleMacUrl =
+        "https://github.com/ollama/ollama/releases/download/v0.20.0/Ollama-darwin.zip";
+
+    private static OllamaPackageMetadata MetadataFor(string sha) =>
+        new("v0.20.0", SampleMacUrl, sha);
+
     [Fact]
     public void VerifyAndAttest_HappyPath_WritesAttestation()
     {
         using var ssd = new TempSsdRoot();
         var (archivePath, archiveSha) = WriteArchive(ssd.Root, "archive.zip");
         var binaryPath = WriteBinary(ssd.Root, "ollama", MachOFixtures.SingleMachO64(x86_64: false));
-        var metadata = OllamaPackageTrustPolicy.DefaultMacPackage with { Sha256 = archiveSha };
+        var metadata = MetadataFor(archiveSha);
 
         var result = MacOllamaStagingPipeline.VerifyAndAttest(ssd.Root, archivePath, binaryPath, metadata);
 
@@ -33,7 +42,7 @@ public sealed class MacOllamaStagingPipelineTests
         var (archivePath, _) = WriteArchive(ssd.Root, "archive.zip");
         var binaryPath = WriteBinary(ssd.Root, "ollama", MachOFixtures.SingleMachO64(x86_64: false));
         // Force a mismatch by claiming a different expected SHA.
-        var metadata = OllamaPackageTrustPolicy.DefaultMacPackage with { Sha256 = new string('a', 64) };
+        var metadata = MetadataFor(new string('a', 64));
 
         var result = MacOllamaStagingPipeline.VerifyAndAttest(ssd.Root, archivePath, binaryPath, metadata);
 
@@ -48,7 +57,7 @@ public sealed class MacOllamaStagingPipelineTests
         using var ssd = new TempSsdRoot();
         var (archivePath, archiveSha) = WriteArchive(ssd.Root, "archive.zip");
         var binaryPath = WriteBinary(ssd.Root, "ollama", MachOFixtures.SingleMachO64(x86_64: true));
-        var metadata = OllamaPackageTrustPolicy.DefaultMacPackage with { Sha256 = archiveSha };
+        var metadata = MetadataFor(archiveSha);
 
         var result = MacOllamaStagingPipeline.VerifyAndAttest(ssd.Root, archivePath, binaryPath, metadata);
 
@@ -63,7 +72,7 @@ public sealed class MacOllamaStagingPipelineTests
         using var ssd = new TempSsdRoot();
         var (archivePath, archiveSha) = WriteArchive(ssd.Root, "archive.zip");
         var binaryPath = Path.Combine(ssd.Root, "does-not-exist", "ollama");
-        var metadata = OllamaPackageTrustPolicy.DefaultMacPackage with { Sha256 = archiveSha };
+        var metadata = MetadataFor(archiveSha);
 
         var result = MacOllamaStagingPipeline.VerifyAndAttest(ssd.Root, archivePath, binaryPath, metadata);
 
@@ -74,8 +83,6 @@ public sealed class MacOllamaStagingPipelineTests
 
     private static (string Path, string Sha256) WriteArchive(string root, string fileName)
     {
-        // Pseudorandom content keeps each test isolated and avoids accidental
-        // SHA collisions with the real DefaultMacPackage hash.
         var content = Guid.NewGuid().ToByteArray();
         var path = Path.Combine(root, fileName);
         File.WriteAllBytes(path, content);

@@ -14,7 +14,6 @@ public enum OllamaPackageTrustFailureReason
     UrlMalformed,
     UrlSchemeNotHttps,
     UrlHostNotAllowlisted,
-    MissingPinnedMetadata,
     ExpectedDigestMissing,
     DigestMismatch,
     AttestationMissing,
@@ -42,7 +41,7 @@ public sealed record OllamaPackageTrustValidationResult(
     OllamaPackageMetadata? Metadata = null,
     string? ActualSha256 = null)
 {
-    public static OllamaPackageTrustValidationResult Success(OllamaPackageMetadata metadata, string? actualSha256 = null) =>
+    public static OllamaPackageTrustValidationResult Success(OllamaPackageMetadata? metadata = null, string? actualSha256 = null) =>
         new(true, OllamaPackageTrustFailureReason.None, "Trusted Ollama package.", metadata, actualSha256);
 
     public static OllamaPackageTrustValidationResult Fail(OllamaPackageTrustFailureReason reason, string message, OllamaPackageMetadata? metadata = null, string? actualSha256 = null) =>
@@ -50,15 +49,17 @@ public sealed record OllamaPackageTrustValidationResult(
 }
 
 /// <summary>
-/// Immutable metadata for a pinned Ollama package version, including its
-/// download URL and expected SHA-256 hash for integrity verification.
+/// Immutable metadata for a verified Ollama package, including its
+/// download URL and SHA-256 hash for integrity verification. Sourced
+/// dynamically at staging time from the upstream release's vendor-published
+/// sha256sum.txt; never hardcoded in this repo.
 /// </summary>
 public sealed record OllamaPackageMetadata(string Version, string Url, string Sha256);
 
 /// <summary>
 /// Persisted attestation record written to the SSD after a trusted package
 /// has been downloaded and verified. Used at runtime to gate execution
-/// without re-downloading.
+/// without re-downloading or re-hashing the multi-hundred-MB binary.
 /// </summary>
 public sealed class OllamaPackageTrustAttestation
 {
@@ -70,33 +71,23 @@ public sealed class OllamaPackageTrustAttestation
 
 /// <summary>
 /// Implements a supply-chain security policy for the bundled Ollama binary.
-/// Validates download sources against an allowlist of trusted hosts and pinned
-/// SHA-256 digests, and manages attestation files on the SSD to gate execution.
-///
-/// Trust chain: URL allowlist → pinned metadata → SHA-256 digest verification → attestation file.
+/// Trust chain (MAC38):
+/// <list type="number">
+/// <item>URL allowlist: only HTTPS to <c>github.com</c> and
+/// <c>objects.githubusercontent.com</c>.</item>
+/// <item>Vendor-published SHA-256 (from each Ollama release's
+/// <c>sha256sum.txt</c> asset, fetched alongside the binary at staging
+/// time) verifies the bytes on disk.</item>
+/// <item>An on-SSD attestation file records the URL + SHA-256 of the
+/// verified payload. The runtime trust gate accepts the attestation as the
+/// source of truth — it doesn't re-verify the binary on every launch
+/// (multi-hundred-MB rehash is too slow).</item>
+/// </list>
+/// Mirrors the trust model already used for the .NET Desktop Runtime
+/// (vendor-published <c>releases.json</c> SHA-512 + on-disk staged file).
 /// </summary>
 public static class OllamaPackageTrustPolicy
 {
-    /// <summary>
-    /// The default pinned Windows Ollama package with known-good version, URL, and SHA-256 hash.
-    /// </summary>
-    public static readonly OllamaPackageMetadata DefaultWindowsPackage = new(
-        Version: "v0.5.7",
-        Url: "https://github.com/ollama/ollama/releases/download/v0.5.7/ollama-windows-amd64.zip",
-        Sha256: "11ec2270a5205228fddeaa15c8319a0f0167c0ee7420d19c43714312d4761d2d");
-
-    /// <summary>
-    /// The default pinned macOS Ollama package. Pinned to the same upstream
-    /// version as <see cref="DefaultWindowsPackage"/> so a single Free-AI-SSD
-    /// release ships the same Ollama runtime on both platforms. Universal
-    /// (x86_64 + arm64) Mach-O archive; the arm64 slice is the only one the
-    /// runtime trust gate accepts (see MAC1 baseline).
-    /// </summary>
-    public static readonly OllamaPackageMetadata DefaultMacPackage = new(
-        Version: "v0.5.7",
-        Url: "https://github.com/ollama/ollama/releases/download/v0.5.7/ollama-darwin.zip",
-        Sha256: "09ad6bb2edf7cb78619a0932c93c544c362c6ac738c7d5531b3b1b87ac619971");
-
     /// <summary>
     /// Set of trusted hostnames from which Ollama packages may be downloaded.
     /// Only HTTPS URLs from these hosts pass source validation.
@@ -107,24 +98,15 @@ public static class OllamaPackageTrustPolicy
         "objects.githubusercontent.com"
     };
 
-    /// <summary>
-    /// Mapping of pinned package URLs to their expected metadata (version + SHA-256).
-    /// Only URLs present in this dictionary pass the pinned metadata check.
-    /// </summary>
-    private static readonly Dictionary<string, OllamaPackageMetadata> PinnedMetadataByUrl = new(StringComparer.Ordinal)
-    {
-        [DefaultWindowsPackage.Url] = DefaultWindowsPackage,
-        [DefaultMacPackage.Url] = DefaultMacPackage
-    };
-
     public static string TrustAttestationFileName => "ollama-package-trust.json";
 
     /// <summary>
-    /// Validates that a package source URL is well-formed, uses HTTPS,
-    /// comes from an allowlisted host, and has pinned metadata with a SHA-256 digest.
+    /// Validates that a package source URL is well-formed, uses HTTPS, and
+    /// comes from an allowlisted host. Returns success with no metadata —
+    /// version + hash come from the upstream release's <c>sha256sum.txt</c>
+    /// at staging time, not from a static dictionary.
     /// </summary>
     /// <param name="urlText">The download URL to validate.</param>
-    /// <returns>Validation result with trust status and metadata if trusted.</returns>
     public static OllamaPackageTrustValidationResult ValidatePackageSource(string? urlText)
     {
         var normalized = (urlText ?? string.Empty).Trim();
@@ -156,31 +138,16 @@ public static class OllamaPackageTrustPolicy
                 $"Ollama package host '{uri.Host}' is not allowlisted.");
         }
 
-        if (!PinnedMetadataByUrl.TryGetValue(uri.AbsoluteUri, out var metadata))
-        {
-            return OllamaPackageTrustValidationResult.Fail(
-                OllamaPackageTrustFailureReason.MissingPinnedMetadata,
-                "No pinned version/digest metadata exists for this Ollama package URL.");
-        }
-
-        if (string.IsNullOrWhiteSpace(metadata.Sha256))
-        {
-            return OllamaPackageTrustValidationResult.Fail(
-                OllamaPackageTrustFailureReason.ExpectedDigestMissing,
-                "Expected SHA256 metadata is missing for this Ollama package URL.",
-                metadata);
-        }
-
-        return OllamaPackageTrustValidationResult.Success(metadata);
+        return OllamaPackageTrustValidationResult.Success();
     }
 
     /// <summary>
     /// Validates a downloaded package archive by computing its SHA-256 hash
-    /// and comparing it against the expected pinned digest.
+    /// and comparing it against the expected digest carried in
+    /// <paramref name="metadata"/>. The expected digest is sourced from the
+    /// upstream release's vendor-published <c>sha256sum.txt</c> asset at
+    /// staging time, not from a static pin.
     /// </summary>
-    /// <param name="archivePath">Path to the downloaded archive file.</param>
-    /// <param name="metadata">Pinned metadata containing the expected hash.</param>
-    /// <returns>Validation result indicating whether the file integrity matches.</returns>
     public static OllamaPackageTrustValidationResult ValidateDownloadedPackage(string archivePath, OllamaPackageMetadata metadata)
     {
         if (string.IsNullOrWhiteSpace(metadata.Sha256))
@@ -229,8 +196,6 @@ public static class OllamaPackageTrustPolicy
     /// Ollama package has been downloaded and verified. Mirrors
     /// <see cref="WriteMacTrustAttestation"/> for the Mac side.
     /// </summary>
-    /// <param name="ssdRoot">Root path of the portable SSD.</param>
-    /// <param name="metadata">Verified package metadata to attest.</param>
     public static void WriteTrustAttestation(string ssdRoot, OllamaPackageMetadata metadata) =>
         WriteTrustAttestationCore(GetTrustAttestationPath(ssdRoot), metadata);
 
@@ -238,8 +203,6 @@ public static class OllamaPackageTrustPolicy
     /// Writes a macOS trust attestation file to the SSD after the Mac Ollama
     /// package has been downloaded, hash-verified, and arm64-validated.
     /// </summary>
-    /// <param name="ssdRoot">Root path of the portable SSD.</param>
-    /// <param name="metadata">Verified package metadata to attest.</param>
     public static void WriteMacTrustAttestation(string ssdRoot, OllamaPackageMetadata metadata) =>
         WriteTrustAttestationCore(GetMacTrustAttestationPath(ssdRoot), metadata);
 
@@ -258,47 +221,32 @@ public static class OllamaPackageTrustPolicy
     }
 
     /// <summary>
-    /// Validates that the Windows Ollama binary is safe to execute by checking
-    /// the source URL, attestation presence, and attestation contents against
-    /// the Windows trust attestation under <c>windows/tools/ollama/</c>.
+    /// Validates that the Windows Ollama binary is safe to execute by
+    /// checking the on-SSD attestation under <c>windows/tools/ollama/</c>.
+    /// The attestation IS the source of truth: it was written only after the
+    /// PrepApp staging path verified the bytes against the vendor-published
+    /// SHA-256 from the upstream release's <c>sha256sum.txt</c>.
     /// </summary>
-    /// <param name="ssdRoot">Root path of the portable SSD.</param>
-    /// <param name="urlText">The package source URL to validate against.</param>
-    /// <returns>Validation result indicating whether execution is permitted.</returns>
-    public static OllamaPackageTrustValidationResult ValidateExecutionAttestation(string ssdRoot, string? urlText) =>
-        ValidateExecutionAttestationCore(GetTrustAttestationPath(ssdRoot), urlText);
+    public static OllamaPackageTrustValidationResult ValidateExecutionAttestation(string ssdRoot) =>
+        ValidateExecutionAttestationCore(GetTrustAttestationPath(ssdRoot));
 
     /// <summary>
     /// Validates that the macOS Ollama binary is safe to execute by checking
-    /// the source URL, attestation presence, and attestation contents against
-    /// the Mac trust attestation under <c>mac/tools/ollama/</c>. Shares the
-    /// same validator core as <see cref="ValidateExecutionAttestation"/>.
+    /// the on-SSD attestation under <c>mac/tools/ollama/</c>. Shares the
+    /// validator core with the Windows variant.
     /// </summary>
-    /// <param name="ssdRoot">Root path of the portable SSD.</param>
-    /// <param name="urlText">The macOS package source URL (typically
-    /// <see cref="DefaultMacPackage"/>'s URL).</param>
-    public static OllamaPackageTrustValidationResult ValidateMacExecutionAttestation(string ssdRoot, string? urlText) =>
-        ValidateExecutionAttestationCore(GetMacTrustAttestationPath(ssdRoot), urlText);
+    public static OllamaPackageTrustValidationResult ValidateMacExecutionAttestation(string ssdRoot) =>
+        ValidateExecutionAttestationCore(GetMacTrustAttestationPath(ssdRoot));
 
-    private static OllamaPackageTrustValidationResult ValidateExecutionAttestationCore(string attestationPath, string? urlText)
+    private static OllamaPackageTrustValidationResult ValidateExecutionAttestationCore(string attestationPath)
     {
-        // First validate the source URL itself.
-        var sourceValidation = ValidatePackageSource(urlText);
-        if (!sourceValidation.IsTrusted || sourceValidation.Metadata is null)
-        {
-            return sourceValidation;
-        }
-
-        // Check that a trust attestation file exists on the SSD.
         if (!File.Exists(attestationPath))
         {
             return OllamaPackageTrustValidationResult.Fail(
                 OllamaPackageTrustFailureReason.AttestationMissing,
-                "Trusted package attestation is missing. Re-download Ollama from the pinned source.",
-                sourceValidation.Metadata);
+                "Trusted package attestation is missing. Re-stage Ollama from PrepApp.");
         }
 
-        // Deserialize and validate the attestation contents.
         OllamaPackageTrustAttestation? attestation;
         try
         {
@@ -313,29 +261,40 @@ public static class OllamaPackageTrustPolicy
         {
             return OllamaPackageTrustValidationResult.Fail(
                 OllamaPackageTrustFailureReason.AttestationMissing,
-                "Trusted package attestation is invalid. Re-download Ollama from the pinned source.",
-                sourceValidation.Metadata);
+                "Trusted package attestation is invalid. Re-stage Ollama from PrepApp.");
         }
 
-        // Verify the attestation URL matches the pinned source.
-        if (!string.Equals(attestation.Url, sourceValidation.Metadata.Url, StringComparison.Ordinal))
+        var sourceCheck = ValidatePackageSource(attestation.Url);
+        if (!sourceCheck.IsTrusted)
         {
+            // Reuse the source validator's reason so the diagnostic stays
+            // precise (e.g. UrlHostNotAllowlisted vs UrlSchemeNotHttps).
             return OllamaPackageTrustValidationResult.Fail(
-                OllamaPackageTrustFailureReason.AttestationUrlMismatch,
-                "Trusted package attestation URL does not match the pinned source. Re-download Ollama.",
-                sourceValidation.Metadata);
+                sourceCheck.Reason,
+                $"Trusted package attestation URL is not allowed: {sourceCheck.Message}");
         }
 
-        // Verify the attestation SHA-256 matches the pinned digest.
-        if (!string.Equals(attestation.Sha256, sourceValidation.Metadata.Sha256, StringComparison.OrdinalIgnoreCase))
+        if (!IsWellFormedSha256Hex(attestation.Sha256))
         {
             return OllamaPackageTrustValidationResult.Fail(
                 OllamaPackageTrustFailureReason.AttestationDigestMismatch,
-                "Trusted package attestation digest does not match pinned metadata. Re-download Ollama.",
-                sourceValidation.Metadata);
+                "Trusted package attestation digest is not a well-formed SHA-256.");
         }
 
-        return OllamaPackageTrustValidationResult.Success(sourceValidation.Metadata);
+        var metadata = new OllamaPackageMetadata(attestation.Version, attestation.Url, attestation.Sha256);
+        return OllamaPackageTrustValidationResult.Success(metadata);
+    }
+
+    private static bool IsWellFormedSha256Hex(string? value)
+    {
+        if (value is null || value.Length != 64) return false;
+        for (var i = 0; i < value.Length; i++)
+        {
+            var c = value[i];
+            var isHex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+            if (!isHex) return false;
+        }
+        return true;
     }
 
     /// <summary>
@@ -362,6 +321,6 @@ public static class OllamaPackageTrustPolicy
                 metadata);
         }
 
-        return OllamaPackageTrustValidationResult.Success(metadata ?? DefaultMacPackage);
+        return OllamaPackageTrustValidationResult.Success(metadata);
     }
 }

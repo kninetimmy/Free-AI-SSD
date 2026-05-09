@@ -149,21 +149,14 @@ static async Task FetchWindowsAsync(HttpClient http, string outDir, Action<strin
 
 static async Task FetchMacOllamaAsync(HttpClient http, string outDir, Action<string> log)
 {
-    // MAC4: pin the Mac payload to OllamaPackageTrustPolicy.DefaultMacPackage
-    // (currently v0.5.7) so CI, the bundled archive, the staging hash check,
-    // and the runtime trust gate all reference the same known-good release.
-    // The previous "resolve releases/latest" path drifted from the pinned
-    // metadata whenever upstream cut a new release, which would cause
-    // staging to refuse the bundle.
-    var pinned = OllamaPackageTrustPolicy.DefaultMacPackage;
-    var resolution = new PrereqResolution(
-        Version: pinned.Version,
-        Url: pinned.Url,
-        Hash: pinned.Sha256,
-        HashAlgorithm: "SHA256",
-        TrustNote: $"Pinned by OllamaPackageTrustPolicy.DefaultMacPackage ({pinned.Version}).");
+    // MAC38: resolve the Mac payload dynamically from the upstream release's
+    // sha256sum.txt. PrepApp's staging path reads the bundled manifest below
+    // and uses its hash + URL — there is no longer a static pin in
+    // OllamaPackageTrustPolicy. Trust anchor is HTTPS to github.com plus the
+    // vendor-published hash, identical to the .NET resolver path.
+    var resolution = await PrereqResolver.ResolveLatestOllamaMacAsync(http);
 
-    log($"Ollama: version={resolution.Version} url={resolution.Url} trust={resolution.TrustNote}");
+    log($"Ollama (Mac): version={resolution.Version} url={resolution.Url} trust={resolution.TrustNote}");
 
     // Downstream staging code expects the on-disk filename to be lowercase
     // "ollama-darwin.zip" (see ArtifactStagingService + MacToolCatalog).
@@ -175,7 +168,7 @@ static async Task FetchMacOllamaAsync(HttpClient http, string outDir, Action<str
         id = MacToolCatalog.Ollama.Id,
         version = resolution.Version,
         sourceUrl = resolution.Url,
-        archive = "ollama-darwin.zip",
+        archive = MacToolCatalog.Ollama.ArchiveFileName,
         verifiedAtUtc = DateTime.UtcNow.ToString("o"),
         vendorHash = resolution.Hash,
         vendorHashAlgorithm = resolution.HashAlgorithm,

@@ -95,23 +95,31 @@ public sealed class ArtifactStagingService : IArtifactStagingService
             throw new InvalidOperationException(message);
         }
 
-        var bundledArchive = ResolveBundledFile(Path.Combine("mac", "tools", "ollama", "ollama-darwin.zip"))
+        var bundledArchive = ResolveBundledFile(Path.Combine("mac", "tools", "ollama", MacToolCatalog.Ollama.ArchiveFileName))
             ?? throw new FileNotFoundException("Bundled macOS Ollama archive was not found.");
-        var cacheArchive = Path.Combine(ssdRoot, SsdLayout.Cache, "ollama-darwin.zip");
+
+        // MAC38: load the bundled mac-tools-manifest.json that PrereqFetch
+        // wrote at CI time. It carries the dynamically-resolved version + URL
+        // + vendor-published SHA-256 (from the upstream sha256sum.txt) for
+        // the bundled archive. There is no static pin here anymore.
+        var bundledManifestPath = ResolveBundledFile(Path.Combine("mac", "tools", "ollama", MacToolCatalog.ManifestFileName))
+            ?? throw new FileNotFoundException("Bundled mac-tools-manifest.json was not found alongside the Ollama archive.");
+        var bundledMetadata = LoadBundledMacOllamaMetadata(bundledManifestPath);
+
+        var cacheArchive = Path.Combine(ssdRoot, SsdLayout.Cache, MacToolCatalog.Ollama.ArchiveFileName);
         Directory.CreateDirectory(Path.GetDirectoryName(cacheArchive)!);
         File.Copy(bundledArchive, cacheArchive, overwrite: true);
 
-        // SHA-256 gate on the bundled archive before extraction. Pinned to
-        // OllamaPackageTrustPolicy.DefaultMacPackage so a tampered or
-        // unrelated zip never lands on the SSD.
-        var pinnedMac = OllamaPackageTrustPolicy.DefaultMacPackage;
-        var hashValidation = OllamaPackageTrustPolicy.ValidateDownloadedPackage(cacheArchive, pinnedMac);
+        // SHA-256 gate on the bundled archive before extraction. Compares the
+        // bytes on disk against the manifest's vendor-published hash; a
+        // tampered or substituted zip is rejected before extraction.
+        var hashValidation = OllamaPackageTrustPolicy.ValidateDownloadedPackage(cacheArchive, bundledMetadata);
         if (!hashValidation.IsTrusted)
         {
             onLog($"Refused macOS Ollama staging: {hashValidation.Message} (actual={hashValidation.ActualSha256 ?? "unknown"})");
             throw new InvalidOperationException(hashValidation.Message);
         }
-        var actualSha = hashValidation.ActualSha256 ?? pinnedMac.Sha256;
+        var actualSha = hashValidation.ActualSha256 ?? bundledMetadata.Sha256;
 
         var ollamaDir = Path.Combine(ssdRoot, SsdLayout.MacOllama);
         if (Directory.Exists(ollamaDir))
@@ -121,13 +129,11 @@ public sealed class ArtifactStagingService : IArtifactStagingService
         ZipFile.ExtractToDirectory(cacheArchive, ollamaDir, overwriteFiles: true);
 
         // MAC26: the macOS Ollama distribution is a GUI app bundle (Ollama.app),
-        // not a CLI server like Linux/Windows. The 119 KB binary at the zip's
-        // top level is a LaunchServices shim that strips env vars (so
-        // OLLAMA_MODELS doesn't propagate) and headlessly-launches Ollama.app
-        // via a SIGKILL-prone path. The actual self-contained 53 MB Go server
+        // not a CLI server like Linux/Windows. The self-contained Go server
         // lives at Ollama.app/Contents/Resources/ollama and runs cleanly as a
-        // direct child process. Stage that one; delete the top-level shim so
-        // it can never be invoked by accident.
+        // direct child process. Newer upstream archives (v0.20.7+) no longer
+        // ship a top-level LaunchServices shim, but older archives did, so
+        // best-effort delete it if present.
         var innerCliPath = Path.Combine(ollamaDir, "Ollama.app", "Contents", "Resources", "ollama");
         if (!File.Exists(innerCliPath))
             throw new FileNotFoundException(
@@ -144,7 +150,7 @@ public sealed class ArtifactStagingService : IArtifactStagingService
         // MacOllamaLifecycleService) checks at launch. On failure, the
         // partially-staged directory is scrubbed so the next attempt starts
         // from a clean slate and the runtime gate keeps refusing to launch.
-        var pipeline = MacOllamaStagingPipeline.VerifyAndAttest(ssdRoot, cacheArchive, innerCliPath);
+        var pipeline = MacOllamaStagingPipeline.VerifyAndAttest(ssdRoot, cacheArchive, innerCliPath, bundledMetadata);
         if (!pipeline.Success)
         {
             var failure = pipeline.Failure!;
@@ -153,21 +159,41 @@ public sealed class ArtifactStagingService : IArtifactStagingService
             throw new InvalidOperationException(failure.Message);
         }
 
-        var sourceManifest = ResolveBundledFile(Path.Combine("mac", "tools", "ollama", "mac-tools-manifest.json"));
-        if (sourceManifest is not null && File.Exists(sourceManifest))
-            File.Copy(sourceManifest, Path.Combine(ollamaDir, "mac-tools-manifest.json"), overwrite: true);
+        // Copy the bundled manifest alongside the binary on the SSD so the
+        // runtime + auditors can see version/sourceUrl/sha256 without going
+        // back to the bundle.
+        File.Copy(bundledManifestPath, Path.Combine(ollamaDir, MacToolCatalog.ManifestFileName), overwrite: true);
 
         var manifest = JsonSerializer.Serialize(new
         {
             id = MacToolCatalog.Ollama.Id,
-            sourceUrl = MacToolCatalog.Ollama.SourceUrl,
+            version = bundledMetadata.Version,
+            sourceUrl = bundledMetadata.Url,
             archive = MacToolCatalog.Ollama.ArchiveFileName,
             sha256 = actualSha,
             downloadedAtUtc = DateTime.UtcNow.ToString("O")
         }, new JsonSerializerOptions { WriteIndented = true });
         await File.WriteAllTextAsync(MacToolCatalog.GetManifestPath(ssdRoot), manifest, ct);
 
-        onLog("Staged macOS Ollama runtime and wrote trust attestation.");
+        onLog($"Staged macOS Ollama {bundledMetadata.Version} and wrote trust attestation.");
+    }
+
+    private static OllamaPackageMetadata LoadBundledMacOllamaMetadata(string manifestPath)
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(manifestPath));
+        var root = doc.RootElement;
+        var version = root.TryGetProperty("version", out var v) ? v.GetString() : null;
+        var url = root.TryGetProperty("sourceUrl", out var u) ? u.GetString() : null;
+        var sha = root.TryGetProperty("sha256", out var s) ? s.GetString() : null;
+
+        if (string.IsNullOrWhiteSpace(version))
+            throw new InvalidOperationException($"Bundled mac-tools-manifest.json missing version: {manifestPath}");
+        if (string.IsNullOrWhiteSpace(url))
+            throw new InvalidOperationException($"Bundled mac-tools-manifest.json missing sourceUrl: {manifestPath}");
+        if (string.IsNullOrWhiteSpace(sha) || sha.Length != 64)
+            throw new InvalidOperationException($"Bundled mac-tools-manifest.json missing or malformed sha256: {manifestPath}");
+
+        return new OllamaPackageMetadata(version, url, sha.ToLowerInvariant());
     }
 
     public bool AreMacArtifactsAvailable(out string? problem)

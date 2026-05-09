@@ -1,15 +1,16 @@
 namespace FreeAiSsd.Shared;
 
 /// <summary>
-/// Immutable definition of a macOS tool to be bundled on the SSD,
-/// including its download URL and expected archive filename.
+/// Immutable definition of a macOS tool to be bundled on the SSD. The source
+/// URL is no longer pinned here — it's resolved from the upstream release at
+/// CI bundling time via <c>PrereqResolver.ResolveLatestOllamaMacAsync</c> and
+/// recorded in the bundled <c>mac-tools-manifest.json</c>.
 /// </summary>
-public sealed record MacToolDefinition(string Id, string SourceUrl, string ArchiveFileName);
+public sealed record MacToolDefinition(string Id, string ArchiveFileName);
 
 /// <summary>
 /// Static catalog of macOS-specific tools bundled on the SSD.
 /// Currently contains only the Ollama universal binary for macOS.
-/// Provides the tool definition and manifest path resolution.
 /// </summary>
 public static class MacToolCatalog
 {
@@ -17,15 +18,13 @@ public static class MacToolCatalog
     public const string ManifestFileName = "mac-tools-manifest.json";
 
     /// <summary>
-    /// Ollama for macOS — downloaded as a universal (ARM64 + x86_64) ZIP archive
-    /// from the official GitHub releases. Pinned to the same upstream version
-    /// as <see cref="OllamaPackageTrustPolicy.DefaultMacPackage"/> so the
-    /// staging hash and runtime trust gate agree on a single known-good
-    /// payload (MAC4).
+    /// Ollama for macOS — downloaded as a universal (ARM64 + x86_64) ZIP
+    /// archive from the official GitHub releases. The exact version + URL
+    /// + SHA-256 is resolved dynamically at CI bundling time and persisted
+    /// alongside the archive in <c>mac-tools-manifest.json</c>.
     /// </summary>
     public static MacToolDefinition Ollama { get; } = new(
         "ollama_macos_universal",
-        OllamaPackageTrustPolicy.DefaultMacPackage.Url,
         "ollama-darwin.zip");
 
     /// <summary>

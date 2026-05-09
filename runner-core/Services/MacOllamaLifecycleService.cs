@@ -31,8 +31,7 @@ public sealed class MacOllamaLifecycleService : IOllamaLifecycleService
 
     public (bool IsTrusted, string Message) ValidateTrust(string ssdRoot)
     {
-        var gate = OllamaPackageTrustPolicy.ValidateMacExecutionAttestation(
-            ssdRoot, OllamaPackageTrustPolicy.DefaultMacPackage.Url);
+        var gate = OllamaPackageTrustPolicy.ValidateMacExecutionAttestation(ssdRoot);
         return (gate.IsTrusted, gate.Message);
     }
 

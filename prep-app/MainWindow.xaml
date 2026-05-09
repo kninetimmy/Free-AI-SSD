@@ -568,17 +568,8 @@
                                           Style="{StaticResource NeumorphicExpander}"
                                           IsExpanded="False"
                                           Margin="0,0,0,0"
-                                          ToolTip="Rarely-used settings: custom Ollama source, listing fixed drives, manual update check.">
+                                          ToolTip="Rarely-used settings: listing fixed drives, manual update check.">
                                     <StackPanel Margin="8">
-                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                                            <TextBlock Text="Ollama package URL:"
-                                                       Foreground="{StaticResource TextSecondaryBrush}"
-                                                       VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                            <TextBox Width="540"
-                                                     Style="{StaticResource GlowFocusTextBox}"
-                                                     Text="{Binding OllamaUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                     ToolTip="Override the trusted Ollama installer source. Leave as default unless you have a specific mirror."/>
-                                        </StackPanel>
                                         <CheckBox VerticalAlignment="Center"
                                                   Foreground="{StaticResource TextSecondaryBrush}"
                                                   Content="Show fixed drives (advanced)"

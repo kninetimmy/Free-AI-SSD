@@ -205,7 +205,7 @@ public sealed class MacPrepHostPullLifecycleTests : IDisposable
             _host = host;
         }
 
-        public Task<string> EnsureOllamaReadyAsync(string root, string ollamaUrl, Action<string> onLog,
+        public Task<string> EnsureOllamaReadyAsync(string root, Action<string> onLog,
             IProgress<DownloadProgress>? progress, CancellationToken ct)
             => throw new NotImplementedException("Not exercised by MAC27 lifecycle tests.");
 
