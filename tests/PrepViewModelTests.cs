@@ -444,6 +444,111 @@ public class PrepViewModelTests
         Assert.Equal(preExistingKey, config.NetworkApiKey);
     }
 
+    /// MAC32: pre-MAC32 Finalize ended silently with no completion
+    /// affordance — user stayed on the prep tab unsure whether anything
+    /// had happened. Modal must pop on the full success path.
+    [Fact]
+    public async Task FinalizeCommand_OnSuccess_ShowsCompletionModal()
+    {
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        _ollamaPackageService
+            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
+        _prereqService
+            .Setup(s => s.StagePrerequisitesAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _artifactStagingService
+            .Setup(s => s.StageRunnerAsync(It.IsAny<string>(), It.IsAny<Action<string>>()))
+            .Returns(Task.CompletedTask);
+        _readinessService
+            .Setup(s => s.RunReadinessChecksAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ReadinessItem> { ReadinessItem.Pass("Runner payload") });
+
+        var config = new PortableConfig
+        {
+            Models =
+            {
+                new ModelConfigEntry { Name = "llama3.2:3b", Status = ModelInstallStatus.Installed }
+            }
+        };
+        _modelService.Setup(m => m.LoadConfigAsync(It.IsAny<string>())).ReturnsAsync(config);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.SelectedProfile = UserProfile.GeneralAssistant;
+
+        vm.FinalizeCommand.Execute(null);
+        await WaitForCommandAsync(vm.FinalizeCommand);
+
+        _dialogService.Verify(
+            d => d.ShowInfo(
+                It.Is<string>(m => m.Contains("Runner.exe", StringComparison.OrdinalIgnoreCase)),
+                "Setup complete"),
+            Times.Once);
+    }
+
+    /// MAC32: modal must NOT fire on the "no profile selected" early-return
+    /// path — that's a finalize-blocked branch, not a success.
+    [Fact]
+    public async Task FinalizeCommand_NoSelectedProfile_DoesNotShowCompletionModal()
+    {
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        // SelectedProfile left null so TryGetFinalizeProfile blocks.
+
+        vm.FinalizeCommand.Execute(null);
+        await WaitForCommandAsync(vm.FinalizeCommand);
+
+        _dialogService.Verify(
+            d => d.ShowInfo(It.IsAny<string>(), "Setup complete"),
+            Times.Never);
+    }
+
+    /// MAC32: modal must NOT fire when readiness fails. The existing
+    /// readiness-failure ShowWarning is the user's signal in that case.
+    [Fact]
+    public async Task FinalizeCommand_OnReadinessFailure_DoesNotShowCompletionModal()
+    {
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        _ollamaPackageService
+            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
+        _prereqService
+            .Setup(s => s.StagePrerequisitesAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _artifactStagingService
+            .Setup(s => s.StageRunnerAsync(It.IsAny<string>(), It.IsAny<Action<string>>()))
+            .Returns(Task.CompletedTask);
+        _readinessService
+            .Setup(s => s.RunReadinessChecksAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ReadinessItem> { ReadinessItem.Fail("Runner payload", "missing") });
+
+        var config = new PortableConfig
+        {
+            Models =
+            {
+                new ModelConfigEntry { Name = "llama3.2:3b", Status = ModelInstallStatus.Installed }
+            }
+        };
+        _modelService.Setup(m => m.LoadConfigAsync(It.IsAny<string>())).ReturnsAsync(config);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.SelectedProfile = UserProfile.GeneralAssistant;
+
+        vm.FinalizeCommand.Execute(null);
+        await WaitForCommandAsync(vm.FinalizeCommand);
+
+        _dialogService.Verify(
+            d => d.ShowInfo(It.IsAny<string>(), "Setup complete"),
+            Times.Never);
+    }
+
     [Fact]
     public void StatusText_Changes_RaisesPropertyChanged()
     {

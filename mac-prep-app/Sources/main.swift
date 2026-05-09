@@ -40,6 +40,8 @@ struct ContentView: View {
                 case .staging:           ProgressLogStepView(vm: vm, title: "Staging artifacts…")
                 case .encryptionSetup:   EncryptionSetupStepView(vm: vm)
                 case .modelPull:         ModelPullStepView(vm: vm)
+                case .modelPullPaused(let tag, let snapshot):
+                    ModelPullPausedStepView(vm: vm, tag: tag, snapshot: snapshot)
                 case .readiness:         ProgressLogStepView(vm: vm, title: "Running readiness checks…")
                 case .done:              DoneStepView(vm: vm)
                 case .failed(let msg):   FailedStepView(message: msg, vm: vm)
@@ -73,6 +75,7 @@ struct ContentView: View {
         case .staging:           return "3 / 6 — Staging"
         case .encryptionSetup:   return "4 / 6 — Encryption"
         case .modelPull:         return "5 / 6 — Models"
+        case .modelPullPaused:   return "5 / 6 — Pull paused"
         case .readiness:         return "6 / 6 — Readiness"
         case .done:              return "Done"
         case .failed:            return "Failed"
@@ -417,6 +420,50 @@ struct ModelPullStepView: View {
     }
 }
 
+// MARK: - Model pull paused (MAC31a)
+
+struct ModelPullPausedStepView: View {
+    @ObservedObject var vm: PrepViewModel
+    let tag: String
+    let snapshot: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Pull paused").font(.headline)
+
+            Text("You cancelled the pull for `\(tag)`. Partial download is preserved on disk — Retry resumes from where it stopped.")
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let snapshot, !snapshot.isEmpty {
+                Text(snapshot)
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(Color(NSColor.textBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+
+            Spacer()
+
+            HStack {
+                Button("Start over") { Task { await vm.restart() } }
+                    .controlSize(.regular)
+                Spacer()
+                Button("Skip") { Task { await vm.skipRemainingPulls() } }
+                    .controlSize(.regular)
+                Button("Retry") { Task { await vm.resumePull() } }
+                    .keyboardShortcut(.defaultAction)
+                    .controlSize(.large)
+            }
+        }
+    }
+}
+
 // MARK: - Done
 
 struct DoneStepView: View {
@@ -427,7 +474,7 @@ struct DoneStepView: View {
             Text("Drive ready")
                 .font(.title)
                 .bold()
-            Text("Free AI SSD is staged and ready to use. Launch the Runner from the SSD's `mac/Runner.app` to start chatting.")
+            Text("Your SSD is ready. Open `mac/Runner.app` on the SSD to start chatting. Quit when ready.")
                 .foregroundColor(.secondary)
 
             if !vm.readinessItems.isEmpty {
@@ -446,8 +493,8 @@ struct DoneStepView: View {
 
             HStack {
                 Spacer()
-                Button("Finish") {
-                    Task { await vm.finalize() }
+                Button("Quit") {
+                    Task { await vm.quit() }
                 }
                 .keyboardShortcut(.defaultAction)
                 .controlSize(.large)

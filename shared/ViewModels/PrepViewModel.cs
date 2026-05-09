@@ -1427,6 +1427,17 @@ public class PrepViewModel : BaseViewModel
             ProgressValue = 100;
             StatusText = "Complete";
             AppendLog("SSD finalized successfully.");
+
+            // MAC32: pre-MAC32 Finalize ended silently — the user stayed on
+            // the prep tab with no clear "you're done" affordance, so the
+            // v1.3.10 mac field test reported Finish as broken on Mac and
+            // ambiguous on Windows. Modal pops only on the full success
+            // path; every early-return failure branch above bails before
+            // reaching here. Copy mirrors mac-prep-app DoneStepView so
+            // cross-OS docs cite one phrase.
+            _dialogService.ShowInfo(
+                "Your SSD is ready. Open Runner.exe on this SSD to start chatting.",
+                "Setup complete");
         }
         catch (Exception ex)
         {

@@ -42,6 +42,13 @@ enum PrepFlowStep: Equatable {
     /// the prep app itself).
     case modelPull
 
+    /// MAC31a: pull was cancelled mid-batch. UI shows the last
+    /// progress snapshot for the cancelled tag and offers Retry /
+    /// Skip / Start over. Without this, `pullStarterModels` would
+    /// fall through to `.readiness` on cancel and the user would
+    /// have no surface to resume the partially-downloaded model.
+    case modelPullPaused(tag: String, progressSnapshot: String?)
+
     /// Sidecar's readiness command runs and we render the result list.
     case readiness
 
