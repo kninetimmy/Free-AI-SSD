@@ -188,9 +188,9 @@ On **Mac**:
 2. Pick your target external SSD and choose target compatibility (Mac-only or cross-platform — Windows-only NTFS is not available from a Mac host)
 3. Confirm the destructive erase in the native confirmation dialog. PrepApp drives `diskutil` directly to format the drive as exFAT and lay out the canonical SSD directory structure
 4. Stage the runner, Ollama, and prereq payloads; pull a starter model
-5. Set an encryption passphrase, then run readiness checks and finalize
+5. Optionally enable encryption (off by default — recommended only if you plan to expose the Runner API on your LAN), then run readiness checks and finalize
 
-The resulting drive is byte-for-byte interchangeable with a Windows-prepped drive of the same target compatibility, including the encrypted config blob.
+The resulting drive is byte-for-byte interchangeable with a Windows-prepped drive of the same target compatibility. If you enabled encryption the on-disk encrypted config blob is interchangeable too.
 
 **Phase 2 — Run (offline, anywhere):**
 

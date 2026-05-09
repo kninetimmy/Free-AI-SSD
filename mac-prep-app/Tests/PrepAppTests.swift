@@ -345,6 +345,83 @@ struct PrepAppTestsMain {
                        "explicit '' override should win, got '\(a.networkApiKey)'")
         }
 
+        // MARK: MAC30 — PlaintextConfigWriter writes a parseable
+        // portable-config.json that PortableConfig.cs can deserialize, with
+        // the networkApiKey field cleared (plaintext invariant: no API key
+        // ever lands on disk in cleartext).
+
+        runner.test("MAC30: PlaintextConfigWriter writes parseable portable-config.json") {
+            let tempRoot = FileManager.default.temporaryDirectory
+                .appendingPathComponent("mac30-plaintext-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+            let writer = PlaintextConfigWriter()
+            try writer.writeInitialPlaintextConfig(
+                ssdRoot: tempRoot, payload: InitialPortableConfigPayload())
+
+            let configURL = tempRoot
+                .appendingPathComponent("config")
+                .appendingPathComponent("portable-config.json")
+            try expect(FileManager.default.fileExists(atPath: configURL.path),
+                       "expected portable-config.json at \(configURL.path)")
+
+            let data = try Data(contentsOf: configURL)
+            let parsed = try JSONSerialization.jsonObject(with: data)
+            guard let dict = parsed as? [String: Any] else {
+                try expect(false, "expected JSON object root")
+                return
+            }
+            // Every camelCase key PortableConfig.cs reads must be present.
+            for key in ["ollamaPort", "networkModeEnabled", "networkBindAddress",
+                        "networkPort", "networkRequireApiKey", "networkApiKey",
+                        "preferredCompute", "models"] {
+                try expect(dict[key] != nil, "missing key: \(key)")
+            }
+        }
+
+        runner.test("MAC30: PlaintextConfigWriter clears networkApiKey on disk") {
+            // The plaintext invariant: even if InitialPortableConfigPayload
+            // generated a random key, the writer must zero it before write.
+            // Otherwise a LAN secret would land on disk in cleartext.
+            let tempRoot = FileManager.default.temporaryDirectory
+                .appendingPathComponent("mac30-key-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+            let payload = InitialPortableConfigPayload()  // generates random key
+            try expect(!payload.networkApiKey.isEmpty,
+                       "precondition: payload should generate a key in memory")
+
+            try PlaintextConfigWriter().writeInitialPlaintextConfig(
+                ssdRoot: tempRoot, payload: payload)
+
+            let configURL = tempRoot
+                .appendingPathComponent("config")
+                .appendingPathComponent("portable-config.json")
+            let data = try Data(contentsOf: configURL)
+            let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let onDiskKey = dict?["networkApiKey"] as? String
+            try expect(onDiskKey == "",
+                       "networkApiKey on disk should be empty, got: '\(onDiskKey ?? "nil")'")
+        }
+
+        runner.test("MAC30: PlaintextConfigWriter creates config directory if missing") {
+            // Fresh SSD has no config/ directory yet — writer must mkdir -p.
+            let tempRoot = FileManager.default.temporaryDirectory
+                .appendingPathComponent("mac30-mkdir-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+            // Note: tempRoot itself doesn't exist either at this point.
+            try PlaintextConfigWriter().writeInitialPlaintextConfig(
+                ssdRoot: tempRoot, payload: InitialPortableConfigPayload())
+
+            let configDir = tempRoot.appendingPathComponent("config")
+            var isDir: ObjCBool = false
+            let exists = FileManager.default.fileExists(atPath: configDir.path,
+                                                        isDirectory: &isDir)
+            try expect(exists && isDir.boolValue,
+                       "expected config/ to exist as a directory")
+        }
+
         // MARK: PrepHostController cancel-path tests (MAC17a Issue #1)
         //
         // Pin the bug fix: on timeout the pending continuation slot must

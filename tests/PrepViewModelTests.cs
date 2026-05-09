@@ -444,6 +444,59 @@ public class PrepViewModelTests
         Assert.Equal(preExistingKey, config.NetworkApiKey);
     }
 
+    /// MAC30: pin the encryption-OFF (default) finalize path. With
+    /// EnableEncryption = false the SaveConfigAsync plaintext write is the
+    /// only persistence call — the encryption service must not be invoked
+    /// and the dialog service must not prompt for a passphrase. Pre-MAC30
+    /// the toggle defaulted off but the contract was undocumented; this
+    /// test locks it in so a future refactor can't silently re-introduce
+    /// a mandatory passphrase prompt.
+    [Fact]
+    public async Task FinalizeCommand_EncryptionDisabled_WritesPlaintext_AndDoesNotInvokeEncryption()
+    {
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        _ollamaPackageService
+            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
+        _prereqService
+            .Setup(s => s.StagePrerequisitesAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _artifactStagingService
+            .Setup(s => s.StageRunnerAsync(It.IsAny<string>(), It.IsAny<Action<string>>()))
+            .Returns(Task.CompletedTask);
+        _readinessService
+            .Setup(s => s.RunReadinessChecksAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ReadinessItem> { ReadinessItem.Pass("Runner payload") });
+
+        var config = new PortableConfig
+        {
+            Models = { new ModelConfigEntry { Name = "llama3.2:3b", Status = ModelInstallStatus.Installed } }
+        };
+        _modelService.Setup(m => m.LoadConfigAsync(It.IsAny<string>())).ReturnsAsync(config);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.SelectedProfile = UserProfile.GeneralAssistant;
+        Assert.False(vm.EnableEncryption);
+
+        vm.FinalizeCommand.Execute(null);
+        await WaitForCommandAsync(vm.FinalizeCommand);
+
+        _modelService.Verify(
+            m => m.SaveConfigAsync(It.IsAny<string>(), It.IsAny<PortableConfig>()),
+            Times.AtLeastOnce);
+        _encryptionService.Verify(
+            e => e.EnableConfigEncryptionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()),
+            Times.Never);
+        _encryptionService.Verify(
+            e => e.EnableConfigEncryptionAsync(It.IsAny<string>(), It.IsAny<PortableConfig>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _dialogService.Verify(d => d.PromptForEncryptionPassword(), Times.Never);
+        Assert.False(config.IsEncrypted);
+        Assert.Equal("Complete", vm.StatusText);
+    }
+
     /// MAC32: pre-MAC32 Finalize ended silently with no completion
     /// affordance — user stayed on the prep tab unsure whether anything
     /// had happened. Modal must pop on the full success path.
