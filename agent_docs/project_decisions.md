@@ -2302,3 +2302,48 @@ exit shim); (b) a separate UI state distinct from "user wants LAN"
 needs to flow through the same toggle.
 
 Established PR #249 (`e6b958e`).
+
+---
+
+## 2026-05-10 — Mac chat failure decoding lives in a pure helper; library callers reuse it without a "Chat failed:" prefix [M12]
+
+The Mac runner's previous private `apiErrorMessage(data:statusCode:)`
+method bundled two responsibilities that don't belong together:
+JSON-error-body decoding (ProblemDetails `detail`, `ErrorResponse`
+`error`, fallback) AND a hardcoded `"Chat failed: "` prefix. It was
+unused for chat (the chat-stream delegate cancelled before the body
+landed) but called by six library-management callsites that had no
+business prefixing library failures with "Chat failed:" — yet did,
+because the helper made it the path of least resistance.
+
+M12 splits these responsibilities:
+- **Body decoding** lives in
+  `mac-runner/Sources/RunnerChatErrorMessage.decode(statusCode:body:)`
+  — returns the bare reason string, no prefix. Pure helper, testable
+  from a standalone swiftc binary (existing pattern for
+  `NdjsonFrameBuffer` / `SsdEncryption`).
+- **Caller-specific framing** is the caller's problem. Chat callers
+  set `chatError = message` (red banner). Library callers set
+  `libraryStatus = message`. Each path knows its own surface.
+
+This shape also makes future failure surfaces (M3 STT when it lands,
+or any new sidecar endpoint) reuse the same decoder without leaking
+chat semantics.
+
+Why not the alternatives:
+- **Keep one helper that returns "Chat failed: X" and have library
+  callers strip the prefix.** Worse: every caller knows about chat,
+  and the prefix is a coincidence not a contract.
+- **Inline the decoding at each callsite.** Six copies of the same
+  `detail`-then-`error`-then-fallback logic, no shared test surface,
+  drift guaranteed.
+- **Subclass / hierarchy of error types per surface.** Overkill for
+  ~10 LOC of body decoding.
+
+Ships unrevisited unless: (a) the server adopts a third error shape
+(currently only `ErrorResponse` `{"error"}` and ProblemDetails
+`{"detail"}`); (b) a caller needs structured error data (status code
++ category + message) rather than a flat string — at which point
+the helper's return type widens to a struct.
+
+Established PR (TBD on M12 merge).
