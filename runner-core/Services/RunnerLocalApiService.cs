@@ -71,7 +71,23 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         }
 
         var bindAddress = NormalizeBindAddress(config.NetworkBindAddress);
-        var networkPort = ValidatePort(config.NetworkPort);
+        var configuredPort = ValidatePort(config.NetworkPort);
+
+        // MAC39: scan for a free port from configuredPort..+20. The previous
+        // hard bind on the configured value failed with "address already in
+        // use" on Mac after Lock + re-unlock — the kernel was still holding
+        // the prior listener's port (TIME_WAIT or slow socket cleanup) and
+        // the runner became unrecoverable until the user quit the app. Mirror
+        // of OllamaLifecycleService.ResolvePort. The Mac sidecar's
+        // mac-runner-host announces the actual baseUrl via "ready: <url>" on
+        // stdout, so the Swift client picks up the shifted port transparently.
+        var networkPort = ResolveAvailablePort(bindAddress, configuredPort);
+        if (networkPort != configuredPort)
+        {
+            var notice = $"Configured port {configuredPort} on {bindAddress} unavailable; using {networkPort} instead.";
+            _logger?.Info(notice);
+            LogMessage?.Invoke(notice);
+        }
 
         if (!IsLoopbackAddress(bindAddress))
         {
@@ -1319,6 +1335,41 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         }
 
         return configuredPort;
+    }
+
+    /// <summary>
+    /// MAC39: scans up to 20 ports starting at <paramref name="preferredPort"/>
+    /// for one that can currently be bound on <paramref name="bindAddress"/>.
+    /// Falls back to the preferred value if all 20 are taken (Kestrel will
+    /// then raise the canonical bind error). Used to route around the
+    /// "address already in use" failure on Mac after Lock + re-unlock, where
+    /// the kernel still holds the prior listener's port even after the
+    /// process has exited.
+    /// </summary>
+    internal static int ResolveAvailablePort(string bindAddress, int preferredPort)
+    {
+        if (!IPAddress.TryParse(bindAddress, out var address))
+        {
+            address = IPAddress.Loopback;
+        }
+
+        for (var port = preferredPort; port < preferredPort + 20 && port <= 65535; port++)
+        {
+            System.Net.Sockets.TcpListener? listener = null;
+            try
+            {
+                listener = new System.Net.Sockets.TcpListener(address, port);
+                listener.Start();
+                return port;
+            }
+            catch (System.Net.Sockets.SocketException) { }
+            finally
+            {
+                listener?.Stop();
+            }
+        }
+
+        return preferredPort;
     }
 
     private static string? TryReadApiKey(HttpRequest request)
