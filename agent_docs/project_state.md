@@ -1,30 +1,36 @@
 # Project State
 
-Last updated: 2026-05-09 yet later (PR #235 MAC36 merged `567f49a` — Mac Runner UX bundle: lock-on-blur removed, /api/chat/stream NDJSON consumer, Send-busy spinner. v1.3.18 dispatched + shipped same session. Awaiting Mac field test.)
+Last updated: 2026-05-09 still later (PR #237 MAC38 merged `edc99d3` — drop static Ollama version pin, resolve from upstream `sha256sum.txt` per build. v1.3.19 dispatched same session to pick up Ollama v0.23.2 and unblock the deepseek-r1:8b pull failure. Awaiting Mac field test.)
 
-Last released: **v1.3.18** (2026-05-09; MAC36 — Mac Runner no longer auto-locks on alt-tab; chat tokens stream into the response box; Send shows a spinner. `Free-AI-SSD-win.zip` 335 MB, `Free-AI-SSD-beta-crossplatform.zip` 644 MB shipped).
+Last released: **v1.3.19** (2026-05-09; MAC38 — bundle now ships whichever Ollama is latest at CI build time, hash-verified against the release's vendor `sha256sum.txt`. `Free-AI-SSD-win.zip` and `Free-AI-SSD-beta-crossplatform.zip` shipped).
 
 > v1.2.7 tag exists on `af77abc` but has no GH release artifact; v1.2.8 supersedes it.
 
-**v1.3.18 closes the v1.3.17 mac field-test UX trio.** The user
-reported MAC30's plaintext default works well — but auto-lock on
-alt-tab tore down the chat host, Send had no busy indicator, and
-chat returned as one block instead of streaming. MAC36 bundles all
-three: drop the `willResignActiveNotification` observer (lock-on-quit
-+ manual Lock stay), swap `sendPrompt()` to `/api/chat/stream`
-(NDJSON via `URLSessionDataDelegate` — `URLSession.bytes(for:)` is
-macOS 12+, blocked by the macOS 11 baseline), and add `@Published var
-isSending` + `ProgressView` on the Send button. **MAC37** (Mac
-PrepApp finalize observability — the 6-min silent finalize) is now
-the lead "Next up" item. **MAC20** (cross-platform ZIP layout
-rework), **F2a** (picker sort + resize gaps), and **X18** (ingest
-observability) remain queued. **MAC11** (signing + notarization)
-remains back-burnered until the user's Apple Developer cert renews.
-The `MacArtifactAvailability` / `ArtifactStagingService` /
-`PrereqService` ancestor-walk consolidation into a shared
-`prep-core/BundleContentRoots` helper remains overdue.
+**v1.3.19 unblocks new-model pulls on Mac.** A v1.3.18 field test
+of `deepseek-r1:8b` failed with `pull model manifest: 412: The model
+you are attempting to pull requires a newer version of Ollama` —
+the bundled Ollama was pinned to `v0.5.7` (MAC4, 2026-05-05) and
+the manifest schema has moved on. Bumping the static pin is a
+recurring toil tax; MAC38 instead replaces the pin with dynamic
+resolution against the upstream release's `sha256sum.txt`,
+mirroring the `.NET 8` Desktop Runtime path that was already in
+`PrereqResolver`. Trust chain stays SHA-256-verified end-to-end
+(URL allowlist → vendor-published hash → on-SSD attestation
+receipt). MAC35 host-staging stays — `numDownloadParts = 16` is
+still hardcoded in upstream `server/download.go` through `v0.23.2`.
+**MAC37** (Mac PrepApp finalize observability — the 6-min silent
+finalize) is now the lead "Next up" item. **MAC20** (cross-platform
+ZIP layout rework), **F2a** (picker sort + resize gaps), and **X18**
+(ingest observability) remain queued. **MAC11** (signing +
+notarization) remains back-burnered until the user's Apple
+Developer cert renews. The `MacArtifactAvailability` /
+`ArtifactStagingService` / `PrereqService` ancestor-walk
+consolidation into a shared `prep-core/BundleContentRoots` helper
+remains overdue.
 
 ## Recently shipped
+
+- **PR #237 — MAC38 drop static Ollama version pin, resolve from upstream `sha256sum.txt` — merged `edc99d3` (2026-05-09).** Released as **v1.3.19**. Closes the v1.3.18 mac field-test failure where a `deepseek-r1:8b` pull returned `412: The model you are attempting to pull requires a newer version of Ollama`. Replaces the hardcoded `v0.5.7` pin in `OllamaPackageTrustPolicy` (`DefaultMacPackage` / `DefaultWindowsPackage` / `PinnedMetadataByUrl`) with dynamic resolution: CI's `FreeAiSsd.PrereqFetch` now calls the resolver `PrereqResolver.ResolveLatestOllamaMacAsync` (already implemented + unit-tested for the `releases/latest` + `sha256sum.txt` path; deactivated in MAC4 because the static dictionary drifted on every upstream release). New `ResolveLatestOllamaWindowsAsync` mirrors it for the Windows side. `ArtifactStagingService.StageMacOllamaAsync` reads the bundled `mac-tools-manifest.json` (which CI populated with the resolved version + `sourceUrl` + vendor SHA-256) as the staging hash gate. Windows runtime download (`OllamaPackageService.EnsureOllamaReadyAsync`) drops the `ollamaUrl` parameter and resolves at first run. Trust chain unchanged: HTTPS to `github.com` allowlist + vendor-published SHA-256 from the release's `sha256sum.txt` + on-SSD attestation receipt; the receipt is the runtime gate (rehashing a 180MB binary on every launch is too slow). Swift `mac-runner/Sources/main.swift` `evaluateTrustGate()` drops the `PinnedMacOllama.url` / `PinnedMacOllama.sha256` constants and validates the attestation in place (URL is HTTPS to allowlisted host + SHA is well-formed 64-hex). The "Ollama package URL" advanced field in `MainWindow.xaml` is removed — it had no semantic role under the new model. **5-minute pre-refactor spike** confirmed `v0.23.2`'s `Ollama-darwin.zip` is byte-identical at the touchpoints we rely on (`Ollama.app/Contents/Resources/ollama` still exists, universal arm64+x86_64, vendor `sha256sum.txt` format unchanged). Tests rewritten across 6 files to construct metadata inline. CI green first run (mac-prep 47s, mac-runner 48s, windows 2m42s); the mac-prep job actually exercises the dynamic resolver against live GitHub, so green is end-to-end proof. v1.3.19 dispatched same-session.
 
 - **PR #235 — MAC36 Mac Runner UX bundle (drop blur-lock, stream chat, Send spinner) — merged `567f49a` (2026-05-09).** Released as **v1.3.18**. Closes the v1.3.17 mac field-test trio. **(a)** `mac-runner/Sources/main.swift:registerLifecycleHooks()` no longer registers `NSApplication.willResignActiveNotification` — that observer was a MAC5-era invariant for a world where every SSD was encrypted; with MAC30 making encryption opt-in, the default-plaintext SSD has no key to zeroize and the auto-teardown forced the user to re-select the SSD on every alt-tab. `willTerminateNotification` (lock-on-quit) and the manual Lock button stay. **(b)** `sendPrompt()` swapped from buffered `POST /api/chat` to `POST /api/chat/stream` (server contract at `runner-core/Services/RunnerLocalApiService.cs:209-263`). macOS 11 baseline (`-target arm64-apple-macos11.0` per `.github/workflows/build.yml:284`) rules out `URLSession.bytes(for:)` (12+); a new private `ChatStreamDelegate: URLSessionDataDelegate` consumes chunks via the pre-Concurrency `didReceive data:` callback. New `mac-runner/Sources/NdjsonFrameBuffer.swift` is a pure buffer-and-split-on-`\n` helper (CRLF-tolerant, tail-aware) with 8 test pins in `mac-runner/Tests/NdjsonFrameBufferTests.swift`. Tokens append to `vm.response` as they arrive; `complete` sets sources/usedRagContext; `rag-warning` surfaces; `error` sets status. `lockSession()` cancels the in-flight `URLSessionDataTask` and invalidates the per-call session before zeroizing unlock material so the delegate can't push tokens into a half-torn-down view-model. **Subtlety pinned:** the `complete` frame's `responseText` is treated as a fallback only — overwriting `vm.response` after streaming would cause a visible flicker for the common case where every token frame already arrived. **(c)** New `@Published var isSending: Bool = false` on `RunnerViewModel`; Send button wraps the label in an HStack with a `ProgressView().controlSize(.small)` shown while sending; `.disabled` while sending or on whitespace-only prompt. CI: new `Run Swift unit tests (NdjsonFrameBuffer)` step mirrors the SsdEncryption tests step; Runner.app build source list grows by one file. No C# changes (audit confirmed Windows already streams + has busy state). 8/8 NDJSON tests + 15/15 SsdEncryption tests passed locally; CI green on first run (mac-prep 58s, mac-runner 51s, windows 2m45s); v1.3.18 dispatch followed merge in the same session, all four jobs green, both ZIPs published.
 
@@ -53,6 +59,8 @@ See `project_backlog.md` for full general backlog details. See
 `agent_docs/mac_project_backlog.md` for the macOS support track.
 
 ## Last session
+
+2026-05-09 still later (PR #237 MAC38 merged `edc99d3` + v1.3.19 dispatched + shipped). Field test of `deepseek-r1:8b` on v1.3.18's Mac PrepApp surfaced `pull model manifest: 412: The model you are attempting to pull requires a newer version of Ollama` — the `v0.5.7` MAC4 pin had aged out. Two-front investigation: (1) checked upstream `server/download.go` through `v0.23.2`, confirmed `numDownloadParts = 16` still hardcoded so MAC35 host-staging stays load-bearing; (2) discovered `PrereqResolver.ResolveLatestOllamaMacAsync` was already implemented, unit-tested, and deactivated in MAC4 because the static `OllamaPackageTrustPolicy.PinnedMetadataByUrl` dictionary drifted from the dynamic CI-resolved hash on every upstream release. The blocker was architectural (static dictionary), not infrastructural — the resolver was waiting to be re-enabled. **5-minute pre-refactor spike** downloaded `v0.23.2`'s `Ollama-darwin.zip`, confirmed `Ollama.app/Contents/Resources/ollama` still at the same path, universal arm64+x86_64, vendor `sha256sum.txt` format unchanged → cleared the path to a one-PR refactor. 20 files changed: trust policy lost the static records and gained an attestation-only validator (no URL parameter); `MacToolDefinition` lost its hardcoded `SourceUrl`; staging service reads hash from the bundled manifest; Windows runtime drops the `ollamaUrl` parameter + the matching XAML field; Swift trust gate validates the on-SSD attestation directly. 6 test files rewritten. CI green first run on all three jobs (`mac-prep-build` 47s, `mac-runner-build` 48s, `windows-build` 2m42s); the mac-prep job actually exercises the dynamic resolver against live GitHub, so green is end-to-end proof. Dispatched v1.3.19 the same session. **No surprises this session** — the hard part was tracing how MAC4's "drift" failure mode could be fixed by moving the trust anchor from a static dictionary to the disk attestation (which is already PrepApp's signed receipt of the staging-time hash verification). Closed stale wrap-up PR #228 (MAC34a/b — its diff would have stripped MAC30/35/35a/36/38 work) en route.
 
 2026-05-09 yet later (PR #235 MAC36 merged `567f49a` + v1.3.18 dispatched + shipped). New `mac-runner/Sources/NdjsonFrameBuffer.swift` (43 lines) — pure buffer-and-split-on-`\n` helper with `append`/`flush` API, CRLF-tolerant, tail-aware. New `mac-runner/Tests/NdjsonFrameBufferTests.swift` (127 lines) — 8 pins covering single-line, two-line-one-chunk, line-split-across-chunks, trailing-tail, empty-chunk, CRLF, flush, lone-newline. `mac-runner/Sources/main.swift` reworked: `registerLifecycleHooks()` shed the `willResignActiveNotification` observer; `sendPrompt()` rewritten for `/api/chat/stream` with a private `ChatStreamDelegate: NSObject, URLSessionDataDelegate` (per-call `URLSession` invalidated on completion to break the delegate retain cycle); `lockSession()` and `deinit` now cancel the in-flight task and invalidate the session; `@Published var isSending` + `ProgressView` in the Send button. `.github/workflows/build.yml` gained the new `Run Swift unit tests (NdjsonFrameBuffer)` step and added `NdjsonFrameBuffer.swift` to the Runner.app source list. **macOS 11 baseline pinned the streaming pattern** — `URLSession.bytes(for:)` is 12+, so `URLSessionDataDelegate.didReceive data:` is the path; recorded as a project decision. Local validation: 8/8 NDJSON tests + 15/15 SsdEncryption tests passed; Runner.app + both test binaries compile clean against CI's invocation. CI green on first run (mac-prep-build 58s, mac-runner-build 51s, windows-build 2m45s); v1.3.18 dispatched same-session via `gh workflow run` (`version=1.3.18 include_macos=true`); all four jobs green; both ZIPs published. **No surprises this session** — the plan held end-to-end; the only judgment call was extracting `NdjsonFrameBuffer` rather than inlining the line-split into the delegate, which paid off because the view-model isn't unit-testable without restructuring (only one Swift test file exists today; helper extraction was the only meaningful test surface).
 

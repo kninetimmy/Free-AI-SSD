@@ -3227,3 +3227,43 @@ verification):**
 - Re-run a clean Mac prep → finalize step shows progress text the entire time it's running → user can tell from the UI alone whether the app is making progress.
 - Wall-clock finalize time either drops (we identified and removed an unnecessary wait) or is justified by visible work (we surface what it's doing). Either outcome is fine.
 
+### MAC38 - Drop static Ollama version pin; resolve from upstream sha256sum.txt per build
+
+**Status:** done 2026-05-09 (PR #237 `edc99d3`, shipped v1.3.19). Closes the v1.3.18 mac field-test failure where `deepseek-r1:8b` returned `pull model manifest: 412: The model you are attempting to pull requires a newer version of Ollama`. Replaces MAC4's `v0.5.7` static pin with dynamic resolution against the upstream release's `sha256sum.txt`. Trust anchor moves from a static URL→hash dictionary to the on-SSD attestation file (which was already PrepApp's signed receipt of the staging-time hash verification — same trust shape `.NET 8` already uses with Microsoft's `releases.json`). The resolver `PrereqResolver.ResolveLatestOllamaMacAsync` was already implemented and unit-tested before MAC4; MAC38 re-enables it. New `ResolveLatestOllamaWindowsAsync` mirrors it for the Windows side.
+**Scope:** medium — 20 files, but the diff is largely deletions and call-site signature trims. The trust-policy refactor + Swift trust-gate rewrite were the only meaty parts.
+**Risk:** Low. CI's mac-prep-build job actually exercises the dynamic resolver against live GitHub, so green CI is end-to-end proof. 5-minute pre-refactor spike confirmed `v0.23.2`'s `Ollama-darwin.zip` is byte-identical at every touchpoint we rely on (`Ollama.app/Contents/Resources/ollama`, universal arm64+x86_64, `sha256sum.txt` format).
+**Dependencies:** Built on MAC4's URL-allowlist + arm64-slice trust gates (those stayed) and on `PrereqResolver`'s dynamic-hash path that was already used for `.NET 8` and ready for Ollama.
+**Goal:** New Ollama models (anything past the v0.5.7 manifest schema) can be pulled by Mac PrepApp without a manual version bump on our side. Bundle picks up whatever upstream is at on each CI build.
+
+**Driver:** v1.3.18 mac field-test attempt to pull `deepseek-r1:8b` failed with a 412 — Ollama's CLI was rejecting the manifest. Bundled Ollama is `v0.5.7` (MAC4 pin); upstream had moved to `v0.23.2` and the manifest schema changed. Two paths: (a) bump the static pin and accept the toil tax, (b) fix the architectural cause of MAC4's "drift" failure mode by removing the static dictionary as the runtime trust authority. We picked (b) because the resolver was already built and the trust shape was already used for .NET.
+
+**Why MAC4's pin existed in the first place:** the previous "resolve `releases/latest`" path drifted from `OllamaPackageTrustPolicy.PinnedMetadataByUrl` on every upstream release. CI would resolve the new hash, runtime would refuse it because the dictionary still had the old hash. MAC4's "fix" was to pin both ends to the same static value; MAC38's "fix" is to remove the dictionary entirely and use the disk attestation as the authority. The attestation only gets written if the bytes verified against the upstream's vendor `sha256sum.txt`, so the trust chain stays intact.
+
+**Why MAC35 host-staging stays:** Pre-refactor verification re-checked upstream `server/download.go` through `v0.23.2`. `numDownloadParts = 16` is still hardcoded with no env override. Bumping to latest doesn't change the exFAT-write bottleneck on Mac. Comment in `prep-core/OllamaModelStager.cs` updated to record the re-verification.
+
+**Cross-OS parity audit (per 2026-05-07 rule):**
+- **Mac:** CI bundles Ollama (resolver runs at build time, vendor `sha256sum.txt` verified, manifest written into the bundle); PrepApp staging reads the manifest's hash for the on-disk gate.
+- **Windows:** PrepApp downloads Ollama at first run (resolver runs at runtime, same `sha256sum.txt` path). The "Ollama package URL" advanced field in `MainWindow.xaml` is removed because there's no longer a static URL the user could override.
+- Both OSes use the same trust chain: HTTPS to allowlisted github.com host → vendor-published SHA-256 → on-SSD attestation receipt. Implementation diverges by where the resolver runs (CI vs first-run), user-visible outcome converges (the bundle/SSD ships the latest Ollama, hash-verified end-to-end).
+
+**Affected files (20):**
+- `shared/OllamaPackageTrustPolicy.cs` — drops `Default*Package` records and `PinnedMetadataByUrl`. New `ValidateExecutionAttestation(ssdRoot)` overload (no URL param). `ValidatePackageSource` becomes URL-allowlist-only.
+- `shared/Prereqs/PrereqResolver.cs` — adds `ResolveLatestOllamaWindowsAsync` (mirror of Mac); shared private resolver core.
+- `shared/Prereqs/MacToolCatalog.cs` — drops `SourceUrl` from `MacToolDefinition`.
+- `shared/MacOllamaStagingPipeline.cs` — `metadata` parameter becomes required.
+- `shared/Services/IOllamaPackageService.cs` — `EnsureOllamaReadyAsync` drops `ollamaUrl` parameter.
+- `shared/ViewModels/PrepViewModel.cs` — drops `_ollamaUrl` field, `OllamaUrl` property, and the parameter from 3 `EnsureOllamaReadyAsync` call sites.
+- `prep-core/Services/OllamaPackageService.cs` — Windows `EnsureOllamaReadyAsync` resolves dynamically + writes attestation.
+- `prep-core/Services/ArtifactStagingService.cs` — Mac staging reads bundled `mac-tools-manifest.json` for hash + URL.
+- `prep-core/OllamaModelStager.cs` — comment update re: `numDownloadParts = 16` re-verified through `v0.23.2`.
+- `runner/Services/OllamaLifecycleService.cs` and `runner-core/Services/MacOllamaLifecycleService.cs` — drop URL argument from trust-gate call.
+- `mac-runner/Sources/main.swift` — drops `PinnedMacOllama.url` / `.sha256` constants, validates attestation in place.
+- `prep-app/MainWindow.xaml` — removes the "Ollama package URL" advanced TextBox.
+- `tools/FreeAiSsd.PrereqFetch/Program.cs` — `FetchMacOllamaAsync` calls dynamic resolver.
+- 6 test files — `OllamaPackageTrustPolicyTests`, `MacOllamaTrustPolicyTests`, `MacOllamaLifecycleServiceTests`, `MacOllamaStagingPipelineTests`, `MacPrepHostPullLifecycleTests`, `PrepViewModelTests` — metadata constructed inline.
+
+**Acceptance / smoke:**
+- CI green first run on all three jobs: `mac-prep-build` 47s (live resolver run), `mac-runner-build` 48s (Swift trust-gate), `windows-build` 2m42s (full C# test suite).
+- v1.3.19 release dispatched + shipped same-session.
+- v1.3.19 Mac field test: stage a fresh SSD, pull `deepseek-r1:8b` — should succeed where v1.3.18 returned 412.
+
