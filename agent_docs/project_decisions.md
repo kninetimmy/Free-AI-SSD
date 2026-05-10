@@ -2173,3 +2173,37 @@ classes — search is "find this thing," not "narrow the discovery
 surface," so it should match anywhere.
 
 Established PR #243 (`859ac08`), shipped v1.3.22.
+
+## 2026-05-10 — Unified C/W/M task-label scheme; parity rule strengthened
+
+The backlog moves from a mixed `X*` / `F*` / `B*` / `H*` / `R*` / `MAC*` numbering scheme to three flat per-OS-scope buckets:
+
+- **`C#`** — Cross-OS (touches `shared/`, `runner-core/`, `prep-core/`, or both per-host UI surfaces)
+- **`W#`** — Windows-only (WPF Runner / PrepApp internals, Companion VR PC, DCS-anchored work)
+- **`M#`** — Mac-only (SwiftUI hosts, `mac-*-host` sidecars, mac packaging, native Mac UX). Bodies live in `mac_project_backlog.md`.
+
+**Why this change:** The legacy scheme grew out-of-order — X-numbers came from chronological field-test triage, F/B-numbers from feature/behavior dictation notes, MAC-numbers from a parallel Mac-track file. Numbers no longer reflected priority or scope. Cross-cutting concerns (e.g., the Mac side of an X-numbered "Windows" item) had no canonical home. The user's 2026-05-10 ask: *"lets take this time to order things in a way that makes sense and fix the numbering. mac only tasks should have their own letter/number; windows should have its own letter and number; and tasks that touch both should have their own letter and number."*
+
+**Bucket assignment rule:** based on where the **work** lands, not where the symptom appears or how the concept frames itself. If shared-core changes substantively, it's `C` even when one OS surface is bigger. Pure-WPF or pure-SwiftUI work that doesn't touch shared code is `W`/`M`.
+
+**Migration policy:**
+
+- **Shipped items keep their original IDs** (`X*`, `F*`, `B*`, `H*`, `R*`, `MAC*`). Renaming would break PR notes, decision-doc cross-refs, and conversation memory across the project.
+- **Open items get a new C/W/M ID** via the mapping table at the top of `project_backlog.md`. The existing `### Old-ID` body header stays in place until the item is next picked up for work, at which point both the header and any cross-references are rewritten in the same PR.
+- **All new items from 2026-05-10 onward use the new scheme exclusively.** The 8-item field-test list intake from 2026-05-10 (filed as C1–C6 + M11–M13) is the first cohort.
+
+**Closed on the refactor:** `X6` (Create Library UI hang) — 3+ weeks no recurrence on v1.2.5+; F3/X13 work touched the surface heavily. Reopen as a new C-item if it returns.
+
+**Parity rule reinforcement (extends 2026-05-07 dual-OS review pass entry):** the user formalized a stronger version 2026-05-10:
+
+> *"since we are closer or at parity for features between mac version and windows version when ever we start a new task mandatory review must be done when planning out new tasks to evaluate whats need (if anything) for each OS. if needed break them up into two PR's/tasks. if it is broken into seperate tasks the task for the other OS should always come next. I do not want one to fall behind or miss features/bug fixes."*
+
+The 2026-05-07 rule mandated a dual-OS review pass during planning. The 2026-05-10 reinforcement adds a sequencing constraint:
+
+- **When a task is split into per-OS work, the other-OS follow-up is the very next task — not deferred behind feature work.**
+- File the follow-up before merging the first half. Mark it priority-next in the backlog. Do not pull a new feature item until the parity follow-up ships.
+- The X13 → M12 case (Mac chat-UI parity to X13's structured-failure surface) is the canonical example of what this rule prevents: X13 shipped 2026-04-20 with Windows-runner UI surfacing only, the Mac follow-up was never filed, and the parity gap surfaced 3 weeks later as part of the v1.3.22 field-test "no fail message" complaint. Filing M12 immediately when X13 shipped would have closed it 3 weeks earlier.
+
+**Exit ramps:** if Free-AI-SSD ever drops back to a single supported OS, the parity rule becomes trivially satisfied and the scheme can collapse to a single counter. As long as both OSes are actively supported, both the scheme and the sequencing rule stand.
+
+Established 2026-05-10 in PR for `refactor/unified-task-labels`.
