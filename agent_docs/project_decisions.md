@@ -2347,3 +2347,104 @@ Ships unrevisited unless: (a) the server adopts a third error shape
 the helper's return type widens to a struct.
 
 Established PR #251 (`a52572c`).
+
+---
+
+## 2026-05-10 — Chat-stream cold-load liveness is a server-side heartbeat carried by an `IChatService` event AND an NDJSON `loading` frame [C1]
+
+The Mac runner's chat stream had a silent-stall class of bugs: any
+time Ollama took longer to load a model than Mac URLSession's
+`timeoutIntervalForRequest` (180s post-MAC39) — a real possibility
+on 14b cold-loads from USB SSD — the request died with
+`NSURLErrorTimedOut` and pre-M12 surfaced no fail message. The
+server flushes `start` immediately so the timer effectively bounds
+"server `start` → Ollama's first token," which is exactly the slow
+phase. Windows runner doesn't traverse URLSession (uses in-process
+`IChatService`) so it never reproduced; the fix needs to be cross-OS
+without growing two parallel implementations.
+
+C1 picks a single-source-of-truth shape:
+
+- **`IChatService.FirstTokenPending(int seconds)` event.** Raised by
+  `ChatService.SendPromptStreamingAsync` every
+  `HeartbeatIntervalSeconds = 20` from a `Task.Run` heartbeat task,
+  cancellation-bounded to the caller's CT, suppressed once
+  `Interlocked.Exchange(ref firstTokenSeen, 1) == 0` flips. Windows
+  runner subscribes in-process and paints `StreamingIndicator`
+  (Dispatcher-marshalled, gated on visibility so PTT chat doesn't
+  leak loading text into the chat tab). Mac runner sees the event
+  via the API layer.
+- **`{type:"loading", elapsedSeconds:N}` NDJSON frame.** `/chat/stream`
+  subscribes to `FirstTokenPending` for the duration of one request
+  and forwards each tick as a frame. Mac handles the new type in
+  `chatStreamDidReceiveLine` and clears the "Loading..." status on
+  first `token` via a `hasPrefix("Loading ")` gate. Frame ordering
+  on the wire: `start` → `loading×N` → `token×M` → `complete` (or
+  `rag-warning` + `complete`, or `error`).
+- **Per-request `SemaphoreSlim` write-gate inside `/chat/stream`.**
+  The heartbeat event handler is fire-and-forget (the event is sync
+  but the response write is async; awaiting would block the
+  thread-pool tick), so heartbeat writes can race with `token` /
+  `complete` writes from the request-pipeline thread. `HttpResponse`
+  stream writes are not concurrent-safe. All NDJSON frames (`start`,
+  `loading`, `token`, `complete`, `rag-warning`, `error`) flow
+  through a single `WriteFrameAsync` helper that serializes them
+  through the gate.
+
+The shape is deliberately dual-purpose — the heartbeat is BOTH the
+phase-2 fix (keeps URLSession's per-packet timer alive) AND the
+phase-1 diagnostic the C1 backlog asked for. Three observable cases
+on a stalled chat: heartbeats then tokens = healthy cold-load;
+heartbeats past 180s with no token = real Ollama-side load issue
+(user can stop and report); no heartbeats = sidecar broken before
+reaching `ChatService`.
+
+Why not the alternatives:
+
+- **Bump Mac URLSession `timeoutIntervalForRequest` further (300s,
+  600s).** Two problems: doesn't help any future model that needs
+  longer; gives the user no visible feedback during the wait
+  (current symptom — silent stall — still applies, just shifted).
+- **Set `timeoutIntervalForRequest = 0` (no timeout).** Loses the
+  ability to detect a genuinely wedged sidecar. The heartbeat
+  pattern is the right balance — a real wedge eventually shows zero
+  heartbeats.
+- **Pre-warm the model on selection (call `/api/generate` with empty
+  prompt).** More complex, adds a hidden async cost on every model
+  change, and doesn't solve the case where the user picks a model
+  and immediately sends — the "wait while loading" UX still needs
+  to exist.
+- **Heartbeat at the URLSession layer only (Mac-only fix).** Loses
+  the cross-OS observability win (Windows users don't see cold-load
+  state) and forks the contract. The event-on-shared-interface plus
+  NDJSON-frame approach gives one mental model.
+- **Inject a clock/seam to unit-test the `ChatService` heartbeat
+  task directly.** ~30 LOC of cancellation-bounded loop is small
+  enough that the integration pin (`FakeChatService` raises the
+  event before tokens flow → `RunnerLocalApiServiceTests` asserts
+  the loading frame on the wire) catches contract violations
+  without adding a clock abstraction.
+
+`HeartbeatIntervalSeconds = 20` chosen for ~9 ticks per Mac
+URLSession timer cycle (180s) — comfortable margin without spamming
+the wire. Future tightening or loosening is a one-line change.
+
+Cross-OS surface: the new event signature broke compile on six
+`IChatService` implementations (production `ChatService` +
+`TestModeChatService` + four test stubs). Establishes the rule:
+**for interface-additive PRs, grep by `: IChatService` (interface
+declaration), not by an existing member like `LogMessage`.** The
+narrower grep silently misses stubs that don't carry the keyed
+member, and CI's `windows-build` catches the compile break a
+half-cycle later than necessary.
+
+Ships unrevisited unless: (a) URLSession adopts a per-request
+keep-alive that obviates the heartbeat; (b) we add a non-streaming
+chat path that hits the same cold-load (currently `/chat`
+non-streaming has the inner `HttpClient.Timeout=100s` problem but
+no consumer in this repo uses it for large models); (c) the
+heartbeat's interval becomes user-visible enough to need
+configurability — at which point it moves from `const` to a
+`PortableConfig` field.
+
+Established PR #253 (`6cfae14`).
