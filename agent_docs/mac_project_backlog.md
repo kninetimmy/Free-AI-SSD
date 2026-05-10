@@ -3265,5 +3265,51 @@ verification):**
 **Acceptance / smoke:**
 - CI green first run on all three jobs: `mac-prep-build` 47s (live resolver run), `mac-runner-build` 48s (Swift trust-gate), `windows-build` 2m42s (full C# test suite).
 - v1.3.19 release dispatched + shipped same-session.
-- v1.3.19 Mac field test: stage a fresh SSD, pull `deepseek-r1:8b` — should succeed where v1.3.18 returned 412.
+- v1.3.19 Mac field test: stage a fresh SSD, pull `deepseek-r1:8b` — should succeed where v1.3.18 returned 412. ✅ Confirmed in v1.3.19 field test (no 412 reported).
+
+### MAC39 - Mac runner bug-fix bundle: chat-host port leak + Lock UX on plaintext + chat cold-load timeout
+
+**Status:** done 2026-05-10 (PR #239 `8eaa922`, shipped v1.3.20). Three v1.3.19 Mac field-test findings, all in the runner / chat-host stack and unrelated to MAC38's Ollama trust-model work. Bundled because they share a surface and the port-leak finding was severe (left the user unable to recover without quitting the app). v1.3.20 field test confirmed all three resolved.
+**Scope:** small — 2 files, ~134 added/5 removed lines. Each fix is self-contained; the bundle is pragmatic, not architectural.
+**Risk:** Low. C# port-shift is shared with Windows and benefits passively (same behavior in the no-conflict case). Swift conditional UI is additive (encrypted path unchanged).
+**Dependencies:** Built on MAC30 (made encryption opt-in, which created the "Lock on plaintext is misleading" condition) and on MAC34b (established the lsof+kill pattern for ollama port; MAC39 applies the same pattern to the sidecar port).
+**Goal:** v1.3.19 field-test failures don't recur. Lock + re-select on plaintext SSD restarts cleanly. Plaintext UI says "Stop"/"Start" not "Lock". 8b model cold-load doesn't time out at 60s.
+
+**Driver:** v1.3.19 mac field test, three findings:
+1. Lock + re-select-SSD wedged the runner with `Failed to bind to address http://127.0.0.1:NNNNN: address already in use`. Recovery required quitting and relaunching the app.
+2. The Lock button on a plaintext SSD had no semantic meaning post-MAC30 (no key to zeroize). User: "if encryption is present show lock, if not present start/stop?"
+3. First chat against `deepseek-r1:8b` failed with `Chat failed: The request timed out` — the URL session's default 60s timeout fired during cold-load on USB SSD.
+
+**Fixes:**
+
+**(1) Chat-host port leak — two-layer fix.**
+- `mac-runner/Sources/main.swift` `restartHostSidecar()`: lsof+kill on the configured `networkPort` before each `hostController.start()`. Mirror of MAC34b's pattern for ollama on 11434. Catches stale sidecar processes.
+- `runner-core/Services/RunnerLocalApiService.cs`: new `ResolveAvailablePort(bindAddress, preferredPort)` scans configuredPort..+20 via `TcpListener` probe before `UseUrls()`. Catches the kernel-cleanup TIME_WAIT case where the process is gone but the port isn't released yet. `mac-runner-host` already announces the actual `baseUrl` via `ready: <url>` on stdout so the Swift client picks up a shifted port transparently.
+
+The two layers cover different failure modes (stale process vs kernel TIME_WAIT) — see the 2026-05-10 project_decisions.md entry for why both are needed and not one or the other.
+
+**(2) Lock-on-plaintext UX.**
+- `mac-runner/Sources/main.swift`: new `@Published var isEncryptedSsd: Bool` set in `loadConfig()` from `SsdEncryption.isEffectivelyEncryptedForWriteGuard`.
+- New `stopChatHost(reason:)` is a subset of `lockSession` that doesn't zeroize unlock material.
+- New `startChatHost()` wraps the existing `ensureLocalChatStackRunning()`.
+- `ContentView` button row picks Lock (encrypted) vs Stop/Start (plaintext, gated on `networkApiBaseUrl != nil`).
+
+**(3) Chat cold-load timeout.**
+- `sendPrompt()`: replaced `URLSession(configuration: .default, ...)` with a custom `URLSessionConfiguration` that has `timeoutIntervalForRequest = 180` (was the default 60s). Server emits a `start` frame immediately so the timer resets on first byte; 180s comfortably covers cold-load on USB SSD without unbounding a wedged request.
+
+**Cross-OS parity audit (per 2026-05-07 rule):**
+- **Windows runner:** No equivalent Lock flow (auto-lock-on-blur was never wired) and no equivalent USB-SSD cold-load constraint. The C# port-shift in `RunnerLocalApiService` is shared so Windows passively benefits in the conflict case (same behavior when the configured port is free).
+- **Conclusion:** Mac-only PR; Windows benefits from the shared C# helper without UI changes.
+
+**Affected files (2):**
+- `mac-runner/Sources/main.swift` — lsof+kill in `restartHostSidecar`, `isEncryptedSsd` published var, `stopChatHost`/`startChatHost` methods, conditional button rendering in `ContentView`, URLSession timeout bump in `sendPrompt`.
+- `runner-core/Services/RunnerLocalApiService.cs` — `ResolveAvailablePort` helper + integration in `StartAsync`.
+
+**Acceptance / smoke (v1.3.20):**
+- CI green first run: `mac-prep-build` 1m13s, `mac-runner-build` 49s, `windows-build` 2m58s. ✅
+- v1.3.20 dispatched + shipped same-session. ✅
+- v1.3.20 Mac field test: Lock + re-select-SSD on plaintext drive should restart cleanly; plaintext button row should read Stop/Start; 8b model cold-load should not time out at 60s. ✅ All three confirmed by the user in the v1.3.20 field test.
+
+**Followup (not in this PR):**
+- v1.3.19 field-test issue #4: model-pull progress shows scrolling logs instead of a static label in PrepApp. Different surface (PrepApp pull path, not the runner), separate ticket. Not regression-introduced — pre-existing or from MAC36.
 

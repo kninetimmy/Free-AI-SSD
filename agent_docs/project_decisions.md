@@ -1968,3 +1968,149 @@ further and the inner-binary resolver in `OllamaPackageService`
 goes away.
 
 Established PR #237 (`edc99d3`), shipped v1.3.19.
+
+## 2026-05-10 — Long-running listener ports get a two-layer recovery path: lsof+kill on stale processes and port-shift on TIME_WAIT [MAC39]
+
+Mac runner field test (v1.3.19) wedged after Lock + re-select-SSD:
+the new `mac-runner-host` sidecar tried to bind the same port the
+prior listener had used and Kestrel raised `Failed to bind to
+address http://127.0.0.1:NNNNN: address already in use`. Quitting
+and relaunching the app was the only recovery. MAC34b had already
+solved the *equivalent* failure for ollama on port 11434 by killing
+PIDs holding the port via `lsof`; the sidecar port hadn't been
+covered.
+
+Two distinct failure modes can hold a port across a planned
+restart on macOS:
+
+1. **Stale process.** A prior process didn't exit cleanly (crash,
+   SIGKILL race, or the process is still in zombie state). `lsof
+   -nP -t -iTCP:port -sTCP:LISTEN` finds it; SIGTERM → SIGKILL
+   reclaims the port.
+2. **Kernel TIME_WAIT / cleanup delay.** The process is gone but
+   the kernel is still holding the port (briefly, but long enough
+   to fail an immediate rebind). `lsof` won't show this — the
+   socket is in a kernel state without a process attached.
+
+MAC39 covers both. For the chat-host port the Mac runner now does
+the lsof+kill before each `hostController.start()` (same pattern
+as MAC34b for ollama). For the kernel-cleanup case the Kestrel
+side picks a different port instead of waiting: the new
+`RunnerLocalApiService.ResolveAvailablePort(bindAddress,
+preferredPort)` scans `preferredPort..preferredPort+20` via a
+short-lived `TcpListener` probe, returns the first free port, and
+the host announces the actual `baseUrl` via the existing `ready:
+<url>` stdout line. The Mac Swift client (and any LAN consumer
+parsing `CurrentBaseUrl`) picks up the shifted port transparently.
+
+**Why both layers, not just one:**
+- lsof+kill alone leaves the TIME_WAIT case unfixed — Lock + fast
+  re-unlock would still fail because no straggler process is
+  there to kill.
+- Port-shift alone leaves the stale-process case half-fixed — the
+  shifted port works, but the original port is still held by a
+  zombie. Subsequent restarts keep climbing through ports until
+  +20 runs out. Killing the straggler keeps the working set
+  bounded to the configured port.
+
+**Why port-shift is safe for LAN consumers:** The default Mac
+runner posture is loopback-only (LAN exposure is OFF by default
+post-MAC34a, and the user must explicitly opt in). When LAN
+exposure is on, the configured port is the *preferred* port; if
+it's actually free at startup, the shift never fires. If it does
+fire, the shift is +1..+20 and the new URL is announced via
+`CurrentBaseUrl` to whatever local consumer cares (mac-runner
+parses `ready:` from stdout; Windows runner reads `CurrentBaseUrl`
+directly). LAN clients have to re-discover the URL after a host
+restart anyway because the loopback bind would have looked
+different to them — same operational property either way.
+
+**Apply to:** any future C# Kestrel host that the user can
+restart at runtime (the MAC39 helper lives on
+`RunnerLocalApiService` for now; promote to a shared utility if
+another host needs it). Don't apply to Ollama itself — Ollama's
+port is bound by the upstream binary, not by us, and the lsof+kill
+half (MAC34b) already covers Ollama's failure mode.
+
+Established PR #239 (`8eaa922`), shipped v1.3.20.
+
+## 2026-05-10 — Lock button is encryption-conditional; plaintext SSDs see Stop/Start [MAC39]
+
+After MAC30 (2026-05-09) made encryption opt-in, the default
+plaintext SSD had no unlock material to zeroize. The Mac runner's
+"Lock" button on a plaintext SSD was a misleading verb — it tore
+down the chat stack (sidecar + ollama) but left the user with no
+way to bring it back without re-selecting the SSD. The v1.3.19
+field test specifically called this out: "if encryption is
+present show lock, if not present start/stop?"
+
+The fix is a conditional verb in `ContentView`'s button row,
+driven by a new `@Published var isEncryptedSsd: Bool` set in
+`loadConfig()` from
+`SsdEncryption.isEffectivelyEncryptedForWriteGuard(ssdRoot:)`:
+
+- **Encrypted SSD:** keeps "Lock" — `lockSession()` continues to
+  do its full job (cancel chat, shut down sidecar, stop ollama,
+  zeroize unlock material, re-show the unlock dialog). The MAC5
+  / MAC30 invariant that the unlock material never outlives the
+  user's session is preserved on every encrypted drive.
+- **Plaintext SSD:** swaps to "Stop" or "Start" depending on
+  whether the chat host is currently up (gated on
+  `networkApiBaseUrl != nil`). The new `stopChatHost(reason:)` is
+  a subset of `lockSession`: cancels the in-flight chat task,
+  shuts down the sidecar, stops ollama, but does *not* touch
+  `unlockMaterial` (there isn't any), `portableConfig`, or the
+  model picker state. The new `startChatHost()` is a thin wrapper
+  on the existing `ensureLocalChatStackRunning()`.
+
+**Why not unify Lock with Stop on plaintext:** Lock has stronger
+semantics on encrypted drives — it intentionally ejects the user
+back to the unlock dialog. Reusing the same button verb for two
+different behaviors would obscure the security-relevant operation.
+Two verbs for two operations is correct; the conditional rendering
+just hides the wrong one.
+
+**Why not always show the button + grey out on encrypted-locked:**
+The encrypted-locked state already returns early in `loadConfig`
+and presents the unlock dialog; the button is hidden anyway via
+`!vm.isEncryptedLocked` for the encrypted side. The new code only
+adds the plaintext branch.
+
+This decision unlocks if encryption ever becomes mandatory again
+(unlikely — the v1.3.5 field test was the original push to make
+it optional, and MAC30 / v1.3.17 codified the default-OFF
+posture).
+
+Established PR #239 (`8eaa922`), shipped v1.3.20.
+
+## 2026-05-10 — Mac chat-stream URLSession timeout bumped to 180s for cold model loads [MAC39]
+
+`URLSessionConfiguration.default.timeoutIntervalForRequest` is 60s
+on macOS. The chat-stream contract from
+`runner-core/Services/RunnerLocalApiService.cs:209-263` emits a
+`start` frame immediately on receipt (before forwarding to ollama)
+so the per-request timer resets on first byte — but on cold model
+loads (5GB+ deepseek-r1:8b on USB SSD takes 30-90s before ollama
+emits the first token), 60s isn't always enough headroom. The
+v1.3.19 field test surfaced this as `Chat failed: The request
+timed out` on the first prompt against a freshly-pulled 8b model.
+
+Bumping the timeout to 180s for the chat session specifically
+(other URLSessions in the runner — library list, ingest, etc. —
+keep the default 60s) covers cold-load on every reasonable SSD
+without unbounding a genuinely wedged request. 180s is the
+ceiling on macOS for a chat that produces zero progress *between*
+frames; once tokens start streaming, every token resets the
+timer, so a long inference doesn't hit it.
+
+**Why client-side timeout, not server-side keepalive:** keepalive
+frames would mask actual server-side hangs. The current behavior
+("you stop seeing data → eventually fail") is the right
+diagnostic surface; 180s is just the right number for it.
+
+**Apply to:** any future Mac client that streams from a slow
+inference path. Don't apply to Windows — Windows is unaffected
+because (a) it doesn't have an equivalent "USB SSD on macOS"
+constraint and (b) HttpClient's defaults differ.
+
+Established PR #239 (`8eaa922`), shipped v1.3.20.
