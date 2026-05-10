@@ -106,7 +106,7 @@ Three flat buckets, one counter per bucket:
 | ~~M11~~ | (new) | ~~Most popular toggle on Mac picker after Refresh~~ — **done** PR #255 (`cf5713e`) 2026-05-10 | mac_project_backlog.md |
 | ~~M12~~ | (new) | ~~Mac runner chat UI parity to X13 (surface real failures)~~ — **done** PR #251 (`a52572c`) 2026-05-10 | mac_project_backlog.md |
 | ~~M13~~ | (new) | ~~"Expose API on LAN" toggle reverts itself on Mac~~ — **done** PR #249 (`e6b958e`) 2026-05-10 | mac_project_backlog.md |
-| M14 | (new) | Mac runner "Pull embedding model" UI button (parity with WPF; defense-in-depth for C2) | mac_project_backlog.md |
+| ~~M14~~ | (new) | ~~Mac runner "Pull embedding model" UI button (parity with WPF; defense-in-depth for C2)~~ — **done** PR #257 (`31f1bbc`) 2026-05-10 | mac_project_backlog.md |
 
 **Closed on this pass (no new ID):**
 
@@ -116,56 +116,55 @@ Three flat buckets, one counter per bucket:
 
 ## Priority order (2026-05-10 post-v1.3.22 triage)
 
-**P0 — Field-test bug surface (top of queue, ship before any feature):**
+**P0 — Field-test bug surface — CLEARED 2026-05-10.** All six items merged this session-cluster:
 
-1. **M14** — Mac runner "Pull embedding model" UI parity button (defense-in-depth for C2; reopens MAC35-deferred daemon-restart question)
-
+> **M14** (Mac runner Pull-embedding-model UI parity) — **done** PR #257 (`31f1bbc`) 2026-05-10. New `POST /api/models/embedding/pull` route on `RunnerLocalApiService` (Bearer-auth gated, reuses `IModelManagementService.PullEmbeddingModelAsync`); Mac UI gains a button in `DocumentsSection` calling the route via URLSession; WPF runner unchanged. MAC35-deferral reframe pinned in `project_decisions.md`: the daemon-restart concern didn't apply because `PullEmbeddingModelAsync` is just `POST /api/pull` against the running daemon and Ollama handles concurrent pull + chat. 3 new pins. CI green first run.
 > **M11** (Most-popular toggle perceived as no-op on Mac picker) — **done** PR #255 (`cf5713e`) 2026-05-10. Phase-1 instrumentation confirmed every layer worked end-to-end (host forwards 398/399 pull counts as Int64 NSNumbers, decoder preserves all 399, toggle ON yields visible=15 sorted desc by pulls). Bug is perception: ollama.com's natural order is already popularity-desc so capping 399 → 15 produces the same first-screenful. Fix is a new accent-cyan caption ("Showing top 15 of 399 by pulls.") rendered on both OS pickers, backed by a new shared pure helper `FreeAiSsd.Shared.Models.StarterRowCountCaption.Format` + Swift mirror `formatStarterRowCountCaption` carrying byte-identical wording. WPF wires `OnPropertyChanged` once via constructor subscription to `ModelRowsViewInvalidated` + `ModelRows.CollectionChanged`. 12 new pins (5 + 5 + 2). Decision pinned in `project_decisions.md`.
 > **C1** (large-model chat stall) — **done** PR #253 (`6cfae14`) 2026-05-10. Server-side heartbeat (`ChatService.FirstTokenPending` event every 20s while awaiting Ollama's first streamed token; forwarded by `/chat/stream` as `{type:"loading", elapsedSeconds:N}` NDJSON) keeps Mac URLSession's 180s per-packet timer alive across cold-loads AND paints a live `Loading <model>… NNs` indicator on both OSes. Per-request `SemaphoreSlim` write-gate added to `/chat/stream` for HttpResponse stream serialization. Boundary logs (request begin / first-token Ns / completion Ns) added via `SsdLogger.Info`. 2 new pins in `RunnerLocalApiServiceTests`. Decision pinned in `project_decisions.md`.
 > **M12** (Mac runner chat UI parity to X13) — **done** PR #251 (`a52572c`) 2026-05-10. New `chatError` red banner in `ContentView` covers the three X13 failure paths (mid-stream `error` frame, transport error, non-2xx HTTP body); new pure helper `RunnerChatErrorMessage.decode` extracted from a dead `apiErrorMessage` private method; `ChatStreamDelegate` now `.allow`s non-2xx responses and buffers the body for structured decoding. 7 new pins in `RunnerChatErrorMessageTests`. Decision pinned in `project_decisions.md`.
 > **M13** (Expose-API-on-LAN toggle reverts on Mac) — **done** PR #249 (`e6b958e`) 2026-05-10. Root cause was the async `.stopped` callback overwriting user intent on every restart; fix removes the auto-clear from `.stopped` and lets `.crashed` own involuntary state changes. Decision pinned in `project_decisions.md`.
 > **C2** (embedding-model provisioning gap) — **done** PR #247 (`1df4431`) 2026-05-10. Body retained below at line 286 with status banner; decision pinned in `project_decisions.md`.
 
-**P1 — F2a model-picker cluster (cross-OS bundle, ship after P0):**
+**P1 — F2a model-picker cluster (top of queue):**
 
-6. **C3** — Parameter-count filter (data already in scrape — cheapest)
-7. **C4** — Capability filter (scraper extension)
-8. **C5** — Sort by newest (scraper extension)
+1. **C3** — Parameter-count filter (data already in scrape — cheapest)
+2. **C4** — Capability filter (scraper extension)
+3. **C5** — Sort by newest (scraper extension)
 
 **P2 — Substantive UX:**
 
-9. **C6** — Detect-configured-drive flow (PrepApp UX; cross-OS)
+4. **C6** — Detect-configured-drive flow (PrepApp UX; cross-OS)
 
-**P3 — Existing critical / high items (deferred behind P0–P2):**
+**P3 — Existing critical / high items (deferred behind P1–P2):**
 
-10. **C7** (was X9) — encrypted config persistence lifecycle *(Critical, Opus planning)*
-11. **C8** (was X10) — document replacement consistency *(plan locked 2026-04-19)*
-12. **W1** (was X11) — companion keyboard PTT
-13. **C9** (was X12) — download verify-before-move
-14. **C10** (was F4 Stage 2) — post-setup launch flow
-15. **W2** (was F4 Stages 3-4) — companion install target + installer
-16. **C11** (was B2) — LAN discovery
-17. **C12** (was R1 Stage 2) — runner-cli slash-commands
-18. **M7** (was MAC20) — cross-platform release ZIP layout rework
+5. **C7** (was X9) — encrypted config persistence lifecycle *(Critical, Opus planning)*
+6. **C8** (was X10) — document replacement consistency *(plan locked 2026-04-19)*
+7. **W1** (was X11) — companion keyboard PTT
+8. **C9** (was X12) — download verify-before-move
+9. **C10** (was F4 Stage 2) — post-setup launch flow
+10. **W2** (was F4 Stages 3-4) — companion install target + installer
+11. **C11** (was B2) — LAN discovery
+12. **C12** (was R1 Stage 2) — runner-cli slash-commands
+13. **M7** (was MAC20) — cross-platform release ZIP layout rework
 
 **P4 — RAG audit batch (slot when v1.3.x feature work resumes):**
 
-19. **C13** (was X18) — ingest observability
-20. **C14** (was X15) — RAG file-size and chunk-size caps
-21. **C15** (was X19) — hybrid retrieval
-22. **C16** (was X20) — section-aware chunking
-23. **C17** (was X22) — prompt packing
-24. **C18** (was X23) — test fixtures
-25. **C19** (was X17) — textless-page diagnostic
+14. **C13** (was X18) — ingest observability
+15. **C14** (was X15) — RAG file-size and chunk-size caps
+16. **C15** (was X19) — hybrid retrieval
+17. **C16** (was X20) — section-aware chunking
+18. **C17** (was X22) — prompt packing
+19. **C18** (was X23) — test fixtures
+20. **C19** (was X17) — textless-page diagnostic
 
 **P5 — Polish:**
 
-26. **W3** (was X16) — unlock dialog dark theme
-27. **C20** (was X5) — GPU/CPU compute indicator
-28. **C21** (was X4) — web chat UI
-29. **W4** (was X7) — DCS bindings parser
-30. **C22** (was F5) — TTS settings UI
-31. **C23** (was X14) — 50 MB upload silent-reject UX
+21. **W3** (was X16) — unlock dialog dark theme
+22. **C20** (was X5) — GPU/CPU compute indicator
+23. **C21** (was X4) — web chat UI
+24. **W4** (was X7) — DCS bindings parser
+25. **C22** (was F5) — TTS settings UI
+26. **C23** (was X14) — 50 MB upload silent-reject UX
 
 **Back-burnered (do not pull without user nudge):**
 

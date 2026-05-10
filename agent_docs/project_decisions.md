@@ -2540,3 +2540,60 @@ process failure, file an item to add a CI check that diffs the
 caption strings.
 
 Established PR #255 (`cf5713e`).
+
+---
+
+## 2026-05-10 — Mac runner reaches the embedding-pull surface via a new HTTP route, not the stdin IPC [M14]
+
+`PullEmbeddingModelAsync` is exposed to the Mac runner UI through a new
+`POST /api/models/embedding/pull` route on `RunnerLocalApiService`,
+under the existing Bearer-auth middleware. Returns 200 `{success, model}`
+on success and 503 + ProblemDetails on the four failure paths (missing
+service, missing Ollama host, missing config name, pull-returned-false).
+WPF runner unchanged — it keeps calling `_modelService.PullEmbeddingModelAsync(host, ...)`
+directly in-process; both paths converge on the same `ModelManagementService`
+method and the same on-the-wire `POST /api/pull` to Ollama.
+
+**MAC35 deferral reframe.** The MAC35 PR body (line 3109 of
+`mac_project_backlog.md`) deferred this surface citing daemon-restart
+vs. parallel-daemon complexity ("Restaging that surface would require
+restarting the in-process daemon mid-chat or running a parallel temp
+daemon"). The M14 filing inherited that framing as Options A/B/C
+(`mac_project_backlog.md:3490`). **Reading the code disproved all three
+options.** `PullEmbeddingModelAsync` is a single `POST /api/pull`
+against the running Ollama daemon; Ollama handles concurrent pull +
+chat natively; no restart, no parallel daemon. WPF has done it this way
+the entire project lifetime. The actual gap was that the Mac UI lives
+in a separate process from the model service and the sidecar's existing
+HTTP API didn't expose model-pull routes — so the recovery just needed
+a new route, not new daemon-lifecycle machinery.
+
+**Choice of HTTP API over stdin IPC.** The Mac runner UI already talks
+to `mac-runner-host` via the sidecar's HTTP API (`/chat/stream`,
+`/library/*`, etc.) — adding a new `pull-embedding` stdin command would
+have created a second IPC surface for a single feature, and Companion
+clients would still need an HTTP equivalent. Routing through the HTTP
+API gives Mac UI + Companion app the same surface for free.
+
+**Choice of `libraryStatus` for UI feedback.** Mac surfaces success/
+failure via the existing `libraryStatus` text in `DocumentsSection`
+(`Pulling embedding model…` → `Embedding model ready: <model>` or the
+503 detail). No new red/orange banner because this is an operational
+status, not a chat error — M12's `chatError` banner is reserved for
+chat-flow failures.
+
+**Button placement.** The button lives in `DocumentsSection`'s action
+row next to Add Files / Add Folder / Sweep / Rebuild, but is gated only
+on `libraryBusy` — not on `activeLibraryId`. The embedder is a global
+Ollama resource, not per-library, so requiring an active library to
+recover would be a UX trap when the user has zero libraries (the
+scenario MAC35's deferred filing was worried about).
+
+**Why WPF stays in-process.** Refactoring WPF to call the new HTTP
+route would add blast radius (new code path, new test coverage needed,
+potential for subtle behavioral differences) for zero user-visible
+benefit. Both paths land at the same `ModelManagementService` method.
+Cross-OS parity is achieved at the *behavior* level, not the *transport*
+level.
+
+**Implementation reference.** PR #257 (M14, `31f1bbc`).

@@ -3479,7 +3479,11 @@ The two layers cover different failure modes (stale process vs kernel TIME_WAIT)
 
 ### M14 - Mac runner "Pull embedding model" UI parity button (defense-in-depth for C2)
 
-**Status:** filed 2026-05-10 from C2 PR #247 wrap-up per the parity rule. **Low — defense-in-depth only; PrepApp's auto-pull (C2) is the primary fix.**
+**Status:** **done** — PR #257 merged `31f1bbc` (2026-05-10). Pinned decision in `project_decisions.md`. **MAC35-deferral reframe captured at pickup:** the filing listed Options A/B/C (parallel temp daemon / pause-and-restart prod daemon / user-coordinated idle); none applied because `PullEmbeddingModelAsync` is just `POST /api/pull` against the running Ollama daemon and Ollama handles concurrent pull + chat natively. The actual gap was that the Mac UI lives in a separate process from the model service and the sidecar's HTTP API didn't expose model-pull routes; fix was a new `POST /api/models/embedding/pull` route on `RunnerLocalApiService` (Bearer-auth gated, reuses `IModelManagementService.PullEmbeddingModelAsync`) plus a button in `DocumentsSection` gated only on `libraryBusy`. WPF runner unchanged. 3 new pins. Field-test pin tracked in `project_state.md` Open questions.
+
+**Historical filing (preserved for memory):**
+
+**Status (historical):** filed 2026-05-10 from C2 PR #247 wrap-up per the parity rule. **Low — defense-in-depth only; PrepApp's auto-pull (C2) is the primary fix.**
 **Scope:** Mac runner UI surface; reopens MAC35-deferred daemon-restart question.
 **Model:** Sonnet 4.6.
 
