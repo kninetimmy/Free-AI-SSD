@@ -245,14 +245,10 @@ No "list documents" or "reindex" endpoint exists today. See Stage 2.
 
 ### F2a â€” Model picker UX gaps surfaced on v1.3.5 field test
 
-**Status:** planned 2026-05-08. Filed during the v1.3.5 mac field test that confirmed F2's live catalog refresh works (399 models pulled cleanly from `ollama.com/library`). Two UX gaps:
+**Status:** **done** — merged 2026-05-10 (PR #243, merge commit `859ac08`). Released as **v1.3.22**. Both UX gaps closed; sort superseded by Most-popular toggle + free-text search (the user's revised UX direction was clearer than alphabetize/size/tier sort, and the field-test feedback supported it). Mac frame cap dropped — `EncryptionSetupStepView` ScrollView now fills available space. Cross-OS in one PR per parity rule (Mac + Windows). New `PullCount` field flows from `ollama.com/library` scrape (`x-test-pull-count`) through `StarterModelEntry` → `StarterCatalogEntry` → `ModelGridRow`. Bundled catalog stays without pull counts by design — popular toggle surfaces an explicit "Refresh first" empty state on Mac. WPF row-class behavior recorded in `project_decisions.md` (configured + on-disk rows always pass popular filter; only `Recommended` rows get the top-15 cap). 14 new test pins (6 Swift + 8 C#) + 7 new scrape pins. CI green first push.
 
-1. **No sort.** 399 entries render in catalog order; user has no way to alphabetize, sort by size, or group by tier. Add a sort selector (Name / Size / Tier) to the picker header on both Windows + Mac. Tier already exists as a chip on each row, so a tier-grouping mode is cheap.
-2. **Picker doesn't fill the window.** Mac `EncryptionSetupStepView`'s ScrollView is locked at `.frame(minHeight: 120, maxHeight: 240)` (`mac-prep-app/Sources/main.swift:294`), so resizing the window leaves the picker stuck at 240px while everything else stretches. Replace the upper bound with `.frame(maxHeight: .infinity)` and let the parent VStack distribute space. Audit Windows MainWindow.xaml for the parallel issue (likely a `Grid.RowDefinitions` `Height="Auto"` or a fixed pixel height on the model panel).
-
-**Scope:** small / cosmetic. Bundle both OSes per the cross-OS parity rule.
-**Affected files:** `mac-prep-app/Sources/main.swift` (ScrollView frame + sort selector), `prep-app/MainWindow.xaml` (model grid sort + row height), shared sort helper if natural.
-**Model:** Sonnet 4.6.
+**Affected files (final):** `mac-prep-app/Sources/main.swift` (ScrollView frame + new action row), `mac-prep-app/Sources/PrepViewModel.swift` + `StarterCatalogTypes.swift` (filter state + pure helper), `mac-prep-app/Tests/PrepAppTests.swift` (6 pins), `prep-app/MainWindow.xaml` + `MainWindow.xaml.cs` (search + popular row + CollectionView filter wiring), `shared/Models/PrepModels.cs` + `shared/ViewModels/PrepViewModel.cs` (PullCount field + filter state + `IsModelRowVisible` predicate), `prep-core/StarterModelCatalog.cs` + `Services/LiveModelCatalogService.cs` (`PullCount` field + `ParsePullCount` + scrape integration), `tests/PrepViewModelTests.cs` (8 pins), `tests/LiveModelCatalogServiceTests.cs` (7 pins), `mac-prep-host/HostLifetime.cs` (forward `pullCount` in catalog payloads), `.github/workflows/build.yml` (test compile gains `StarterCatalogTypes.swift`).
+**Model:** Opus 4.7.
 
 ---
 

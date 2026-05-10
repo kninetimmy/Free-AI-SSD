@@ -2146,3 +2146,30 @@ log is sufficient and the equivalent HTTP call would be more
 ceremony for no benefit.
 
 Established PR #241 (`b5ac727`), shipped v1.3.21.
+
+## 2026-05-10 — F2a: "Most popular" cap applies only to Recommended-source rows
+
+On the WPF merged Models grid (`prep-app/MainWindow.xaml`), the
+"Most popular" toggle restricts visibility to the top-15 entries
+by ollama.com pull count — but **only for `Recommended`-source
+rows.** Configured rows (`Source = "Config"`) and on-disk rows
+(`Source = "Disk"`) always pass the filter.
+
+**Why:** The merged grid surfaces three semantically different row
+classes through one collection. The user already chose / installed
+the Configured + on-disk entries — hiding them behind a popularity
+filter would obscure their own work. The popular cap exists to
+shrink the *discovery* surface (the 399-entry post-Refresh
+catalog), not to gate already-tracked state.
+
+**Implementation:** `PrepViewModel.IsModelRowVisible(row)` checks
+`IsStarterOnlyRecommendationRow(row)` before consulting the
+precomputed top-N tag set. The Mac picker doesn't have this
+issue because `EncryptionSetupStepView` only renders catalog
+entries (no row-class mixing).
+
+**Search**, by contrast, runs uniformly across all three row
+classes — search is "find this thing," not "narrow the discovery
+surface," so it should match anywhere.
+
+Established PR #243 (`859ac08`), shipped v1.3.22.
