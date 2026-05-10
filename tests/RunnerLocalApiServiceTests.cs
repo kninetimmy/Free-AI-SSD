@@ -605,6 +605,64 @@ public sealed class RunnerLocalApiServiceTests
         await fixture.DisposeAsync();
     }
 
+    [Fact]
+    public async Task PullEmbedding_Succeeds_Returns200WithModelName()
+    {
+        var model = new FakeModelManagementService();
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: false, modelService: model, embeddingModelName: "nomic-embed-text:latest");
+        using var http = new HttpClient();
+
+        var response = await http.PostAsync($"{fixture.BaseUrl}/api/models/embedding/pull", content: null);
+
+        response.EnsureSuccessStatusCode();
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(json.GetProperty("success").GetBoolean());
+        Assert.Equal("nomic-embed-text:latest", json.GetProperty("model").GetString());
+        Assert.Equal(1, model.PullCallCount);
+        Assert.Equal("nomic-embed-text:latest", model.LastPulledModelName);
+        Assert.Equal("127.0.0.1:11434", model.LastPulledHost);
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task PullEmbedding_ServiceReturnsFalse_Returns503WithDetail()
+    {
+        var model = new FakeModelManagementService { PullSucceeds = false };
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: false, modelService: model, embeddingModelName: "nomic-embed-text:latest");
+        using var http = new HttpClient();
+
+        var response = await http.PostAsync($"{fixture.BaseUrl}/api/models/embedding/pull", content: null);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var detail = json.GetProperty("detail").GetString() ?? string.Empty;
+        Assert.Contains("nomic-embed-text:latest", detail, StringComparison.Ordinal);
+        Assert.Equal(1, model.PullCallCount);
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task PullEmbedding_MissingBearer_Returns401()
+    {
+        var model = new FakeModelManagementService();
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: true, allowTts: false, modelService: model, embeddingModelName: "nomic-embed-text:latest");
+        using var http = new HttpClient();
+
+        var unauthorized = await http.PostAsync($"{fixture.BaseUrl}/api/models/embedding/pull", content: null);
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
+        Assert.Equal(0, model.PullCallCount);
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, $"{fixture.BaseUrl}/api/models/embedding/pull");
+        req.Headers.Add("Authorization", "Bearer secret-key");
+        var authorized = await http.SendAsync(req);
+        authorized.EnsureSuccessStatusCode();
+        Assert.Equal(1, model.PullCallCount);
+
+        await fixture.DisposeAsync();
+    }
+
     private sealed class RunnerLocalApiFixture : IAsyncDisposable
     {
         private readonly RunnerLocalApiService _service;
@@ -628,14 +686,16 @@ public sealed class RunnerLocalApiServiceTests
             bool allowRemoteStt = false,
             bool allowVoiceQuery = false,
             bool voiceAutoSendToChat = true,
-            int maxUploadMb = 10)
+            int maxUploadMb = 10,
+            IModelManagementService? modelService = null,
+            string? embeddingModelName = null)
         {
             var chat = new FakeChatService();
             var stt = new FakeSttService();
             var tts = new FakeTtsService();
             var ttsProvider = new TtsProvider();
             ttsProvider.SetCurrent(tts);
-            var service = new RunnerLocalApiService(chat, stt, ttsProvider, logger: null);
+            var service = new RunnerLocalApiService(chat, stt, ttsProvider, logger: null, modelService: modelService);
             var config = new PortableConfig
             {
                 NetworkModeEnabled = true,
@@ -648,6 +708,7 @@ public sealed class RunnerLocalApiServiceTests
                 NetworkAllowRemoteVoiceQuery = allowVoiceQuery,
                 NetworkVoiceAutoSendToChat = voiceAutoSendToChat,
                 NetworkMaxAudioUploadMB = maxUploadMb,
+                EmbeddingModelName = embeddingModelName ?? "nomic-embed-text",
                 Models = new List<ModelConfigEntry>
                 {
                     new() { Name = "phi3", Status = ModelInstallStatus.Installed }
@@ -927,6 +988,29 @@ public sealed class RunnerLocalApiServiceTests
         }
 
         public void Dispose() { }
+    }
+
+    private sealed class FakeModelManagementService : IModelManagementService
+    {
+        public event Action<string>? LogMessage;
+
+        public bool PullSucceeds { get; set; } = true;
+        public int PullCallCount { get; private set; }
+        public string? LastPulledHost { get; private set; }
+        public string? LastPulledModelName { get; private set; }
+
+        public List<string> GetInstalledModelNames(PortableConfig config) => new();
+        public List<string> GetModelSizingWarnings(PortableConfig config) => new();
+        public bool IsSizingWarningDismissed(string ssdRoot) => true;
+        public Task DismissSizingWarningAsync(string ssdRoot) => Task.CompletedTask;
+
+        public Task<bool> PullEmbeddingModelAsync(string host, string modelName)
+        {
+            PullCallCount++;
+            LastPulledHost = host;
+            LastPulledModelName = modelName;
+            return Task.FromResult(PullSucceeds);
+        }
     }
 
     private static MultipartFormDataContent CreateWavUploadContent(string? model = "phi3", bool? autoSendToChat = null, bool? speakResponse = null, bool? returnAudio = null)

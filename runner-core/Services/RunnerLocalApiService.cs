@@ -202,6 +202,55 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             return Results.Ok(new { models });
         });
 
+        // M14: defense-in-depth recovery path for the embedding model. C2 made
+        // PrepApp auto-pull during Download/Finalize, but a user who lands on
+        // the runner with the embedder missing (manual SSD tamper, partial
+        // prep, mid-chat delete) has no in-app recovery without this route.
+        // The Windows runner already has a Pull-embedding button that calls
+        // ModelManagementService directly in-process (runner/MainWindow.xaml.cs).
+        // The Mac runner UI lives in a separate process and reaches the
+        // sidecar over HTTP, so the recovery has to be an API surface.
+        //
+        // MAC35 deferred this work over a daemon-restart concern; reading the
+        // code disproves it — PullEmbeddingModelAsync is just POST /api/pull
+        // against the running Ollama daemon, which handles concurrent
+        // chat + pull without restart. The Windows runner has done this for
+        // the entire project lifetime.
+        api.MapPost("/models/embedding/pull", async () =>
+        {
+            if (_modelService is null)
+            {
+                return Results.Problem(
+                    detail: "Model management service is not available on this runner.",
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            if (string.IsNullOrWhiteSpace(ollamaHost))
+            {
+                return Results.Problem(
+                    detail: "Ollama host is not running. Start Ollama before pulling the embedding model.",
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            var modelName = config.EmbeddingModelName?.Trim();
+            if (string.IsNullOrWhiteSpace(modelName))
+            {
+                return Results.Problem(
+                    detail: "Embedding model name is not configured.",
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            var success = await _modelService.PullEmbeddingModelAsync(ollamaHost, modelName);
+            if (!success)
+            {
+                return Results.Problem(
+                    detail: $"Unable to pull embedding model '{modelName}'. Connect to the internet and try again.",
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            return Results.Ok(new { success = true, model = modelName });
+        });
+
         api.MapPost("/chat", async (HttpContext context, ChatRequest request, CancellationToken ct) =>
         {
             var error = ValidateChatRequest(request);

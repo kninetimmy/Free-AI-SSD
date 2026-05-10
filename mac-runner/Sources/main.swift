@@ -1194,6 +1194,60 @@ final class RunnerViewModel: ObservableObject {
         runSseLibraryOp(verb: "Rebuild", endpoint: "rebuild")
     }
 
+    /// M14: defense-in-depth recovery for the embedding model. C2 made
+    /// PrepApp auto-pull during Download/Finalize so this button should
+    /// rarely run, but a user who lands on the runner with the embedder
+    /// missing (manual tamper, partial prep, mid-chat delete) has no other
+    /// in-app recovery — they would otherwise have to go back to PrepApp
+    /// and re-finalize.
+    ///
+    /// Mirrors `PullEmbeddingModel_Click` in the Windows runner
+    /// (`runner/MainWindow.xaml.cs`). The route accepts no body and uses
+    /// the embedding model name from the sidecar's PortableConfig, so the
+    /// UI side only has to POST and surface success / failure.
+    func pullEmbeddingModel() {
+        guard let baseUrl = networkApiBaseUrl,
+              let url = URL(string: "\(baseUrl)/api/models/embedding/pull") else {
+            libraryStatus = "Start Network Mode first."
+            return
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        if let key = apiKeyForLocalApiRequest() {
+            req.addValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
+
+        libraryBusy = true
+        libraryStatus = "Pulling embedding model…"
+        URLSession.shared.dataTask(with: req) { [weak self] data, urlResponse, error in
+            guard let self else { return }
+            DispatchQueue.main.async { self.libraryBusy = false }
+            if let error {
+                DispatchQueue.main.async {
+                    self.libraryStatus = "Pull failed: \(error.localizedDescription)"
+                }
+                return
+            }
+            if let http = urlResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                let msg = RunnerChatErrorMessage.decode(statusCode: http.statusCode, body: data)
+                DispatchQueue.main.async { self.libraryStatus = msg }
+                return
+            }
+            var modelName = ""
+            if let data,
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let m = obj["model"] as? String {
+                modelName = m
+            }
+            DispatchQueue.main.async {
+                self.libraryStatus = modelName.isEmpty
+                    ? "Embedding model ready."
+                    : "Embedding model ready: \(modelName)"
+            }
+        }.resume()
+    }
+
     private func runSseLibraryOp(verb: String, endpoint: String) {
         guard let activeId = activeLibraryId else {
             libraryStatus = "Create or select a library first."
@@ -1615,6 +1669,12 @@ struct DocumentsSection: View {
                         .disabled(vm.libraryBusy || vm.activeLibraryId == nil)
                     Button("Rebuild") { vm.rebuildActiveLibrary() }
                         .disabled(vm.libraryBusy || vm.activeLibraryId == nil)
+                    // M14: parity with WPF runner's Index-tools button.
+                    // Not gated on activeLibraryId — the embedding model is
+                    // a global resource on the running Ollama daemon, not
+                    // a per-library asset.
+                    Button("Pull embedding model") { vm.pullEmbeddingModel() }
+                        .disabled(vm.libraryBusy)
                     Spacer()
                 }
 
