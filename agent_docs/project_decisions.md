@@ -2301,4 +2301,4 @@ sidecar can stop without going through `shutdown()` AND without
 exit shim); (b) a separate UI state distinct from "user wants LAN"
 needs to flow through the same toggle.
 
-Established PR (TBD on M13 merge).
+Established PR #249 (`e6b958e`).
