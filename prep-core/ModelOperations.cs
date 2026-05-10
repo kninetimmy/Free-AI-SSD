@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using FreeAiSsd.Shared.Helpers;
+using FreeAiSsd.Shared.Services;
 
 namespace FreeAiSsd.PrepApp;
 
@@ -12,35 +13,45 @@ namespace FreeAiSsd.PrepApp;
 public sealed class ModelOperations
 {
     /// <summary>
-    /// Downloads a model from the Ollama registry using the bundled Ollama CLI.
-    /// Sets OLLAMA_MODELS to redirect storage to the SSD's models directory.
-    /// After pulling, locates the model's primary blob and computes its SHA-256 hash.
+    /// Downloads a model by streaming Ollama's <c>POST /api/pull</c> NDJSON
+    /// response from a server already listening at <paramref name="ollamaHost"/>.
+    /// The server-side process owns OLLAMA_MODELS — callers stage that env
+    /// when they start the temp server (see <see cref="OllamaServerHandle"/>);
+    /// <paramref name="modelRoot"/> here is only used for the post-pull blob
+    /// lookup + SHA-256 verification.
+    ///
+    /// Replaces the prior subprocess + TUI-stdout parser. The CLI rendering
+    /// shifted shape between Ollama versions and broke the in-place progress
+    /// label after MAC38 dropped the static version pin; the JSON API is
+    /// what the CLI itself consumes, so a contract that's stable across
+    /// upstream releases.
     /// </summary>
-    /// <param name="ollamaExe">Path to the Ollama executable.</param>
-    /// <param name="modelRoot">Path to the SSD's models directory.</param>
+    /// <param name="ollamaExe">Unused for the pull path (retained for the
+    /// IModelService delete signature). The caller is expected to have
+    /// started a temp server pointing at this binary.</param>
+    /// <param name="modelRoot">SSD models directory (or staging root, on
+    /// Mac post-MAC35) — read for the post-pull blob hash, not written.</param>
     /// <param name="modelTag">Model tag to pull (e.g., "llama3.2:3b").</param>
-    /// <param name="onLog">Callback for streaming pull progress to the UI.</param>
-    /// <param name="ct">Cancellation token for aborting the download.</param>
-    /// <returns>Pull result containing the SHA-256 hash and file size of the model blob.</returns>
-    public async Task<PullModelResult> PullModelAsync(string ollamaExe, string modelRoot, string modelTag, Action<string> onLog, CancellationToken ct, string? ollamaHost = null, Action<string>? onProgress = null)
+    /// <param name="onLog">Callback for status messages around the pull
+    /// (entry/exit only — per-frame progress flows through onProgress).</param>
+    /// <param name="ct">Cancellation token; aborts the HTTP request.</param>
+    /// <param name="ollamaHost">Required. Host string from
+    /// <see cref="OllamaServerHandle.Host"/> (e.g. <c>127.0.0.1:11434</c>).</param>
+    /// <param name="onProgress">Optional structured progress sink. Every
+    /// NDJSON frame from the pull stream is forwarded.</param>
+    public async Task<PullModelResult> PullModelAsync(string ollamaExe, string modelRoot, string modelTag, Action<string> onLog, CancellationToken ct, string? ollamaHost = null, Action<OllamaPullProgress>? onProgress = null)
     {
-        var env = new Dictionary<string, string>
+        if (string.IsNullOrWhiteSpace(ollamaHost))
         {
-            ["OLLAMA_MODELS"] = modelRoot
-        };
-        if (ollamaHost is not null)
-            env["OLLAMA_HOST"] = ollamaHost;
-
-        // MAC31: onProgress is opt-in. When set, Ollama's TUI progress
-        // lines (after ANSI strip) are routed there instead of onLog so
-        // the PrepApp can render a single in-place progress line. When
-        // null, callers see the legacy behavior (every tick lands in the
-        // log surface) so existing call sites don't have to change.
-        var exitCode = await RunProcessStreamingAsync(ollamaExe, BuildOllamaArgs("pull", modelTag), Path.GetDirectoryName(ollamaExe)!, env, onLog, ct, onProgress);
-        if (exitCode != 0)
-        {
-            throw new InvalidOperationException($"Failed to pull model {modelTag}. Exit code: {exitCode}");
+            throw new InvalidOperationException(
+                $"PullModelAsync requires ollamaHost (the URL of a running Ollama server). The PrepApp lifecycle starts a temporary server before pulling — see HostLifetime.PullModelAsync / PrepViewModel.DownloadAsync.");
         }
+
+        await OllamaPullClient.PullAsync(
+            ollamaHost,
+            modelTag,
+            onProgress ?? (_ => { }),
+            ct);
 
         // After successful pull, locate the model blob to compute its integrity hash.
         var modelFile = FindModelBlobForModel(modelRoot, modelTag)
@@ -368,7 +379,7 @@ public sealed class ModelOperations
     /// Uses ArgumentList (not Arguments string) for safe argument passing.
     /// Registers a cancellation callback that kills the process tree on cancellation.
     /// </summary>
-    private static async Task<int> RunProcessStreamingAsync(string fileName, IReadOnlyList<string> arguments, string workingDirectory, IDictionary<string, string> env, Action<string> onOutput, CancellationToken ct, Action<string>? onProgress = null)
+    private static async Task<int> RunProcessStreamingAsync(string fileName, IReadOnlyList<string> arguments, string workingDirectory, IDictionary<string, string> env, Action<string> onOutput, CancellationToken ct)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -413,8 +424,8 @@ public sealed class ModelOperations
         // Consume stdout and stderr concurrently to prevent buffer deadlocks.
         // Consume uses ReadLineAsync (not the blocking EndOfStream property),
         // so both tasks yield immediately and resume on the caller's sync context.
-        var outputTask = Consume(process.StandardOutput, onOutput, ct, onProgress);
-        var errorTask = Consume(process.StandardError, onOutput, ct, onProgress);
+        var outputTask = Consume(process.StandardOutput, onOutput, ct);
+        var errorTask = Consume(process.StandardError, onOutput, ct);
 
         await Task.WhenAll(outputTask, errorTask, process.WaitForExitAsync());
         ct.ThrowIfCancellationRequested();
@@ -426,47 +437,19 @@ public sealed class ModelOperations
     /// for each non-empty line until EOF.
     /// Uses ReadLineAsync (returns null at EOF) instead of the EndOfStream property,
     /// which is synchronous and blocks the calling thread when no data is available.
-    ///
-    /// MAC31: when <paramref name="onProgress"/> is provided, the line is
-    /// run through <see cref="OllamaPullProgressFilter"/> first.
-    /// Lines that match Ollama's progress shape (<c>pulling &lt;hash&gt;... NN%</c>)
-    /// are routed to onProgress instead of onOutput so the PrepApp UI can
-    /// render them as a single in-place progress line. ANSI cursor-rewrite
-    /// escapes are always stripped before forwarding so the log surface
-    /// stays human-readable. A throwing onProgress is contained so a
-    /// misbehaving UI dispatcher cannot leave the pipe unread.
     /// </summary>
-    private static async Task Consume(StreamReader reader, Action<string> onOutput, CancellationToken ct, Action<string>? onProgress = null)
+    private static async Task Consume(StreamReader reader, Action<string> onOutput, CancellationToken ct)
     {
         try
         {
             while (await reader.ReadLineAsync(ct) is { } line)
             {
-                var cleaned = onProgress is null
-                    ? line
-                    : OllamaPullProgressFilter.Clean(line);
+                if (string.IsNullOrWhiteSpace(line)) continue;
 
-                if (string.IsNullOrWhiteSpace(cleaned))
-                {
-                    continue;
-                }
-
-                if (onProgress is not null && OllamaPullProgressFilter.IsProgressLine(cleaned))
-                {
-                    try { onProgress(cleaned); }
-                    catch
-                    {
-                        // A misbehaving onProgress must not stop the
-                        // consumer — same invariant as the onLog catch
-                        // in OllamaServerHandle.ConsumeAsync.
-                    }
-                    continue;
-                }
-
-                try { onOutput(cleaned); }
+                try { onOutput(line); }
                 catch
                 {
-                    // Same containment as onProgress above.
+                    // A misbehaving onOutput must not stop the consumer.
                 }
             }
         }
