@@ -2114,3 +2114,35 @@ because (a) it doesn't have an equivalent "USB SSD on macOS"
 constraint and (b) HttpClient's defaults differ.
 
 Established PR #239 (`8eaa922`), shipped v1.3.20.
+
+## 2026-05-10 — Model-pull progress source-of-truth is the Ollama HTTP API, not CLI stdout text [MAC40]
+
+`ModelOperations.PullModelAsync` consumes Ollama's `POST /api/pull`
+streaming NDJSON response and surfaces it as structured
+`OllamaPullProgress` frames (`Status`, `Digest`, `Total`,
+`Completed`). The pre-MAC40 path spawned `ollama pull <tag>` as
+a subprocess and parsed its TUI stdout; the v1.3.20 field test
+showed why that's the wrong abstraction.
+
+The CLI rendering is itself a downstream consumer of `/api/pull`
+— the binary is just an HTTP client that prints what it gets.
+Parsing the rendered text means our code is tied to the CLI's
+human-facing format choices: MAC31's regex `pulling <hash>... NN%`
+broke when post-MAC38 Ollama shifted the dots to a colon.
+Broadening the regex defers the next break; switching to the
+JSON contract eliminates the regression class because Ollama
+maintains the API across versions.
+
+**Apply to:** any future "parse the CLI's stdout to discover
+state" temptation. If Ollama (or any tool we wrap) exposes an
+HTTP/JSON contract for the same data, prefer that — even at the
+cost of a bigger refactor than text-scraping. The principle is
+"parse the source of truth, not the rendering."
+
+**Doesn't apply to:** delete-model and other one-shot CLI
+operations where there's no progress stream to consume. Those
+stay on `RunProcessStreamingAsync` because exit-code-and-final-
+log is sufficient and the equivalent HTTP call would be more
+ceremony for no benefit.
+
+Established PR #241 (`b5ac727`), shipped v1.3.21.
