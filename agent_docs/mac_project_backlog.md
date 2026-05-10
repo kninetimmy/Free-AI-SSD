@@ -3459,3 +3459,31 @@ The two layers cover different failure modes (stale process vs kernel TIME_WAIT)
 
 **Exit criterion:** Toggle stays ON when conditions are met; reverts only with a visible, actionable explanation when it cannot engage.
 
+### M14 - Mac runner "Pull embedding model" UI parity button (defense-in-depth for C2)
+
+**Status:** filed 2026-05-10 from C2 PR #247 wrap-up per the parity rule. **Low — defense-in-depth only; PrepApp's auto-pull (C2) is the primary fix.**
+**Scope:** Mac runner UI surface; reopens MAC35-deferred daemon-restart question.
+**Model:** Sonnet 4.6.
+
+**Driver:** C2 (PR #247) made PrepApp the sole party for embedding-model provisioning. The WPF Runner already has a recovery action — `PullEmbeddingModel_Click` in `runner/MainWindow.xaml.cs:1097` calls `ModelManagementService.PullEmbeddingModelAsync` against the running daemon when the embedder is missing. The Mac runner has no equivalent. If a user lands on a Mac Runner with a missing embedder (manually-tampered SSD, partial prep, mid-chat embedder deletion), they have no in-app recovery — they have to go back to PrepApp and re-finalize. The parity rule mandates filing this as the next task per `project_decisions.md` 2026-05-10.
+
+**Foreseen tension:** MAC35 explicitly deferred runner-side `PullEmbeddingModelAsync` because pulling against the long-running in-process daemon either restarts the daemon (interrupting any active chat stream) or stands up a parallel temp daemon (port allocation + lifecycle complexity). C2 sidesteps this by putting the eager pull in PrepApp; M14 reopens the same question because the runner is the only place to recover post-prep.
+
+**Approach (sketch — re-triage at pickup):**
+- **Option A: parallel temp daemon for the pull.** Mirror PrepApp's `StartTemporaryServerAsync` pattern in the runner, scoped to a single pull. Daemon dies after the pull completes. Tricky port allocation if the production daemon is on the default port.
+- **Option B: pause-and-restart the production daemon.** Stop the in-process daemon, run the pull, restart it. Interrupts any active chat stream and is heavy-handed for a 270 MB pull.
+- **Option C: surface in UI but require user confirmation that chat is idle.** Smaller engineering surface; user-coordinated. Not ideal UX.
+
+**Cross-OS audit:** Windows runner already has the button (existing `PullEmbeddingModel_Click`); the Windows daemon implementation is the same in-process Ollama instance Mac uses, so whichever option Mac picks may also need to be retrofitted for Windows. Today the WPF button works because... (verify at pickup; may have an undocumented path that's safe today but won't survive C2's cross-OS framing).
+
+**Affected files (expected):**
+- `mac-runner/Sources/ContentView.swift` — UI surface for the recovery button.
+- `mac-runner/Sources/main.swift` — IPC route to the sidecar.
+- `mac-runner-host/HostLifetime.cs` — sidecar handler that calls into `runner-core/Services/ModelManagementService.PullEmbeddingModelAsync`.
+- `runner-core/Services/ModelManagementService.cs` — already has the method; verify it works against the sidecar's daemon.
+- `tests/MacRunnerHost*.cs` — pin the new IPC route end-to-end.
+
+**Exit criterion:** On a Mac Runner with the embedder missing, clicking "Pull embedding model" pulls it without taking down active chat (or with a clear "stop active chat first" UX). After pull, ingest succeeds without a re-prep.
+
+**Watch for:** chat-stream interruption regressions; port-allocation conflicts with the production daemon; any C2 follow-up symptom that suggests the eager-pull path isn't enough.
+
