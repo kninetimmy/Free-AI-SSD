@@ -2346,4 +2346,4 @@ Ships unrevisited unless: (a) the server adopts a third error shape
 + category + message) rather than a flat string — at which point
 the helper's return type widens to a struct.
 
-Established PR (TBD on M12 merge).
+Established PR #251 (`a52572c`).
