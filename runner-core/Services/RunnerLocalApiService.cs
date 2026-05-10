@@ -235,45 +235,78 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             context.Response.StatusCode = StatusCodes.Status200OK;
             context.Response.ContentType = "application/x-ndjson";
 
-            await WriteNdjsonAsync(context.Response, new
+            // C1: serialize NDJSON writes through a per-request gate. The
+            // heartbeat handler below fires from a thread-pool tick that
+            // cannot await the response write without blocking the timer,
+            // so we fire-and-forget it — but onToken and completion writes
+            // run on the request-pipeline thread and could otherwise
+            // interleave with an in-flight heartbeat write on the same
+            // HttpResponse stream (not concurrent-safe).
+            using var writeGate = new SemaphoreSlim(1, 1);
+            async Task WriteFrameAsync(object payload)
+            {
+                await writeGate.WaitAsync(ct);
+                try { await WriteNdjsonAsync(context.Response, payload, ct); }
+                finally { writeGate.Release(); }
+            }
+
+            await WriteFrameAsync(new
             {
                 type = "start",
                 model = request.Model.Trim(),
                 usedRagContext = false,
                 sources = Array.Empty<string>()
-            }, ct);
+            });
 
-            var streamResult = await _chatService.SendPromptStreamingAsync(
-                request.Model.Trim(),
-                request.Prompt.Trim(),
-                ollamaHost,
-                config,
-                onToken: token => WriteNdjsonAsync(context.Response, new { type = "token", token }, ct),
-                cancellationToken: ct);
+            // C1: forward ChatService.FirstTokenPending heartbeats as NDJSON
+            // `loading` frames. Each frame keeps the Mac URLSession 180s
+            // per-packet timer alive across cold-load and lets the client paint
+            // a "Loading <model>… NNs" indicator.
+            void OnFirstTokenPending(int seconds)
+            {
+                _ = WriteFrameAsync(new { type = "loading", elapsedSeconds = seconds });
+            }
+            _chatService.FirstTokenPending += OnFirstTokenPending;
+
+            ChatResult streamResult;
+            try
+            {
+                streamResult = await _chatService.SendPromptStreamingAsync(
+                    request.Model.Trim(),
+                    request.Prompt.Trim(),
+                    ollamaHost,
+                    config,
+                    onToken: token => WriteFrameAsync(new { type = "token", token }),
+                    cancellationToken: ct);
+            }
+            finally
+            {
+                _chatService.FirstTokenPending -= OnFirstTokenPending;
+            }
 
             switch (streamResult)
             {
                 case ChatResult.Success s:
-                    await WriteNdjsonAsync(context.Response, new
+                    await WriteFrameAsync(new
                     {
                         type = "complete",
                         usedRagContext = s.Response.UsedRagContext,
                         sources = s.Response.Sources ?? new List<string>(),
                         responseText = s.Response.ResponseText
-                    }, ct);
+                    });
                     break;
                 case ChatResult.RagRetrievalFailed r:
-                    await WriteNdjsonAsync(context.Response, new { type = "rag-warning", message = r.RagError }, ct);
-                    await WriteNdjsonAsync(context.Response, new
+                    await WriteFrameAsync(new { type = "rag-warning", message = r.RagError });
+                    await WriteFrameAsync(new
                     {
                         type = "complete",
                         usedRagContext = r.Response.UsedRagContext,
                         sources = r.Response.Sources ?? new List<string>(),
                         responseText = r.Response.ResponseText
-                    }, ct);
+                    });
                     break;
                 case ChatResult.Failure f:
-                    await WriteNdjsonAsync(context.Response, new { type = "error", message = f.ErrorMessage }, ct);
+                    await WriteFrameAsync(new { type = "error", message = f.ErrorMessage });
                     break;
             }
         });

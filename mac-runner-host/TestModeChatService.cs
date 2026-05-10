@@ -14,6 +14,10 @@ internal sealed class TestModeChatService : IChatService
 {
     public event Action<string>? LogMessage;
 
+    // C1: required by IChatService. Test-mode never simulates a cold-load,
+    // so this never fires — but it must exist to satisfy the contract.
+    public event Action<int>? FirstTokenPending;
+
     public Task<ChatResult> SendPromptAsync(string model, string userPrompt, string host, PortableConfig config)
     {
         LogMessage?.Invoke($"test-mode chat: model={model}, host={host}, promptLength={userPrompt.Length}");

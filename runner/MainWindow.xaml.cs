@@ -121,6 +121,18 @@ public partial class MainWindow : System.Windows.Window
         _modelService.LogMessage += msg => AppendLog(msg);
         _docService.LogMessage += msg => AppendLog(msg);
         _chatService.LogMessage += msg => AppendLog(msg);
+        // C1: paint cold-load progress in the streaming indicator while
+        // ChatService waits for Ollama's first token. Heartbeats fire every
+        // ChatService.HeartbeatIntervalSeconds and stop once a token arrives.
+        _chatService.FirstTokenPending += seconds => Dispatcher.Invoke(() =>
+        {
+            // Only paint while the Generating indicator is visible — outside
+            // a streaming send the event is irrelevant.
+            if (StreamingIndicator.Visibility == System.Windows.Visibility.Visible)
+            {
+                StreamingIndicator.Text = $"● Loading model… {seconds}s";
+            }
+        });
         _dcsImportService.LogMessage += msg => AppendLog(msg);
         _sttService.LogMessage += msg => AppendLog(msg);
         _audioCaptureService.LogMessage += msg => AppendLog(msg);
@@ -536,6 +548,9 @@ public partial class MainWindow : System.Windows.Window
 
         SendButton.IsEnabled = false;
         StopButton.Visibility = System.Windows.Visibility.Visible;
+        // C1: reset to the default "Generating" label; FirstTokenPending may
+        // overwrite it with "Loading model… NNs" until tokens flow.
+        StreamingIndicator.Text = "● Generating...";
         StreamingIndicator.Visibility = System.Windows.Visibility.Visible;
         ResponseText.Text = string.Empty;
 
@@ -544,11 +559,21 @@ public partial class MainWindow : System.Windows.Window
 
         try
         {
+            var firstTokenSeen = false;
             var streamResult = await _chatService.SendPromptStreamingAsync(
                 model, PromptText.Text, host, _config!,
                 async token =>
                 {
-                    await Dispatcher.InvokeAsync(() => ResponseText.AppendText(token));
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        if (!firstTokenSeen)
+                        {
+                            // C1: tokens flowing — clear "Loading model…" label.
+                            firstTokenSeen = true;
+                            StreamingIndicator.Text = "● Generating...";
+                        }
+                        ResponseText.AppendText(token);
+                    });
                     ttsSpeaker?.FeedToken(token);
                 },
                 ct);

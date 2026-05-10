@@ -74,6 +74,7 @@ public class PttVoicePipelineServiceTests
     {
         private readonly string[] _tokens;
         public event Action<string>? LogMessage;
+        public event Action<int>? FirstTokenPending;
         public StubChat(string[] tokensToEmit) => _tokens = tokensToEmit;
 
         public Task<ChatResult> SendPromptAsync(string model, string userPrompt, string host, PortableConfig config)

@@ -828,8 +828,30 @@ final class RunnerViewModel: ObservableObject {
         case "token":
             if let token = obj["token"] as? String, !token.isEmpty {
                 DispatchQueue.main.async { [weak self] in
-                    self?.response.append(token)
+                    guard let self else { return }
+                    self.response.append(token)
+                    // C1: clear the "Loading <model>… NNs" status once
+                    // tokens start flowing. hasPrefix gate fires once per
+                    // request — subsequent token writes find status =
+                    // "Generating…" and skip the update.
+                    if self.status.hasPrefix("Loading ") || self.status == "Sending..." {
+                        self.status = "Generating\u{2026}"
+                    }
                 }
+            }
+        case "loading":
+            // C1: server-side heartbeat frame emitted every 20s while
+            // ChatService awaits Ollama's first token. Two purposes: (1)
+            // bytes flowing keep URLSession's 180s per-packet timeout from
+            // firing across cold-loads of large models (qwen3:14b on USB
+            // SSD can take 60-300s); (2) the elapsed-seconds payload lets
+            // us paint a live "Loading <model>… NNs" status so the user
+            // knows the system is alive. Stops once a `token` frame
+            // arrives.
+            let elapsed = (obj["elapsedSeconds"] as? Int) ?? 0
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.status = "Loading \(self.selectedModel)\u{2026} \(elapsed)s"
             }
         case "rag-warning":
             let message = (obj["message"] as? String) ?? "RAG retrieval failed."
