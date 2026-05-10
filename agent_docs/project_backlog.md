@@ -104,7 +104,7 @@ Three flat buckets, one counter per bucket:
 | M9 | MAC25 | OllamaPackageService.ResolveOllamaExe Mac binary name | mac_project_backlog.md |
 | M10 | MAC37 | Mac PrepApp finalize observability (back-burnered) | mac_project_backlog.md |
 | M11 | (new) | Most popular toggle on Mac picker after Refresh | mac_project_backlog.md |
-| M12 | (new) | Mac runner chat UI parity to X13 (surface real failures) | mac_project_backlog.md |
+| ~~M12~~ | (new) | ~~Mac runner chat UI parity to X13 (surface real failures)~~ — **done**, branch `fix/m12-mac-chat-error-surfacing` (PR TBD) | mac_project_backlog.md |
 | ~~M13~~ | (new) | ~~"Expose API on LAN" toggle reverts itself on Mac~~ — **done** PR #249 (`e6b958e`) 2026-05-10 | mac_project_backlog.md |
 | M14 | (new) | Mac runner "Pull embedding model" UI button (parity with WPF; defense-in-depth for C2) | mac_project_backlog.md |
 
@@ -118,11 +118,11 @@ Three flat buckets, one counter per bucket:
 
 **P0 — Field-test bug surface (top of queue, ship before any feature):**
 
-1. **M12** — Mac runner chat UI parity to X13 (Mac chat surface lacks structured-failure surfacing)
-2. **C1** — Large-model chat stall investigation (qwen3:14b stalls; cross-OS; partly depends on M12)
-3. **M11** — Most-popular toggle on Mac picker after Refresh
-4. **M14** — Mac runner "Pull embedding model" UI parity button (defense-in-depth for C2; reopens MAC35-deferred daemon-restart question)
+1. **C1** — Large-model chat stall investigation (qwen3:14b stalls; cross-OS; M12 now provides the visible error surface, so C1's actual cause should appear in the field)
+2. **M11** — Most-popular toggle on Mac picker after Refresh
+3. **M14** — Mac runner "Pull embedding model" UI parity button (defense-in-depth for C2; reopens MAC35-deferred daemon-restart question)
 
+> **M12** (Mac runner chat UI parity to X13) — **done** branch `fix/m12-mac-chat-error-surfacing` (PR TBD) 2026-05-10. New `chatError` red banner in `ContentView` covers the three X13 failure paths (mid-stream `error` frame, transport error, non-2xx HTTP body); new pure helper `RunnerChatErrorMessage.decode` extracted from a dead `apiErrorMessage` private method; `ChatStreamDelegate` now `.allow`s non-2xx responses and buffers the body for structured decoding. 7 new pins in `RunnerChatErrorMessageTests`. Decision pinned in `project_decisions.md`.
 > **M13** (Expose-API-on-LAN toggle reverts on Mac) — **done** PR #249 (`e6b958e`) 2026-05-10. Root cause was the async `.stopped` callback overwriting user intent on every restart; fix removes the auto-clear from `.stopped` and lets `.crashed` own involuntary state changes. Decision pinned in `project_decisions.md`.
 > **C2** (embedding-model provisioning gap) — **done** PR #247 (`1df4431`) 2026-05-10. Body retained below at line 286 with status banner; decision pinned in `project_decisions.md`.
 

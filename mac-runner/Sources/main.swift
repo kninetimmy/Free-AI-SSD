@@ -72,6 +72,12 @@ final class RunnerViewModel: ObservableObject {
     @Published var responseSources: [String] = []
     @Published var usedRagContext: Bool = false
     @Published var ragWarning: String? = nil
+    /// M12: structured chat-failure surface. Populated from the three X13
+    /// failure paths (mid-stream `error` NDJSON frame, transport error,
+    /// non-2xx HTTP body). Reset at the top of `sendPrompt` so a retry
+    /// clears the prior banner. Distinct from `ragWarning` (orange — model
+    /// answered without sources) so the user sees one signal per outcome.
+    @Published var chatError: String? = nil
     @Published var status: String = "Idle"
     /// MAC36c: drives the Send button's spinner + disabled state while a
     /// streaming chat request is in flight.
@@ -774,6 +780,7 @@ final class RunnerViewModel: ObservableObject {
         // stale answer.
         response = ""
         clearRagState()
+        chatError = nil
         isSending = true
         status = "Sending..."
 
@@ -847,11 +854,18 @@ final class RunnerViewModel: ObservableObject {
                 self.status = usedRag ? "Answered with sources" : "Answered"
             }
         case "error":
+            // M12: X13 ChatResult.Failure surfaced as a mid-stream NDJSON
+            // frame. Mirror Windows MainWindow.xaml.cs:519-521 — log the
+            // backend reason and set chatError so ContentView paints the
+            // red banner. Status keeps its concise summary for the title
+            // strip.
             let message = (obj["message"] as? String) ?? "stream error"
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.status = "Chat failed: \(message)"
+                self.chatError = message
                 self.clearRagState()
+                self.log("Chat backend error: \(message)")
             }
         default:
             break
@@ -877,23 +891,43 @@ final class RunnerViewModel: ObservableObject {
                     // sendPrompt — UI state is already where it needs
                     // to be. No status overwrite.
                 } else {
-                    self.status = "Chat failed: \(error.localizedDescription)"
+                    // M12: transport-layer failure (timeout, connection
+                    // dropped, sidecar crash). Surface to the red banner
+                    // and the file log so the user has a durable reason
+                    // beyond the single-line status strip.
+                    let message = error.localizedDescription
+                    self.status = "Chat failed: \(message)"
+                    self.chatError = message
+                    self.log("Chat transport error: \(message)")
                 }
             }
             session?.finishTasksAndInvalidate()
         }
     }
 
+    /// M12: always `.allow` so the delegate can read the response body.
+    /// `RunnerLocalApiService` returns small JSON `ErrorResponse` /
+    /// ProblemDetails bodies on validation 400s and 5xx — pre-M12 we
+    /// cancelled before the body landed and surfaced only "API returned
+    /// N", losing the structured reason X13 expects callers to render.
+    /// The delegate now tracks `httpStatus` and either feeds 200 chunks
+    /// to the NDJSON parser or buffers non-2xx bytes for `decodeError`.
     fileprivate func chatStreamDidReceiveResponse(_ response: HTTPURLResponse) -> URLSession.ResponseDisposition {
-        if (200..<300).contains(response.statusCode) {
-            return .allow
-        }
+        return .allow
+    }
+
+    /// M12: invoked by `ChatStreamDelegate` when a non-2xx response
+    /// completes. Decodes the buffered body and routes through the same
+    /// red-banner + file-log surface as the other two failure paths.
+    fileprivate func chatStreamDidReceiveErrorBody(statusCode: Int, body: Data?) {
+        let message = RunnerChatErrorMessage.decode(statusCode: statusCode, body: body)
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.status = "Chat failed: API returned \(response.statusCode)"
+            self.status = "Chat failed: \(message)"
+            self.chatError = message
             self.clearRagState()
+            self.log("Chat HTTP \(statusCode): \(message)")
         }
-        return .cancel
     }
 
     private func clearRagState() {
@@ -908,19 +942,6 @@ final class RunnerViewModel: ObservableObject {
         guard requireKey else { return nil }
         let key = (config["networkApiKey"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return key.isEmpty ? nil : key
-    }
-
-    private func apiErrorMessage(data: Data?, statusCode: Int) -> String {
-        if let data,
-           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            if let detail = obj["detail"] as? String, !detail.isEmpty {
-                return "Chat failed: \(detail)"
-            }
-            if let error = obj["error"] as? String, !error.isEmpty {
-                return "Chat failed: \(error)"
-            }
-        }
-        return "Chat failed: API returned \(statusCode)"
     }
 
     // MARK: - MAC8 Document Library Management
@@ -991,7 +1012,7 @@ final class RunnerViewModel: ObservableObject {
             guard let self else { return }
             DispatchQueue.main.async { self.libraryBusy = false }
             if let http = urlResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                let msg = self.apiErrorMessage(data: data, statusCode: http.statusCode)
+                let msg = RunnerChatErrorMessage.decode(statusCode: http.statusCode, body: data)
                 DispatchQueue.main.async { self.libraryStatus = msg }
                 return
             }
@@ -1027,7 +1048,7 @@ final class RunnerViewModel: ObservableObject {
         URLSession.shared.dataTask(with: req) { [weak self] data, urlResponse, error in
             guard let self else { return }
             if let http = urlResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                let msg = self.apiErrorMessage(data: data, statusCode: http.statusCode)
+                let msg = RunnerChatErrorMessage.decode(statusCode: http.statusCode, body: data)
                 DispatchQueue.main.async { self.libraryStatus = msg }
                 return
             }
@@ -1091,7 +1112,7 @@ final class RunnerViewModel: ObservableObject {
             guard let self else { return }
             DispatchQueue.main.async { self.libraryBusy = false }
             if let http = urlResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                let msg = self.apiErrorMessage(data: data, statusCode: http.statusCode)
+                let msg = RunnerChatErrorMessage.decode(statusCode: http.statusCode, body: data)
                 DispatchQueue.main.async { self.libraryStatus = msg }
                 return
             }
@@ -1128,7 +1149,7 @@ final class RunnerViewModel: ObservableObject {
             guard let self else { return }
             DispatchQueue.main.async { self.libraryBusy = false }
             if let http = urlResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                let msg = self.apiErrorMessage(data: data, statusCode: http.statusCode)
+                let msg = RunnerChatErrorMessage.decode(statusCode: http.statusCode, body: data)
                 DispatchQueue.main.async { self.libraryStatus = msg }
                 return
             }
@@ -1172,7 +1193,7 @@ final class RunnerViewModel: ObservableObject {
             guard let self else { return }
             DispatchQueue.main.async { self.libraryBusy = false }
             if let http = urlResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                let msg = self.apiErrorMessage(data: data, statusCode: http.statusCode)
+                let msg = RunnerChatErrorMessage.decode(statusCode: http.statusCode, body: data)
                 DispatchQueue.main.async { self.libraryStatus = msg }
                 return
             }
@@ -1197,7 +1218,7 @@ final class RunnerViewModel: ObservableObject {
             guard let self else { return }
             DispatchQueue.main.async { self.libraryBusy = false }
             if let http = urlResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                let msg = self.apiErrorMessage(data: data, statusCode: http.statusCode)
+                let msg = RunnerChatErrorMessage.decode(statusCode: http.statusCode, body: data)
                 DispatchQueue.main.async { self.libraryStatus = msg }
                 return
             }
@@ -1358,6 +1379,12 @@ final class RunnerViewModel: ObservableObject {
 private final class ChatStreamDelegate: NSObject, URLSessionDataDelegate {
     private weak var owner: RunnerViewModel?
     private var buffer = NdjsonFrameBuffer()
+    /// M12: populated in `didReceive response`. `0` means we never saw a
+    /// response (transport error before headers); 200..<300 means feed
+    /// data into the NDJSON parser; non-2xx means buffer for
+    /// `RunnerChatErrorMessage.decode`.
+    private var httpStatus: Int = 0
+    private var errorBuffer = Data()
 
     init(owner: RunnerViewModel) {
         self.owner = owner
@@ -1371,6 +1398,7 @@ private final class ChatStreamDelegate: NSObject, URLSessionDataDelegate {
             completionHandler(.cancel)
             return
         }
+        httpStatus = http.statusCode
         let disposition = owner?.chatStreamDidReceiveResponse(http) ?? .cancel
         completionHandler(disposition)
     }
@@ -1378,19 +1406,34 @@ private final class ChatStreamDelegate: NSObject, URLSessionDataDelegate {
     func urlSession(_ session: URLSession,
                     dataTask: URLSessionDataTask,
                     didReceive data: Data) {
-        let lines = buffer.append(data)
-        for line in lines where !line.isEmpty {
-            owner?.chatStreamDidReceiveLine(line)
+        if (200..<300).contains(httpStatus) {
+            let lines = buffer.append(data)
+            for line in lines where !line.isEmpty {
+                owner?.chatStreamDidReceiveLine(line)
+            }
+        } else {
+            errorBuffer.append(data)
         }
     }
 
     func urlSession(_ session: URLSession,
                     task: URLSessionTask,
                     didCompleteWithError error: Error?) {
-        if let tail = buffer.flush(), !tail.isEmpty {
-            owner?.chatStreamDidReceiveLine(tail)
+        if (200..<300).contains(httpStatus) {
+            if let tail = buffer.flush(), !tail.isEmpty {
+                owner?.chatStreamDidReceiveLine(tail)
+            }
+            owner?.chatStreamDidComplete(error: error)
+        } else if httpStatus > 0 {
+            // Non-2xx with headers received: surface the buffered body via
+            // the structured error path. Skip chatStreamDidComplete's
+            // transport-error handling so we don't double-report.
+            owner?.chatStreamDidReceiveErrorBody(statusCode: httpStatus, body: errorBuffer)
+            owner?.chatStreamDidComplete(error: nil)
+        } else {
+            // Transport error before any response landed.
+            owner?.chatStreamDidComplete(error: error)
         }
-        owner?.chatStreamDidComplete(error: error)
     }
 }
 
@@ -1440,6 +1483,14 @@ struct ContentView: View {
                       || vm.selectedModel.isEmpty
                       || vm.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             TextEditor(text: $vm.response).frame(height: 200)
+            if let chatError = vm.chatError {
+                // M12: red banner for X13 ChatResult.Failure / transport
+                // error / non-2xx HTTP body. Distinct from the orange RAG
+                // warning so the user reads one signal per outcome.
+                Text(chatError)
+                    .font(.callout)
+                    .foregroundColor(.red)
+            }
             if let warning = vm.ragWarning {
                 Text(warning)
                     .font(.callout)
