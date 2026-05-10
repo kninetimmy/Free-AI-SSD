@@ -114,6 +114,19 @@ final class PrepViewModel: ObservableObject {
 
     var availableStarterModels: [StarterModelDisplayEntry] { starterCatalog }
 
+    /// M11: caption that announces the picker's visible row count + cap
+    /// reason. Empty when no filter or search is active — `catalogStatusText`
+    /// already reports the total in that case. See
+    /// `formatStarterRowCountCaption` for the full branch table.
+    var starterRowCountCaption: String {
+        let trimmed = modelSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return formatStarterRowCountCaption(
+            visible: visibleStarterModels.count,
+            total: starterCatalog.count,
+            showOnlyMostPopular: showOnlyMostPopular,
+            hasSearch: !trimmed.isEmpty)
+    }
+
     /// F2a: the picker renders this list rather than `starterCatalog`
     /// directly. Search runs first, then the popular filter caps to
     /// the top N by pull count. Pure logic lives in

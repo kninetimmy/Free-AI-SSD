@@ -292,6 +292,17 @@ struct EncryptionSetupStepView: View {
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            // M11: announce the visible row count + cap reason when a
+            // filter is active. Empty string when neither toggle nor
+            // search is engaged (catalogStatusText already shows the
+            // total in that case).
+            if !vm.starterRowCountCaption.isEmpty {
+                Text(vm.starterRowCountCaption)
+                    .font(.caption)
+                    .bold()
+                    .foregroundColor(Color.brandAccentCyan)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             starterPickerBody
 

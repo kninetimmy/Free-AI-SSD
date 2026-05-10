@@ -108,6 +108,14 @@ public class PrepViewModel : BaseViewModel
         ReadinessItems = new ObservableCollection<ReadinessItem>();
         LogLines = new ObservableCollection<string>();
 
+        // M11: keep the picker's "Showing X of Y" caption in sync with
+        // every change that shifts the visible row set (search text,
+        // Most-popular toggle, catalog swap). Subscribing once here is
+        // simpler than duplicating an OnPropertyChanged at each callsite
+        // and will not miss future invalidation paths.
+        ModelRowsViewInvalidated += (_, _) => OnPropertyChanged(nameof(StarterRowCountCaption));
+        ModelRows.CollectionChanged += (_, _) => OnPropertyChanged(nameof(StarterRowCountCaption));
+
         RefreshDrivesCommand = new RelayCommand(RefreshDrives);
         AddModelCommand = new AsyncRelayCommand(AddModelAsync, () => CanMutateDrive && HasDriveSelected);
         ClearSelectionCommand = new RelayCommand(ClearSelection);
@@ -384,6 +392,24 @@ public class PrepViewModel : BaseViewModel
         {
             if (SetProperty(ref _showOnlyMostPopular, value))
                 ModelRowsViewInvalidated?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>M11: caption that announces the visible row count + cap
+    /// reason. Empty when no filter or search is active. Mirrors the Mac
+    /// picker's <c>starterRowCountCaption</c> via the shared
+    /// <see cref="StarterRowCountCaption"/> formatter — wording stays
+    /// in sync across both platforms.</summary>
+    public string StarterRowCountCaption
+    {
+        get
+        {
+            var total = ModelRows.Count;
+            var visible = ModelRows.Count(IsModelRowVisible);
+            var hasSearch = !string.IsNullOrWhiteSpace(_modelSearchText);
+            return FreeAiSsd.Shared.Models.StarterRowCountCaption.Format(
+                visible: visible, total: total,
+                showOnlyMostPopular: _showOnlyMostPopular, hasSearch: hasSearch);
         }
     }
 

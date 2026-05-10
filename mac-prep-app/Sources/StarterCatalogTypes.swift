@@ -95,6 +95,32 @@ func applyStarterModelFilters(
     return result
 }
 
+/// M11: caption that announces the picker's visible row count + cap
+/// reason. The Most-popular toggle's effect is invisible without this
+/// — ollama.com's natural order is already popularity-desc, so capping
+/// the top-15 produces the same first-screenful, and field testers
+/// reported the toggle "doesn't do anything." Returning empty when no
+/// filter is active keeps the UI quiet (catalogStatusText already
+/// reports the total count); only the *change* needs a dedicated line.
+func formatStarterRowCountCaption(
+    visible: Int,
+    total: Int,
+    showOnlyMostPopular: Bool,
+    hasSearch: Bool
+) -> String {
+    if total == 0 { return "" }
+    switch (showOnlyMostPopular, hasSearch) {
+    case (true, true):
+        return "Showing top \(visible) of \(total) by pulls (filtered by search)."
+    case (true, false):
+        return "Showing top \(visible) of \(total) by pulls."
+    case (false, true):
+        return "Showing \(visible) of \(total) matching search."
+    case (false, false):
+        return ""
+    }
+}
+
 /// Decode the entries array out of a PrepHostResult payload. The
 /// PrepHostController hands us a [String: Any] from JSONSerialization;
 /// re-serializing the "entries" subtree and decoding via JSONDecoder

@@ -116,6 +116,17 @@
                                                  Text="{Binding ModelSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                  ToolTip="Filter the grid by tag, tier, or capability description (case-insensitive)."/>
                                     </Grid>
+                                    <!-- M11: announce the visible row count + cap reason
+                                         when a filter is active. ollama.com's natural
+                                         order is already popularity-desc, so without
+                                         this caption the Most-popular toggle's effect
+                                         (grid shrinks to top 15) is easy to miss. -->
+                                    <TextBlock x:Name="StarterRowCountCaptionText"
+                                               Margin="0,4,0,0"
+                                               FontWeight="SemiBold"
+                                               Foreground="{StaticResource AccentCyanBrush}"
+                                               Text="{Binding StarterRowCountCaption}"
+                                               Visibility="{Binding StarterRowCountCaption, Converter={StaticResource EmptyToVisibilityConverter}, ConverterParameter=Inverted}"/>
                                 </StackPanel>
 
                                 <!-- Actions row: Download (primary), then ghost buttons. -->
