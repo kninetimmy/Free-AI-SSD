@@ -9,7 +9,7 @@ public interface IModelService
     void UpsertModel(List<ModelConfigEntry> models, string name, ModelInstallStatus status);
     Task UpdateModelStatusAsync(string configPath, string modelName, ModelInstallStatus status, string? sha256 = null, long? sizeBytes = null, DateTime? lastVerifiedUtc = null);
     IReadOnlyCollection<string> DiscoverModelsOnDisk(string modelsRoot);
-    Task<ModelPullResult> PullModelAsync(string ollamaExe, string modelsRoot, string modelTag, Action<string> onLog, CancellationToken ct, string? ollamaHost = null, Action<string>? onProgress = null);
+    Task<ModelPullResult> PullModelAsync(string ollamaExe, string modelsRoot, string modelTag, Action<string> onLog, CancellationToken ct, string? ollamaHost = null, Action<OllamaPullProgress>? onProgress = null);
     /// <summary>
     /// MAC31: estimates the fraction (0.0–1.0) of <paramref name="modelTag"/>'s
     /// expected blob payload already on disk under <paramref name="modelsRoot"/>.

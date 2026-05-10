@@ -362,14 +362,14 @@ struct ProgressLogStepView: View {
 
 // MARK: - Model pull
 //
-// MAC31: dedicated step view for the pull batch. Differs from
+// Dedicated step view for the pull batch. Differs from
 // ProgressLogStepView in two ways:
 //   1. A single in-place "progress" Text view bound to
 //      vm.pullProgressLine receives the sidecar's `progress: ...`
-//      ticks (cleaned of ANSI cursor-rewrite escapes by
-//      OllamaPullProgressFilter on the C# side). The scrolling log
-//      still surfaces stalls and other diagnostics from
-//      [ollama serve stderr] etc.
+//      ticks — one per Ollama /api/pull NDJSON frame, formatted by
+//      OllamaPullProgress.ToDisplayString on the C# side. The
+//      scrolling log still surfaces stalls and other diagnostics
+//      from [ollama serve stderr] etc.
 //   2. A Cancel button gated on vm.canCancelPull lets the user
 //      bail out of a slow pull without force-quitting the app.
 //      Cancellation preserves partial blobs on disk so a Retry

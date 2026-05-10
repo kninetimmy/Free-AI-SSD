@@ -748,7 +748,7 @@ public class PrepViewModelTests
             It.IsAny<Action<string>>(),
             It.IsAny<CancellationToken>(),
             It.IsAny<string?>(),
-            It.IsAny<Action<string>?>()), Times.Never);
+            It.IsAny<Action<OllamaPullProgress>?>()), Times.Never);
         Assert.Contains(vm.LogLines, l => l.Contains("nothing to download"));
     }
 

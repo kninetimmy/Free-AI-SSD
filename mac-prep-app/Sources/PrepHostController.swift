@@ -47,11 +47,13 @@ final class PrepHostController: @unchecked Sendable {
     var onStatusChange: ((Status) -> Void)?
     var onLogLine: ((String) -> Void)?
 
-    /// MAC31: receives `progress: ...` lines emitted by the sidecar's
-    /// pull-model arm. The PrepApp routes these to a single in-place
-    /// progress label rather than the scrolling log so Ollama's TUI
-    /// rewrite escapes don't look like a restart loop. Optional —
-    /// callers that don't bind it get the legacy log-only behavior.
+    /// Receives `progress: ...` lines emitted by the sidecar's
+    /// pull-model arm. The sidecar renders each Ollama
+    /// /api/pull NDJSON frame to a single human-readable line via
+    /// OllamaPullProgress.ToDisplayString and writes it here; the
+    /// PrepApp routes these to a single in-place progress label
+    /// rather than the scrolling log. Optional — callers that
+    /// don't bind it get log-only behavior.
     var onPullProgress: ((String) -> Void)?
 
     private(set) var status: Status = .stopped {
@@ -340,13 +342,12 @@ final class PrepHostController: @unchecked Sendable {
             return
         }
 
-        // MAC31: dedicated channel for ollama-pull TUI ticks. The
-        // sidecar already strips ANSI cursor-rewrite escapes via
-        // OllamaPullProgressFilter; we just need to route the cleaned
-        // line to the PrepApp's single-line progress label so the log
-        // surface stays for diagnostics. Falls back to onLogLine if no
-        // pull-progress handler is bound (e.g. an older PrepViewModel
-        // build without the MAC31 wiring).
+        // Dedicated channel for ollama-pull progress. The sidecar
+        // emits one `progress: <human-readable>` line per /api/pull
+        // NDJSON frame (formatted by OllamaPullProgress.ToDisplayString
+        // on the C# side); we just route to the PrepApp's single-line
+        // label so the log surface stays for diagnostics. Falls back
+        // to onLogLine if no pull-progress handler is bound.
         if trimmed.hasPrefix("progress: ") {
             let msg = String(trimmed.dropFirst("progress: ".count))
             if let cb = onPullProgress {

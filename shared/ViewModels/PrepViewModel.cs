@@ -29,10 +29,10 @@ public class PrepViewModel : BaseViewModel
     private double _progressValue;
     private bool _progressIsIndeterminate;
     private bool _isModelOperationRunning;
-    // MAC31: receives ANSI-stripped pull progress lines from
-    // ModelOperations.Consume's onProgress channel so the view can
-    // render a single in-place progress label rather than letting
-    // Ollama's TUI rewrite ticks scroll the log surface.
+    // Backs the in-place progress label fed by OllamaPullClient's
+    // NDJSON frames (each one rendered to a single human-readable
+    // line via OllamaPullProgress.ToDisplayString). Empty between
+    // pulls.
     private string _pullProgressLine = string.Empty;
     private string _modelTagInput = string.Empty;
     private bool _prepareWindows = true;
@@ -172,10 +172,11 @@ public class PrepViewModel : BaseViewModel
     }
 
     /// <summary>
-    /// MAC31: latest pull progress line (ANSI-stripped, coalesced from
-    /// Ollama's TUI rewrites). Bound to a single Text element so a
-    /// long pull renders as one in-place line rather than spamming
-    /// the log surface. Empty between pulls.
+    /// Latest pull progress line — one human-readable summary per
+    /// Ollama <c>/api/pull</c> NDJSON frame, rendered through
+    /// <see cref="OllamaPullProgress.ToDisplayString"/>. Bound to a
+    /// single Text element so a long pull renders as one in-place
+    /// line rather than spamming the log surface. Empty between pulls.
     /// </summary>
     public string PullProgressLine
     {
@@ -815,13 +816,12 @@ public class PrepViewModel : BaseViewModel
                 {
                     var result = await _modelService.PullModelAsync(
                         ollamaExe, modelsRoot, model, AppendLog, _modelOperationCts.Token, serverHandle.Host,
-                        // MAC31: route Ollama's TUI ticks (ANSI-stripped
-                        // by OllamaPullProgressFilter) into the single
-                        // in-place label instead of the scrolling log.
+                        // Each NDJSON frame from Ollama's /api/pull is
+                        // rendered to a single in-place progress line.
                         // SetPullProgressLineSafe dispatches via the UI
                         // sync context because the lambda fires from
-                        // ModelOperations.Consume's drain thread.
-                        onProgress: SetPullProgressLineSafe);
+                        // OllamaPullClient's HTTP-response drain thread.
+                        onProgress: progress => SetPullProgressLineSafe(progress.ToDisplayString()));
 
                     await _modelService.UpdateModelStatusAsync(configPath, model, ModelInstallStatus.Installed, result.Sha256, result.SizeBytes, DateTime.UtcNow);
                     AppendLog($"Downloaded {model} ({FormatSize(result.SizeBytes)}). Sha256 {result.Sha256[..8]}...");
@@ -1661,14 +1661,14 @@ public class PrepViewModel : BaseViewModel
     }
 
     /// <summary>
-    /// MAC31: thread-safe setter for <see cref="PullProgressLine"/>.
+    /// Thread-safe setter for <see cref="PullProgressLine"/>.
     /// Mirrors <see cref="AppendLog"/>'s dispatch pattern because the
-    /// onProgress lambda fires from <c>ModelOperations.Consume</c>'s
-    /// stdout-drain thread, not the UI thread. WPF binding can usually
-    /// route a string PropertyChanged across threads on its own, but
-    /// going through the sync context keeps the entire VM consistent
-    /// and avoids surprising the binding engine when the surrounding
-    /// SetProperty triggers other reactive code.
+    /// onProgress lambda fires from <c>OllamaPullClient</c>'s HTTP
+    /// response-drain thread, not the UI thread. WPF binding can
+    /// usually route a string PropertyChanged across threads on its
+    /// own, but going through the sync context keeps the entire VM
+    /// consistent and avoids surprising the binding engine when the
+    /// surrounding SetProperty triggers other reactive code.
     /// </summary>
     private void SetPullProgressLineSafe(string line)
     {

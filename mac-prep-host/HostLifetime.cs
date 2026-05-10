@@ -327,13 +327,14 @@ internal sealed class HostLifetime : IAsyncDisposable
                     ollamaExe, stagingRoot, EmitLog, pullCts.Token);
             }
 
-            // MAC31: onProgress lambda routes Ollama's TUI ticks to the
-            // dedicated `progress: ...` stdout channel so the PrepApp
-            // renders them as a single in-place line instead of spamming
-            // the log surface with cursor-rewrite garbage.
+            // Each NDJSON frame from Ollama's /api/pull is rendered to a
+            // single in-place progress line via OllamaPullProgress.ToDisplayString
+            // and emitted on the dedicated `progress: ...` stdout channel
+            // (the Swift side routes it to a single Text view that
+            // overwrites in place rather than scrolling the log surface).
             var result = await _modelService.PullModelAsync(
                 ollamaExe, stagingRoot, modelTag, EmitLog, pullCts.Token, _ollamaServer.Host,
-                onProgress: EmitProgress);
+                onProgress: progress => EmitProgress(progress.ToDisplayString()));
 
             // MAC35: sequential merge under the same pull CTS so a
             // user cancel between pull-finish and merge-finish still
