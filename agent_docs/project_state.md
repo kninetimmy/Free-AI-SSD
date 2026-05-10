@@ -6,29 +6,16 @@ Last released: **v1.3.22** (2026-05-10; F2a — full-page picker, search, Most p
 
 > v1.2.7 tag exists on `af77abc` but has no GH release artifact; v1.2.8 supersedes it.
 
-**v1.3.22 closes the F2a backlog item** opened from the v1.3.5 mac
-field test. Mac picker (`EncryptionSetupStepView`) drops the
-`.frame(maxHeight: 240)` cap — picker now fills the page and
-resizes with the window. Both OSes get a search box (case-
-insensitive substring match over tag + tier + best-at) and a
-"Most popular" toggle that caps recommended rows to the top 15 by
-ollama.com pull count. New `PullCount` field is parsed from
-`x-test-pull-count` on the existing `ollama.com/library` scrape
-and threaded through `StarterModelEntry` → `StarterCatalogEntry`
-→ `ModelGridRow`. Bundled catalog stays without pull counts —
-toggling Most popular before Refresh surfaces an explicit
-"Refresh first" empty state on Mac. On Windows, configured +
-on-disk rows always pass the popular filter (only Recommended
-rows get the top-15 cap). 14 new test pins (6 Swift + 8 C#).
-**MAC37** (Mac PrepApp finalize observability) stays as a known
-backlog item but **back-burnered per user** — cold-load wait is
-20s post-cache, acceptable. **MAC20** (cross-platform ZIP layout
-rework) and **X18** (ingest observability) remain queued. **MAC11**
-(signing + notarization) remains back-burnered until the user's
-Apple Developer cert renews. The `MacArtifactAvailability` /
-`ArtifactStagingService` / `PrereqService` ancestor-walk
-consolidation into a shared `prep-core/BundleContentRoots`
-helper remains overdue.
+**Currently between tasks.** v1.3.22 mac field test surfaced 8
+new items, filed under the new C/W/M label scheme (PR #245) as
+C1–C6 (cross-OS) and M11–M13 (Mac-only). User picking up **C2**
+(embedding-model provisioning gap) next session — highest-
+leverage P0, blocks RAG end-to-end, exact pathology MAC35
+explicitly deferred as a follow-up. Back-burnered: M2 (was
+MAC11, signing + notarization, awaiting Apple Developer cert
+renewal), M10 (was MAC37, finalize observability, cold-load
+wait acceptable post-MAC39). Ancestor-walk consolidation into
+`prep-core/BundleContentRoots` remains overdue.
 
 ## Recently shipped
 
@@ -63,9 +50,9 @@ See `project_backlog.md` for full general backlog details. See
 
 ## Last session
 
-2026-05-10 (latest) (PR #243 F2a merged `859ac08` + v1.3.22 released). User confirmed the v1.3.21 pull-progress regression is fixed in the field ("no more regression") and that cold-load chat wait is down to 20s post-cache — MAC37 deferred to back-burner. Picked up F2a from the next-up list with explicit user UX direction (screenshot-annotated): full-page picker, search bar, "Most popular" top-15 button. **Picked the data-layer-first approach:** `x-test-pull-count` already exists on `ollama.com/library` (verified live + in the captured fixture) — added a `long? PullCount` field to `StarterModelEntry` and a `ParsePullCount` helper that converts `"114.1M"`/`"1.2K"`/`"1.5B"` to numeric. Threaded through to both surfaces. **Mac side:** drop the 240px cap, new `[Most popular toggle | Search | Refresh]` action row, per-row pull-count caption, "why is this empty?" empty states. macOS 11 baseline forced a `Button`-with-checkmark instead of `.toggleStyle(.button)` for Most popular. Pure filter logic factored into `applyStarterModelFilters` so the standalone test binary covers it. **Windows side:** added the new row to `MainWindow.xaml` Models tab; wired the existing `ListCollectionView` to a VM-owned `IsModelRowVisible` predicate via the `ModelRowsViewInvalidated` event for refresh marshalling. Cross-row-class behavior decision: configured + on-disk rows always pass the popular filter; only `Recommended`-source rows get the top-15 cap (recorded in `project_decisions.md`). **Cross-OS audit caught a concrete benefit:** MAC40's "Mac jobs miss WPF tests" lesson held — built locally on the Mac (32/32 mac-prep-tests green) but couldn't validate the C# side without dotnet. Pre-emptively counted: 8 new C# pins + 7 new scrape pins + WPF compile guard. CI green first push on all three jobs (mac-prep + mac-runner + windows). v1.3.22 dispatched same-session and shipped (package-release green).
+2026-05-10 (latest, refactor session) (PR #245 unified C/W/M task labels merged `b852b4c`). User asked to (1) cross-check 8 v1.3.22 mac-field-test items against the open backlog, (2) reverse-pass the open backlog against shipped work for silent closures, (3) validate priority order, (4) introduce a unified label scheme to replace the mixed `X*`/`F*`/`B*`/`H*`/`R*`/`MAC*` numbering. **Cross-check:** all 8 items were genuinely new — no dupes. Item #5 split into a Mac-only chat-UI parity piece (M12) and a cross-OS chat-stall investigation (C1). Item #8 reframed from "sub-1MB ingest fail" to "embedding-model provisioning gap" after reading the screenshot's 138/138 embed-failure threshold message — exact pathology MAC35 explicitly deferred. **Reverse pass:** no open item silently closed by recent work; closed X6 as stale (3+ weeks no recurrence). **Label scheme:** three flat per-OS-scope buckets, shipped items keep legacy IDs (renaming would break PR notes / decision cross-refs), open items get new IDs via a 38-row mapping table at the top of `project_backlog.md`, bodies stay as `### X9` etc. until next picked up for work. Filed C1–C6 + M11–M13 as the first cohort under the new scheme. **Parity rule strengthened** (`project_decisions.md` 2026-05-10 entry): when a task is split into per-OS work, the other-OS follow-up is the very next task — never deferred. M12 is the canonical example of what this prevents — X13 shipped 2026-04-20 with Windows-only UI surfacing, the Mac follow-up was never filed, the gap surfaced 3 weeks later as the v1.3.22 "no fail message" complaint. Memory `feedback_cross_os_parity_audit.md` updated to capture the sequencing constraint.
 
-2026-05-10 (later) (PR #241 MAC40 merged `b5ac727` + v1.3.21 dispatched). User flagged from v1.3.20 field test that the model-pull progress shows scrolling logs instead of the static MAC31 in-place label (issue #4 deferred from MAC39 because it's a different surface — PrepApp pull path, not Mac runner). Diagnosed in 5 minutes: `OllamaPullProgressFilter.IsProgressLine`'s regex requires literal `...` between hash and percent; the post-MAC38 Ollama (`v0.23.2`+) emits `:` instead. **Picked the smart fix, not the easy fix:** retire the CLI-stdout parser entirely and consume Ollama's `POST /api/pull` NDJSON — the canonical contract the CLI itself speaks. New `OllamaPullClient.PullAsync` (HTTP NDJSON consumer with `HttpMessageHandler` test seam), new `OllamaPullProgress` record with `ToDisplayString()`, `Action<string>?` → `Action<OllamaPullProgress>?` on `IModelService.PullModelAsync`. Both consumers (Mac sidecar `EmitProgress`, Windows `SetPullProgressLineSafe`) format the structured frame to a single line. `OllamaPullProgressFilter.cs` + its 5 tests deleted; 10 new pins added (`OllamaPullClientTests` 6 + `OllamaPullProgressTests` 4). **First CI push:** mac-prep + mac-runner green, windows failed on a `Moq.Verify` expression in `PrepViewModelTests.cs:751` with the old `Action<string>?` type. Mac jobs miss WPF tests so the Mac-only smoke wouldn't have caught it — the cross-OS audit pattern that worked for MAC31 silently broke on a Windows-only test file. Second push (`e9c68d8`) updated the Verify type, green on all three (mac-prep 48s, mac-runner 57s, windows 3m59s). v1.3.21 dispatched. **Architectural decision worth pinning:** model-pull source-of-truth is the HTTP API, not CLI text rendering — the CLI is a downstream consumer of the same contract. Future Ollama TUI shape changes can no longer break PrepApp. Recorded in `project_decisions.md` 2026-05-10 entry.
+2026-05-10 (latest) (PR #243 F2a merged `859ac08` + v1.3.22 released). User confirmed the v1.3.21 pull-progress regression is fixed in the field ("no more regression") and that cold-load chat wait is down to 20s post-cache — MAC37 deferred to back-burner. Picked up F2a from the next-up list with explicit user UX direction (screenshot-annotated): full-page picker, search bar, "Most popular" top-15 button. **Picked the data-layer-first approach:** `x-test-pull-count` already exists on `ollama.com/library` (verified live + in the captured fixture) — added a `long? PullCount` field to `StarterModelEntry` and a `ParsePullCount` helper that converts `"114.1M"`/`"1.2K"`/`"1.5B"` to numeric. Threaded through to both surfaces. **Mac side:** drop the 240px cap, new `[Most popular toggle | Search | Refresh]` action row, per-row pull-count caption, "why is this empty?" empty states. macOS 11 baseline forced a `Button`-with-checkmark instead of `.toggleStyle(.button)` for Most popular. Pure filter logic factored into `applyStarterModelFilters` so the standalone test binary covers it. **Windows side:** added the new row to `MainWindow.xaml` Models tab; wired the existing `ListCollectionView` to a VM-owned `IsModelRowVisible` predicate via the `ModelRowsViewInvalidated` event for refresh marshalling. Cross-row-class behavior decision: configured + on-disk rows always pass the popular filter; only `Recommended`-source rows get the top-15 cap (recorded in `project_decisions.md`). **Cross-OS audit caught a concrete benefit:** MAC40's "Mac jobs miss WPF tests" lesson held — built locally on the Mac (32/32 mac-prep-tests green) but couldn't validate the C# side without dotnet. Pre-emptively counted: 8 new C# pins + 7 new scrape pins + WPF compile guard. CI green first push on all three jobs (mac-prep + mac-runner + windows). v1.3.22 dispatched same-session and shipped (package-release green).
 
 ## Open questions
 
