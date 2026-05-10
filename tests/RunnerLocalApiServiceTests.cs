@@ -130,6 +130,60 @@ public sealed class RunnerLocalApiServiceTests
     }
 
     [Fact]
+    public async Task ChatStream_HeartbeatRaised_EmitsLoadingFrameBeforeTokens()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true);
+        // C1: simulate a cold-load — ChatService raises FirstTokenPending
+        // twice (20s, 40s elapsed) before the first token reaches the wire.
+        fixture.Chat.HeartbeatSecondsBeforeTokens = new List<int> { 20, 40 };
+        fixture.Chat.StreamingTokens = new List<string> { "alpha" };
+        fixture.Chat.Response = new ChatResponse("alpha", null, false);
+        using var http = new HttpClient();
+
+        using var response = await http.PostAsJsonAsync($"{fixture.BaseUrl}/api/chat/stream", new { model = "phi3", prompt = "status" });
+        response.EnsureSuccessStatusCode();
+        var lines = await ReadNdjsonLinesAsync(response);
+        var events = lines.Select(line => JsonDocument.Parse(line).RootElement.Clone()).ToList();
+
+        Assert.Equal("start", events[0].GetProperty("type").GetString());
+        // Two heartbeat frames in order between start and token.
+        var firstLoading = events[1];
+        Assert.Equal("loading", firstLoading.GetProperty("type").GetString());
+        Assert.Equal(20, firstLoading.GetProperty("elapsedSeconds").GetInt32());
+        var secondLoading = events[2];
+        Assert.Equal("loading", secondLoading.GetProperty("type").GetString());
+        Assert.Equal(40, secondLoading.GetProperty("elapsedSeconds").GetInt32());
+        // Token + complete after the heartbeats.
+        Assert.Equal("token", events[3].GetProperty("type").GetString());
+        Assert.Equal("alpha", events[3].GetProperty("token").GetString());
+        Assert.Equal("complete", events[^1].GetProperty("type").GetString());
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ChatStream_NoHeartbeat_OmitsLoadingFrames()
+    {
+        // C1 contract pin: when ChatService never raises FirstTokenPending
+        // (warm-load, sub-20s), the NDJSON stream contains zero `loading`
+        // frames. Protects clients that ignore unknown types from a
+        // contract drift where a `loading` always-on frame would be
+        // misinterpreted.
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true);
+        fixture.Chat.StreamingTokens = new List<string> { "alpha", "bravo" };
+        fixture.Chat.Response = new ChatResponse("alphabravo", null, false);
+        using var http = new HttpClient();
+
+        using var response = await http.PostAsJsonAsync($"{fixture.BaseUrl}/api/chat/stream", new { model = "phi3", prompt = "status" });
+        response.EnsureSuccessStatusCode();
+        var lines = await ReadNdjsonLinesAsync(response);
+
+        Assert.DoesNotContain(lines, line => line.Contains("\"type\":\"loading\"", StringComparison.Ordinal));
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
     public async Task ChatStream_ClientCancellation_PropagatesToChatService()
     {
         var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true);
@@ -622,6 +676,11 @@ public sealed class RunnerLocalApiServiceTests
     private sealed class FakeChatService : IChatService
     {
         public event Action<string>? LogMessage;
+        public event Action<int>? FirstTokenPending;
+
+        // C1: lets tests synchronously simulate a heartbeat tick from the
+        // service without sleeping HeartbeatIntervalSeconds (20s).
+        public void RaiseFirstTokenPending(int seconds) => FirstTokenPending?.Invoke(seconds);
 
         public ChatResponse Response { get; set; } = new("ok", null, false);
         public ChatResult? ResultOverride { get; set; }
@@ -642,6 +701,9 @@ public sealed class RunnerLocalApiServiceTests
         public bool BlockTokenCallbacks { get; set; }
         public bool StreamUntilCancelled { get; set; }
         public bool StreamingCancellationObserved { get; private set; }
+        // C1: heartbeats to emit before any token is yielded — simulates a
+        // cold-load where ChatService waits on Ollama for N seconds.
+        public List<int> HeartbeatSecondsBeforeTokens { get; set; } = new();
 
         private readonly TaskCompletionSource<bool> _tokenCallbackAttempted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource<bool> _allowTokenCallbacks = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -650,6 +712,15 @@ public sealed class RunnerLocalApiServiceTests
         public async Task<ChatResult> SendPromptStreamingAsync(string model, string userPrompt, string host, PortableConfig config, Func<string, Task> onToken, CancellationToken cancellationToken = default)
         {
             var assembled = new StringBuilder();
+
+            foreach (var seconds in HeartbeatSecondsBeforeTokens)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                FirstTokenPending?.Invoke(seconds);
+                // Yield once so the fire-and-forget heartbeat write reaches
+                // the wire before the first token frame.
+                await Task.Yield();
+            }
 
             foreach (var token in StreamingTokens)
             {

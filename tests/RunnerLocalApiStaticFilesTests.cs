@@ -150,6 +150,7 @@ public sealed class RunnerLocalApiStaticFilesTests
     private sealed class StubChatService : IChatService
     {
         public event Action<string>? LogMessage;
+        public event Action<int>? FirstTokenPending;
         public Task<ChatResult> SendPromptAsync(string model, string userPrompt, string host, PortableConfig config)
             => Task.FromResult<ChatResult>(new ChatResult.Success(new ChatResponse("ok", null, false)));
         public Task<ChatResult> SendPromptStreamingAsync(string model, string userPrompt, string host, PortableConfig config, Func<string, Task> onToken, CancellationToken cancellationToken = default)

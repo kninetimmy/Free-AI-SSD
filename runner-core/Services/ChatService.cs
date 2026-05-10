@@ -9,6 +9,13 @@ namespace FreeAiSsd.Runner.Services;
 
 public sealed class ChatService : IChatService
 {
+    /// <summary>
+    /// C1: heartbeat cadence while waiting for Ollama's first streamed token.
+    /// 20s gives ~9 ticks before Mac URLSession's 180s per-packet timer would fire,
+    /// keeping the chat stream alive across cold-loads.
+    /// </summary>
+    public const int HeartbeatIntervalSeconds = 20;
+
     private readonly HttpClient _http;
     private readonly DocumentLibraryManager _libraryManager;
     private readonly SsdLogger? _logger;
@@ -21,6 +28,7 @@ public sealed class ChatService : IChatService
     }
 
     public event Action<string>? LogMessage;
+    public event Action<int>? FirstTokenPending;
 
     public async Task<ChatResult> SendPromptAsync(
         string model, string userPrompt, string host, PortableConfig config)
@@ -67,6 +75,35 @@ public sealed class ChatService : IChatService
         };
 
         var assembled = new StringBuilder();
+        var requestStart = DateTimeOffset.UtcNow;
+        var firstTokenSeen = 0;
+        _logger?.Info($"chat stream begin (model={model}, host={host})");
+
+        // C1: heartbeat task ticks every HeartbeatIntervalSeconds until the first
+        // token arrives. Each tick raises FirstTokenPending so the API layer can
+        // emit a `loading` NDJSON frame (resets the Mac URLSession 180s timer)
+        // and the WPF UI can paint a "Loading model… NNs" indicator. Linked to
+        // the caller's CT so Lock / cancel tears it down promptly.
+        using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var heartbeatTask = Task.Run(async () =>
+        {
+            try
+            {
+                while (!heartbeatCts.IsCancellationRequested)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(HeartbeatIntervalSeconds), heartbeatCts.Token);
+                    if (Volatile.Read(ref firstTokenSeen) != 0) return;
+                    var elapsed = (int)(DateTimeOffset.UtcNow - requestStart).TotalSeconds;
+                    try { FirstTokenPending?.Invoke(elapsed); }
+                    catch (Exception handlerEx)
+                    {
+                        // Subscriber faults must never abort the chat. Log once and continue.
+                        _logger?.Warn($"FirstTokenPending handler threw: {handlerEx.Message}");
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+        }, heartbeatCts.Token);
 
         try
         {
@@ -97,6 +134,11 @@ public sealed class ChatService : IChatService
                             var token = tokenElement.GetString() ?? string.Empty;
                             if (token.Length > 0)
                             {
+                                if (Interlocked.Exchange(ref firstTokenSeen, 1) == 0)
+                                {
+                                    var elapsedMs = (int)(DateTimeOffset.UtcNow - requestStart).TotalMilliseconds;
+                                    _logger?.Info($"chat first-token in {elapsedMs}ms (model={model})");
+                                }
                                 assembled.Append(token);
                                 await onToken(token);
                             }
@@ -108,6 +150,7 @@ public sealed class ChatService : IChatService
                 }
             }
 
+            _logger?.Info($"chat stream complete in {(int)(DateTimeOffset.UtcNow - requestStart).TotalMilliseconds}ms (model={model})");
             var chatResponse = new ChatResponse(assembled.ToString(), sources, usedContext);
             return ragError is not null
                 ? new ChatResult.RagRetrievalFailed(chatResponse, ragError)
@@ -115,11 +158,13 @@ public sealed class ChatService : IChatService
         }
         catch (OperationCanceledException)
         {
+            _logger?.Info($"chat stream cancelled after {(int)(DateTimeOffset.UtcNow - requestStart).TotalMilliseconds}ms (model={model})");
             LogMessage?.Invoke("Generation cancelled by user.");
             return new ChatResult.Success(new ChatResponse(assembled.ToString(), sources, usedContext));
         }
         catch (Exception ex)
         {
+            _logger?.Warn($"chat stream failed after {(int)(DateTimeOffset.UtcNow - requestStart).TotalMilliseconds}ms (model={model}): {ex.Message}");
             LogMessage?.Invoke($"Streaming failed: {ex.Message}");
             var partial = assembled.ToString();
             if (partial.Length > 0)
@@ -127,6 +172,11 @@ public sealed class ChatService : IChatService
                 await onToken($"\n\n[Error: {ex.Message}]");
             }
             return new ChatResult.Failure(SanitizeError(ex));
+        }
+        finally
+        {
+            heartbeatCts.Cancel();
+            try { await heartbeatTask; } catch { /* heartbeat task swallows its own cancel */ }
         }
     }
 
