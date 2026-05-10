@@ -1,25 +1,33 @@
 # Project State
 
-Last updated: 2026-05-09 still later (PR #237 MAC38 merged `edc99d3` — drop static Ollama version pin, resolve from upstream `sha256sum.txt` per build. v1.3.19 dispatched same session to pick up Ollama v0.23.2 and unblock the deepseek-r1:8b pull failure. Awaiting Mac field test.)
+Last updated: 2026-05-10 (PR #239 MAC39 merged `8eaa922` — Mac Runner bug-fix bundle: chat-host port leak fix, conditional Lock-vs-Start/Stop button on plaintext SSDs, chat URLSession timeout bumped from 60s to 180s for cold model loads. v1.3.20 dispatched + shipped same session. v1.3.20 Mac field test confirmed all three issues resolved.)
 
-Last released: **v1.3.19** (2026-05-09; MAC38 — bundle now ships whichever Ollama is latest at CI build time, hash-verified against the release's vendor `sha256sum.txt`. `Free-AI-SSD-win.zip` and `Free-AI-SSD-beta-crossplatform.zip` shipped).
+Last released: **v1.3.20** (2026-05-10; MAC39 — Mac Runner port-leak fix + Lock UX on plaintext + chat cold-load timeout. `Free-AI-SSD-win.zip` 335 MB, `Free-AI-SSD-beta-crossplatform.zip` 622 MB shipped).
 
 > v1.2.7 tag exists on `af77abc` but has no GH release artifact; v1.2.8 supersedes it.
 
-**v1.3.19 unblocks new-model pulls on Mac.** A v1.3.18 field test
-of `deepseek-r1:8b` failed with `pull model manifest: 412: The model
-you are attempting to pull requires a newer version of Ollama` —
-the bundled Ollama was pinned to `v0.5.7` (MAC4, 2026-05-05) and
-the manifest schema has moved on. Bumping the static pin is a
-recurring toil tax; MAC38 instead replaces the pin with dynamic
-resolution against the upstream release's `sha256sum.txt`,
-mirroring the `.NET 8` Desktop Runtime path that was already in
-`PrereqResolver`. Trust chain stays SHA-256-verified end-to-end
-(URL allowlist → vendor-published hash → on-SSD attestation
-receipt). MAC35 host-staging stays — `numDownloadParts = 16` is
-still hardcoded in upstream `server/download.go` through `v0.23.2`.
-**MAC37** (Mac PrepApp finalize observability — the 6-min silent
-finalize) is now the lead "Next up" item. **MAC20** (cross-platform
+**v1.3.20 closes three v1.3.19 Mac field-test findings**, all in
+the runner / chat-host stack and unrelated to MAC38's Ollama
+trust-model work. (1) After Lock + re-select-SSD, the new
+`mac-runner-host` sidecar tried to bind the same port the prior
+listener had used and the kernel hadn't released it yet — the
+unlock path bailed with `Failed to bind to address: address
+already in use` and the user couldn't recover without quitting
+the app. Two-layer fix: `mac-runner` lsof+kills any straggler on
+the configured network port before each `hostController.start()`
+(MAC34b pattern for ollama, now applied to the sidecar port too),
+and `RunnerLocalApiService.StartAsync` scans configuredPort..+20
+for a free port via TcpListener probe before `UseUrls()`
+(`OllamaLifecycleService.ResolvePort` mirror). (2) After MAC30
+made encryption opt-in, "Lock" on a plaintext SSD was just
+stopping the chat stack with no path back. New `isEncryptedSsd`
+published var drives a conditional button verb: encrypted SSD
+keeps "Lock"; plaintext SSD shows "Stop" / "Start". (3) Default
+`URLSessionConfiguration.default.timeoutIntervalForRequest = 60s`
+was firing on cold model loads (5GB+ deepseek-r1:8b on USB SSD
+takes 30-90s to first token); bumped to 180s for the chat stream
+specifically. **MAC37** (Mac PrepApp finalize observability — the
+6-min silent finalize) is now the lead "Next up" item. **MAC20** (cross-platform
 ZIP layout rework), **F2a** (picker sort + resize gaps), and **X18**
 (ingest observability) remain queued. **MAC11** (signing +
 notarization) remains back-burnered until the user's Apple
@@ -29,6 +37,8 @@ consolidation into a shared `prep-core/BundleContentRoots` helper
 remains overdue.
 
 ## Recently shipped
+
+- **PR #239 — MAC39 Mac runner bug-fix bundle (port leak + Lock UX + chat timeout) — merged `8eaa922` (2026-05-10).** Released as **v1.3.20**. Closes three v1.3.19 Mac field-test findings in the runner / chat-host stack — none related to MAC38. **(1) Chat-host port leak.** Severe: after Lock + re-select-SSD the user was stuck (had to quit the app to recover). Two-layer fix: `mac-runner/Sources/main.swift` adds `terminateProcessesListening(onPort: configuredPort)` before each `hostController.start()` (mirror of MAC34b for ollama on 11434) — handles stale sidecar processes. New `RunnerLocalApiService.ResolveAvailablePort(bindAddress, preferredPort)` scans configuredPort..+20 via `TcpListener` probe before `UseUrls()` (mirror of `OllamaLifecycleService.ResolvePort`) — handles the kernel-level TIME_WAIT case where the port isn't released yet. `mac-runner-host` already announces the actual `baseUrl` via `ready: <url>` on stdout so the Swift client picks up a shifted port transparently. **(2) Lock-on-plaintext UX.** After MAC30 made encryption opt-in, plaintext SSDs have no key to zeroize — "Lock" was just stopping the chat stack with no path back. New `@Published var isEncryptedSsd: Bool` drives conditional button rendering in `ContentView`: encrypted SSD keeps "Lock"; plaintext SSD shows "Stop" / "Start" depending on chat-host running state. New `stopChatHost()` (subset of `lockSession` minus the unlock-material zero) and `startChatHost()` wrapper for the existing `ensureLocalChatStackRunning()`. **(3) Chat cold-load timeout.** Default URLSession `timeoutIntervalForRequest = 60s` was firing on cold model loads (5GB+ deepseek-r1:8b on USB SSD takes 30-90s to first token). Bumped to 180s for the chat stream specifically — server already emits a `start` frame immediately so the per-request timer resets on first byte. **Cross-OS audit:** Windows runner has no equivalent Lock flow and doesn't exhibit the field-test failures; the C# port-shift is shared so Windows passively benefits in the conflict case. CI green first run on all three jobs (mac-prep 1m13s, mac-runner 49s, windows 2m58s); v1.3.20 dispatched + shipped same-session; field-test confirmed all three resolved.
 
 - **PR #237 — MAC38 drop static Ollama version pin, resolve from upstream `sha256sum.txt` — merged `edc99d3` (2026-05-09).** Released as **v1.3.19**. Closes the v1.3.18 mac field-test failure where a `deepseek-r1:8b` pull returned `412: The model you are attempting to pull requires a newer version of Ollama`. Replaces the hardcoded `v0.5.7` pin in `OllamaPackageTrustPolicy` (`DefaultMacPackage` / `DefaultWindowsPackage` / `PinnedMetadataByUrl`) with dynamic resolution: CI's `FreeAiSsd.PrereqFetch` now calls the resolver `PrereqResolver.ResolveLatestOllamaMacAsync` (already implemented + unit-tested for the `releases/latest` + `sha256sum.txt` path; deactivated in MAC4 because the static dictionary drifted on every upstream release). New `ResolveLatestOllamaWindowsAsync` mirrors it for the Windows side. `ArtifactStagingService.StageMacOllamaAsync` reads the bundled `mac-tools-manifest.json` (which CI populated with the resolved version + `sourceUrl` + vendor SHA-256) as the staging hash gate. Windows runtime download (`OllamaPackageService.EnsureOllamaReadyAsync`) drops the `ollamaUrl` parameter and resolves at first run. Trust chain unchanged: HTTPS to `github.com` allowlist + vendor-published SHA-256 from the release's `sha256sum.txt` + on-SSD attestation receipt; the receipt is the runtime gate (rehashing a 180MB binary on every launch is too slow). Swift `mac-runner/Sources/main.swift` `evaluateTrustGate()` drops the `PinnedMacOllama.url` / `PinnedMacOllama.sha256` constants and validates the attestation in place (URL is HTTPS to allowlisted host + SHA is well-formed 64-hex). The "Ollama package URL" advanced field in `MainWindow.xaml` is removed — it had no semantic role under the new model. **5-minute pre-refactor spike** confirmed `v0.23.2`'s `Ollama-darwin.zip` is byte-identical at the touchpoints we rely on (`Ollama.app/Contents/Resources/ollama` still exists, universal arm64+x86_64, vendor `sha256sum.txt` format unchanged). Tests rewritten across 6 files to construct metadata inline. CI green first run (mac-prep 47s, mac-runner 48s, windows 2m42s); the mac-prep job actually exercises the dynamic resolver against live GitHub, so green is end-to-end proof. v1.3.19 dispatched same-session.
 
@@ -59,6 +69,8 @@ See `project_backlog.md` for full general backlog details. See
 `agent_docs/mac_project_backlog.md` for the macOS support track.
 
 ## Last session
+
+2026-05-10 (PR #239 MAC39 merged `8eaa922` + v1.3.20 dispatched + shipped). v1.3.19 Mac field test of `deepseek-r1:8b` confirmed MAC38's dynamic Ollama resolver works (no more 412 from `/api/pull`) but surfaced three new findings in the runner / chat-host stack: (1) Lock + re-select-SSD wedged the runner with `Failed to bind to address http://127.0.0.1:NNNNN: address already in use` until the user quit and relaunched; (2) the Lock button on a plaintext SSD had no semantic meaning post-MAC30 and was just a confusing way to stop the chat stack with no path back; (3) sending a chat to a cold-loaded 8b model timed out at 60s before ollama emitted the first token. All three bundled into MAC39 because they share the runner / chat-host surface. **Two-layer fix on the port leak:** lsof+kill on the configured port before sidecar start (handles stale processes — same shape as MAC34b for ollama) AND `TcpListener` port-shift in `RunnerLocalApiService.StartAsync` (handles kernel TIME_WAIT). Together they cover both failure modes. **Diagnosis pinned an architectural detail:** `mac-runner-host/HostLifetime.cs` already emits `ready: <baseUrl>` from `api.CurrentBaseUrl` after `app.StartAsync` returns, so a Swift client picks up a shifted port without any handshake change — port-shifting is transparent to the Mac runner. **Lock UX fix:** `@Published var isEncryptedSsd` set in `loadConfig()` after the `SsdEncryption.isEffectivelyEncryptedForWriteGuard` check; `ContentView` button row picks Lock vs Stop/Start based on it. **Cold-load timeout:** bumped URLSession `timeoutIntervalForRequest` from 60s default to 180s for chat only. CI green first run; v1.3.20 dispatched same-session; field test confirmed all three resolved. Closed stale wrap-up PR #228 (MAC34a/b — pre-MAC30/35/35a/36/38, would have stripped a week of work) en route to the MAC38 work earlier in the session. Issue #4 from the v1.3.19 field test (model-pull progress shows scrolling logs instead of static label) is deferred — different surface (PrepApp pull path), not MAC38-introduced.
 
 2026-05-09 still later (PR #237 MAC38 merged `edc99d3` + v1.3.19 dispatched + shipped). Field test of `deepseek-r1:8b` on v1.3.18's Mac PrepApp surfaced `pull model manifest: 412: The model you are attempting to pull requires a newer version of Ollama` — the `v0.5.7` MAC4 pin had aged out. Two-front investigation: (1) checked upstream `server/download.go` through `v0.23.2`, confirmed `numDownloadParts = 16` still hardcoded so MAC35 host-staging stays load-bearing; (2) discovered `PrereqResolver.ResolveLatestOllamaMacAsync` was already implemented, unit-tested, and deactivated in MAC4 because the static `OllamaPackageTrustPolicy.PinnedMetadataByUrl` dictionary drifted from the dynamic CI-resolved hash on every upstream release. The blocker was architectural (static dictionary), not infrastructural — the resolver was waiting to be re-enabled. **5-minute pre-refactor spike** downloaded `v0.23.2`'s `Ollama-darwin.zip`, confirmed `Ollama.app/Contents/Resources/ollama` still at the same path, universal arm64+x86_64, vendor `sha256sum.txt` format unchanged → cleared the path to a one-PR refactor. 20 files changed: trust policy lost the static records and gained an attestation-only validator (no URL parameter); `MacToolDefinition` lost its hardcoded `SourceUrl`; staging service reads hash from the bundled manifest; Windows runtime drops the `ollamaUrl` parameter + the matching XAML field; Swift trust gate validates the on-SSD attestation directly. 6 test files rewritten. CI green first run on all three jobs (`mac-prep-build` 47s, `mac-runner-build` 48s, `windows-build` 2m42s); the mac-prep job actually exercises the dynamic resolver against live GitHub, so green is end-to-end proof. Dispatched v1.3.19 the same session. **No surprises this session** — the hard part was tracing how MAC4's "drift" failure mode could be fixed by moving the trust anchor from a static dictionary to the disk attestation (which is already PrepApp's signed receipt of the staging-time hash verification). Closed stale wrap-up PR #228 (MAC34a/b — its diff would have stripped MAC30/35/35a/36/38 work) en route.
 
