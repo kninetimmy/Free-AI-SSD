@@ -1879,3 +1879,92 @@ then, the delegate path is the only supported shape and is locked
 into the project.
 
 Established PR #235 (`567f49a`), shipped v1.3.18.
+
+## 2026-05-09 — Bundled Ollama version is no longer pinned; resolved per-build from upstream `sha256sum.txt` [MAC38]
+
+MAC4 (2026-05-05) pinned the bundled Ollama to `v0.5.7` because the
+previous "resolve `releases/latest`" path drifted from the static
+`OllamaPackageTrustPolicy.PinnedMetadataByUrl` dictionary on every
+upstream release, causing PrepApp staging to refuse the bundle.
+That pin caused a new failure mode in the v1.3.18 mac field test:
+`pull model manifest: 412: The model you are attempting to pull
+requires a newer version of Ollama` when staging
+`deepseek-r1:8b` — the model's manifest schema had moved past
+`v0.5.7`'s CLI. There's no environment-variable workaround;
+`numDownloadParts = 16` is hardcoded upstream and any newer Ollama
+would have the same bottleneck on Mac, which MAC35 already
+addresses with host-staging.
+
+MAC38 fixes the failure mode without falling back to the static
+pin: drop the static `Default*Package` records and the
+`PinnedMetadataByUrl` dictionary entirely, and move the trust
+anchor to the on-SSD attestation file.
+
+**New trust chain (Mac):**
+1. CI's `FreeAiSsd.PrereqFetch` (`tools/FreeAiSsd.PrereqFetch/Program.cs`)
+   calls `PrereqResolver.ResolveLatestOllamaMacAsync` against
+   `https://api.github.com/repos/ollama/ollama/releases/latest`,
+   picks `Ollama-darwin.zip` (lowercase fallback for older
+   releases), and fetches the release's `sha256sum.txt` asset.
+2. `DownloadAndVerifyAsync` downloads + verifies the bytes against
+   the vendor SHA-256. The resolved version, source URL, and SHA
+   are written into the bundled `mac-tools-manifest.json`.
+3. PrepApp `ArtifactStagingService.StageMacOllamaAsync` reads the
+   bundled manifest and uses *its* hash as the staging-time gate
+   (no static lookup). On match, the `MacOllamaStagingPipeline`
+   runs the arm64-slice gate and writes the on-SSD attestation
+   under `mac/tools/ollama/ollama-package-trust.json`.
+4. At runtime, `MacOllamaLifecycleService.ValidateTrust` and the
+   Swift `evaluateTrustGate` in `mac-runner/Sources/main.swift`
+   validate the attestation directly: file present + deserializes
+   + URL is HTTPS to an allowlisted host (`github.com` or
+   `objects.githubusercontent.com`) + SHA-256 is well-formed
+   64-char hex. The 180MB+ binary is *not* re-hashed on each
+   launch; the attestation is PrepApp's signed receipt of the
+   staging-time hash verification.
+
+**New trust chain (Windows):** Same shape, but the resolver runs
+at PrepApp first-run instead of at CI build time —
+`OllamaPackageService.EnsureOllamaReadyAsync` calls
+`ResolveLatestOllamaWindowsAsync`, downloads, verifies, writes
+attestation. The "Ollama package URL" advanced field in
+`MainWindow.xaml` is removed because there's no longer a static
+URL the user could override.
+
+**Why this works where MAC4's previous attempt didn't:** the
+"drift" failure mode in MAC4 was that the static dictionary at
+runtime disagreed with the dynamic CI-resolved hash. The fix
+isn't to pin both ends; it's to remove the static dictionary as
+the runtime authority. The attestation written at staging time
+(after byte-level hash verification against the upstream's
+vendor `sha256sum.txt`) is the runtime authority. Same trust
+model `.NET 8` already uses with Microsoft's `releases.json`
+SHA-512 path. The URL-allowlist half of the chain stays; only
+the URL→hash dictionary is gone.
+
+**Why MAC35 host-staging stays:** Pre-refactor verification
+re-checked upstream `server/download.go` through `v0.23.2`;
+`numDownloadParts = 16` is still hardcoded with no env override.
+Bumping to latest doesn't change the exFAT-write bottleneck on
+Mac. The comment in `prep-core/OllamaModelStager.cs` was updated
+to record the re-verification.
+
+**Why a 5-minute spike before the refactor:** The Mac path bets
+on the upstream `Ollama.app/Contents/Resources/ollama` layout
+staying intact. A pre-refactor spike confirmed `v0.23.2`'s
+archive is byte-identical at every touchpoint we rely on (inner
+CLI path, universal arm64+x86_64 slices, vendor `sha256sum.txt`
+format with `./` filename prefix). `Contents/Resources` now also
+ships GGML inference dylibs alongside the CLI; extraction is
+`ZipFile.ExtractToDirectory` so they ride along automatically.
+
+This decision unlocks if upstream removes the GitHub release
+shape (no `sha256sum.txt`, no per-asset URL), at which point we'd
+need a different vendor-hash source. It also unlocks if Mac drops
+the `Ollama.app` GUI bundle and ships only the CLI tarball
+(`ollama-darwin.tgz` is now alongside `Ollama-darwin.zip` in
+upstream releases) — at that point the Mac side simplifies
+further and the inner-binary resolver in `OllamaPackageService`
+goes away.
+
+Established PR #237 (`edc99d3`), shipped v1.3.19.
