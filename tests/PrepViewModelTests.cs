@@ -1245,6 +1245,10 @@ public class PrepViewModelTests
     {
         SetupDefaultMocks();
         _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        // SetupDefaultMocks omits BuildPullSelectionWarnings (the only existing
+        // download test short-circuits before ConfirmSizingWarningsIfNeeded);
+        // mock here so the real download path reaches PullModelsAsync.
+        _modelService.Setup(m => m.BuildPullSelectionWarnings(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int?>())).Returns(new List<string>());
 
         var config = new PortableConfig();
         config.Models.Add(new ModelConfigEntry { Name = "llama3.2:3b", Status = ModelInstallStatus.NotInstalled });
@@ -1303,6 +1307,7 @@ public class PrepViewModelTests
     {
         SetupDefaultMocks();
         _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        _modelService.Setup(m => m.BuildPullSelectionWarnings(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int?>())).Returns(new List<string>());
 
         var config = new PortableConfig();
         config.Models.Add(new ModelConfigEntry { Name = "llama3.2:3b", Status = ModelInstallStatus.NotInstalled });
