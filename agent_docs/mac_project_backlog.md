@@ -3310,6 +3310,51 @@ The two layers cover different failure modes (stale process vs kernel TIME_WAIT)
 - v1.3.20 dispatched + shipped same-session. ✅
 - v1.3.20 Mac field test: Lock + re-select-SSD on plaintext drive should restart cleanly; plaintext button row should read Stop/Start; 8b model cold-load should not time out at 60s. ✅ All three confirmed by the user in the v1.3.20 field test.
 
-**Followup (not in this PR):**
-- v1.3.19 field-test issue #4: model-pull progress shows scrolling logs instead of a static label in PrepApp. Different surface (PrepApp pull path, not the runner), separate ticket. Not regression-introduced — pre-existing or from MAC36.
+**Followup (now resolved):**
+- v1.3.19 field-test issue #4 (model-pull progress shows scrolling logs instead of static label in PrepApp): closed by **MAC40** (PR #241, v1.3.21).
+
+---
+
+### MAC40 - Model-pull progress switches to Ollama HTTP /api/pull NDJSON (retires CLI-stdout regex parser)
+
+**Status:** done 2026-05-10 (PR #241 `b5ac727`, shipped v1.3.21). Closes the v1.3.20 field-test "scrolling logs" pull-progress regression flagged as v1.3.19 issue #4 (deferred from MAC39 because it's a PrepApp pull-path surface, not the Mac runner). The MAC31 `OllamaPullProgressFilter.IsProgressLine` regex was anchored on `pulling <hash>... NN%`; MAC38's dynamic Ollama version resolution brought in `v0.23.2+` which emits `pulling <hash>: NN%` (colon, not dots) — every progress tick failed the match and fell through to the scrolling log channel.
+
+**Scope:** medium — 13 files (3 new, 2 deleted, 8 modified). Net −190 lines vs the prior CLI parser. The dotnet build doesn't run on Stephen's Mac; CI is the build oracle for this work.
+
+**Risk:** Low. Cancel/resume invariants preserved (HttpClient cancel = TCP close = server-side resumable state intact). MAC31's `EstimatePartialProgress` seed is filesystem-based and untouched. MAC35 staging-then-merge is untouched (only the pull *mechanism* changed; OLLAMA_MODELS still points at staging).
+
+**Dependencies:** MAC27 (the temp `OllamaServerHandle` already plumbed `OLLAMA_HOST` through `PullModelAsync`, so the swap is local — no new lifecycle to invent). MAC38 is what surfaced the bug (the new Ollama's TUI shape) but isn't a code dependency.
+
+**Goal:** the in-place pull-progress label updates frame-by-frame with structured percent + bytes, and the implementation is robust against future Ollama TUI rendering shifts.
+
+**Driver:** v1.3.20 field-test screenshot showed the user pulling `deepseek-r1:7b` and seeing the same `pulling 96c41565... 83% | 3.9 GB/4.7 GB | 68 MB/s` line scrolling past per tick instead of updating in place. User asked "what's the smartest fix? not the easiest fix" — explicit ask for the principled refactor over the regex tweak.
+
+**Smart-fix rationale (from the session):** parsing the CLI's rendered text is the wrong abstraction. The CLI is itself an HTTP client of `/api/pull`; we're parsing the rendering of the source instead of the source. Broadening the regex defers the next break; switching to the JSON API eliminates the class. The infrastructure cost is near-zero because the temp server + `OLLAMA_HOST` are already in place. Side benefits: structured `Total`/`Completed` enables real progress-bar rendering in MAC37; structured `error` frames replace exit-code inference; the entire `OllamaPullProgressFilter` (ANSI strip + `\r` coalesce + regex) becomes dead code.
+
+**Cross-OS parity audit (per 2026-05-07 rule):**
+- **Windows + Mac:** `ModelOperations.PullModelAsync` is shared C# — both platforms flip in this PR.
+- **Mac sidecar wire format:** `progress: <human-readable>` stdout channel unchanged. `PrepHostController.swift` does not need a code change (only stale comments updated). Future Mac UI work (MAC37) could switch to JSON-on-the-wire to surface the structured fields to Swift if needed.
+- **Conclusion:** truly cross-OS — same code path, same failure was latent on Windows too.
+
+**Affected files (13):**
+- `shared/Services/OllamaPullProgress.cs` — new record + `ToDisplayString()`.
+- `shared/Services/IModelService.cs` — `Action<string>?` → `Action<OllamaPullProgress>?`.
+- `prep-core/OllamaPullClient.cs` — new HTTP NDJSON consumer with `HttpMessageHandler` test seam.
+- `prep-core/ModelOperations.cs` — `PullModelAsync` body replaced; `RunProcessStreamingAsync`/`Consume` lose their unused `onProgress` plumbing.
+- `prep-core/Services/ModelService.cs` — passthrough signature.
+- `mac-prep-host/HostLifetime.cs:337` — `progress => EmitProgress(progress.ToDisplayString())`.
+- `shared/ViewModels/PrepViewModel.cs:823` — `progress => SetPullProgressLineSafe(progress.ToDisplayString())` + 4 stale-comment updates.
+- `tests/MacPrepHostPullLifecycleTests.cs:258` — `FakeModelService.PullModelAsync` signature.
+- `tests/PrepViewModelTests.cs:751` — Moq.Verify expression updated (this was the second-push fix; mac jobs don't compile WPF tests so it slipped past the first CI run).
+- `tests/OllamaPullClientTests.cs` — new, 6 pins.
+- `tests/OllamaPullProgressTests.cs` — new, 4 pins.
+- Deleted: `prep-core/OllamaPullProgressFilter.cs` + `tests/OllamaPullProgressFilterTests.cs`.
+- `mac-prep-app/Sources/PrepHostController.swift`, `mac-prep-app/Sources/main.swift` — stale-comment updates only.
+
+**Acceptance / smoke (v1.3.21):**
+- CI: first push mac-prep 50s + mac-runner 1m18s + windows-build FAIL on `PrepViewModelTests.cs:751`; second push (`e9c68d8`) green all three (mac-prep 48s, mac-runner 57s, windows 3m59s).
+- v1.3.21 dispatched same-session.
+- v1.3.21 Mac field test: pulling a starter model (e.g. `deepseek-r1:7b`) shows the in-place label updating with `pulling <hash> — NN% (X.X GB / Y.Y GB)` instead of the scrolling-logs symptom; cancel mid-pull → SSD has partial blobs → retry resumes via "Resuming from NN%…".
+
+**Architectural decision recorded:** see 2026-05-10 entry in `project_decisions.md` — model-pull source-of-truth is the HTTP API, not CLI stdout text. Applies to any future "parse a CLI's progress" temptation.
 

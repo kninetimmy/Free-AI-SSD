@@ -174,7 +174,9 @@ cache/                    — prep-time download cache
 ## Runtime layout (host-side, Mac)
 
 Mac model pulls stage outside the SSD before merging in. The bundled
-`ollama` CLI hardcodes 16 parallel chunk writers, which exFAT FSKit
+`ollama` server hardcodes 16 parallel chunk writers (post-MAC40 we
+talk to it via `POST /api/pull` over `OLLAMA_HOST`; the CLI is no
+longer in the pull path), which exFAT FSKit
 on macOS 15+ cannot sustain — pulls collapse to ~5 % of network
 bandwidth on a 1 Gb line. The fix (MAC35) routes the pull's
 `OLLAMA_MODELS` to a host-side cache, then `OllamaModelStager`
