@@ -2448,3 +2448,95 @@ configurability — at which point it moves from `const` to a
 `PortableConfig` field.
 
 Established PR #253 (`6cfae14`).
+
+## 2026-05-10 — Most-popular toggle effect is announced via a row-count caption (cross-OS pure-helper-mirror) [M11]
+
+The v1.3.22 mac field-test reported that PrepApp's "Most popular"
+toggle "doesn't do anything." Phase-1 instrumentation patched into
+a throwaway dev build (orange `[M11]` log strip on the
+encryption-setup step + per-toggle `appendLog` capturing
+`showOnly`/`starter.count`/`nonNilPullCount`/`firstPC`/`visible.count`
++ raw `result.payload["entries"]` `pullCount` distribution) proved
+every layer worked end-to-end on the user's actual SSD: live
+ollama.com scrape returns 399 entries, 398 carry valid Int64
+NSNumber pull counts (`objCType=q`, not `d`, so no
+NSNumber→Double round-trip risk), the Swift decoder preserves all
+399, the toggle's `showOnly.toggle()` action fires, and
+`applyStarterModelFilters` yields `visible=15` sorted desc by
+`pullCount`. **The bug is perception, not logic.** ollama.com's
+natural order is already popularity-desc — capping 399 → 15
+produces the same first-screenful and the user reads "no change"
+because the only visible delta is the scrollbar shrinking.
+
+M11 picks a perception-first shape:
+
+- **Row-count caption between catalog status and picker.** Toggle
+  ON → `Showing top 15 of 399 by pulls.` Toggle OFF → caption
+  hides (the existing catalog status line already shows the total
+  in that case). Search-only → `Showing N of 399 matching search.`
+  Both → `Showing top N of 399 by pulls (filtered by search).`
+  Accent-cyan + bold so the change is unmissable.
+- **Cross-OS pure-helper-mirror.** New static method
+  `FreeAiSsd.Shared.Models.StarterRowCountCaption.Format(
+  visible, total, showOnlyMostPopular, hasSearch)` lives in
+  `shared/Models/StarterRowCountCaption.cs`; a Swift mirror
+  `formatStarterRowCountCaption` lives in
+  `mac-prep-app/Sources/StarterCatalogTypes.swift` carrying
+  byte-identical wording. Establishes the rule: **for any cross-OS
+  UX surface where the wording is part of the user-visible
+  contract, the helper exists in two files with identical names
+  and identical strings — one PR title is one search query that
+  finds both.** Wording drift between platforms is a contract
+  violation, not a UI nit.
+- **WPF wiring via single constructor subscription.**
+  `PrepViewModel`'s constructor subscribes once to
+  `ModelRowsViewInvalidated` AND `ModelRows.CollectionChanged`,
+  raising `OnPropertyChanged(nameof(StarterRowCountCaption))` from
+  both. This is preferred over duplicating an `OnPropertyChanged`
+  call at each invalidation callsite (search setter, popular
+  setter, `SetStarterCatalogAsync`) because future invalidation
+  paths can't silently miss the caption — the subscription catches
+  them automatically.
+- **Helper layering: `shared/Models/`, NOT `prep-core/`.** First
+  draft put the helper in `prep-core/StarterModelCatalog.cs`
+  (semantically near `StarterModelEntry`) but `shared/` does not
+  reference `prep-core/` — the dependency goes
+  `prep-app/` → `prep-core/` and separately `prep-app/` →
+  `shared/`. The helper is consumed by `shared/ViewModels/PrepViewModel.cs`,
+  so it must live in `shared/`. Pinning this so future helpers
+  follow the same rule: anything `PrepViewModel` calls lives in
+  `shared/`, not in `prep-core/`.
+
+Why not the alternatives:
+
+- **Re-implement `applyStarterModelFilters`.** The most natural
+  first instinct given the field-test wording — but phase-1
+  evidence proved the filter already works. Without the
+  diagnostic patches we would have shipped a "fix" to a
+  non-broken filter and the perception bug would have stayed
+  live. The diagnostic-patches-before-fix discipline is the
+  reusable lesson.
+- **Toast/notification on toggle.** Visually intrusive, doesn't
+  persist, doesn't help users who clicked the toggle five
+  seconds ago and are still trying to figure out what changed.
+- **Row-count badge inside the toggle button label.** Considered
+  briefly — `Most popular ✓ (15)` — but loses the "of 399"
+  context that makes the cap legible. The standalone caption can
+  carry both numbers without crowding the button.
+- **Animate the row count or scroll position.** Would communicate
+  the change but is heavy and macOS-11-baseline-hostile (some
+  animation modifiers are macOS 12+).
+- **Add the caption to ollama.com-side via a sort indicator.**
+  Out of scope; we don't control ollama.com's HTML.
+
+Revisit conditions: (a) ollama.com switches to a non-popularity
+default sort — the perception bug returns and the caption alone
+may not be enough; (b) we add a third or fourth filter dimension
+(parameter count, capability) that needs to compose into the same
+caption — the four-quadrant branch table grows and may need
+restructuring; (c) the wording diverges between Mac and Windows
+because someone tweaks one file without the other — that's a
+process failure, file an item to add a CI check that diffs the
+caption strings.
+
+Established PR #255 (`cf5713e`).
