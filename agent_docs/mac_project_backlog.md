@@ -3427,6 +3427,12 @@ The two layers cover different failure modes (stale process vs kernel TIME_WAIT)
 
 ### M13 - "Expose API on LAN" toggle reverts itself on Mac
 
+**Status:** **done** — fix landed in branch `fix/m13-mac-expose-api-toggle-revert` (PR TBD; commit pending). Decision pinned in `project_decisions.md` 2026-05-10. **Root cause:** `handleHostStatusChange(.stopped)` was clearing `networkModeEnabled` to false. `MacRunnerHostController.shutdown()` synchronously sets `status = .stopped` and the `didSet` observer dispatches `onStatusChange` to main *async* — so on every `restartHostSidecar()` the queued `.stopped` callback fired one runloop turn later, *after* the sidecar had already been restarted with the correct bind address, and unconditionally reset the user-intent toggle. Field-test symptom ("toggles for a split second then it un-toggles") matches exactly: one frame ON (Published change → SwiftUI re-reads), then OFF on the next runloop turn. **Fix:** delete the auto-clear from `.stopped`. `.crashed` (`terminationStatus != 0`) remains the right home for involuntary state changes — it surfaces a message and clears the toggle. Plain `lockSession`/`stopChatHost` already clear the toggle directly because they represent the user walking away from intent. None of phase-1's plausible causes (silent validation, bind failure, MAC34a regression) actually fired; the bug was async-callback-vs-sync-restart ordering.
+
+---
+
+**(Original filing preserved below for archeology.)**
+
 **Status:** filed 2026-05-10 from v1.3.22 mac field test. **P0 field-test surface; regression candidate on the MAC34 surface.**
 **Scope:** Diagnose then fix. Likely small.
 **Model:** Sonnet 4.6.
