@@ -45,7 +45,137 @@ the user-facing change â€” not a changelog dump. The current README
 was refreshed in PR #123 (`796719d`) with real screenshots; that's
 the style to match.
 
-## Priority order (most recent triage: 2026-04-18 â€” v1.2.1 field test)
+## Unified label scheme (2026-05-10 refactor)
+
+Three flat buckets, one counter per bucket:
+
+- **`C#`** — Cross-OS (touches `shared/`, `runner-core/`, `prep-core/`, or both per-host UI surfaces)
+- **`W#`** — Windows-only (WPF Runner / PrepApp internals, Companion VR PC, DCS-anchored work)
+- **`M#`** — Mac-only (SwiftUI hosts, `mac-*-host` sidecars, mac packaging, native Mac UX). Bodies live in `mac_project_backlog.md`.
+
+**Mapping policy:**
+
+- Shipped items keep their original IDs (`X*`, `F*`, `B*`, `H*`, `R*`, `MAC*`) so PR notes / decision-doc cross-refs / git history stay searchable.
+- Open items get a new C/W/M ID via the table below; the existing `### Old-ID` body header stays until the item is next picked up for work, at which point both the header and cross-references get rewritten.
+- All new items from 2026-05-10 onward use the new scheme exclusively.
+- Full rationale: `project_decisions.md` 2026-05-10 entry.
+
+**Cross-OS parity rule (reinforced 2026-05-10):** every new task's planning phase mandates a dual-OS review pass. When a task is split into per-OS work, **the other-OS follow-up is the very next task — not deferred behind feature work.** See `project_decisions.md` 2026-05-07 and 2026-05-10 entries.
+
+**Open-item mapping (2026-05-10 — applies until each body is renamed):**
+
+| New ID | Old ID | One-line scope | File |
+|---|---|---|---|
+| C1 | (new) | Large-model chat stall investigation (cold-load + silent failure) | this file |
+| C2 | (new) | Embedding-model provisioning gap (100% embed-failure pathology) | this file |
+| C3 | (new) | Model picker: filter by parameter count | this file |
+| C4 | (new) | Model picker: filter by capability (tools/vision/thinking/coding) | this file |
+| C5 | (new) | Model picker: sort by newest | this file |
+| C6 | (new) | PrepApp: detect already-configured drive, skip-format flow | this file |
+| C7 | X9 | Encrypted config persistence lifecycle | this file |
+| C8 | X10 | Document replacement + rebuild consistency | this file |
+| C9 | X12 | DownloadManager verify-before-move | this file |
+| C10 | F4 Stage 2 | Post-setup launch flow (FTUE) | this file |
+| C11 | B2 | LAN discovery (Runner broadcasts, Companion listens) | this file |
+| C12 | R1 Stage 2 | runner-cli `/docs` and `/reindex` slash-commands | this file |
+| C13 | X18 | Ingest observability | this file |
+| C14 | X15 | RAG file-size and chunk-size caps | this file |
+| C15 | X19 | Hybrid retrieval (dense + FTS5 + neighbors) | this file |
+| C16 | X20 | Section-aware chunking + richer metadata | this file |
+| C17 | X22 | Prompt packing + grounding enforcement | this file |
+| C18 | X23 | Representative test fixtures | this file |
+| C19 | X17 | Textless-page diagnostic | this file |
+| C20 | X5 | GPU/CPU compute indicator | this file |
+| C21 | X4 | Web chat UI bundled in Runner Kestrel | this file |
+| C22 | F5 | TTS settings UI | this file |
+| C23 | X14 | 50 MB upload silent-reject UX | this file |
+| W1 | X11 | Companion keyboard PTT + first-run validation | this file |
+| W2 | F4 Stages 3-4 | Companion install target selector + installer | this file |
+| W3 | X16 | Unlock dialog dark theme (WPF) | this file |
+| W4 | X7 | DCS bindings: aircraft found, "no custom bindings" parser bug | this file |
+| M1 | MAC10 | Mac packaging hardening | mac_project_backlog.md |
+| M2 | MAC11 | Signing & notarization (back-burnered until cert renews) | mac_project_backlog.md |
+| M3 | MAC12 | Voice/TTS parity on Mac | mac_project_backlog.md |
+| M4 | MAC13 | HOTAS/PTT support or deliberate deferral | mac_project_backlog.md |
+| M5 | MAC14 | DCS import on Mac | mac_project_backlog.md |
+| M6 | MAC15 | Supported Mac release docs | mac_project_backlog.md |
+| M7 | MAC20 | Cross-platform release ZIP layout rework | mac_project_backlog.md |
+| M8 | MAC22 | Mac sidecar manifest lookup walks ancestors | mac_project_backlog.md |
+| M9 | MAC25 | OllamaPackageService.ResolveOllamaExe Mac binary name | mac_project_backlog.md |
+| M10 | MAC37 | Mac PrepApp finalize observability (back-burnered) | mac_project_backlog.md |
+| M11 | (new) | Most popular toggle on Mac picker after Refresh | mac_project_backlog.md |
+| M12 | (new) | Mac runner chat UI parity to X13 (surface real failures) | mac_project_backlog.md |
+| M13 | (new) | "Expose API on LAN" toggle reverts itself on Mac | mac_project_backlog.md |
+
+**Closed on this pass (no new ID):**
+
+- **X6** — "Create Library" UI hang. 3+ weeks no recurrence on v1.2.5+; F3/X13 work touched that surface heavily and likely fixed incidentally. Reopen as a new C-item if it returns.
+
+---
+
+## Priority order (2026-05-10 post-v1.3.22 triage)
+
+**P0 — Field-test bug surface (top of queue, ship before any feature):**
+
+1. **M13** — Expose-API-on-LAN toggle reverts on Mac (regression candidate, MAC34 surface)
+2. **M12** — Mac runner chat UI parity to X13 (Mac chat surface lacks structured-failure surfacing)
+3. **C1** — Large-model chat stall investigation (qwen3:14b stalls; cross-OS; partly depends on M12)
+4. **C2** — Embedding-model provisioning gap (100% embed failures — was MAC35's deferred follow-up)
+5. **M11** — Most-popular toggle on Mac picker after Refresh
+
+**P1 — F2a model-picker cluster (cross-OS bundle, ship after P0):**
+
+6. **C3** — Parameter-count filter (data already in scrape — cheapest)
+7. **C4** — Capability filter (scraper extension)
+8. **C5** — Sort by newest (scraper extension)
+
+**P2 — Substantive UX:**
+
+9. **C6** — Detect-configured-drive flow (PrepApp UX; cross-OS)
+
+**P3 — Existing critical / high items (deferred behind P0–P2):**
+
+10. **C7** (was X9) — encrypted config persistence lifecycle *(Critical, Opus planning)*
+11. **C8** (was X10) — document replacement consistency *(plan locked 2026-04-19)*
+12. **W1** (was X11) — companion keyboard PTT
+13. **C9** (was X12) — download verify-before-move
+14. **C10** (was F4 Stage 2) — post-setup launch flow
+15. **W2** (was F4 Stages 3-4) — companion install target + installer
+16. **C11** (was B2) — LAN discovery
+17. **C12** (was R1 Stage 2) — runner-cli slash-commands
+18. **M7** (was MAC20) — cross-platform release ZIP layout rework
+
+**P4 — RAG audit batch (slot when v1.3.x feature work resumes):**
+
+19. **C13** (was X18) — ingest observability
+20. **C14** (was X15) — RAG file-size and chunk-size caps
+21. **C15** (was X19) — hybrid retrieval
+22. **C16** (was X20) — section-aware chunking
+23. **C17** (was X22) — prompt packing
+24. **C18** (was X23) — test fixtures
+25. **C19** (was X17) — textless-page diagnostic
+
+**P5 — Polish:**
+
+26. **W3** (was X16) — unlock dialog dark theme
+27. **C20** (was X5) — GPU/CPU compute indicator
+28. **C21** (was X4) — web chat UI
+29. **W4** (was X7) — DCS bindings parser
+30. **C22** (was F5) — TTS settings UI
+31. **C23** (was X14) — 50 MB upload silent-reject UX
+
+**Back-burnered (do not pull without user nudge):**
+
+- **M2** (was MAC11) — signing + notarization (waiting on Apple Developer cert renewal)
+- **M10** (was MAC37) — Mac PrepApp finalize observability (cold-load wait acceptable post-MAC39)
+
+**Dormant (could not reproduce):** X1-Redux. Diag branch `diag/x1-redux-send-hang` stays on remote, unmerged. Reopen as a new C-item if the hang returns.
+
+**Housekeeping:** README update for F1 (USB SSD detection fix) remains a small bundle-able doc touch.
+
+---
+
+## Priority order (2026-04-18 historical — superseded 2026-05-10 by the section above)
 
 **v1.2.x patch stream (each ships as its own PR + release â€” see decision 2026-04-18):**
 1. **B3-Redux phase 2** â€” shipped 2026-04-18 (PR #133, `b20dd67`).
@@ -113,6 +243,185 @@ Items `B1`â€“`F4` below were triaged from Stephen's `Downloads/# Free-AI-SS
 ---
 
 ## Items
+
+### C1 — Large-model chat stall investigation (cold-load + silent failure)
+
+**Status:** filed 2026-05-10 from v1.3.22 mac field test.
+**Scope:** Diagnose first, then fix. Investigation phase before scoping.
+**Model:** Sonnet 4.6 for diagnosis; re-triage for fix.
+
+**Driver:** With `qwen3:14b` loaded on Mac runner, clicking Send produces no response — the spinning indicator just stops, no fail message. Distinct from X1-Redux (TTS-side, dormant since v1.2.5). MAC39 already raised Mac chat URLSession timeout 60s → 180s, but a 14b model on USB SSD plausibly exceeds that on first cold load, OR Ollama is failing to load the model and not returning a JSON error, OR the failure is structured but Mac UI isn't surfacing it (see **M12**).
+
+**Plausible root causes (phase 1 should discriminate):**
+1. **Cold load > 180s.** 14b on USB SSD may take 3–5 min to mmap from cold; URLSession timeout fires; chat appears stalled.
+2. **Ollama load failure with empty stream.** `/api/chat/stream` opens, errors silently mid-load, client sees `start` but never tokens or `complete`.
+3. **Memory pressure on 16 GB Macs.** 14b q4_K_M is ~8 GB; macOS may swap aggressively and the load never completes.
+4. **Ollama returning 5xx on chat.** `RunnerLocalApiService` should translate to a structured error post-X13, but the Mac UI may not render it (see M12).
+
+**Cross-OS audit (per 2026-05-07 + 2026-05-10 rules):**
+- `runner-core/Services/ChatService.cs` is shared. Investigation likely touches both.
+- Mac surfaces the symptom; Windows hasn't been retested with comparable hardware.
+- Default to bundle if fix scope is small; split with Mac-first if cause is Mac-specific.
+
+**Phase 1 — diagnostic:**
+- Reproduce on user hardware with logs at `/api/chat/stream` boundary (request sent, first byte, last byte, total duration).
+- Compare 8b (works) vs 14b (stalls) — duration-bound or model-class-bound?
+- Check Ollama daemon log + `mac-runner-host` stdout for load-time errors.
+- Verify URLSession timeout actually fires (vs. genuine indefinite stall).
+
+**Phase 2 — fix (depends on phase 1):**
+- If timeout: bump per-request budget AND emit a "Loading model… (NN s)" message during cold load.
+- If Ollama failure: surface as a structured chat error (depends on M12).
+- If memory: pre-load warning naming model size vs. available RAM.
+
+**Affected files (expected):**
+- `runner-core/Services/ChatService.cs` — load-time observability.
+- `mac-runner/Sources/main.swift` — URLSession config + cold-load indicator.
+- `runner/MainWindow.xaml.cs` — Windows equivalent if cross-OS.
+
+**Exit criterion:** A 14b cold-load either succeeds within budget or produces a clear, user-actionable error. No silent stalls.
+
+---
+
+### C2 — Embedding-model provisioning gap (100% embed-failure pathology)
+
+**Status:** filed 2026-05-10 from v1.3.22 mac field test. **High — blocks RAG end-to-end on prepped SSDs.**
+**Scope:** Investigation first (PrepApp vs runner side), then fix where the gap is.
+**Model:** Sonnet 4.6 for investigation; re-triage for fix.
+
+**Driver (2026-05-10 mac field test):** User created `test` library, dropped a sub-1 MB PDF (`/Users/stephenelswick/Downloads/export.pdf`) via Add Files. PDF parsed fine (138 chunks). Every embedding call failed: `"Ingest failed: Ingestion failed for 'export.pdf': embedding failures exceeded threshold (total=138, succeeded=0, failed=138, ratio=100.0 %, threshold=50 %)."` 100% failure → no embedding model is reachable.
+
+**Foreseen by MAC35:** MAC35 explicitly deferred runner-side `ModelManagementService.PullEmbeddingModelAsync` ("Restaging that surface would require restarting the in-process daemon mid-chat or running a parallel temp daemon… Filed as a follow-up if the embedding-pull pathology actually surfaces in the field"). C2 is that pathology surfacing.
+
+**Plausible root causes (phase 1 should discriminate):**
+1. **Embedding model never pulled by PrepApp.** F2a's picker is chat-model focused; `nomic-embed-text` (or whatever `EmbeddingModel` defaults to in `PortableConfig`) may not be auto-pulled during prep.
+2. **Embedding model on host system Ollama but not on SSD.** Runner reads SSD models; embed call fails because the embed model lives in `~/.ollama/models`, not `<ssd>/ollama-models`.
+3. **Wrong embed-model name in config.** `PortableConfig.EmbeddingModel` may default to a name that isn't pulled.
+4. **`/api/embed` endpoint shape mismatch.** Less likely (every prior test would have failed) but worth verifying via raw HTTP error body capture.
+
+**Cross-OS audit (mandatory per 2026-05-07 rule):**
+- **Windows surface:** Same shared `EmbeddingClient` + `DocumentIngestor` + `PortableConfig.EmbeddingModel` field. Same risk that a Windows user prepping with the F2a picker doesn't get an embed model auto-pulled. **Likely identical gap on Windows.**
+- **Mac surface:** Symptom observed today.
+- **Decision:** Cross-OS investigation. Fix bundle if scope allows; split with Mac-first if Windows surface is wider.
+
+**Phase 1 — investigation:**
+- Inspect user's SSD: `ls <ssdRoot>/ollama-models/manifests/` — is `nomic-embed-text` (or configured `EmbeddingModel`) there?
+- Trace PrepApp prep flow: does it pull the embedding model alongside the chat model? Where in `PrepViewModel` / `prep-core/`?
+- Trace runner ingest: which model name does `EmbeddingClient` send to `/api/embed`? Capture the actual HTTP error body on failure.
+- Compare against MAC35's deferred `PullEmbeddingModelAsync` — add it, or make PrepApp the sole responsible party?
+
+**Phase 2 — fix:**
+- Likely: PrepApp auto-pulls the embedding model during finalize (one-time, ~270 MB per MAC35 sizing).
+- Optional defense-in-depth: runner detects missing embed model and offers a one-click pull (the deferred MAC35 path).
+- If cause was simply unactionable error reporting, fold into C13 (X18) — but the underlying gap still needs the fix.
+
+**Affected files (expected):**
+- `prep-core/ModelOperations.cs` — embed-model auto-pull during finalize.
+- `shared/PortableConfig.cs` — verify `EmbeddingModel` default.
+- `runner-core/Services/EmbeddingClient.cs` — surface real `/api/embed` errors (X13-style; cross-cuts with M12).
+- `shared/Documents/DocumentIngestor.cs` — better error attribution when 100% fail (likely "embedding model not available").
+- `tests/` — pin: ingest with no embed model present produces a clear error, not a generic threshold message.
+
+**Exit criterion:** Drop a small PDF into a fresh-prepped library — ingest succeeds. If the embed model is somehow missing, the error names that specifically.
+
+---
+
+### C3 — Model picker: filter by parameter count
+
+**Status:** filed 2026-05-10 from v1.3.22 mac field test. F2a follow-on. **Cheapest of the picker cluster — data is already in the scrape.**
+**Scope:** One-shot, cross-OS bundle.
+**Model:** Sonnet 4.6.
+
+**Driver:** F2a's picker shows hundreds of entries after Refresh. User can already filter by tag/tier/best-at via search; no way to constrain by parameter size ("nothing above 14B"). Hardware-aware filtering is the next natural cut.
+
+**Approach:** `ollama.com/library` exposes parameter counts in tag metadata (e.g., `qwen3:14b`, `llama3.1:70b`). Parser may already capture this implicitly via tag names; if not, extend `LiveModelCatalogService.ParseOllamaLibraryHtml` to surface a structured `ParametersBillion` field on `StarterCatalogEntry`. UI: a slider or dropdown ("≤ 7B / ≤ 14B / ≤ 30B / All") next to the Most-popular toggle and search field.
+
+**Cross-OS audit:** Cross-OS bundle — same data path, both UI hosts (`prep-app/MainWindow.xaml` row above merged grid + `mac-prep-app/Sources/EncryptionSetupStepView`) need the new filter.
+
+**Affected files:**
+- `prep-core/StarterModelCatalog.cs` + `Services/LiveModelCatalogService.cs` — parameter parsing if not already captured.
+- `shared/Models/PrepModels.cs`, `shared/ViewModels/PrepViewModel.cs` — filter state + predicate.
+- `prep-app/MainWindow.xaml(.cs)` — filter UI.
+- `mac-prep-app/Sources/PrepViewModel.swift`, `StarterCatalogTypes.swift`, `main.swift` — Mac equivalent.
+- `mac-prep-host/HostLifetime.cs` — payload field forwarding.
+- `tests/` — pin: filter applies, clears, composes with Most-popular and search.
+
+**Exit criterion:** Picking "≤ 14B" hides 30B+ entries on both OSes; clearing returns full list; composes with search and Most-popular without conflict.
+
+---
+
+### C4 — Model picker: filter by capability (tools / vision / thinking / coding)
+
+**Status:** filed 2026-05-10 from v1.3.22 mac field test. F2a follow-on. **Depends on scraper extension.**
+**Scope:** One-shot, cross-OS bundle. Bigger than C3 — capability tags are scraped per-model, not per-tag.
+**Model:** Sonnet 4.6.
+
+**Driver:** User wants to find tool-capable / vision / thinking / coding-tuned models without hunting through descriptions. ollama.com surfaces these as capability badges on each model page.
+
+**Approach:** Extend the `ollama.com/library` scraper to capture the capability tag list per model (HTML inspection needed at execution start to confirm exact selector). Add `Capabilities: List<string>` to `StarterCatalogEntry`. UI: a multi-select control or chip row next to the parameter filter (C3) — toggling "tools" hides non-tool-capable entries.
+
+**Cross-OS audit:** Cross-OS bundle once C3 lands (can ship together if scope is comfortable). Same data + UI path on both OSes.
+
+**Affected files:** Same surfaces as C3, plus the scraper. `tests/LiveModelCatalogServiceTests.cs` gains capability-extraction pins.
+
+**Watch for:** ollama.com capability vocabulary may evolve. Capture the raw tag list as opaque strings; UI groups them into the user-facing categories. Don't hardcode the four categories at the data layer.
+
+**Exit criterion:** Toggling "tools" surfaces only tool-capable entries; multiple toggles compose; clearing restores the list.
+
+---
+
+### C5 — Model picker: sort by newest
+
+**Status:** filed 2026-05-10 from v1.3.22 mac field test. F2a follow-on. **Depends on scraper extension.**
+**Scope:** One-shot, cross-OS bundle.
+**Model:** Sonnet 4.6.
+
+**Driver:** Today's order is "popular first" (the natural ollama.com listing) modulated by Most-popular cap. Once Most-popular works as expected (M11), users want a "newest" alternative — surface freshly-released models without manually scanning.
+
+**Approach:** Capture `last-updated` (or release date) on the scrape — ollama.com surfaces relative dates ("2 days ago", "3 weeks ago") which need to be normalized. Add `LastUpdated: DateTime?` to `StarterCatalogEntry`. UI: a sort dropdown ("Popular / Newest / A-Z") replacing the implicit popular-first ordering.
+
+**Cross-OS audit:** Cross-OS bundle.
+
+**Affected files:** Same surfaces as C4 (scraper + filter UI).
+
+**Exit criterion:** Selecting "Newest" reorders the list by `LastUpdated` desc; composes with Most-popular and filters.
+
+---
+
+### C6 — PrepApp: detect already-configured drive, skip-format flow
+
+**Status:** filed 2026-05-10. **Substantive UX.** Cross-OS.
+**Scope:** Multi-stage. Opus planning at kickoff (touches PrepApp boot flow + drive detection + FTUE).
+**Model:** Opus 4.7 for planning; Sonnet for stages.
+
+**Driver (user 2026-05-10):** *"Runner app should have ability to detect if drive was previously configured and skip format and go straight to adding or removing models. Maybe a contextual thing where if it's detected as configured we have 2 buttons. One that says format or start over, and one that says manage models."*
+
+**Interpretation:** When PrepApp launches with an SSD that already has a valid Free-AI-SSD layout (config + models present), don't push the user through Format → starter-model picker. Detect, branch, and offer two clear paths:
+- **Manage models** — jumps straight to the Models tab on the existing SSD, skipping format and FTUE.
+- **Start over** — preserves today's full Format flow with explicit confirmation.
+
+**Detection signal:** presence of `<ssdRoot>/config/portable-config.json` (plaintext or encrypted) plus a non-empty `<ssdRoot>/ollama-models/manifests/` tree. Both required — config without models is a half-prepped drive (still needs the format path); models without config is foreign data we shouldn't touch.
+
+**Cross-OS audit:** Both PrepApps need this. Bundle if shared `prep-core/` detection logic suffices and per-host UI is small; split with Mac-first if PrepApp boot flow diverges meaningfully.
+
+**Stage outline (refine in planning):**
+- **Stage 1** — `prep-core/` detection helper: `DriveConfigurationState DetectExistingConfig(string ssdRoot)` returning `Unconfigured | PartiallyConfigured | FullyConfigured`. Pure logic, full test coverage.
+- **Stage 2** — Windows PrepApp branch: when a fully-configured drive is selected, swap the Drive tab CTA from "Format" to a two-button group [Manage models] / [Start over (formats drive)]. FTUE skips for fully-configured.
+- **Stage 3** — Mac PrepApp parity: SwiftUI equivalent in `mac-prep-app/Sources/main.swift`.
+
+**Affected files (expected):**
+- New: `prep-core/DriveConfigurationDetector.cs`.
+- `prep-app/MainWindow.xaml(.cs)`, `shared/ViewModels/PrepViewModel.cs` — branched UI.
+- `mac-prep-app/Sources/main.swift` + the relevant step view — Mac branch.
+- `tests/` — fixtures for Unconfigured / Partial / Full.
+
+**Watch for:**
+- Don't conflate Free-AI-SSD's layout with arbitrary other SSDs that happen to have an `ollama-models/` directory (e.g., a user's existing Ollama install). The detection gate is the **`portable-config.json`** marker, not just model presence.
+- "Start over" must require explicit confirmation per B3-Redux's UAC two-click lesson — formatting silently is not acceptable.
+
+**Exit criterion:** Selecting an already-prepped SSD shows the two-button branch; "Manage models" lands directly on the Models tab with no FTUE; "Start over" runs the existing full flow with confirmation.
+
+---
 
 ### R1 â€” Runner CLI REPL (headless SSH/Tailscale client)
 
@@ -581,7 +890,9 @@ Could be implemented via a `DataTrigger` binding on `IsRunning` or via visibilit
 
 ### X6 â€” "Create Library" click hangs UI, crashes, library created on reopen
 
-**Status:** triaged 2026-04-18
+**Status:** **closed as stale 2026-05-10.** Did not reproduce on v1.2.5 field test (2026-04-19) and 3+ weeks of subsequent runner refactor activity (F3, X13) without recurrence. Reopen as a new C-item if it returns. Original triage preserved below for context.
+
+**Original status:** triaged 2026-04-18
 **Scope:** One-shot (diagnose + fix UI-thread blocking)
 **Model:** Sonnet 4.6
 

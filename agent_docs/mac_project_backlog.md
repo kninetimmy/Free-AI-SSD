@@ -21,6 +21,10 @@ When asked to tackle a macOS item:
 5. Do not duplicate RAG, encryption, or network API logic in Swift. Extract or
    reuse shared/core services instead.
 
+## Label scheme (2026-05-10 refactor)
+
+This file holds **`M#`** items (Mac-only) under the unified C/W/M scheme; cross-OS items live in `project_backlog.md` under `C#`. Shipped items keep their original `MAC*` IDs for git/PR searchability — see the open-item mapping table at the top of `project_backlog.md`. New Mac-only items added 2026-05-10 onward use `### M##` headers directly.
+
 ## Current macOS Reality
 
 What exists:
@@ -3357,4 +3361,101 @@ The two layers cover different failure modes (stale process vs kernel TIME_WAIT)
 - v1.3.21 Mac field test: pulling a starter model (e.g. `deepseek-r1:7b`) shows the in-place label updating with `pulling <hash> — NN% (X.X GB / Y.Y GB)` instead of the scrolling-logs symptom; cancel mid-pull → SSD has partial blobs → retry resumes via "Resuming from NN%…".
 
 **Architectural decision recorded:** see 2026-05-10 entry in `project_decisions.md` — model-pull source-of-truth is the HTTP API, not CLI stdout text. Applies to any future "parse a CLI's progress" temptation.
+
+---
+
+### M11 - Most popular toggle on Mac picker after Refresh
+
+**Status:** filed 2026-05-10 from v1.3.22 mac field test. **P0 field-test surface.**
+**Scope:** One-shot Mac UI fix.
+**Model:** Sonnet 4.6.
+
+**Driver (user 2026-05-10):** *"clicking refresh from Ollama automatically sorts by most popular. Most popular button doesn't do anything."* On the Mac PrepApp picker (`EncryptionSetupStepView`), after the user clicks Refresh — which populates the catalog from `ollama.com/library` with pull counts attached — the Most-popular toggle has no visible effect. The pre-Refresh "Refresh first" empty state works as designed (F2a 2026-05-10), but the post-Refresh case where the toggle should engage is broken.
+
+**F2a contract reminder:** On Mac, Most-popular should filter visible rows to the top-15 by `pullCount` once the catalog has pull-count data. Configured + on-disk row classes do not exist on the Mac picker (per the F2a 2026-05-10 decision in `project_decisions.md`), so all rows are subject to the cap.
+
+**Plausible root causes:**
+1. **Filter predicate not running** — `applyStarterModelFilters` may not be wired to the toggle's `@Published` change.
+2. **Pull-count flow gap** — `mac-prep-host` `refresh-catalog` payload may not be forwarding `pullCount` after Refresh; F2a's tests pinned it but field reality may differ.
+3. **Sort step missing** — even if filter applies, the visible list may not be sorted by `pullCount` desc (F2a's ordering contract).
+4. **Caption visible without filter applied** — the per-row `"<count> pulls"` caption may be rendering even when filter is no-op, masking the bug.
+
+**Phase 1 — diagnose:**
+- Toggle Most-popular ON before Refresh: should show the existing "Refresh first" empty state. Confirm.
+- After Refresh: log `vm.visibleStarterModels.count` and `vm.showOnlyMostPopular` immediately on toggle change. Compare to expected ~15.
+- If filter is running but list is unchanged: check sort step.
+- If filter never engages: check `@Published` flow.
+
+**Affected files (expected):**
+- `mac-prep-app/Sources/PrepViewModel.swift` — `showOnlyMostPopular` flow, `applyStarterModelFilters` invocation.
+- `mac-prep-app/Sources/StarterCatalogTypes.swift` — pure filter helper (already test-covered; verify field test scenario matches test fixture).
+- `mac-prep-app/Sources/main.swift` — `EncryptionSetupStepView` toggle binding.
+- `mac-prep-host/HostLifetime.cs` — verify `refresh-catalog` payload forwards `pullCount`.
+- `tests/PrepAppTests.swift` — gain a test for the post-Refresh Most-popular behavior pinned against an integration-shaped fixture (current pins are unit-shaped against `applyStarterModelFilters` directly).
+
+**Cross-OS audit (per parity rule):** Windows F2a top-15 cap path is independently field-tested green per the v1.3.22 Windows smoke (still pending) — but Windows uses `IsModelRowVisible` + `ListCollectionView.Filter` (different mechanism). Mac fix is Mac-only; no Windows mirror needed unless investigation reveals a shared `pullCount`-flow gap.
+
+**Exit criterion:** After Refresh, toggling Most-popular ON narrows the visible list to the top 15 by `pullCount` desc; toggling OFF restores the full list; clearing search and toggling ON keeps the cap correct.
+
+---
+
+### M12 - Mac runner chat UI parity to X13 (surface real failures)
+
+**Status:** filed 2026-05-10. **P0 field-test surface.** Captures a parity-rule violation we caught in retrospect — X13 (chat/STT surface real failures, PR #162) shipped 2026-04-20 with Windows-runner UI surfacing only; Mac-side parity should have been filed at that time per the 2026-05-07 dual-OS rule.
+**Scope:** One-shot Mac UI fix; consumes the `ChatResult` / `TranscriptionResult` types X13 already added in shared code.
+**Model:** Sonnet 4.6.
+
+**Driver:** Item #5 of the v1.3.22 mac field-test list reports that `qwen3:14b` Send produces no response and **no fail message**. The underlying chat-stall investigation is C1; M12 covers the orthogonal "no fail message" half — the Mac runner Swift `sendPrompt` path doesn't render the structured failure types X13 introduced into `ChatService` and `RunnerLocalApiService`.
+
+**X13 reminder:** `ChatResult` / `TranscriptionResult` are sum types (success or failure with error message). `RunnerLocalApiService` translates failure → 5xx with structured body; the LAN API consumer is supposed to render the error. Windows MainWindow.xaml.cs got the UI handling. Mac `mac-runner/Sources/main.swift` `sendPrompt` was never updated.
+
+**Approach:**
+- Inspect the Mac chat call path in `main.swift` `sendPrompt`. Confirm it calls `mac-runner-host`'s `/api/chat/stream`.
+- Map non-2xx HTTP responses + JSON error bodies (X13 shape) to a visible UI error line in `ContentView` — a red banner above the response area, or appended to the response body, matching whatever the existing error-display affordance is.
+- Distinguish three failure classes per X13: chat backend error, RAG retrieval failure (`X-RAG-Status: retrieval-failed`), STT backend error (when STT lands on Mac, M3).
+- Don't leak backend URLs or stack traces — log full detail to console; show concise messages.
+
+**Cross-OS audit (per parity rule):** Pure Mac-only fix consuming pre-existing shared contract. Windows already has X13 surfacing.
+
+**Affected files (expected):**
+- `mac-runner/Sources/main.swift` — `sendPrompt` error handling + `ContentView` error display.
+- `tests/` — Mac runner test surface is thin; pin failure-decoding logic at minimum.
+
+**Exit criterion:** A simulated chat backend failure (e.g., kill `mac-runner-host` mid-request, or temporarily mis-config the embed model to force a `RagRetrievalFailed`) renders a clear, actionable error in the Mac runner UI rather than a silent stall.
+
+---
+
+### M13 - "Expose API on LAN" toggle reverts itself on Mac
+
+**Status:** filed 2026-05-10 from v1.3.22 mac field test. **P0 field-test surface; regression candidate on the MAC34 surface.**
+**Scope:** Diagnose then fix. Likely small.
+**Model:** Sonnet 4.6.
+
+**Driver (user 2026-05-10):** *"Clicking expose api to lan toggles the button for a split second then it un-toggles and doesn't explain why."* The toggle visually engages, then reverts to OFF with no error, no log line, no validation hint.
+
+**Plausible root causes (phase 1 should discriminate):**
+1. **Validation gate (silent).** `setExposeApiOnLan(_:)` may guard on a precondition (network API key present, sidecar reachable, valid `networkBindAddress`) and revert silently on failure. If so: surface the reason in the UI.
+2. **Sidecar restart failure.** MAC34's contract: toggle ON triggers `restartHostSidecar()` with the configured bind address. If the sidecar fails to bind (port in use, address invalid) it may abort and the UI rolls back the toggle.
+3. **Two-way binding race.** SwiftUI `@Published` binding may be getting overwritten by a config reload that fires on toggle change.
+4. **MAC34a regression.** MAC34a hardcoded `networkModeEnabled = true` in the C# handshake; if a recent change re-introduced a path where the toggle's runtime value flows back to the handshake, MAC34a could be regressing.
+
+**Cross-OS audit (per parity rule):** Mac-only surface — the "Expose API on LAN" toggle was reshaped in MAC34 specifically for the Mac architecture (auto-spawn sidecar on unlock, toggle controls bind address). Windows uses a different exposure model. No Windows mirror.
+
+**Phase 1 — diagnose:**
+- Reproduce on user's hardware. Check the runner log + `mac-runner-host` stdout for any line at toggle-click time.
+- Check whether the toggle ever calls into `setExposeApiOnLan(_:)` — add a temporary log if needed.
+- Check whether `restartHostSidecar()` is throwing.
+- Verify config state: is `networkApiKey` populated? Does PrepApp ship one by default per MAC34's "generate at first encrypted write" path? Plaintext SSDs may not have a generated key (MAC30 made encryption optional 2026-05-09).
+
+**Phase 2 — fix:**
+- If silent validation: surface the reason in the UI ("Set a network API key in PrepApp first" or similar).
+- If sidecar bind failure: log the specific port + address; offer fallback or retry.
+- If MAC34a regression: restore the handshake hardcode.
+
+**Affected files (expected):**
+- `mac-runner/Sources/main.swift` — `setExposeApiOnLan(_:)`, `restartHostSidecar()`, `ContentView` toggle binding + any error surface.
+- Possibly `mac-runner-host/HostLifetime.cs` — handshake gate.
+- `tests/` — Mac runner test surface is thin; pin the validation branch if testable.
+
+**Exit criterion:** Toggle stays ON when conditions are met; reverts only with a visible, actionable explanation when it cannot engage.
 

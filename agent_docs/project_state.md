@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-05-10 (latest) (PR #243 F2a merged `859ac08` — Mac + Windows model picker grows F2a UX: ScrollView fills the page (drops the 240px cap), search box filters live across tag/tier/best-at, and a Most popular toggle caps recommended rows to top-15 by ollama.com pull count. PullCount field now flows from the live scrape through `StarterModelEntry` → `StarterCatalogEntry` → `ModelGridRow`. v1.3.22 released.)
+Last updated: 2026-05-10 (latest) (PR #243 F2a merged `859ac08` — Mac + Windows model picker grows F2a UX: ScrollView fills the page (drops the 240px cap), search box filters live across tag/tier/best-at, and a Most popular toggle caps recommended rows to top-15 by ollama.com pull count. PullCount field now flows from the live scrape through `StarterModelEntry` → `StarterCatalogEntry` → `ModelGridRow`. v1.3.22 released. **Backlog refactor 2026-05-10**: unified C/W/M label scheme established (cross-OS / Windows-only / Mac-only); shipped items keep legacy IDs, open items get new IDs via the mapping table at the top of `project_backlog.md`. v1.3.22 mac field test surfaced 8 items filed as C1–C6 + M11–M13 — see `project_backlog.md` priority order.)
 
 Last released: **v1.3.22** (2026-05-10; F2a — full-page picker, search, Most popular cap, both OSes).
 
@@ -44,13 +44,15 @@ helper remains overdue.
 
 ## Next up
 
-1. **MAC20** — Cross-platform release ZIP layout rework. Filed 2026-05-07 from v1.3.1 field test: root currently scatters loose Windows DLLs + PDBs alongside `payload/`; user wants `windows/` + `mac/` + `QUICKSTART.txt` + `LICENSE` at root. Medium; touches CI release-assembly + PrepApp sidecar paths.
-2. **X18** — Ingest observability (first item in the v1.3.x RAG audit sequence X18 → X22 → X15 → X19 → X20 → X23). Execution prompt drafted at `agent_docs/x18_execution_prompt.md`. Bundle-cross-OS by default per the strengthened 2026-05-07 dual-OS review pass rule.
-3. **MAC37** — Finalize observability (Mac PrepApp). **Back-burnered per user 2026-05-10** — cold-load wait is now 20s post-cache, acceptable. The 6-min silent finalize from the v1.3.17 field test still hasn't been root-caused; revisit when finalize friction returns. MAC40 unlocked structured progress data (`OllamaPullProgress`) so the UI work, when it lands, can render real progress bars without re-touching the pull pipeline.
-4. **MAC11** — Signing + notarization. **Back-burnered** until the user's Apple Developer account renews on payday. MAC10b already landed the bundle metadata so MAC11 is plumbing-ready when the cert returns.
-5. **Cleanup follow-up (now overdue):** fold `MacArtifactAvailability.EnumerateContentRoots`, `ArtifactStagingService.EnumerateBundledContentRoots`, and `PrereqService.EnumerateBundleRoots` into one shared `prep-core/BundleContentRoots` helper. All three are byte-identical ancestor-walk enumerators.
-6. **X4** unblocked from the host side: only needs SPA assets at `runner-core/wwwroot/chat/`. After F2 demonstrated the cross-OS bundle pattern works cleanly, X4 is a natural next bundled-cross-OS pick.
-7. For other non-Mac work, pick from `B2` (LAN discovery — Stage 1 done, Stages 2-4 pending), `F4` (FTUE Stage 2-4), `H3`, or `R1` follow-up (RunnerCli `/docs`+`/reindex` slash-commands).
+**Authoritative priority lives in `project_backlog.md`** under the 2026-05-10 P0–P5 ranking. Highlights:
+
+1. **P0 field-test bug surface (top of queue):** `M13` (Expose-API toggle reverts on Mac), `M12` (Mac chat UI parity to X13), `C1` (large-model chat stall), `C2` (embedding-model provisioning gap — was MAC35's foreseen follow-up), `M11` (Most-popular toggle on Mac picker).
+2. **P1 F2a model-picker cluster** (after P0 clears): `C3` (parameter-count filter), `C4` (capability filter), `C5` (sort by newest).
+3. **P2 substantive UX:** `C6` (PrepApp detect-configured-drive flow).
+4. **P3 critical pre-existing:** `C7` (was X9, encrypted config persistence), `C8` (was X10, document replacement consistency), `W1` (was X11, companion keyboard PTT), `C9` (was X12, download verify-before-move), `C10` (was F4 Stage 2, post-setup launch flow), `W2` (was F4 Stages 3-4, companion installer), `C11` (was B2, LAN discovery), `C12` (was R1 Stage 2, runner-cli slash-commands), `M7` (was MAC20, cross-platform release ZIP layout rework).
+5. **P4 RAG audit batch** (slot when v1.3.x feature work resumes): `C13` (was X18, ingest observability), `C14` (was X15), `C15` (was X19), `C16` (was X20), `C17` (was X22), `C18` (was X23), `C19` (was X17).
+6. **Back-burnered per user:** `M2` (was MAC11, signing + notarization, awaiting Apple Developer cert renewal), `M10` (was MAC37, finalize observability, cold-load wait acceptable post-MAC39).
+7. **Cleanup follow-up (now overdue):** fold `MacArtifactAvailability.EnumerateContentRoots`, `ArtifactStagingService.EnumerateBundledContentRoots`, and `PrereqService.EnumerateBundleRoots` into one shared `prep-core/BundleContentRoots` helper. All three are byte-identical ancestor-walk enumerators.
 
 **RAG audit backlog:** X17-X23 cover audit findings; X10/X13/X15 scope expansions recorded. Plan: `C:\Users\Kninetimmy\.claude\plans\okay-i-want-to-glowing-galaxy.md`. v1.3.x sequence: X18 -> X15 (expanded) -> X19 -> X20 -> X22 -> X23. X17 reduced to Stage 1 textless-page diagnostic (full OCR deferred — workload is text-layer PDFs).
 
