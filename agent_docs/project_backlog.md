@@ -103,7 +103,7 @@ Three flat buckets, one counter per bucket:
 | M8 | MAC22 | Mac sidecar manifest lookup walks ancestors | mac_project_backlog.md |
 | M9 | MAC25 | OllamaPackageService.ResolveOllamaExe Mac binary name | mac_project_backlog.md |
 | M10 | MAC37 | Mac PrepApp finalize observability (back-burnered) | mac_project_backlog.md |
-| M11 | (new) | Most popular toggle on Mac picker after Refresh | mac_project_backlog.md |
+| ~~M11~~ | (new) | ~~Most popular toggle on Mac picker after Refresh~~ — **done** PR #255 (`cf5713e`) 2026-05-10 | mac_project_backlog.md |
 | ~~M12~~ | (new) | ~~Mac runner chat UI parity to X13 (surface real failures)~~ — **done** PR #251 (`a52572c`) 2026-05-10 | mac_project_backlog.md |
 | ~~M13~~ | (new) | ~~"Expose API on LAN" toggle reverts itself on Mac~~ — **done** PR #249 (`e6b958e`) 2026-05-10 | mac_project_backlog.md |
 | M14 | (new) | Mac runner "Pull embedding model" UI button (parity with WPF; defense-in-depth for C2) | mac_project_backlog.md |
@@ -118,9 +118,9 @@ Three flat buckets, one counter per bucket:
 
 **P0 — Field-test bug surface (top of queue, ship before any feature):**
 
-1. **M11** — Most-popular toggle on Mac picker after Refresh
-2. **M14** — Mac runner "Pull embedding model" UI parity button (defense-in-depth for C2; reopens MAC35-deferred daemon-restart question)
+1. **M14** — Mac runner "Pull embedding model" UI parity button (defense-in-depth for C2; reopens MAC35-deferred daemon-restart question)
 
+> **M11** (Most-popular toggle perceived as no-op on Mac picker) — **done** PR #255 (`cf5713e`) 2026-05-10. Phase-1 instrumentation confirmed every layer worked end-to-end (host forwards 398/399 pull counts as Int64 NSNumbers, decoder preserves all 399, toggle ON yields visible=15 sorted desc by pulls). Bug is perception: ollama.com's natural order is already popularity-desc so capping 399 → 15 produces the same first-screenful. Fix is a new accent-cyan caption ("Showing top 15 of 399 by pulls.") rendered on both OS pickers, backed by a new shared pure helper `FreeAiSsd.Shared.Models.StarterRowCountCaption.Format` + Swift mirror `formatStarterRowCountCaption` carrying byte-identical wording. WPF wires `OnPropertyChanged` once via constructor subscription to `ModelRowsViewInvalidated` + `ModelRows.CollectionChanged`. 12 new pins (5 + 5 + 2). Decision pinned in `project_decisions.md`.
 > **C1** (large-model chat stall) — **done** PR #253 (`6cfae14`) 2026-05-10. Server-side heartbeat (`ChatService.FirstTokenPending` event every 20s while awaiting Ollama's first streamed token; forwarded by `/chat/stream` as `{type:"loading", elapsedSeconds:N}` NDJSON) keeps Mac URLSession's 180s per-packet timer alive across cold-loads AND paints a live `Loading <model>… NNs` indicator on both OSes. Per-request `SemaphoreSlim` write-gate added to `/chat/stream` for HttpResponse stream serialization. Boundary logs (request begin / first-token Ns / completion Ns) added via `SsdLogger.Info`. 2 new pins in `RunnerLocalApiServiceTests`. Decision pinned in `project_decisions.md`.
 > **M12** (Mac runner chat UI parity to X13) — **done** PR #251 (`a52572c`) 2026-05-10. New `chatError` red banner in `ContentView` covers the three X13 failure paths (mid-stream `error` frame, transport error, non-2xx HTTP body); new pure helper `RunnerChatErrorMessage.decode` extracted from a dead `apiErrorMessage` private method; `ChatStreamDelegate` now `.allow`s non-2xx responses and buffers the body for structured decoding. 7 new pins in `RunnerChatErrorMessageTests`. Decision pinned in `project_decisions.md`.
 > **M13** (Expose-API-on-LAN toggle reverts on Mac) — **done** PR #249 (`e6b958e`) 2026-05-10. Root cause was the async `.stopped` callback overwriting user intent on every restart; fix removes the auto-clear from `.stopped` and lets `.crashed` own involuntary state changes. Decision pinned in `project_decisions.md`.
