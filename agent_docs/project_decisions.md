@@ -2207,3 +2207,52 @@ The 2026-05-07 rule mandated a dual-OS review pass during planning. The 2026-05-
 **Exit ramps:** if Free-AI-SSD ever drops back to a single supported OS, the parity rule becomes trivially satisfied and the scheme can collapse to a single counter. As long as both OSes are actively supported, both the scheme and the sequencing rule stand.
 
 Established 2026-05-10 in PR for `refactor/unified-task-labels`.
+
+---
+
+## 2026-05-10 — PrepApp is the sole party for embedding-model provisioning; runner UI is fallback only [C2]
+
+PrepApp's `PrepViewModel.EnsureEmbeddingModelInstalledAsync` runs at
+the tail of `DownloadAsync` (reusing the temp Ollama server already
+running for the chat-model loop) AND as an idempotent guard at the
+start of `FinalizeAsync` (spinning its own temp server only when the
+disk-truth check shows the embedder is missing). Both paths share the
+same disk-truth check via `_modelService.DiscoverModelsOnDisk`, so a
+re-Download or re-Finalize on a fully-prepped drive is free.
+
+The runner-side `ModelManagementService.PullEmbeddingModelAsync` +
+WPF Runner's `PullEmbeddingModel_Click` button stays **as fallback
+only** — a recovery action for the case where the user somehow lands
+on a Runner with a missing embedder (manually-tampered SSD, partial
+prep, etc.). The Mac runner does not currently have an equivalent UI
+button; that parity gap is tracked as **M14** (Mac runner "Pull
+embedding model" UI parity) — filed per the 2026-05-10 parity rule
+rather than bundled into C2.
+
+Why not the alternatives:
+- **Runner is the sole party (push the responsibility downstream).**
+  Reopens MAC35's deferred concern: pulling against the long-running
+  in-process daemon mid-chat would either need to restart the daemon
+  (interrupting any active stream) or stand up a parallel temp daemon
+  (port allocation + lifecycle complexity). PrepApp already has the
+  temp-server infrastructure for the chat-model loop, so reusing it
+  is strictly cheaper. MAC35 explicitly deferred this exact path
+  ("Filed as a follow-up if the embedding-pull pathology actually
+  surfaces"); C2 is that pathology surfacing, but the right fix is
+  upstream (PrepApp) rather than the deferred runner-side path.
+- **Both PrepApp AND runner pull eagerly.** Doubles the failure
+  surface for the same job; PrepApp running first means the runner
+  call is a no-op in the happy path. Keep responsibility in one place.
+- **Bundle Mac runner UI parity into C2.** The Mac runner button
+  reopens the MAC35 daemon-restart question and would balloon the
+  PR scope without changing the field-test outcome (PrepApp's auto-
+  pull is the actual fix; the runner button is defense-in-depth for
+  edge cases). Filed as M14 per the parity rule.
+
+Ships unrevisited unless: (a) a class of users emerges who skip
+PrepApp entirely (manually-staged SSDs); (b) the embedder model
+churn becomes high enough that runner-side update needs to happen
+without a re-prep; (c) M14 lands and the Mac runner button proves
+robust enough that PrepApp's eager pull becomes redundant.
+
+Established PR #247 (`1df4431`).

@@ -67,7 +67,7 @@ Three flat buckets, one counter per bucket:
 | New ID | Old ID | One-line scope | File |
 |---|---|---|---|
 | C1 | (new) | Large-model chat stall investigation (cold-load + silent failure) | this file |
-| C2 | (new) | Embedding-model provisioning gap (100% embed-failure pathology) | this file |
+| C2 | (new) | Embedding-model provisioning gap (100% embed-failure pathology) — **done** PR #247 (`1df4431`) | this file |
 | C3 | (new) | Model picker: filter by parameter count | this file |
 | C4 | (new) | Model picker: filter by capability (tools/vision/thinking/coding) | this file |
 | C5 | (new) | Model picker: sort by newest | this file |
@@ -106,6 +106,7 @@ Three flat buckets, one counter per bucket:
 | M11 | (new) | Most popular toggle on Mac picker after Refresh | mac_project_backlog.md |
 | M12 | (new) | Mac runner chat UI parity to X13 (surface real failures) | mac_project_backlog.md |
 | M13 | (new) | "Expose API on LAN" toggle reverts itself on Mac | mac_project_backlog.md |
+| M14 | (new) | Mac runner "Pull embedding model" UI button (parity with WPF; defense-in-depth for C2) | mac_project_backlog.md |
 
 **Closed on this pass (no new ID):**
 
@@ -120,8 +121,10 @@ Three flat buckets, one counter per bucket:
 1. **M13** — Expose-API-on-LAN toggle reverts on Mac (regression candidate, MAC34 surface)
 2. **M12** — Mac runner chat UI parity to X13 (Mac chat surface lacks structured-failure surfacing)
 3. **C1** — Large-model chat stall investigation (qwen3:14b stalls; cross-OS; partly depends on M12)
-4. **C2** — Embedding-model provisioning gap (100% embed failures — was MAC35's deferred follow-up)
-5. **M11** — Most-popular toggle on Mac picker after Refresh
+4. **M11** — Most-popular toggle on Mac picker after Refresh
+5. **M14** — Mac runner "Pull embedding model" UI parity button (defense-in-depth for C2; reopens MAC35-deferred daemon-restart question)
+
+> **C2** (embedding-model provisioning gap) — **done** PR #247 (`1df4431`) 2026-05-10. Body retained below at line 286 with status banner; decision pinned in `project_decisions.md`.
 
 **P1 — F2a model-picker cluster (cross-OS bundle, ship after P0):**
 
@@ -285,7 +288,9 @@ Items `B1`â€“`F4` below were triaged from Stephen's `Downloads/# Free-AI-SS
 
 ### C2 — Embedding-model provisioning gap (100% embed-failure pathology)
 
-**Status:** filed 2026-05-10 from v1.3.22 mac field test. **High — blocks RAG end-to-end on prepped SSDs.**
+**Status:** **done** — PR #247 merged `1df4431` (2026-05-10). Pinned decision in `project_decisions.md`. Open follow-up: **M14** (Mac runner UI parity button — defense-in-depth, MAC35-deferred-daemon-restart caveat). Field-test pin tracked in `project_state.md` Open questions.
+
+**Status (historical):** filed 2026-05-10 from v1.3.22 mac field test. **High — blocks RAG end-to-end on prepped SSDs.**
 **Scope:** Investigation first (PrepApp vs runner side), then fix where the gap is.
 **Model:** Sonnet 4.6 for investigation; re-triage for fix.
 
