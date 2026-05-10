@@ -217,6 +217,14 @@ public sealed class LiveModelCatalogService : ILiveModelCatalogService, IDisposa
         @"<span\s+x-test-capability\b[^>]*>(?<cap>[^<]+)</span>",
         RegexOptions.Compiled);
 
+    // F2a: pull-count is rendered like "114.1M" / "1.2K" / "1.5B" /
+    // bare integer. Captured at the model-card level so every size
+    // variant shares the same value (Ollama exposes pull counts
+    // per-model, not per-tag).
+    private static readonly Regex PullCountRegex = new(
+        @"x-test-pull-count\b[^>]*>(?<count>[^<]+)<",
+        RegexOptions.Compiled);
+
     /// <summary>
     /// Parses ollama.com/library HTML into a <see cref="StarterModelCatalog"/>.
     /// Emits one entry per (model, size) combination so the picker can
@@ -272,6 +280,10 @@ public sealed class LiveModelCatalogService : ILiveModelCatalogService, IDisposa
                 continue;
             }
 
+            var pullCount = PullCountRegex.Match(cardBody) is { Success: true } pullMatch
+                ? ParsePullCount(DecodeHtmlText(pullMatch.Groups["count"].Value))
+                : null;
+
             var sizes = SizeRegex.Matches(cardBody)
                 .Select(m => DecodeHtmlText(m.Groups["size"].Value).Trim())
                 .Where(s => s.Length > 0)
@@ -301,6 +313,7 @@ public sealed class LiveModelCatalogService : ILiveModelCatalogService, IDisposa
                     SizeTier = ClassifySize(size),
                     Description = description,
                     UseCases = nonEmbeddingCapabilities,
+                    PullCount = pullCount,
                 });
             }
         }
@@ -346,6 +359,38 @@ public sealed class LiveModelCatalogService : ILiveModelCatalogService, IDisposa
         if (billions < 3.0) return "Small";
         if (billions <= 13.0) return "Medium";
         return "Large";
+    }
+
+    /// <summary>
+    /// Parses a pull-count string like "114.1M", "1.2K", "1.5B", or a
+    /// bare integer "999" into an approximate count. Returns null on
+    /// empty or unparseable input — callers treat that as "unknown
+    /// popularity" and exclude the entry from the F2a top-N filter.
+    /// </summary>
+    internal static long? ParsePullCount(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+
+        var trimmed = raw.Trim();
+        if (trimmed.Length == 0) return null;
+
+        var lastChar = trimmed[^1];
+        var multiplier = char.ToLowerInvariant(lastChar) switch
+        {
+            'k' => 1_000L,
+            'm' => 1_000_000L,
+            'b' => 1_000_000_000L,
+            _ => 1L,
+        };
+        var numericPart = multiplier == 1L ? trimmed : trimmed[..^1];
+
+        if (!double.TryParse(numericPart, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
+        {
+            return null;
+        }
+        if (value < 0) return null;
+
+        return (long)Math.Round(value * multiplier);
     }
 
     /// <summary>

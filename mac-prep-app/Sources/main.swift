@@ -245,10 +245,33 @@ struct EncryptionSetupStepView: View {
 
             Divider()
 
-            HStack {
+            // F2a: action row collapses Most popular + Search + Refresh
+            // into a single line so the catalog body owns the rest of
+            // the page. The picker scrolls inside a `.frame(maxHeight:
+            // .infinity)` ScrollView that grows with the window — no
+            // hardcoded 240px cap.
+            HStack(spacing: 10) {
                 Text("Starter models")
                     .font(.headline)
-                Spacer()
+                Spacer(minLength: 12)
+                // F2a: macOS 11.0 baseline rules out
+                // `.toggleStyle(.button)` (12+), so a plain Button
+                // flips the state. Active state is communicated by
+                // the trailing checkmark in the label.
+                Button {
+                    vm.showOnlyMostPopular.toggle()
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Most popular")
+                        if vm.showOnlyMostPopular {
+                            Text("✓").bold()
+                        }
+                    }
+                }
+                .help("Show the top \(PrepViewModel.mostPopularCount) by pull count from ollama.com/library. Refresh first to populate pull counts on the bundled list.")
+                TextField("Search models…", text: $vm.modelSearchText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(minWidth: 180, maxWidth: 280)
                 Button {
                     Task { await vm.refreshCatalog() }
                 } label: {
@@ -269,9 +292,63 @@ struct EncryptionSetupStepView: View {
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            starterPickerBody
+
+            Text("Starter model pull happens after encryption. If the pull fails (e.g. Mac Ollama isn't running yet), it's non-fatal — you can pull models later from Mac Runner.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Spacer()
+                Button(vm.enableEncryption ? "Write encryption & continue" : "Continue without encryption") {
+                    Task { await vm.writeConfigAndProceed() }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(vm.enableEncryption &&
+                          (vm.passphrase.isEmpty || vm.passphrase != vm.passphraseConfirm))
+            }
+        }
+    }
+
+    /// F2a: scrolling list that fills the rest of the page. Empty
+    /// state surfaces *why* nothing is visible (filter active vs.
+    /// catalog empty) so the user knows the next move.
+    @ViewBuilder
+    private var starterPickerBody: some View {
+        let entries = vm.visibleStarterModels
+        if entries.isEmpty {
+            VStack(spacing: 8) {
+                Spacer(minLength: 0)
+                if vm.starterCatalog.isEmpty {
+                    Text("No models loaded.")
+                        .font(.body)
+                    Text("Click Refresh from Ollama to fetch the catalog.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } else if vm.showOnlyMostPopular && vm.starterCatalog.allSatisfy({ $0.pullCount == nil }) {
+                    Text("No popularity data on the bundled catalog.")
+                        .font(.body)
+                    Text("Click Refresh from Ollama to populate pull counts, then re-toggle Most popular.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                } else {
+                    Text("No models match the current filter.")
+                        .font(.body)
+                    Text("Clear the search box or toggle Most popular off to see all entries.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(vm.availableStarterModels) { entry in
+                    ForEach(entries) { entry in
                         Toggle(isOn: Binding(
                             get: { vm.selectedStarterModels.contains(entry.tag) },
                             set: { sel in
@@ -288,6 +365,11 @@ struct EncryptionSetupStepView: View {
                                         .background(Color.brandStatusInfo.opacity(0.15))
                                         .foregroundColor(Color.brandStatusInfo)
                                         .clipShape(RoundedRectangle(cornerRadius: 3))
+                                    if let count = entry.pullCount {
+                                        Text(formatPullCount(count) + " pulls")
+                                            .font(.caption2)
+                                            .foregroundColor(.secondary)
+                                    }
                                 }
                                 if !entry.bestAt.isEmpty {
                                     Text(entry.bestAt)
@@ -301,25 +383,27 @@ struct EncryptionSetupStepView: View {
                         .toggleStyle(.checkbox)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 4)
             }
-            .frame(minHeight: 120, maxHeight: 240)
-            Text("Starter model pull happens after encryption. If the pull fails (e.g. Mac Ollama isn't running yet), it's non-fatal — you can pull models later from Mac Runner.")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            Spacer()
-
-            HStack {
-                Spacer()
-                Button(vm.enableEncryption ? "Write encryption & continue" : "Continue without encryption") {
-                    Task { await vm.writeConfigAndProceed() }
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(vm.enableEncryption &&
-                          (vm.passphrase.isEmpty || vm.passphrase != vm.passphraseConfirm))
-            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+}
+
+/// F2a: format a pull-count number into the Ollama library shorthand
+/// (e.g. 114_100_000 → "114.1M"). Mirrors the inverse of
+/// `LiveModelCatalogService.ParsePullCount` for caption display.
+private func formatPullCount(_ count: Int64) -> String {
+    let absVal = abs(count)
+    if absVal >= 1_000_000_000 {
+        return String(format: "%.1fB", Double(count) / 1_000_000_000.0)
+    } else if absVal >= 1_000_000 {
+        return String(format: "%.1fM", Double(count) / 1_000_000.0)
+    } else if absVal >= 1_000 {
+        return String(format: "%.1fK", Double(count) / 1_000.0)
+    } else {
+        return "\(count)"
     }
 }
 

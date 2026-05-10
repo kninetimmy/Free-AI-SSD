@@ -1056,4 +1056,179 @@ public class PrepViewModelTests
         Assert.Contains(vm.LogLines, l => l.Contains("Drive preparation failed"));
         _dialogService.Verify(d => d.ShowError(It.Is<string>(s => s.Contains("Format-Volume failed")), "Format failed"), Times.Once);
     }
+
+    // ── F2a: picker filter (search + most-popular cap) ──────────────
+
+    [Fact]
+    public async Task IsModelRowVisible_EmptySearch_ShowsAllRows()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        await vm.SetStarterCatalogAsync(F2aCatalogFixture());
+
+        Assert.All(vm.ModelRows, r => Assert.True(vm.IsModelRowVisible(r)));
+    }
+
+    [Fact]
+    public async Task IsModelRowVisible_SearchFiltersByName()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        await vm.SetStarterCatalogAsync(F2aCatalogFixture());
+
+        vm.ModelSearchText = "llama";
+
+        var visible = vm.ModelRows.Where(vm.IsModelRowVisible).ToList();
+        Assert.NotEmpty(visible);
+        Assert.All(visible, r => Assert.Contains("llama", r.Name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task IsModelRowVisible_SearchMatchesBestAtCaseInsensitive()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        await vm.SetStarterCatalogAsync(F2aCatalogFixture());
+
+        vm.ModelSearchText = "REASONING";   // matches "reasoning, coding" in qwen2.5:7b's BestAt
+
+        var visible = vm.ModelRows.Where(vm.IsModelRowVisible).Select(r => r.Name).ToList();
+        Assert.Contains("qwen2.5:7b", visible);
+    }
+
+    [Fact]
+    public async Task IsModelRowVisible_TrimsSearchWhitespace()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        await vm.SetStarterCatalogAsync(F2aCatalogFixture());
+
+        vm.ModelSearchText = "   llama   ";
+        var trimmed = vm.ModelRows.Where(vm.IsModelRowVisible).Select(r => r.Name).OrderBy(n => n).ToList();
+
+        vm.ModelSearchText = "llama";
+        var plain = vm.ModelRows.Where(vm.IsModelRowVisible).Select(r => r.Name).OrderBy(n => n).ToList();
+
+        Assert.Equal(plain, trimmed);
+    }
+
+    [Fact]
+    public async Task IsModelRowVisible_MostPopular_CapsRecommendedRowsToTopByPullCount()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        // 18-entry catalog (3 above the 15-cap) so the cap actually
+        // excludes someone. Pull counts descend from 100M down by 5M.
+        var catalog = Enumerable.Range(0, 18)
+            .Select(i => new StarterCatalogEntry(
+                Tag: $"popular:{i}",
+                SizeTier: "Medium",
+                BestAt: $"Variant {i}",
+                PullCount: 100_000_000L - i * 5_000_000L))
+            .ToList();
+        await vm.SetStarterCatalogAsync(catalog);
+
+        vm.ShowOnlyMostPopular = true;
+
+        var visibleRecommended = vm.ModelRows
+            .Where(r => string.Equals(r.Source, "Recommended", StringComparison.OrdinalIgnoreCase))
+            .Where(vm.IsModelRowVisible)
+            .Select(r => r.Name)
+            .ToList();
+
+        Assert.Equal(PrepViewModel.MostPopularLimit, visibleRecommended.Count);
+        // The bottom three (popular:15..popular:17) must be hidden.
+        Assert.DoesNotContain("popular:15", visibleRecommended);
+        Assert.DoesNotContain("popular:16", visibleRecommended);
+        Assert.DoesNotContain("popular:17", visibleRecommended);
+        // And the top three must be present.
+        Assert.Contains("popular:0", visibleRecommended);
+        Assert.Contains("popular:1", visibleRecommended);
+        Assert.Contains("popular:2", visibleRecommended);
+    }
+
+    [Fact]
+    public async Task IsModelRowVisible_MostPopular_HidesRecommendedRowsWithoutPullCount()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        // Mirror the bundled-catalog state: no pull counts at all.
+        await vm.SetStarterCatalogAsync(new[]
+        {
+            new StarterCatalogEntry("bundled-1", "Small", "Bundled entry 1"),
+            new StarterCatalogEntry("bundled-2", "Small", "Bundled entry 2"),
+        });
+
+        vm.ShowOnlyMostPopular = true;
+
+        var visibleRecommended = vm.ModelRows
+            .Where(r => string.Equals(r.Source, "Recommended", StringComparison.OrdinalIgnoreCase))
+            .Where(vm.IsModelRowVisible)
+            .ToList();
+        Assert.Empty(visibleRecommended);
+    }
+
+    [Fact]
+    public async Task IsModelRowVisible_MostPopular_LeavesConfiguredRowsAlone()
+    {
+        SetupDefaultMocks();
+        var config = new PortableConfig();
+        config.Models.Add(new ModelConfigEntry { Name = "llama3:latest", Status = ModelInstallStatus.Installed });
+        _modelService.Setup(m => m.LoadConfigAsync(It.IsAny<string>())).ReturnsAsync(config);
+        _modelService.Setup(m => m.DiscoverModelsOnDisk(It.IsAny<string>())).Returns(new[] { "llama3:latest" });
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        await vm.SetStarterCatalogAsync(F2aCatalogFixture());
+
+        vm.ShowOnlyMostPopular = true;
+
+        var configuredRow = vm.ModelRows.SingleOrDefault(r => r.Name == "llama3:latest");
+        Assert.NotNull(configuredRow);
+        Assert.True(vm.IsModelRowVisible(configuredRow!),
+            "configured rows must always pass the popular filter");
+    }
+
+    [Fact]
+    public async Task ModelRowsViewInvalidated_FiresWhenSearchTextChanges()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        await vm.SetStarterCatalogAsync(F2aCatalogFixture());
+
+        var fired = 0;
+        vm.ModelRowsViewInvalidated += (_, _) => fired++;
+
+        vm.ModelSearchText = "llama";
+        Assert.Equal(1, fired);
+
+        vm.ModelSearchText = "llama";   // no-op set
+        Assert.Equal(1, fired);
+
+        vm.ShowOnlyMostPopular = true;
+        Assert.Equal(2, fired);
+    }
+
+    private static List<StarterCatalogEntry> F2aCatalogFixture() => new()
+    {
+        new StarterCatalogEntry("llama3.2:1b", "Small",
+            "Lightweight assistant for quick prompts (chat, fast)", 114_000_000L),
+        new StarterCatalogEntry("llama3.2:3b", "Small",
+            "Balanced small model for everyday Q&A (chat, general)", 90_000_000L),
+        new StarterCatalogEntry("qwen2.5:7b", "Medium",
+            "Versatile 7B with reasoning + coding support (reasoning, coding)", 50_000_000L),
+        new StarterCatalogEntry("gemma2:2b", "Small",
+            "Good starter when hardware is limited (cpu-friendly)", 200_000_000L),
+        new StarterCatalogEntry("deepseek-r1:70b", "Large",
+            "Frontier reasoning model (reasoning)", 25_000_000L),
+        new StarterCatalogEntry("bundled-only:1b", "Small",
+            "Fallback bundled entry (chat)", null),
+    };
 }

@@ -135,6 +135,17 @@ public partial class MainWindow : Window
         // grid offered, now applied to the unified ModelRows collection).
         var collectionView = new ListCollectionView(_viewModel.ModelRows);
         collectionView.GroupDescriptions.Add(new PropertyGroupDescription(nameof(ModelGridRow.Tier)));
+        // F2a: route picker filter state through the VM. Filter callback
+        // returns true for a row when it passes the search + popular
+        // checks; the VM raises ModelRowsViewInvalidated on every state
+        // change so we can refresh the live view in place.
+        collectionView.Filter = item => item is not ModelGridRow row || _viewModel.IsModelRowVisible(row);
+        _viewModel.ModelRowsViewInvalidated += (_, _) =>
+        {
+            // CollectionView.Refresh must run on the dispatcher thread —
+            // the event may fire from a background catalog reload.
+            Dispatcher.BeginInvoke(new Action(collectionView.Refresh));
+        };
         ModelStatusGrid.ItemsSource = collectionView;
     }
 
@@ -155,7 +166,8 @@ public partial class MainWindow : Window
                     ? string.Join(", ", m.UseCases)
                     : m.UseCases.Count == 0
                         ? m.Description
-                        : $"{m.Description} ({string.Join(", ", m.UseCases)})"))
+                        : $"{m.Description} ({string.Join(", ", m.UseCases)})",
+                m.PullCount))
             .ToList();
     }
 

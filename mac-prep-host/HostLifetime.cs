@@ -477,6 +477,7 @@ internal sealed class HostLifetime : IAsyncDisposable
                 sizeTier = m.SizeTier,
                 description = m.Description,
                 useCases = m.UseCases.ToArray(),
+                pullCount = m.PullCount,
             }).ToArray(),
         });
     }
@@ -523,6 +524,7 @@ internal sealed class HostLifetime : IAsyncDisposable
                     sizeTier = m.SizeTier,
                     description = m.Description,
                     useCases = m.UseCases.ToArray(),
+                    pullCount = m.PullCount,
                 }).ToArray(),
             });
         }

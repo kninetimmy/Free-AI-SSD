@@ -210,6 +210,101 @@ public class LiveModelCatalogServiceTests
         Assert.Equal("chat-model:7b", catalog.Models[0].Tag);
     }
 
+    [Theory]
+    [InlineData("114.1M", 114_100_000L)]
+    [InlineData("84.8M", 84_800_000L)]
+    [InlineData("1.2K", 1_200L)]
+    [InlineData("1.5B", 1_500_000_000L)]
+    [InlineData("999", 999L)]
+    [InlineData("0", 0L)]
+    [InlineData("1.5b", 1_500_000_000L)]   // case-insensitive suffix
+    [InlineData("  3.2M  ", 3_200_000L)]   // tolerates surrounding whitespace
+    public void ParsePullCount_ConvertsHumanFormatToNumeric(string raw, long expected)
+    {
+        Assert.Equal(expected, LiveModelCatalogService.ParsePullCount(raw));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("garbage")]
+    [InlineData("M")]
+    [InlineData("-5M")]
+    [InlineData(null)]
+    public void ParsePullCount_ReturnsNullForUnparseableInput(string? raw)
+    {
+        Assert.Null(LiveModelCatalogService.ParsePullCount(raw));
+    }
+
+    [Fact]
+    public void ParseOllamaLibraryHtml_PopulatesPullCountFromCardAttribute()
+    {
+        const string html = """
+            <ul>
+              <li x-test-model>
+                <a href="/library/popular">
+                  <p class="max-w-lg break-words text-neutral-800 text-md">A popular model.</p>
+                  <span x-test-pull-count>114.1M</span>
+                  <span x-test-size>7b</span>
+                </a>
+              </li>
+              <li x-test-model>
+                <a href="/library/no-count">
+                  <p class="max-w-lg break-words text-neutral-800 text-md">No pull count surfaced.</p>
+                  <span x-test-size>7b</span>
+                </a>
+              </li>
+            </ul>
+            """;
+        var catalog = LiveModelCatalogService.ParseOllamaLibraryHtml(html);
+        var popular = Assert.Single(catalog.Models, m => m.Tag == "popular:7b");
+        Assert.Equal(114_100_000L, popular.PullCount);
+        var noCount = Assert.Single(catalog.Models, m => m.Tag == "no-count:7b");
+        Assert.Null(noCount.PullCount);
+    }
+
+    [Fact]
+    public void ParseOllamaLibraryHtml_AllSizeVariantsShareTheModelPullCount()
+    {
+        const string html = """
+            <ul>
+              <li x-test-model>
+                <a href="/library/multi">
+                  <p class="max-w-lg break-words text-neutral-800 text-md">Multi-size model.</p>
+                  <span x-test-pull-count>5M</span>
+                  <span x-test-size>7b</span>
+                  <span x-test-size>13b</span>
+                </a>
+              </li>
+            </ul>
+            """;
+        var catalog = LiveModelCatalogService.ParseOllamaLibraryHtml(html);
+        Assert.Equal(2, catalog.Models.Count);
+        Assert.All(catalog.Models, m => Assert.Equal(5_000_000L, m.PullCount));
+    }
+
+    [Fact]
+    public async Task FetchAsync_PopulatesPullCountForFixtureModels()
+    {
+        var html = LoadFixture();
+        using var handler = new StubHandler((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(html, Encoding.UTF8, "text/html"),
+            }));
+        using var client = new HttpClient(handler);
+        using var svc = new LiveModelCatalogService(client);
+
+        var result = await svc.FetchAsync(CancellationToken.None);
+
+        // Most cards in the captured fixture have a pull-count; assert
+        // a healthy majority do (allows a few stragglers without
+        // churning on a future fixture refresh).
+        var withCounts = result.Catalog.Models.Count(m => m.PullCount.HasValue);
+        Assert.True(withCounts >= result.Catalog.Models.Count / 2,
+            $"Expected at least half of {result.Catalog.Models.Count} entries to carry a pull-count; got {withCounts}");
+    }
+
     [Fact]
     public void ParseOllamaLibraryHtml_DecodesHtmlEntitiesInDescriptions()
     {

@@ -530,8 +530,111 @@ struct PrepAppTestsMain {
                        "second-call slot leaked")
         }
 
+        // MARK: F2a — picker filter (search + most-popular cap)
+
+        runner.test("F2a: empty search returns the source list unchanged") {
+            let entries = makeF2aFixture()
+            let out = applyStarterModelFilters(
+                to: entries, search: "", showOnlyMostPopular: false, popularLimit: 15)
+            try expect(out.count == entries.count, "got \(out.count)")
+        }
+
+        runner.test("F2a: search matches against tag, sizeTier, and bestAt") {
+            let entries = makeF2aFixture()
+            let byTag = applyStarterModelFilters(
+                to: entries, search: "llama", showOnlyMostPopular: false, popularLimit: 15)
+            try expect(byTag.allSatisfy { $0.tag.contains("llama") },
+                       "byTag had non-llama entries: \(byTag.map(\.tag))")
+            try expect(byTag.count >= 2, "byTag count: \(byTag.count)")
+
+            let byBestAt = applyStarterModelFilters(
+                to: entries, search: "REASONING",   // case-insensitive
+                showOnlyMostPopular: false, popularLimit: 15)
+            try expect(byBestAt.contains(where: { $0.tag == "qwen2.5:7b" }),
+                       "byBestAt missing qwen2.5:7b: \(byBestAt.map(\.tag))")
+
+            let bySize = applyStarterModelFilters(
+                to: entries, search: "Large", showOnlyMostPopular: false, popularLimit: 15)
+            try expect(bySize.allSatisfy { $0.sizeTier == "Large" },
+                       "bySize had non-Large: \(bySize.map(\.sizeTier))")
+        }
+
+        runner.test("F2a: search trims leading/trailing whitespace") {
+            let entries = makeF2aFixture()
+            let trimmed = applyStarterModelFilters(
+                to: entries, search: "   llama  ", showOnlyMostPopular: false, popularLimit: 15)
+            let plain = applyStarterModelFilters(
+                to: entries, search: "llama", showOnlyMostPopular: false, popularLimit: 15)
+            try expect(trimmed.map(\.tag) == plain.map(\.tag),
+                       "trimmed=\(trimmed.map(\.tag)) plain=\(plain.map(\.tag))")
+        }
+
+        runner.test("F2a: most-popular sorts desc by pull count and caps at limit") {
+            let entries = makeF2aFixture()
+            let out = applyStarterModelFilters(
+                to: entries, search: "", showOnlyMostPopular: true, popularLimit: 3)
+            try expect(out.count == 3, "expected 3 (cap), got \(out.count)")
+            // makeF2aFixture popularity ranking: gemma2:2b (200M) >
+            // llama3.2:1b (114M) > llama3.2:3b (90M) > qwen2.5:7b (50M).
+            try expect(out.map(\.tag) == ["gemma2:2b", "llama3.2:1b", "llama3.2:3b"],
+                       "ranking drift: \(out.map(\.tag))")
+        }
+
+        runner.test("F2a: most-popular drops entries without a pull count") {
+            let entries = makeF2aFixture()
+            let out = applyStarterModelFilters(
+                to: entries, search: "", showOnlyMostPopular: true, popularLimit: 15)
+            try expect(out.allSatisfy { $0.pullCount != nil },
+                       "popular set included nil-pullCount entry: \(out.map { ($0.tag, $0.pullCount as Any) })")
+            try expect(!out.contains(where: { $0.tag == "bundled-only:1b" }),
+                       "expected bundled-only:1b excluded; got \(out.map(\.tag))")
+        }
+
+        runner.test("F2a: search and popular compose (search first, then top-N)") {
+            let entries = makeF2aFixture()
+            let out = applyStarterModelFilters(
+                to: entries, search: "llama", showOnlyMostPopular: true, popularLimit: 15)
+            try expect(out.allSatisfy { $0.tag.contains("llama") },
+                       "composed result had non-llama entries: \(out.map(\.tag))")
+            // Composed: llama3.2:1b (114M) > llama3.2:3b (90M); the
+            // 200M gemma2:2b is filtered out by the search clause.
+            try expect(out.map(\.tag) == ["llama3.2:1b", "llama3.2:3b"],
+                       "composed ranking drift: \(out.map(\.tag))")
+        }
+
         await runner.run()
     }
+}
+
+// MARK: - F2a fixture
+//
+// Hand-rolled display entries instead of round-tripping through
+// StarterModelEntry.from(...) so the test is independent of the
+// projection logic and asserts only the filter behavior.
+
+private func makeF2aFixture() -> [StarterModelDisplayEntry] {
+    [
+        StarterModelDisplayEntry(tag: "llama3.2:1b", sizeTier: "Small",
+                                 bestAt: "Lightweight assistant for quick prompts (chat, fast)",
+                                 pullCount: 114_000_000),
+        StarterModelDisplayEntry(tag: "llama3.2:3b", sizeTier: "Small",
+                                 bestAt: "Balanced small model for everyday Q&A (chat, general)",
+                                 pullCount: 90_000_000),
+        StarterModelDisplayEntry(tag: "qwen2.5:7b", sizeTier: "Medium",
+                                 bestAt: "Versatile 7B with reasoning + coding support (reasoning, coding)",
+                                 pullCount: 50_000_000),
+        StarterModelDisplayEntry(tag: "gemma2:2b", sizeTier: "Small",
+                                 bestAt: "Good starter when hardware is limited (cpu-friendly)",
+                                 pullCount: 200_000_000),
+        StarterModelDisplayEntry(tag: "deepseek-r1:70b", sizeTier: "Large",
+                                 bestAt: "Frontier reasoning model (reasoning)",
+                                 pullCount: 25_000_000),
+        // Bundled-style entry without a pull count — must drop out of
+        // the "Most popular" view, but appear in unfiltered + search.
+        StarterModelDisplayEntry(tag: "bundled-only:1b", sizeTier: "Small",
+                                 bestAt: "Fallback bundled entry (chat)",
+                                 pullCount: nil),
+    ]
 }
 
 // MARK: - Fixture writer (cross-language proof)
