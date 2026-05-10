@@ -551,10 +551,9 @@ final class RunnerViewModel: ObservableObject {
         case .stopped:
             networkApiBaseUrl = nil
             networkApiStatus = "API stopped"
-            // If a stop wasn't user-initiated, drop the toggle too.
-            if networkModeEnabled {
-                networkModeEnabled = false
-            }
+            // M13: don't clear networkModeEnabled — `.stopped` fires on every
+            // deliberate restart (shutdown→status=.stopped is async). `.crashed`
+            // owns involuntary state changes.
             libraries = []
             activeLibrary = nil
             activeLibraryId = nil

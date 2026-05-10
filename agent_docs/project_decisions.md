@@ -2256,3 +2256,49 @@ without a re-prep; (c) M14 lands and the Mac runner button proves
 robust enough that PrepApp's eager pull becomes redundant.
 
 Established PR #247 (`1df4431`).
+
+---
+
+## 2026-05-10 — Mac LAN-exposure toggle is user intent; only `.crashed` clears it [M13]
+
+Under MAC34's reshape, the "Expose API on LAN" toggle controls the
+sidecar's bind address (loopback vs. configured) — it does NOT control
+sidecar lifecycle. The sidecar always runs after unlock. Therefore
+`networkModeEnabled` is pure user intent and must not be derived from
+host-controller status transitions.
+
+Concretely, `handleHostStatusChange(.stopped)` no longer touches
+`networkModeEnabled`. `.stopped` fires routinely on every
+`restartHostSidecar()` because `MacRunnerHostController.shutdown()` sets
+`status = .stopped` synchronously and `didSet` dispatches the listener
+to main async — so the listener fires on a later runloop turn, after
+the new sidecar has already been started with the correct bind. Prior
+to M13, that callback's `if networkModeEnabled { networkModeEnabled =
+false }` ran after every toggle-ON click, snapping the UI back to OFF
+even though the underlying sidecar was correctly bound to the LAN
+address (v1.3.22 mac field-test report: "toggles for a split second
+then it un-toggles").
+
+`.crashed` (`terminationStatus != 0`) remains the right home for
+involuntary state changes — it surfaces a message and clears
+`networkModeEnabled` so the user sees they're back on loopback.
+`lockSession` and `stopChatHost` continue to clear the toggle directly
+because those represent the user walking away from intent.
+
+Why not the alternatives:
+- **Suppress `.stopped` during deliberate restart with a flag.** Adds
+  state and a cancellation window where a real crash during a
+  user-initiated restart would be misclassified. `.crashed` already
+  distinguishes the two via terminationStatus; extra state is
+  redundant.
+- **Re-derive `networkModeEnabled` from `effectiveBind`.** Loses user
+  intent the moment configuredBind is empty/loopback. The toggle is a
+  declaration, not a computed view of bind state.
+
+Ships unrevisited unless: (a) the runner gains a path where the
+sidecar can stop without going through `shutdown()` AND without
+`terminationStatus != 0` (e.g., external `kill -TERM` with a clean
+exit shim); (b) a separate UI state distinct from "user wants LAN"
+needs to flow through the same toggle.
+
+Established PR (TBD on M13 merge).

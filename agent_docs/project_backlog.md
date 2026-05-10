@@ -105,7 +105,7 @@ Three flat buckets, one counter per bucket:
 | M10 | MAC37 | Mac PrepApp finalize observability (back-burnered) | mac_project_backlog.md |
 | M11 | (new) | Most popular toggle on Mac picker after Refresh | mac_project_backlog.md |
 | M12 | (new) | Mac runner chat UI parity to X13 (surface real failures) | mac_project_backlog.md |
-| M13 | (new) | "Expose API on LAN" toggle reverts itself on Mac | mac_project_backlog.md |
+| ~~M13~~ | (new) | ~~"Expose API on LAN" toggle reverts itself on Mac~~ — **done**, branch `fix/m13-mac-expose-api-toggle-revert` (PR TBD) | mac_project_backlog.md |
 | M14 | (new) | Mac runner "Pull embedding model" UI button (parity with WPF; defense-in-depth for C2) | mac_project_backlog.md |
 
 **Closed on this pass (no new ID):**
@@ -118,12 +118,12 @@ Three flat buckets, one counter per bucket:
 
 **P0 — Field-test bug surface (top of queue, ship before any feature):**
 
-1. **M13** — Expose-API-on-LAN toggle reverts on Mac (regression candidate, MAC34 surface)
-2. **M12** — Mac runner chat UI parity to X13 (Mac chat surface lacks structured-failure surfacing)
-3. **C1** — Large-model chat stall investigation (qwen3:14b stalls; cross-OS; partly depends on M12)
-4. **M11** — Most-popular toggle on Mac picker after Refresh
-5. **M14** — Mac runner "Pull embedding model" UI parity button (defense-in-depth for C2; reopens MAC35-deferred daemon-restart question)
+1. **M12** — Mac runner chat UI parity to X13 (Mac chat surface lacks structured-failure surfacing)
+2. **C1** — Large-model chat stall investigation (qwen3:14b stalls; cross-OS; partly depends on M12)
+3. **M11** — Most-popular toggle on Mac picker after Refresh
+4. **M14** — Mac runner "Pull embedding model" UI parity button (defense-in-depth for C2; reopens MAC35-deferred daemon-restart question)
 
+> **M13** (Expose-API-on-LAN toggle reverts on Mac) — **done** branch `fix/m13-mac-expose-api-toggle-revert` (PR TBD) 2026-05-10. Root cause was the async `.stopped` callback overwriting user intent on every restart; fix removes the auto-clear from `.stopped` and lets `.crashed` own involuntary state changes. Decision pinned in `project_decisions.md`.
 > **C2** (embedding-model provisioning gap) — **done** PR #247 (`1df4431`) 2026-05-10. Body retained below at line 286 with status banner; decision pinned in `project_decisions.md`.
 
 **P1 — F2a model-picker cluster (cross-OS bundle, ship after P0):**
