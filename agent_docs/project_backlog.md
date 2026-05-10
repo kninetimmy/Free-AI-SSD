@@ -66,7 +66,7 @@ Three flat buckets, one counter per bucket:
 
 | New ID | Old ID | One-line scope | File |
 |---|---|---|---|
-| C1 | (new) | Large-model chat stall investigation (cold-load + silent failure) | this file |
+| C1 | (new) | Large-model chat stall investigation (cold-load + silent failure) — **done** PR #253 (`6cfae14`) | this file |
 | C2 | (new) | Embedding-model provisioning gap (100% embed-failure pathology) — **done** PR #247 (`1df4431`) | this file |
 | C3 | (new) | Model picker: filter by parameter count | this file |
 | C4 | (new) | Model picker: filter by capability (tools/vision/thinking/coding) | this file |
@@ -118,10 +118,10 @@ Three flat buckets, one counter per bucket:
 
 **P0 — Field-test bug surface (top of queue, ship before any feature):**
 
-1. **C1** — Large-model chat stall investigation (qwen3:14b stalls; cross-OS; M12 now provides the visible error surface, so C1's actual cause should appear in the field)
-2. **M11** — Most-popular toggle on Mac picker after Refresh
-3. **M14** — Mac runner "Pull embedding model" UI parity button (defense-in-depth for C2; reopens MAC35-deferred daemon-restart question)
+1. **M11** — Most-popular toggle on Mac picker after Refresh
+2. **M14** — Mac runner "Pull embedding model" UI parity button (defense-in-depth for C2; reopens MAC35-deferred daemon-restart question)
 
+> **C1** (large-model chat stall) — **done** PR #253 (`6cfae14`) 2026-05-10. Server-side heartbeat (`ChatService.FirstTokenPending` event every 20s while awaiting Ollama's first streamed token; forwarded by `/chat/stream` as `{type:"loading", elapsedSeconds:N}` NDJSON) keeps Mac URLSession's 180s per-packet timer alive across cold-loads AND paints a live `Loading <model>… NNs` indicator on both OSes. Per-request `SemaphoreSlim` write-gate added to `/chat/stream` for HttpResponse stream serialization. Boundary logs (request begin / first-token Ns / completion Ns) added via `SsdLogger.Info`. 2 new pins in `RunnerLocalApiServiceTests`. Decision pinned in `project_decisions.md`.
 > **M12** (Mac runner chat UI parity to X13) — **done** PR #251 (`a52572c`) 2026-05-10. New `chatError` red banner in `ContentView` covers the three X13 failure paths (mid-stream `error` frame, transport error, non-2xx HTTP body); new pure helper `RunnerChatErrorMessage.decode` extracted from a dead `apiErrorMessage` private method; `ChatStreamDelegate` now `.allow`s non-2xx responses and buffers the body for structured decoding. 7 new pins in `RunnerChatErrorMessageTests`. Decision pinned in `project_decisions.md`.
 > **M13** (Expose-API-on-LAN toggle reverts on Mac) — **done** PR #249 (`e6b958e`) 2026-05-10. Root cause was the async `.stopped` callback overwriting user intent on every restart; fix removes the auto-clear from `.stopped` and lets `.crashed` own involuntary state changes. Decision pinned in `project_decisions.md`.
 > **C2** (embedding-model provisioning gap) — **done** PR #247 (`1df4431`) 2026-05-10. Body retained below at line 286 with status banner; decision pinned in `project_decisions.md`.
@@ -249,7 +249,9 @@ Items `B1`â€“`F4` below were triaged from Stephen's `Downloads/# Free-AI-SS
 
 ### C1 — Large-model chat stall investigation (cold-load + silent failure)
 
-**Status:** filed 2026-05-10 from v1.3.22 mac field test.
+**Status:** **done** — PR #253 merged `6cfae14` (2026-05-10). Pinned decision in `project_decisions.md` (heartbeat + NDJSON `loading` frame + write-gate). Open follow-up: the field-test pin tracked in `project_state.md` Open questions (qwen3:14b cold-load on USB SSD verifies the heartbeat end-to-end). Phase-1 hypothesis (cold-load > 180s) confirmed by code inspection: server flushes `start` immediately, Mac URLSession's `timeoutIntervalForRequest=180s` then waits for first Ollama token after model load, exceeded on 14b USB SSD. Heartbeat doubles as fix + diagnostic — heartbeats past 180s with no token = real Ollama-side load issue (memory / corrupted blob); no heartbeats = sidecar broken.
+
+**Status (historical):** filed 2026-05-10 from v1.3.22 mac field test.
 **Scope:** Diagnose first, then fix. Investigation phase before scoping.
 **Model:** Sonnet 4.6 for diagnosis; re-triage for fix.
 
