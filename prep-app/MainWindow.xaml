@@ -84,6 +84,38 @@
                                                Style="{StaticResource CaptionText}"
                                                Margin="0,4,0,0"
                                                Visibility="Collapsed"/>
+
+                                    <!-- F2a: search + Most popular cap. The Refresh
+                                         button stays in the title row above; this row
+                                         drives the DataGrid's CollectionView Filter via
+                                         PrepViewModel.IsModelRowVisible (wired in code-
+                                         behind, refreshed on ModelRowsViewInvalidated). -->
+                                    <Grid Margin="0,8,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <ToggleButton x:Name="MostPopularToggle"
+                                                      Grid.Column="0"
+                                                      Content="Most popular"
+                                                      Padding="10,4" MinHeight="0"
+                                                      VerticalAlignment="Center"
+                                                      IsChecked="{Binding ShowOnlyMostPopular, Mode=TwoWay}"
+                                                      ToolTip="Show only the top 15 recommended models by ollama.com pull count. Click Refresh from Ollama first to populate pull counts on the bundled list."/>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="Search"
+                                                   Style="{StaticResource CaptionText}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="14,0,6,0"/>
+                                        <TextBox x:Name="ModelSearchBox"
+                                                 Grid.Column="2"
+                                                 Padding="8,4"
+                                                 VerticalAlignment="Center"
+                                                 Style="{StaticResource GlowFocusTextBox}"
+                                                 Text="{Binding ModelSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 ToolTip="Filter the grid by tag, tier, or capability description (case-insensitive)."/>
+                                    </Grid>
                                 </StackPanel>
 
                                 <!-- Actions row: Download (primary), then ghost buttons. -->

@@ -63,6 +63,22 @@ public class PrepViewModel : BaseViewModel
     private readonly HashSet<string> _provenanceCheckedRoots = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<StarterCatalogEntry> _starterCatalog = Array.Empty<StarterCatalogEntry>();
 
+    // F2a: picker filter state. The XAML wraps ModelRows in a
+    // ListCollectionView whose Filter callback consults
+    // IsModelRowVisible — search runs over Name + BestAt; the popular
+    // toggle restricts recommended-only rows to the precomputed
+    // top-N tag set so the filter callback stays O(1) per row.
+    private string _modelSearchText = string.Empty;
+    private bool _showOnlyMostPopular;
+    private HashSet<string> _topPopularStarterTags = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>F2a: top-N cap for the "Most popular" filter.</summary>
+    public const int MostPopularLimit = 15;
+
+    /// <summary>F2a: emitted when the picker filter state changes so
+    /// the view-host can refresh its CollectionView.</summary>
+    public event EventHandler? ModelRowsViewInvalidated;
+
     public PrepViewModel(
         IDriveService driveService,
         IModelService modelService,
@@ -345,6 +361,72 @@ public class PrepViewModel : BaseViewModel
     public ObservableCollection<ModelGridRow> ModelRows { get; }
     public ObservableCollection<ReadinessItem> ReadinessItems { get; }
     public ObservableCollection<string> LogLines { get; }
+
+    /// <summary>F2a: case-insensitive substring filter applied to
+    /// Name and BestAt. Empty string = no search filter.</summary>
+    public string ModelSearchText
+    {
+        get => _modelSearchText;
+        set
+        {
+            if (SetProperty(ref _modelSearchText, value ?? string.Empty))
+                ModelRowsViewInvalidated?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>F2a: when true, recommended-only rows are restricted
+    /// to the top <see cref="MostPopularLimit"/> by pull count.
+    /// Configured / on-disk rows always remain visible.</summary>
+    public bool ShowOnlyMostPopular
+    {
+        get => _showOnlyMostPopular;
+        set
+        {
+            if (SetProperty(ref _showOnlyMostPopular, value))
+                ModelRowsViewInvalidated?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>F2a: row-visibility predicate the WPF
+    /// <c>ListCollectionView.Filter</c> callback delegates to.
+    /// Pure function over <see cref="ModelGridRow"/> + current filter
+    /// state; safe to unit-test.</summary>
+    public bool IsModelRowVisible(ModelGridRow row)
+    {
+        var needle = _modelSearchText.Trim();
+        if (needle.Length > 0)
+        {
+            var nameMatch = row.Name.Contains(needle, StringComparison.OrdinalIgnoreCase);
+            var bestAtMatch = !string.IsNullOrEmpty(row.BestAt)
+                && row.BestAt.Contains(needle, StringComparison.OrdinalIgnoreCase);
+            var tierMatch = !string.IsNullOrEmpty(row.Tier)
+                && row.Tier.Contains(needle, StringComparison.OrdinalIgnoreCase);
+            if (!nameMatch && !bestAtMatch && !tierMatch)
+                return false;
+        }
+
+        if (_showOnlyMostPopular && IsStarterOnlyRecommendationRow(row))
+        {
+            return _topPopularStarterTags.Contains(row.Name);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// F2a: precompute the set of recommended-row tags that pass the
+    /// "Most popular" cap so <see cref="IsModelRowVisible"/> stays
+    /// O(1) per row. Called whenever the starter catalog changes.
+    /// </summary>
+    private void RecomputeTopPopularStarterTags()
+    {
+        _topPopularStarterTags = _starterCatalog
+            .Where(e => e.PullCount.HasValue)
+            .OrderByDescending(e => e.PullCount!.Value)
+            .Take(MostPopularLimit)
+            .Select(e => e.Tag)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
 
     public RelayCommand RefreshDrivesCommand { get; }
     public AsyncRelayCommand AddModelCommand { get; }
@@ -656,7 +738,12 @@ public class PrepViewModel : BaseViewModel
     public async Task SetStarterCatalogAsync(IEnumerable<StarterCatalogEntry> entries)
     {
         _starterCatalog = entries?.ToList() ?? new List<StarterCatalogEntry>();
+        RecomputeTopPopularStarterTags();
         await RefreshModelStatusesAsync();
+        // Catalog swap can shift which rows belong to the popular cap;
+        // tell the host to refresh its CollectionView so the new top-N
+        // takes effect without requiring the user to re-toggle.
+        ModelRowsViewInvalidated?.Invoke(this, EventArgs.Empty);
     }
 
     private async Task AddOrphanToConfigAsync()
@@ -1540,7 +1627,7 @@ public class PrepViewModel : BaseViewModel
             var onDisk = discoveredOnDisk.Contains(model.Name);
             var state = DetermineConfiguredState(model, onDisk);
             var warnings = _modelService.GetSizingWarnings(model.Name, freeDiskGb, _systemRamGb, _gpuVramGb);
-            var (tier, bestAt) = LookupStarterMeta(catalogByTag, model.Name);
+            var (tier, bestAt, pullCount) = LookupStarterMeta(catalogByTag, model.Name);
             rows.Add(new ModelGridRow(
                 model.Name,
                 state,
@@ -1552,14 +1639,15 @@ public class PrepViewModel : BaseViewModel
                 isOnDiskOnly: false,
                 isPresentOnDrive: onDisk,
                 tier: tier,
-                bestAt: bestAt));
+                bestAt: bestAt,
+                pullCount: pullCount));
         }
 
         var configuredNames = new HashSet<string>(configured.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
         foreach (var discovered in discoveredOnDisk.Where(d => !configuredNames.Contains(d)).OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
         {
             var warnings = _modelService.GetSizingWarnings(discovered, freeDiskGb, _systemRamGb, _gpuVramGb);
-            var (tier, bestAt) = LookupStarterMeta(catalogByTag, discovered);
+            var (tier, bestAt, pullCount) = LookupStarterMeta(catalogByTag, discovered);
             rows.Add(new ModelGridRow(
                 discovered,
                 "On drive only",
@@ -1569,7 +1657,8 @@ public class PrepViewModel : BaseViewModel
                 isOnDiskOnly: true,
                 isPresentOnDrive: true,
                 tier: tier,
-                bestAt: bestAt));
+                bestAt: bestAt,
+                pullCount: pullCount));
         }
 
         // Third pass: recommended starters that aren't in config or on-disk.
@@ -1599,18 +1688,19 @@ public class PrepViewModel : BaseViewModel
                 isOnDiskOnly: false,
                 isPresentOnDrive: false,
                 tier: entry.SizeTier,
-                bestAt: entry.BestAt);
+                bestAt: entry.BestAt,
+                pullCount: entry.PullCount);
             row.IsSelected = false;
             yield return row;
         }
     }
 
-    private static (string tier, string bestAt) LookupStarterMeta(
+    private static (string tier, string bestAt, long? pullCount) LookupStarterMeta(
         Dictionary<string, StarterCatalogEntry> catalogByTag, string name)
     {
         if (catalogByTag.TryGetValue(name, out var entry))
-            return (entry.SizeTier, entry.BestAt);
-        return ("Custom", string.Empty);
+            return (entry.SizeTier, entry.BestAt, entry.PullCount);
+        return ("Custom", string.Empty, null);
     }
 
     private void RefreshReadinessItems(List<ReadinessItem> checks)

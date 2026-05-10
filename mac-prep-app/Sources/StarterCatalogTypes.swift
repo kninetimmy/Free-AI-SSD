@@ -17,6 +17,10 @@ struct StarterModelEntry: Codable, Hashable {
     let sizeTier: String
     let description: String
     let useCases: [String]
+    /// F2a: Approximate pull count from ollama.com/library; nil for
+    /// the bundled catalog (predates the field). Drives the
+    /// "Most popular" filter in the picker.
+    let pullCount: Int64?
 }
 
 /// Display projection for the picker. Mirrors the Windows
@@ -27,6 +31,9 @@ struct StarterModelDisplayEntry: Identifiable, Hashable {
     let tag: String
     let sizeTier: String
     let bestAt: String
+    /// F2a: nil when the bundled catalog is in play; populated from
+    /// ollama.com/library after Refresh.
+    let pullCount: Int64?
     var id: String { tag }
 
     /// "Best at" combines description + comma-joined use cases —
@@ -45,8 +52,47 @@ struct StarterModelDisplayEntry: Identifiable, Hashable {
         return StarterModelDisplayEntry(
             tag: entry.tag,
             sizeTier: entry.sizeTier,
-            bestAt: bestAt)
+            bestAt: bestAt,
+            pullCount: entry.pullCount)
     }
+}
+
+/// F2a: pure picker filter so unit tests can pin search + popular
+/// behavior without constructing the @MainActor PrepViewModel (which
+/// depends on AppKit/SwiftUI and isn't in the test binary's compile
+/// list). The view-model delegates here.
+///
+/// Search is a case-insensitive substring against tag, sizeTier, and
+/// bestAt. The "Most popular" filter sorts by pull count desc and
+/// caps at `popularLimit`; entries without a pullCount drop out
+/// entirely (the bundled catalog has no pull counts so toggling it
+/// before Refresh yields zero rows — visible signal to Refresh first).
+func applyStarterModelFilters(
+    to source: [StarterModelDisplayEntry],
+    search: String,
+    showOnlyMostPopular: Bool,
+    popularLimit: Int
+) -> [StarterModelDisplayEntry] {
+    var result = source
+    let needle = search.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !needle.isEmpty {
+        result = result.filter { entry in
+            entry.tag.range(of: needle, options: .caseInsensitive) != nil
+                || entry.sizeTier.range(of: needle, options: .caseInsensitive) != nil
+                || entry.bestAt.range(of: needle, options: .caseInsensitive) != nil
+        }
+    }
+    if showOnlyMostPopular {
+        result = result
+            .compactMap { entry -> (StarterModelDisplayEntry, Int64)? in
+                guard let count = entry.pullCount else { return nil }
+                return (entry, count)
+            }
+            .sorted { $0.1 > $1.1 }
+            .prefix(popularLimit)
+            .map { $0.0 }
+    }
+    return result
 }
 
 /// Decode the entries array out of a PrepHostResult payload. The

@@ -28,6 +28,13 @@ public sealed record StarterModelEntry
     public string Description { get; init; } = string.Empty;
     /// <summary>List of typical use cases (e.g., "chat", "code", "translation").</summary>
     public List<string> UseCases { get; init; } = new();
+    /// <summary>
+    /// Approximate pull count from ollama.com/library, populated by
+    /// <c>LiveModelCatalogService</c>. Null for the bundled catalog
+    /// (the curated 12-entry list pre-dates this field). The picker
+    /// uses it to surface the F2a "Most popular" filter.
+    /// </summary>
+    public long? PullCount { get; init; }
 }
 
 /// <summary>

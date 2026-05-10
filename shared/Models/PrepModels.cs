@@ -12,7 +12,8 @@ public sealed record ReadinessItem(string Check, bool Passed, string Result)
 public sealed class ModelGridRow(
     string name, string status, string source, string sizingWarning,
     string sizeDisplay, string shaPreview, string lastVerifiedDisplay, bool isOnDiskOnly,
-    bool isPresentOnDrive, string tier = "Custom", string bestAt = "")
+    bool isPresentOnDrive, string tier = "Custom", string bestAt = "",
+    long? pullCount = null)
     : BaseViewModel
 {
     private bool _isSelected;
@@ -35,6 +36,13 @@ public sealed class ModelGridRow(
     public bool IsPresentOnDrive { get; } = isPresentOnDrive;
     public string Tier { get; } = tier;
     public string BestAt { get; } = bestAt;
+    /// <summary>
+    /// F2a: approximate pull count from ollama.com/library. Null for
+    /// rows whose tag isn't in the live catalog (custom, on-disk-only,
+    /// or anything from the bundled list before Refresh). Drives the
+    /// "Most popular" filter cap on the merged grid.
+    /// </summary>
+    public long? PullCount { get; } = pullCount;
 }
 
 /// <summary>
@@ -46,7 +54,14 @@ public sealed class ModelGridRow(
 public sealed record StarterCatalogEntry(
     string Tag,
     string SizeTier,
-    string BestAt);
+    string BestAt,
+    /// <summary>
+    /// F2a: approximate pull count from ollama.com/library, populated
+    /// during the live Refresh path. Null for the bundled catalog
+    /// (which predates the field). Drives the "Most popular" picker
+    /// filter — entries without a count fall outside the popular cap.
+    /// </summary>
+    long? PullCount = null);
 
 [Flags]
 public enum PrepTargets

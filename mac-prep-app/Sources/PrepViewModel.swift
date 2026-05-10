@@ -49,6 +49,17 @@ final class PrepViewModel: ObservableObject {
     @Published var catalogStatusText: String = ""
     @Published var isRefreshingCatalog: Bool = false
 
+    // F2a: picker filter state. Search filters tag + sizeTier + bestAt
+    // (case-insensitive substring). showOnlyMostPopular subsets to the
+    // top 15 entries by pullCount; entries without a pull count drop
+    // out of that view (the bundled catalog has no pull counts, so
+    // toggling it on a bundled list yields zero rows — visible signal
+    // to Refresh first, by design).
+    @Published var modelSearchText: String = ""
+    @Published var showOnlyMostPopular: Bool = false
+    /// F2a: how many entries the "Most popular" filter exposes.
+    static let mostPopularCount: Int = 15
+
     // Readiness
     @Published var readinessItems: [ReadinessRow] = []
 
@@ -102,6 +113,18 @@ final class PrepViewModel: ObservableObject {
     }
 
     var availableStarterModels: [StarterModelDisplayEntry] { starterCatalog }
+
+    /// F2a: the picker renders this list rather than `starterCatalog`
+    /// directly. Search runs first, then the popular filter caps to
+    /// the top N by pull count. Pure logic lives in
+    /// `applyStarterModelFilters` so the test binary can cover it.
+    var visibleStarterModels: [StarterModelDisplayEntry] {
+        applyStarterModelFilters(
+            to: starterCatalog,
+            search: modelSearchText,
+            showOnlyMostPopular: showOnlyMostPopular,
+            popularLimit: Self.mostPopularCount)
+    }
 
     // MARK: - Step transitions
 
