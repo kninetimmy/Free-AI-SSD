@@ -77,6 +77,14 @@ final class RunnerViewModel: ObservableObject {
     /// streaming chat request is in flight.
     @Published var isSending: Bool = false
     @Published var isEncryptedLocked: Bool = false
+    /// MAC39: surfaces "is the on-disk SSD config encrypted at all?" so the
+    /// Lock/Start/Stop button picker in `ContentView` can do the right thing.
+    /// Encrypted SSD: button stays "Lock" (current behavior — lockSession
+    /// tears down the chat host AND zeroizes unlock material). Plaintext SSD:
+    /// button toggles Start/Stop on the chat host explicitly because there's
+    /// no key to zeroize and "Lock" was actually just a confusing way to
+    /// stop chat. Refreshed in `loadConfig`/`attemptUnlock`/`pickSsdRoot`.
+    @Published var isEncryptedSsd: Bool = false
     @Published var unlockDialogPresented: Bool = false
     @Published var unlockDialogPassword: String = ""
     @Published var unlockDialogError: String? = nil
@@ -207,7 +215,10 @@ final class RunnerViewModel: ObservableObject {
     func loadConfig() {
         guard let root = ssdRoot else { return }
 
-        if SsdEncryption.isEffectivelyEncryptedForWriteGuard(ssdRoot: root) {
+        let encrypted = SsdEncryption.isEffectivelyEncryptedForWriteGuard(ssdRoot: root)
+        isEncryptedSsd = encrypted
+
+        if encrypted {
             // Encrypted drive: present the unlock dialog. Don't read or
             // decode anything else until the user completes unlock.
             isEncryptedLocked = true
@@ -335,6 +346,34 @@ final class RunnerViewModel: ObservableObject {
         log(reason)
     }
 
+    /// MAC39: explicit Stop for the chat host on plaintext SSDs. Tears down
+    /// the sidecar + ollama but keeps `portableConfig`, `modelNames`, and
+    /// the in-memory state — this is "stop the chat stack" not "lock the
+    /// drive". The corresponding Start (`startChatHost`) flips the same
+    /// stack back on. `lockSession` stays the right verb for encrypted
+    /// drives where there's unlock material to zeroize.
+    func stopChatHost(reason: String = "Chat host stopped") {
+        activeChatTask?.cancel()
+        activeChatTask = nil
+        isSending = false
+
+        hostController.shutdown()
+        networkApiBaseUrl = nil
+        networkApiStatus = "Chat host stopped"
+
+        if process != nil {
+            stopOllama()
+        }
+        log(reason)
+    }
+
+    /// MAC39: explicit Start for the chat host on plaintext SSDs. Mirrors
+    /// the auto-spawn path that runs at unlock — kept as a separate method
+    /// so the UI's intent is legible at the call site.
+    func startChatHost() {
+        ensureLocalChatStackRunning()
+    }
+
     /// MAC34: UI toggle for "Expose API on LAN". The sidecar always runs
     /// after unlock; this only flips the bind address between 127.0.0.1
     /// (toggle off) and the configured `networkBindAddress` (toggle on).
@@ -415,6 +454,19 @@ final class RunnerViewModel: ObservableObject {
         // purely via `networkBindAddress` (loopback when toggle is OFF).
         config["networkModeEnabled"] = true
         config["networkBindAddress"] = effectiveBind
+
+        // MAC39: defensive cleanup before re-bind. Mirror of the MAC34b
+        // pattern for ollama on port 11434. If a prior sidecar process
+        // crashed without releasing its listener, the new bind would fail
+        // with "address already in use" and the user would need to quit the
+        // app to recover. Kill any straggler bound to the configured
+        // network port. Sidecar-side port-shifting (RunnerLocalApiService.
+        // ResolveAvailablePort) handles the residual TIME_WAIT case where
+        // the kernel hasn't released the port yet — together they cover the
+        // observed "Lock + re-unlock fails" flow.
+        if let configuredPort = config["networkPort"] as? Int {
+            Self.terminateProcessesListening(onPort: configuredPort, log: { [weak self] in self?.log($0) })
+        }
 
         networkApiStatus = "Starting API…"
         do {
@@ -737,7 +789,17 @@ final class RunnerViewModel: ObservableObject {
             withJSONObject: ["model": selectedModel, "prompt": prompt])
 
         let delegate = ChatStreamDelegate(owner: self)
-        let session = URLSession(configuration: .default,
+        // MAC39: bump timeoutIntervalForRequest from the default 60s to 180s
+        // for the chat stream. The server emits a `start` frame immediately
+        // (see RunnerLocalApiService.cs:222), so the per-request timer
+        // resets as soon as the request lands — but cold-loading a 5GB+
+        // model on a USB SSD can take 30-90s before Ollama emits the first
+        // token, and 60s isn't enough headroom on every machine. 180s gives
+        // the cold-load path comfortable room while still bounding a truly
+        // wedged request.
+        let sessionConfig = URLSessionConfiguration.default
+        sessionConfig.timeoutIntervalForRequest = 180
+        let session = URLSession(configuration: sessionConfig,
                                  delegate: delegate,
                                  delegateQueue: nil)
         let task = session.dataTask(with: req)
@@ -1342,8 +1404,24 @@ struct ContentView: View {
             Text(vm.status)
             HStack {
                 Button("Select SSD") { vm.pickSsdRoot() }
-                if !vm.isEncryptedLocked {
-                    Button("Lock") { vm.lockSession(reason: "Manual lock") }
+                // MAC39: conditional verb based on encryption state.
+                //   Encrypted SSD (unlocked): Lock — tears down chat AND
+                //     zeroizes unlock material. Same as the MAC30 default.
+                //   Plaintext SSD: Start/Stop — toggles the chat host
+                //     explicitly. There's no key to zeroize, so "Lock" was
+                //     just a misleading way to stop the chat stack and
+                //     leave the user without a way to bring it back without
+                //     re-selecting the SSD.
+                if vm.isEncryptedSsd {
+                    if !vm.isEncryptedLocked {
+                        Button("Lock") { vm.lockSession(reason: "Manual lock") }
+                    }
+                } else {
+                    if vm.networkApiBaseUrl != nil {
+                        Button("Stop") { vm.stopChatHost(reason: "Manual stop") }
+                    } else {
+                        Button("Start") { vm.startChatHost() }
+                    }
                 }
             }
             Picker("Model", selection: $vm.selectedModel) {
