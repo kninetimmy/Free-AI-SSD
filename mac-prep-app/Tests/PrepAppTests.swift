@@ -602,6 +602,38 @@ struct PrepAppTestsMain {
                        "composed ranking drift: \(out.map(\.tag))")
         }
 
+        // MARK: M11 — visible-row caption
+
+        runner.test("M11: caption empty when no filter and no search") {
+            let s = formatStarterRowCountCaption(
+                visible: 399, total: 399, showOnlyMostPopular: false, hasSearch: false)
+            try expect(s.isEmpty, "expected empty, got: \(s)")
+        }
+
+        runner.test("M11: caption empty when total is zero") {
+            let s = formatStarterRowCountCaption(
+                visible: 0, total: 0, showOnlyMostPopular: true, hasSearch: false)
+            try expect(s.isEmpty, "expected empty, got: \(s)")
+        }
+
+        runner.test("M11: caption announces top-N cap when popular only") {
+            let s = formatStarterRowCountCaption(
+                visible: 15, total: 399, showOnlyMostPopular: true, hasSearch: false)
+            try expect(s == "Showing top 15 of 399 by pulls.", "got: \(s)")
+        }
+
+        runner.test("M11: caption notes search filter when search only") {
+            let s = formatStarterRowCountCaption(
+                visible: 12, total: 399, showOnlyMostPopular: false, hasSearch: true)
+            try expect(s == "Showing 12 of 399 matching search.", "got: \(s)")
+        }
+
+        runner.test("M11: caption combines popular + search") {
+            let s = formatStarterRowCountCaption(
+                visible: 4, total: 399, showOnlyMostPopular: true, hasSearch: true)
+            try expect(s == "Showing top 4 of 399 by pulls (filtered by search).", "got: \(s)")
+        }
+
         await runner.run()
     }
 }

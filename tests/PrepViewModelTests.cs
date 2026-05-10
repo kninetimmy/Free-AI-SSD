@@ -1216,6 +1216,51 @@ public class PrepViewModelTests
         Assert.Equal(2, fired);
     }
 
+    // M11: integration pin against the perception bug. Toggling
+    // ShowOnlyMostPopular has to (a) populate StarterRowCountCaption
+    // with a non-empty visible/total string and (b) raise PropertyChanged
+    // so the WPF binding refreshes. Without this surface the toggle
+    // looks no-op when ollama.com's natural order already has the
+    // popular models on top.
+    [Fact]
+    public async Task StarterRowCountCaption_PopulatedAndRaisesPropertyChanged_WhenMostPopularToggled()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        await vm.SetStarterCatalogAsync(F2aCatalogFixture());
+
+        var captionChanges = 0;
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(vm.StarterRowCountCaption)) captionChanges++;
+        };
+
+        Assert.Equal(string.Empty, vm.StarterRowCountCaption);
+
+        vm.ShowOnlyMostPopular = true;
+        Assert.True(captionChanges >= 1, $"expected PropertyChanged for caption; got {captionChanges}");
+        Assert.Contains("Showing top", vm.StarterRowCountCaption);
+        Assert.Contains("by pulls.", vm.StarterRowCountCaption);
+
+        vm.ShowOnlyMostPopular = false;
+        Assert.Equal(string.Empty, vm.StarterRowCountCaption);
+    }
+
+    [Fact]
+    public async Task StarterRowCountCaption_AnnouncesSearchFilter_WhenOnlySearchActive()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        await vm.SetStarterCatalogAsync(F2aCatalogFixture());
+
+        vm.ModelSearchText = "llama";
+
+        Assert.Contains("matching search.", vm.StarterRowCountCaption);
+        Assert.DoesNotContain("by pulls", vm.StarterRowCountCaption);
+    }
+
     private static List<StarterCatalogEntry> F2aCatalogFixture() => new()
     {
         new StarterCatalogEntry("llama3.2:1b", "Small",
