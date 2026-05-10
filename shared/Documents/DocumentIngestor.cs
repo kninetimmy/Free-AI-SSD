@@ -134,6 +134,12 @@ public sealed class DocumentIngestor
                 var embeddedChunks = 0;
                 var failedChunkCount = 0;
                 var results = new DocumentChunk?[totalChunks];
+                // C2: capture the first per-chunk exception so the
+                // threshold abort message can name the actual cause
+                // (e.g. "model 'nomic-embed-text' not found"). Without
+                // this the user sees only "ratio=100% threshold=50%"
+                // and has no path to the underlying provisioning gap.
+                Exception? firstFailure = null;
 
                 var maxConcurrency = Math.Max(1, config.MaxEmbeddingConcurrency);
                 using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
@@ -174,8 +180,9 @@ public sealed class DocumentIngestor
                     {
                         throw;
                     }
-                    catch (Exception)
+                    catch (Exception ex)
                     {
+                        Interlocked.CompareExchange(ref firstFailure, ex, null);
                         Interlocked.Increment(ref failedChunkCount);
                     }
                     finally
@@ -205,9 +212,12 @@ public sealed class DocumentIngestor
 
                 if (failureRatio > MaxEmbeddingFailureRatioBeforeAbort)
                 {
+                    var causeSuffix = firstFailure is null
+                        ? string.Empty
+                        : $" First failure: {firstFailure.Message}";
                     var error =
                         $"Ingestion failed for '{fileName}': embedding failures exceeded threshold " +
-                        $"(total={totalChunks}, succeeded={embeddedChunks}, failed={failedChunkCount}, ratio={failureRatio:P1}, threshold={MaxEmbeddingFailureRatioBeforeAbort:P0}).";
+                        $"(total={totalChunks}, succeeded={embeddedChunks}, failed={failedChunkCount}, ratio={failureRatio:P1}, threshold={MaxEmbeddingFailureRatioBeforeAbort:P0}).{causeSuffix}";
                     _logger?.Error(error);
                     throw new InvalidOperationException(error);
                 }
@@ -415,6 +425,9 @@ public sealed class DocumentIngestor
         using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
         var results = new DocumentChunk?[textItems.Count];
         var failedCount = 0;
+        // C2: same first-failure capture as IngestFilesAsync — see the
+        // comment there for rationale.
+        Exception? firstFailure = null;
 
         var tasks = textItems.Select(async (item, i) =>
         {
@@ -443,8 +456,9 @@ public sealed class DocumentIngestor
             {
                 throw;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Interlocked.CompareExchange(ref firstFailure, ex, null);
                 Interlocked.Increment(ref failedCount);
             }
             finally
@@ -459,9 +473,12 @@ public sealed class DocumentIngestor
         var failureRatio = totalChunks == 0 ? 0d : (double)failedCount / totalChunks;
         if (failureRatio > MaxEmbeddingFailureRatioBeforeAbort)
         {
+            var causeSuffix = firstFailure is null
+                ? string.Empty
+                : $" First failure: {firstFailure.Message}";
             var error =
                 $"Rebuild from stored copy failed for '{entry.FileName}': embedding failures exceeded threshold " +
-                $"(total={totalChunks}, failed={failedCount}, ratio={failureRatio:P1}, threshold={MaxEmbeddingFailureRatioBeforeAbort:P0}).";
+                $"(total={totalChunks}, failed={failedCount}, ratio={failureRatio:P1}, threshold={MaxEmbeddingFailureRatioBeforeAbort:P0}).{causeSuffix}";
             _logger?.Error(error);
             throw new InvalidOperationException(error);
         }
