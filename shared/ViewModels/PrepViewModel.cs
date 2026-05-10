@@ -925,6 +925,18 @@ public class PrepViewModel : BaseViewModel
                     AppendLog($"Failed to download {model}: {ex.Message}");
                 }
             }
+
+            // C2: ensure the configured embedding model is on the SSD too.
+            // Chat-model picker (F2a) ignores the embedder, so without this
+            // step a freshly-prepped drive ingests 0/N chunks at first
+            // library use ("embedding failures exceeded threshold"). The
+            // pull reuses the temp server already running for the chat
+            // models, so it costs no extra startup.
+            var configForEmbed = await _modelService.LoadConfigAsync(configPath);
+            await EnsureEmbeddingModelInstalledAsync(
+                ollamaExe, modelsRoot, serverHandle.Host, configPath,
+                configForEmbed.EmbeddingModelName, _modelOperationCts.Token);
+
             StatusText = "Download complete";
         }
         catch (OperationCanceledException)
@@ -943,6 +955,123 @@ public class PrepViewModel : BaseViewModel
             _modelOperationCts = null;
             await RefreshModelStatusesAsync();
         }
+    }
+
+    // C2: idempotent disk-truth pull of the embedder. Two callers:
+    // (1) DownloadAsync tail, reusing the temp server already running for
+    //     the chat-model loop; (2) EnsureEmbeddingModelOnFinalizeAsync,
+    //     which spins its own server only when the disk-check shows the
+    //     embedder is missing. Best-effort: a failed pull logs but does
+    //     not abort the wider operation — offline users can still finalize
+    //     without RAG, and Stage 2 of C2 surfaces a readable runtime error
+    //     if they try to ingest without an embedder.
+    private async Task EnsureEmbeddingModelInstalledAsync(
+        string ollamaExe,
+        string modelsRoot,
+        string ollamaHost,
+        string configPath,
+        string embeddingModelName,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(embeddingModelName))
+        {
+            AppendLog("No embedding model configured; skipping embedder pull.");
+            return;
+        }
+
+        var canonicalTag = NormalizeOllamaTag(embeddingModelName);
+        var onDisk = _modelService.DiscoverModelsOnDisk(modelsRoot);
+        var alreadyInstalled = onDisk.Any(t =>
+            string.Equals(NormalizeOllamaTag(t), canonicalTag, StringComparison.OrdinalIgnoreCase));
+
+        if (alreadyInstalled)
+        {
+            AppendLog($"Embedding model {canonicalTag} already on disk; skipping pull.");
+            return;
+        }
+
+        AppendLog($"Pulling embedding model {canonicalTag}…");
+        await _modelService.UpdateModelStatusAsync(configPath, canonicalTag, ModelInstallStatus.Downloading);
+
+        var seed = _modelService.EstimatePartialPullProgress(modelsRoot, canonicalTag);
+        PullProgressLine = seed > 0
+            ? $"Resuming {canonicalTag} from {seed:P0}…"
+            : $"Pulling {canonicalTag}…";
+
+        try
+        {
+            var result = await _modelService.PullModelAsync(
+                ollamaExe, modelsRoot, canonicalTag, AppendLog, ct, ollamaHost,
+                onProgress: progress => SetPullProgressLineSafe(progress.ToDisplayString()));
+
+            await _modelService.UpdateModelStatusAsync(
+                configPath, canonicalTag, ModelInstallStatus.Installed,
+                result.Sha256, result.SizeBytes, DateTime.UtcNow);
+            AppendLog($"Embedding model ready: {canonicalTag} ({FormatSize(result.SizeBytes)}).");
+        }
+        catch (OperationCanceledException)
+        {
+            await _modelService.UpdateModelStatusAsync(configPath, canonicalTag, ModelInstallStatus.NotInstalled);
+            AppendLog($"Embedding model pull cancelled for {canonicalTag}.");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            await _modelService.UpdateModelStatusAsync(configPath, canonicalTag, ModelInstallStatus.Failed);
+            AppendLog($"Embedding model pull failed for {canonicalTag}: {ex.Message}. Document ingestion will fail until this is resolved.");
+            // Intentionally do not rethrow — see method header.
+        }
+    }
+
+    // C2 finalize-time guard. Disk-check first; only spins a temp server
+    // if the embedder is genuinely missing. Mirrors DownloadAsync's
+    // server-startup pattern so the pull surface matches MAC40's
+    // /api/pull NDJSON contract.
+    private async Task EnsureEmbeddingModelOnFinalizeAsync(string root, string configPath, string embeddingModelName)
+    {
+        if (string.IsNullOrWhiteSpace(embeddingModelName))
+        {
+            return;
+        }
+
+        var modelsRoot = Path.Combine(root, SsdLayout.Models);
+        var canonicalTag = NormalizeOllamaTag(embeddingModelName);
+        var onDisk = _modelService.DiscoverModelsOnDisk(modelsRoot);
+        if (onDisk.Any(t => string.Equals(NormalizeOllamaTag(t), canonicalTag, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        StatusText = "Pulling embedding model…";
+        IOllamaServerHandle? serverHandle = null;
+        try
+        {
+            var ollamaExe = await _ollamaPackageService.EnsureOllamaReadyAsync(root, AppendLog, null, CancellationToken.None);
+            serverHandle = await _ollamaPackageService.StartTemporaryServerAsync(ollamaExe, modelsRoot, AppendLog, CancellationToken.None);
+            await EnsureEmbeddingModelInstalledAsync(
+                ollamaExe, modelsRoot, serverHandle.Host, configPath, embeddingModelName, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Embedding model pull during finalize failed: {ex.Message}. Document ingestion will fail until this is resolved.");
+        }
+        finally
+        {
+            serverHandle?.Dispose();
+            PullProgressLine = string.Empty;
+        }
+    }
+
+    // Ollama treats "name" and "name:latest" as the same model on the
+    // wire and on disk. DiscoverModelsOnDisk emits "name:latest"; the
+    // user-facing PortableConfig.EmbeddingModelName default is bare
+    // "nomic-embed-text". Normalize both sides before equality so the
+    // disk-truth idempotency check doesn't double-pull.
+    private static string NormalizeOllamaTag(string tag)
+    {
+        if (string.IsNullOrWhiteSpace(tag)) return string.Empty;
+        var trimmed = tag.Trim();
+        return trimmed.Contains(':', StringComparison.Ordinal) ? trimmed : $"{trimmed}:latest";
     }
 
     private async Task RemoveAsync()
@@ -1381,6 +1510,14 @@ public class PrepViewModel : BaseViewModel
                 StatusText = "Finalize blocked";
                 return;
             }
+
+            // C2: best-effort embed-model guard. DownloadAsync's tail also
+            // runs this, but a user can reach Finalize via paths that skip
+            // Download (e.g. drive already had chat models on disk before
+            // the user opened PrepApp). Idempotent — disk-truth check skips
+            // the pull when the embedder is already present, so re-finalize
+            // is free.
+            await EnsureEmbeddingModelOnFinalizeAsync(root, configPath, config.EmbeddingModelName);
 
             CheckMacArtifactAvailability();
 

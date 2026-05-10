@@ -64,6 +64,32 @@ public sealed class DocumentIngestorFailureHandlingTests : IDisposable
         Assert.Equal(0, vectorIndex.GetChunkCount(manifest.Id));
     }
 
+    /// C2 Stage 2b. Pre-C2 the threshold-exceeded message named only the
+    /// ratio + counts, leaving the user (and future debuggers) no path to
+    /// the actual cause — typically "model not found" because the
+    /// embedder was never pulled by PrepApp. The capture-first-failure
+    /// patch piggybacks the underlying exception message onto the
+    /// existing error so the next time this fires, the cause is in the
+    /// same string the user sees.
+    [Fact]
+    public async Task IngestFilesAsync_HighFailureRatio_IncludesFirstFailureCause()
+    {
+        var handler = new ModelNotFoundEmbeddingHandler();
+        var (manager, manifest, ingestor) = await CreateIngestorAsync(handler);
+        var sourcePath = Path.Combine(_tempRoot, "no-embedder.txt");
+        File.WriteAllText(sourcePath, CreateLongText(1600));
+        var config = CreateConfig();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => ingestor.IngestFilesAsync(manifest, new[] { sourcePath }, "localhost:11434", config));
+
+        Assert.Contains("embedding failures exceeded threshold", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("First failure:", ex.Message, StringComparison.OrdinalIgnoreCase);
+        // The cause text must surface the underlying /api/embed body so
+        // the provisioning gap is self-explanatory next time.
+        Assert.Contains("model 'nomic-embed-text' not found", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public async Task IngestFilesAsync_AcceptableFailureRatio_PersistsSuccessfulChunksOnly()
     {
@@ -123,6 +149,22 @@ public sealed class DocumentIngestorFailureHandlingTests : IDisposable
         {
             Interlocked.Increment(ref _requestCount);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError));
+        }
+    }
+
+    /// C2 fixture: simulates the actual production failure mode — Ollama
+    /// returns 404 with `{"error":"model 'X' not found"}` when the
+    /// embedder was never pulled. Combined with the C2 EmbeddingClient
+    /// hardening, this body should flow through to the threshold message.
+    private sealed class ModelNotFoundEmbeddingHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.NotFound)
+            {
+                Content = new StringContent("{\"error\":\"model 'nomic-embed-text' not found\"}")
+            };
+            return Task.FromResult(response);
         }
     }
 

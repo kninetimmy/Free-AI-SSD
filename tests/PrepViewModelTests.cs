@@ -1231,4 +1231,231 @@ public class PrepViewModelTests
         new StarterCatalogEntry("bundled-only:1b", "Small",
             "Fallback bundled entry (chat)", null),
     };
+
+    // ───── C2: embedding-model auto-pull pins ─────
+
+    /// C2 Stage 1b. The user-facing failure mode pre-C2 was: prep a
+    /// fresh SSD, pick a chat model from the F2a picker, finalize, then
+    /// drop a small PDF into a library — every chunk's /api/embed call
+    /// 404s because nothing ever pulled the embedder. This pin covers
+    /// the Download path: after the chat-model pull loop, the embedder
+    /// MUST be pulled too, sharing the same temp Ollama server.
+    [Fact]
+    public async Task DownloadCommand_PullsEmbeddingModel_AfterChatModels_WhenMissing()
+    {
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+
+        var config = new PortableConfig();
+        config.Models.Add(new ModelConfigEntry { Name = "llama3.2:3b", Status = ModelInstallStatus.NotInstalled });
+        _modelService.Setup(m => m.LoadConfigAsync(It.IsAny<string>())).ReturnsAsync(config);
+        _modelService.Setup(m => m.DiscoverModelsOnDisk(It.IsAny<string>())).Returns(Array.Empty<string>());
+        _ollamaPackageService
+            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
+        _ollamaPackageService
+            .Setup(s => s.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FakeOllamaServerHandle("127.0.0.1:11434"));
+        _modelService
+            .Setup(m => m.PullModelAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
+                It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()))
+            .ReturnsAsync(new ModelPullResult("0123456789abcdef", 270_000_000));
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        Thread.Sleep(100);
+        vm.ModelRows.Single(r => r.Name == "llama3.2:3b").IsSelected = true;
+
+        vm.DownloadCommand.Execute(null);
+        await WaitForCommandAsync(vm.DownloadCommand);
+
+        // Chat model pulled.
+        _modelService.Verify(m => m.PullModelAsync(
+            It.IsAny<string>(), It.IsAny<string>(), "llama3.2:3b",
+            It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
+            "127.0.0.1:11434", It.IsAny<Action<OllamaPullProgress>?>()),
+            Times.Once);
+
+        // Embedder pulled (default EmbeddingModelName = "nomic-embed-text",
+        // normalized to nomic-embed-text:latest by the helper).
+        _modelService.Verify(m => m.PullModelAsync(
+            It.IsAny<string>(), It.IsAny<string>(), "nomic-embed-text:latest",
+            It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
+            "127.0.0.1:11434", It.IsAny<Action<OllamaPullProgress>?>()),
+            Times.Once);
+
+        // Embedder marked Installed in the on-disk config.
+        _modelService.Verify(m => m.UpdateModelStatusAsync(
+            It.IsAny<string>(), "nomic-embed-text:latest",
+            ModelInstallStatus.Installed,
+            It.IsAny<string?>(), It.IsAny<long?>(), It.IsAny<DateTime?>()),
+            Times.Once);
+    }
+
+    /// C2 idempotency. If the embedder is already on the SSD (e.g. the
+    /// user ran prep before), DownloadAsync's tail must NOT re-pull it.
+    /// Disk-truth check is the source of truth — re-pulling would burn
+    /// 270 MB of bandwidth for nothing.
+    [Fact]
+    public async Task DownloadCommand_SkipsEmbeddingPull_WhenAlreadyOnDisk()
+    {
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+
+        var config = new PortableConfig();
+        config.Models.Add(new ModelConfigEntry { Name = "llama3.2:3b", Status = ModelInstallStatus.NotInstalled });
+        _modelService.Setup(m => m.LoadConfigAsync(It.IsAny<string>())).ReturnsAsync(config);
+        // Embedder already present on disk; chat model not yet.
+        _modelService.Setup(m => m.DiscoverModelsOnDisk(It.IsAny<string>())).Returns(new[] { "nomic-embed-text:latest" });
+        _ollamaPackageService
+            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
+        _ollamaPackageService
+            .Setup(s => s.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FakeOllamaServerHandle("127.0.0.1:11434"));
+        _modelService
+            .Setup(m => m.PullModelAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
+                It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()))
+            .ReturnsAsync(new ModelPullResult("abcdefabcdef", 4_000_000_000L));
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        Thread.Sleep(100);
+        vm.ModelRows.Single(r => r.Name == "llama3.2:3b").IsSelected = true;
+
+        vm.DownloadCommand.Execute(null);
+        await WaitForCommandAsync(vm.DownloadCommand);
+
+        _modelService.Verify(m => m.PullModelAsync(
+            It.IsAny<string>(), It.IsAny<string>(), "nomic-embed-text:latest",
+            It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
+            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()),
+            Times.Never);
+    }
+
+    /// C2 Stage 1c. A user can reach Finalize without going through
+    /// Download (e.g. a drive that already had chat models on disk
+    /// before they opened PrepApp). The Finalize-time guard must
+    /// detect a missing embedder and pull it before readiness checks.
+    [Fact]
+    public async Task FinalizeCommand_PullsEmbeddingModel_WhenMissing()
+    {
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        _ollamaPackageService
+            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
+        _ollamaPackageService
+            .Setup(s => s.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FakeOllamaServerHandle("127.0.0.1:11434"));
+        _prereqService
+            .Setup(s => s.StagePrerequisitesAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _artifactStagingService
+            .Setup(s => s.StageRunnerAsync(It.IsAny<string>(), It.IsAny<Action<string>>()))
+            .Returns(Task.CompletedTask);
+        _readinessService
+            .Setup(s => s.RunReadinessChecksAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ReadinessItem> { ReadinessItem.Pass("Runner payload") });
+        _modelService
+            .Setup(m => m.PullModelAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
+                It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()))
+            .ReturnsAsync(new ModelPullResult("ee11ee11", 270_000_000));
+
+        var config = new PortableConfig
+        {
+            Models =
+            {
+                new ModelConfigEntry { Name = "llama3.2:3b", Status = ModelInstallStatus.Installed }
+            }
+        };
+        _modelService.Setup(m => m.LoadConfigAsync(It.IsAny<string>())).ReturnsAsync(config);
+        // Chat model on disk so the installedCount==0 guard passes;
+        // embedder is NOT on disk, so the helper should pull it.
+        _modelService.Setup(m => m.DiscoverModelsOnDisk(It.IsAny<string>())).Returns(new[] { "llama3.2:3b" });
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.SelectedProfile = UserProfile.GeneralAssistant;
+
+        vm.FinalizeCommand.Execute(null);
+        await WaitForCommandAsync(vm.FinalizeCommand);
+
+        _modelService.Verify(m => m.PullModelAsync(
+            It.IsAny<string>(), It.IsAny<string>(), "nomic-embed-text:latest",
+            It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
+            "127.0.0.1:11434", It.IsAny<Action<OllamaPullProgress>?>()),
+            Times.Once);
+    }
+
+    /// C2 Finalize idempotency. If the embedder is already present on
+    /// disk, the Finalize-time helper must NOT spin up a temp Ollama
+    /// server just to discover the no-op. Re-finalize on a fully-prepped
+    /// drive should be free.
+    [Fact]
+    public async Task FinalizeCommand_SkipsEmbeddingPull_WhenAlreadyOnDisk()
+    {
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        _ollamaPackageService
+            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
+        _ollamaPackageService
+            .Setup(s => s.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FakeOllamaServerHandle("127.0.0.1:11434"));
+        _prereqService
+            .Setup(s => s.StagePrerequisitesAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _artifactStagingService
+            .Setup(s => s.StageRunnerAsync(It.IsAny<string>(), It.IsAny<Action<string>>()))
+            .Returns(Task.CompletedTask);
+        _readinessService
+            .Setup(s => s.RunReadinessChecksAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ReadinessItem> { ReadinessItem.Pass("Runner payload") });
+
+        var config = new PortableConfig
+        {
+            Models =
+            {
+                new ModelConfigEntry { Name = "llama3.2:3b", Status = ModelInstallStatus.Installed }
+            }
+        };
+        _modelService.Setup(m => m.LoadConfigAsync(It.IsAny<string>())).ReturnsAsync(config);
+        // Both chat model AND embedder already on disk.
+        _modelService.Setup(m => m.DiscoverModelsOnDisk(It.IsAny<string>())).Returns(new[] { "llama3.2:3b", "nomic-embed-text:latest" });
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.SelectedProfile = UserProfile.GeneralAssistant;
+
+        vm.FinalizeCommand.Execute(null);
+        await WaitForCommandAsync(vm.FinalizeCommand);
+
+        _modelService.Verify(m => m.PullModelAsync(
+            It.IsAny<string>(), It.IsAny<string>(), "nomic-embed-text:latest",
+            It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
+            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()),
+            Times.Never);
+
+        // Existing Windows-runner staging path calls StartTemporaryServerAsync
+        // 0 times today; the C2 finalize helper must also not spin one up
+        // when the embedder is already present.
+        _ollamaPackageService.Verify(s => s.StartTemporaryServerAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    private sealed class FakeOllamaServerHandle : IOllamaServerHandle
+    {
+        public string Host { get; }
+        public bool Disposed { get; private set; }
+        public FakeOllamaServerHandle(string host) { Host = host; }
+        public void Dispose() { Disposed = true; }
+    }
 }
