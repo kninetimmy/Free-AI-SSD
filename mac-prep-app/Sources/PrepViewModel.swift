@@ -738,9 +738,15 @@ final class PrepViewModel: ObservableObject {
         // C27 Stage 3: thread the inline HF token into the initial
         // encrypted config write. Empty input becomes nil so JSON omits
         // the field; PortableConfig defaults HuggingFaceToken to null.
-        var payload = InitialPortableConfigPayload()
-        let trimmedToken = self.huggingFaceToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        payload.huggingFaceToken = trimmedToken.isEmpty ? nil : trimmedToken
+        // Build via an immediate closure so the captured `payload` is a
+        // `let` — Swift's strict-concurrency check on Task.detached
+        // refuses to capture a mutated var.
+        let payload: InitialPortableConfigPayload = {
+            var p = InitialPortableConfigPayload()
+            let trimmed = self.huggingFaceToken.trimmingCharacters(in: .whitespacesAndNewlines)
+            p.huggingFaceToken = trimmed.isEmpty ? nil : trimmed
+            return p
+        }()
         do {
             try await Task.detached(priority: .userInitiated) {
                 try writer.writeInitialEncryptedConfig(
@@ -765,11 +771,14 @@ final class PrepViewModel: ObservableObject {
     private func writePlaintextAndAdvance(mount: URL) async {
         let writer = self.plaintextConfigWriter
         // C27 Stage 3: same token threading as the encrypted branch.
-        // The plaintext warning banner already nudged the user toward
-        // encryption; if they opted out, the token rides plaintext.
-        var payload = InitialPortableConfigPayload()
-        let trimmedToken = self.huggingFaceToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        payload.huggingFaceToken = trimmedToken.isEmpty ? nil : trimmedToken
+        // Closure-init keeps the captured `payload` immutable for
+        // Swift's strict-concurrency check on Task.detached.
+        let payload: InitialPortableConfigPayload = {
+            var p = InitialPortableConfigPayload()
+            let trimmed = self.huggingFaceToken.trimmingCharacters(in: .whitespacesAndNewlines)
+            p.huggingFaceToken = trimmed.isEmpty ? nil : trimmed
+            return p
+        }()
         do {
             try await Task.detached(priority: .userInitiated) {
                 try writer.writeInitialPlaintextConfig(
