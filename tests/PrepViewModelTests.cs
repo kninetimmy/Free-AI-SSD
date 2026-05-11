@@ -1141,7 +1141,7 @@ public class PrepViewModelTests
             .Select(r => r.Name)
             .ToList();
 
-        Assert.Equal(PrepViewModel.MostPopularLimit, visibleRecommended.Count);
+        Assert.Equal(PrepViewModel.DefaultMostPopularLimit, visibleRecommended.Count);
         // The bottom three (popular:15..popular:17) must be hidden.
         Assert.DoesNotContain("popular:15", visibleRecommended);
         Assert.DoesNotContain("popular:16", visibleRecommended);
@@ -1442,6 +1442,112 @@ public class PrepViewModelTests
 
         vm.MaxParametersBillion = 14.0;
         Assert.Contains("≤14B", vm.StarterRowCountCaption);
+    }
+
+    // ───── C25: capability pass-through marker ─────
+    //
+    // Visual cue is rendered by the XAML row style (MultiDataTrigger
+    // gated on row.Capabilities.Count == 0 AND VM.HasActiveCapabilityFilter);
+    // the unit tests cover the VM signal the row style depends on.
+
+    [Fact]
+    public void HasActiveCapabilityFilter_FalseByDefault()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        Assert.False(vm.HasActiveCapabilityFilter);
+    }
+
+    [Fact]
+    public async Task HasActiveCapabilityFilter_TogglesWithChips()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        await vm.SetStarterCatalogAsync(C3C4C5Fixture());
+
+        var changes = new List<string>();
+        vm.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(PrepViewModel.HasActiveCapabilityFilter))
+                changes.Add(args.PropertyName!);
+        };
+
+        vm.FilterCapabilityTools = true;
+        Assert.True(vm.HasActiveCapabilityFilter);
+        // Adding a second chip is still "active" — no flip back to false.
+        vm.FilterCapabilityVision = true;
+        Assert.True(vm.HasActiveCapabilityFilter);
+        // Clearing both flips it back to false.
+        vm.FilterCapabilityTools = false;
+        vm.FilterCapabilityVision = false;
+        Assert.False(vm.HasActiveCapabilityFilter);
+        // PropertyChanged fired at least once when state crossed boundaries —
+        // we don't assert exact count because each chip toggle raises it.
+        Assert.NotEmpty(changes);
+    }
+
+    // ───── C26: Most-popular limit dropdown ─────
+
+    [Fact]
+    public void MostPopularLimit_DefaultMatchesConstant()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        Assert.Equal(PrepViewModel.DefaultMostPopularLimit, vm.MostPopularLimit);
+    }
+
+    [Fact]
+    public async Task MostPopularLimit_ChangeRecomputesTopTagsAndInvalidates()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        // 30 recommended entries with descending pull counts so different
+        // top-N caps produce visibly different visible sets.
+        var catalog = Enumerable.Range(0, 30)
+            .Select(i => new StarterCatalogEntry(
+                Tag: $"limit:{i}",
+                SizeTier: "Medium",
+                BestAt: $"Variant {i}",
+                PullCount: 100_000_000L - i * 1_000_000L))
+            .ToList();
+        await vm.SetStarterCatalogAsync(catalog);
+        vm.ShowOnlyMostPopular = true;
+
+        var fired = 0;
+        vm.ModelRowsViewInvalidated += (_, _) => fired++;
+
+        vm.MostPopularLimit = 10;
+        var visibleAt10 = vm.ModelRows
+            .Where(r => string.Equals(r.Source, "Recommended", StringComparison.OrdinalIgnoreCase))
+            .Count(vm.IsModelRowVisible);
+        Assert.Equal(10, visibleAt10);
+        Assert.Equal(1, fired);
+
+        vm.MostPopularLimit = 25;
+        var visibleAt25 = vm.ModelRows
+            .Where(r => string.Equals(r.Source, "Recommended", StringComparison.OrdinalIgnoreCase))
+            .Count(vm.IsModelRowVisible);
+        Assert.Equal(25, visibleAt25);
+        Assert.Equal(2, fired);
+
+        // No-op set must not fire.
+        vm.MostPopularLimit = 25;
+        Assert.Equal(2, fired);
+    }
+
+    [Fact]
+    public void MostPopularLimitOptions_AreSurfaced()
+    {
+        // C26: the WPF/Mac dropdown read these — pin so a future
+        // refactor doesn't silently drop an option.
+        Assert.Contains(10, PrepViewModel.MostPopularLimitOptions);
+        Assert.Contains(15, PrepViewModel.MostPopularLimitOptions);
+        Assert.Contains(25, PrepViewModel.MostPopularLimitOptions);
+        Assert.Contains(50, PrepViewModel.MostPopularLimitOptions);
     }
 
     // ───── C2: embedding-model auto-pull pins ─────

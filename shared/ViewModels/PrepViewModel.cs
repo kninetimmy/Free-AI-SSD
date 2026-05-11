@@ -70,6 +70,7 @@ public class PrepViewModel : BaseViewModel
     // top-N tag set so the filter callback stays O(1) per row.
     private string _modelSearchText = string.Empty;
     private bool _showOnlyMostPopular;
+    private int _mostPopularLimit = DefaultMostPopularLimit;
     private HashSet<string> _topPopularStarterTags = new(StringComparer.OrdinalIgnoreCase);
 
     // C3 / C4 / C5 picker filter state. All three default to "no
@@ -81,8 +82,14 @@ public class PrepViewModel : BaseViewModel
     private readonly HashSet<string> _requiredCapabilities = new(StringComparer.OrdinalIgnoreCase);
     private ModelSortMode _sortMode = ModelSortMode.Popular;
 
-    /// <summary>F2a: top-N cap for the "Most popular" filter.</summary>
-    public const int MostPopularLimit = 15;
+    /// <summary>C26: choices surfaced in the Most-popular limit dropdown.
+    /// 50 is the upper cap — anything higher starts feeling like "show
+    /// all" without the explicit toggle.</summary>
+    public static readonly IReadOnlyList<int> MostPopularLimitOptions = new[] { 10, 15, 25, 50 };
+
+    /// <summary>C26: default Most-popular cap. 15 matches the F2a
+    /// behavior so users who don't touch the dropdown see no change.</summary>
+    public const int DefaultMostPopularLimit = 15;
 
     /// <summary>C4: the four capability toggles surfaced as picker
     /// chips. Anchored as constants so the UI labels and the filter
@@ -414,6 +421,24 @@ public class PrepViewModel : BaseViewModel
         }
     }
 
+    /// <summary>C26: top-N cap for the "Most popular" filter. Defaults
+    /// to <see cref="DefaultMostPopularLimit"/> (15) so the F2a v1.3.22
+    /// behavior is preserved when the user doesn't touch the dropdown.
+    /// Setter recomputes the precomputed top-tag set and invalidates
+    /// the view so the picker re-applies the new cap immediately.</summary>
+    public int MostPopularLimit
+    {
+        get => _mostPopularLimit;
+        set
+        {
+            if (SetProperty(ref _mostPopularLimit, value))
+            {
+                RecomputeTopPopularStarterTags();
+                ModelRowsViewInvalidated?.Invoke(this, EventArgs.Empty);
+            }
+        }
+    }
+
     /// <summary>C3: upper bound on parameter count in billions; null
     /// means no cap. Rows whose ParametersBillion is unknown pass
     /// through (configured/custom and pre-Refresh bundled entries).</summary>
@@ -470,12 +495,20 @@ public class PrepViewModel : BaseViewModel
             CapabilityAudio => nameof(FilterCapabilityAudio),
             _ => string.Empty,
         });
+        OnPropertyChanged(nameof(HasActiveCapabilityFilter));
         ModelRowsViewInvalidated?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>C4: snapshot of the active capability filter set.
     /// Exposed for the caption formatter and tests.</summary>
     public IReadOnlyCollection<string> ActiveCapabilityFilters => _requiredCapabilities;
+
+    /// <summary>C25: true when at least one capability chip is engaged.
+    /// The picker's row style uses this to gate the pass-through marker
+    /// — rows with empty <see cref="ModelGridRow.Capabilities"/> render
+    /// muted only when the user has narrowed by capability, so the
+    /// signal is invisible in the default view.</summary>
+    public bool HasActiveCapabilityFilter => _requiredCapabilities.Count > 0;
 
     /// <summary>C5: sort mode applied to ModelRows by the view-host.
     /// The VM exposes the property; the WPF code-behind translates it
@@ -575,7 +608,7 @@ public class PrepViewModel : BaseViewModel
         _topPopularStarterTags = _starterCatalog
             .Where(e => e.PullCount.HasValue)
             .OrderByDescending(e => e.PullCount!.Value)
-            .Take(MostPopularLimit)
+            .Take(_mostPopularLimit)
             .Select(e => e.Tag)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }

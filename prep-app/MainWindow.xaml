@@ -85,13 +85,15 @@
                                                Margin="0,4,0,0"
                                                Visibility="Collapsed"/>
 
-                                    <!-- F2a: search + Most popular cap. The Refresh
+                                    <!-- F2a: search + Most popular cap. C26 adds the
+                                         limit dropdown next to the toggle. The Refresh
                                          button stays in the title row above; this row
                                          drives the DataGrid's CollectionView Filter via
                                          PrepViewModel.IsModelRowVisible (wired in code-
                                          behind, refreshed on ModelRowsViewInvalidated). -->
                                     <Grid Margin="0,8,0,0">
                                         <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
                                             <ColumnDefinition Width="Auto"/>
                                             <ColumnDefinition Width="Auto"/>
                                             <ColumnDefinition Width="*"/>
@@ -102,14 +104,26 @@
                                                       Padding="10,4" MinHeight="0"
                                                       VerticalAlignment="Center"
                                                       IsChecked="{Binding ShowOnlyMostPopular, Mode=TwoWay}"
-                                                      ToolTip="Show only the top 15 recommended models by ollama.com pull count. Click Refresh from Ollama first to populate pull counts on the bundled list."/>
-                                        <TextBlock Grid.Column="1"
+                                                      ToolTip="Show only the top-N recommended models by ollama.com pull count. Click Refresh from Ollama first to populate pull counts on the bundled list."/>
+                                        <ComboBox x:Name="MostPopularLimitCombo"
+                                                  Grid.Column="1"
+                                                  MinWidth="64"
+                                                  Margin="6,0,0,0"
+                                                  VerticalAlignment="Center"
+                                                  SelectionChanged="MostPopularLimitCombo_SelectionChanged"
+                                                  ToolTip="Choose how many top entries the Most-popular toggle exposes. Sorted desc by pull count from the live ollama.com catalog.">
+                                            <ComboBoxItem Content="Top 10" Tag="10"/>
+                                            <ComboBoxItem Content="Top 15" Tag="15" IsSelected="True"/>
+                                            <ComboBoxItem Content="Top 25" Tag="25"/>
+                                            <ComboBoxItem Content="Top 50" Tag="50"/>
+                                        </ComboBox>
+                                        <TextBlock Grid.Column="2"
                                                    Text="Search"
                                                    Style="{StaticResource CaptionText}"
                                                    VerticalAlignment="Center"
                                                    Margin="14,0,6,0"/>
                                         <TextBox x:Name="ModelSearchBox"
-                                                 Grid.Column="2"
+                                                 Grid.Column="3"
                                                  Padding="8,4"
                                                  VerticalAlignment="Center"
                                                  Style="{StaticResource GlowFocusTextBox}"
@@ -286,6 +300,28 @@
                                                   MinHeight="120"
                                                   Background="Transparent"
                                                   BorderThickness="0">
+                                            <!-- C25: capability pass-through marker.
+                                                 Rows with empty Capabilities (configured /
+                                                 on-disk / custom — anything outside the
+                                                 live scrape) survive the C4 chip filter
+                                                 via pass-through. The MultiDataTrigger
+                                                 mutes those rows only when at least one
+                                                 chip is engaged, so the picker stays
+                                                 quiet in the default view. -->
+                                            <DataGrid.RowStyle>
+                                                <Style TargetType="DataGridRow">
+                                                    <Style.Triggers>
+                                                        <MultiDataTrigger>
+                                                            <MultiDataTrigger.Conditions>
+                                                                <Condition Binding="{Binding Capabilities.Count}" Value="0"/>
+                                                                <Condition Binding="{Binding DataContext.HasActiveCapabilityFilter, RelativeSource={RelativeSource AncestorType=DataGrid}}" Value="True"/>
+                                                            </MultiDataTrigger.Conditions>
+                                                            <Setter Property="Opacity" Value="0.55"/>
+                                                            <Setter Property="ToolTip" Value="No capability data for this entry — surviving the chip filter via pass-through. Refresh from Ollama to populate."/>
+                                                        </MultiDataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </DataGrid.RowStyle>
                                             <DataGrid.GroupStyle>
                                                 <GroupStyle>
                                                     <GroupStyle.HeaderTemplate>

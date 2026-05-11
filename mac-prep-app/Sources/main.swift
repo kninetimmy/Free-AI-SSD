@@ -268,7 +268,18 @@ struct EncryptionSetupStepView: View {
                         }
                     }
                 }
-                .help("Show the top \(PrepViewModel.mostPopularCount) by pull count from ollama.com/library. Refresh first to populate pull counts on the bundled list.")
+                .help("Show the top-N by pull count from ollama.com/library. Refresh first to populate pull counts on the bundled list.")
+                // C26: limit dropdown next to the Most-popular toggle.
+                // Mirrors the WPF ComboBox: Top 10 / 15 / 25 / 50.
+                Picker("", selection: $vm.mostPopularLimit) {
+                    ForEach(PrepViewModel.mostPopularLimitOptions, id: \.self) { n in
+                        Text("Top \(n)").tag(n)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(width: 90)
+                .help("Choose how many top entries the Most-popular toggle exposes. Sorted desc by pull count from the live catalog.")
                 TextField("Search models…", text: $vm.modelSearchText)
                     .textFieldStyle(.roundedBorder)
                     .frame(minWidth: 180, maxWidth: 280)
@@ -414,6 +425,7 @@ struct EncryptionSetupStepView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(entries) { entry in
+                        let isPassThrough = entry.capabilities.isEmpty && !vm.requiredCapabilities.isEmpty
                         Toggle(isOn: Binding(
                             get: { vm.selectedStarterModels.contains(entry.tag) },
                             set: { sel in
@@ -446,6 +458,15 @@ struct EncryptionSetupStepView: View {
                             }
                         }
                         .toggleStyle(.checkbox)
+                        // C25: mute rows that survive an active chip filter
+                        // only because their capabilities list is empty
+                        // (configured / on-disk / custom — anything outside
+                        // the live scrape). Keeps the picker quiet when no
+                        // chip is engaged.
+                        .opacity(isPassThrough ? 0.55 : 1.0)
+                        .help(isPassThrough
+                              ? "No capability data for this entry — surviving the chip filter via pass-through. Refresh from Ollama to populate."
+                              : "")
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
