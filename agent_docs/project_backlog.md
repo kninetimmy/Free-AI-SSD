@@ -135,7 +135,7 @@ Three flat buckets, one counter per bucket:
 
 **P1.5 — Picker filter cluster follow-ons (filed 2026-05-10 post-v1.3.22 Mac field test; top of queue for next session):**
 
-1. **C24** — Mac refresh-catalog payload missing `parametersBillion` + `lastUpdated` — **P0 regression** introduced by PR #259; Max-size and Sort: Newest are no-ops on Mac after Refresh. One-line host fix + Swift end-to-end pin.
+1. ~~**C24**~~ — **done** PR #262 (`34a66b8`) 2026-05-11. Two-line host projection mirror at `mac-prep-host/HostLifetime.cs:522-532` + 2 Swift end-to-end pins; CI green first run.
 2. **C25** — Visual differentiation for capability pass-through entries (rows with empty `Capabilities` surviving active chip filter).
 3. **C26** — Most-popular limit dropdown (10 / 15 / 25 / 50) replacing the static 15.
 4. **C27** — Hugging Face as a model source (full integration; **Opus planning** at kickoff; multi-stage).
@@ -405,7 +405,9 @@ Items `B1`â€“`F4` below were triaged from Stephen's `Downloads/# Free-AI-SS
 
 ### C24 — Mac refresh-catalog payload missing parametersBillion + lastUpdated (Max-size and Sort no-op regression)
 
-**Status:** filed 2026-05-10 (post-v1.3.22 Mac field test). **P0 regression** introduced by PR #259 (C3+C4+C5). Cross-OS impact is Mac-only — WPF gets the live catalog in-process and is unaffected.
+**Status:** **done** — PR #262 merged `34a66b8` (2026-05-11). Two-line projection mirror in `mac-prep-host/HostLifetime.cs:522-532` + 2 new Swift end-to-end pins in `mac-prep-app/Tests/PrepAppTests.swift`. CI green first run on all three jobs. Decision pinned in `project_decisions.md`. Field-test pin folded into the C3/C4/C5 pin in `project_state.md` Open questions (Mac branch now functional on v1.3.24+ builds).
+
+**Status (historical):** filed 2026-05-10 (post-v1.3.22 Mac field test). **P0 regression** introduced by PR #259 (C3+C4+C5). Cross-OS impact is Mac-only — WPF gets the live catalog in-process and is unaffected.
 **Scope:** Single-PR bugfix. One-line host change + Swift end-to-end pin.
 **Model:** Sonnet 4.6.
 

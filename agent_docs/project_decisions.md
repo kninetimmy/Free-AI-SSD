@@ -2638,3 +2638,41 @@ Mechanism: see `prep-core/Services/LiveModelCatalogService.cs`
 (`ParseRelativeDate`, `ParseParamsBillions`),
 `shared/ViewModels/PrepViewModel.cs:IsModelRowVisible`,
 `mac-prep-app/Sources/StarterCatalogTypes.swift:applyStarterModelFilters`.
+
+---
+
+## 2026-05-11 — Host wire-shape duplication across paired arms must be unified or pinned on both arms [C24 lesson]
+
+PR #262 (`34a66b8`) fixed a P0 regression where `mac-prep-host/HostLifetime.cs`
+discover-catalog and refresh-catalog projections drifted: PR #259 added
+`parametersBillion` + `lastUpdated` to the discover arm but missed the refresh
+arm, making Max-size and Sort: Newest no-ops on Mac after Refresh from Ollama.
+The C3+C4+C5 decision (2026-05-10) had already pinned the *posture* (null
+pass-through, ISO-8601-as-string); this entry pins the *workflow* needed to
+keep that posture from drifting across paired host arms.
+
+**Rule:** when a wire shape is emitted from multiple host arms (e.g. one
+that returns a bundled source and one that returns a live-fetched source),
+adding a field to one arm without the other is a high-risk regression
+class. Two acceptable mitigations:
+
+1. **Unify the projection** — extract the anonymous-type construction
+   into a shared helper (`BuildCatalogEntries(IEnumerable<StarterModel>)`
+   or similar). Both arms call it. Drift becomes structurally impossible.
+2. **Pin key-presence on both arms** — when a single PR adds a new field,
+   add a key-presence assertion (e.g. `Assert.Contains("\"newField\":", output)`)
+   to *both* arms' contract tests in the same PR.
+
+Either is acceptable; (1) is preferable for projections shared by 3+ arms
+or projections expected to grow.
+
+**Specific gap acknowledged:** the existing `HostRunner_RefreshCatalog_TestMode_EmitsSyntheticOkPayload`
+test mode short-circuits to empty entries, so projection drift in the
+refresh arm has no contract test today. Closing that gap would require a
+fake `ILiveModelCatalogService` seam on `HostLifetime` — not in scope for
+C24, but tracked as future tightening if a similar regression surfaces.
+
+Mechanism: `mac-prep-host/HostLifetime.cs:473-485` (discover-catalog
+projection), `:520-532` (refresh-catalog projection, now mirroring), and
+`mac-prep-app/Tests/PrepAppTests.swift` "C24:" pins (the Swift-side
+regression cover until the C# seam exists).
