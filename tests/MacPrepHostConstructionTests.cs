@@ -31,6 +31,50 @@ public sealed class MacPrepHostConstructionTests : IDisposable
     }
 
     [Fact]
+    public void ExtractHuggingFaceBareRepoId_StripsPrefixAndQuantSuffix()
+    {
+        // 2026-05-12 field test: HF's /api/models/{repoId} 404s on a
+        // tag with a `:quant` suffix (e.g. unsloth/Qwen3.5-9B-GGUF:IQ2_M).
+        // PullModelAsync's HF size precheck now strips both the
+        // `hf.co/` prefix and the trailing `:quant` before calling
+        // FetchSiblingsAsync. Pin: parent and child tags both map to
+        // the same bare `owner/repo`.
+        Assert.Equal("unsloth/Qwen3.5-9B-GGUF",
+            HostLifetime.ExtractHuggingFaceBareRepoId("hf.co/unsloth/Qwen3.5-9B-GGUF:IQ2_M"));
+        Assert.Equal("unsloth/Qwen3.5-9B-GGUF",
+            HostLifetime.ExtractHuggingFaceBareRepoId("hf.co/unsloth/Qwen3.5-9B-GGUF"));
+        // Case-insensitive prefix match (Ollama accepts HF.CO too).
+        Assert.Equal("owner/repo",
+            HostLifetime.ExtractHuggingFaceBareRepoId("HF.CO/owner/repo:Q4_K_M"));
+        // Empty / missing prefix passes through (caller still
+        // validates via FetchSiblingsAsync's owner/repo regex).
+        Assert.Equal(string.Empty, HostLifetime.ExtractHuggingFaceBareRepoId(string.Empty));
+        Assert.Equal("owner/repo",
+            HostLifetime.ExtractHuggingFaceBareRepoId("owner/repo:Q5_K_M"));
+    }
+
+    [Fact]
+    public void ExtractPullModelTag_RecoversTagAfterCommand()
+    {
+        // 2026-05-12 regression: when PullModelAsync throws BEFORE the
+        // inner try (e.g. ollamaExe missing, staging-precheck disk-full),
+        // Program.cs's fallback emits a `pull-model ok=false` result so
+        // Swift's PrepHostController unblocks. The result line needs the
+        // model tag — extract it from the command line.
+        Assert.Equal("hf.co/owner/repo:Q4_K_M",
+            HostRunner.ExtractPullModelTag("pull-model hf.co/owner/repo:Q4_K_M"));
+        Assert.Equal("llama3:8b", HostRunner.ExtractPullModelTag("pull-model llama3:8b"));
+        // Tolerates extra whitespace.
+        Assert.Equal("hf.co/owner/repo",
+            HostRunner.ExtractPullModelTag("  pull-model    hf.co/owner/repo  "));
+        // Empty payload / unrelated command → empty (still safe: the
+        // fallback result just omits modelTag, Swift still unblocks).
+        Assert.Equal(string.Empty, HostRunner.ExtractPullModelTag("pull-model"));
+        Assert.Equal(string.Empty, HostRunner.ExtractPullModelTag(""));
+        Assert.Equal(string.Empty, HostRunner.ExtractPullModelTag("ensure-structure"));
+    }
+
+    [Fact]
     public void HostLifetime_ConstructsOnPlainNet8_WithoutWpfHost()
     {
         using var stdout = new StringWriter();

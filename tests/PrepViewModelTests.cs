@@ -1576,7 +1576,7 @@ public class PrepViewModelTests
             .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
         _ollamaPackageService
-            .Setup(s => s.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(), It.IsAny<IReadOnlyDictionary<string, string>?>()))
             .ReturnsAsync(new FakeOllamaServerHandle("127.0.0.1:11434"));
         _modelService
             .Setup(m => m.PullModelAsync(
@@ -1636,7 +1636,7 @@ public class PrepViewModelTests
             .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
         _ollamaPackageService
-            .Setup(s => s.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(), It.IsAny<IReadOnlyDictionary<string, string>?>()))
             .ReturnsAsync(new FakeOllamaServerHandle("127.0.0.1:11434"));
         _modelService
             .Setup(m => m.PullModelAsync(
@@ -1673,7 +1673,7 @@ public class PrepViewModelTests
             .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
         _ollamaPackageService
-            .Setup(s => s.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(), It.IsAny<IReadOnlyDictionary<string, string>?>()))
             .ReturnsAsync(new FakeOllamaServerHandle("127.0.0.1:11434"));
         _prereqService
             .Setup(s => s.StagePrerequisitesAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
@@ -1730,7 +1730,7 @@ public class PrepViewModelTests
             .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
         _ollamaPackageService
-            .Setup(s => s.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(), It.IsAny<IReadOnlyDictionary<string, string>?>()))
             .ReturnsAsync(new FakeOllamaServerHandle("127.0.0.1:11434"));
         _prereqService
             .Setup(s => s.StagePrerequisitesAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
@@ -1841,6 +1841,117 @@ public class PrepViewModelTests
     }
 
     [Fact]
+    public async Task DownloadCommand_HuggingFaceRowWithoutToken_BlocksAndOffersBrowser()
+    {
+        // 2026-05-12 regression: HF pulls fail without a Bearer token
+        // in Ollama's HF_TOKEN env (even for public GGUFs — HF rate-
+        // limits anon). DownloadAsync must block on missing token,
+        // ask the user via Confirm() whether to open the HF token page,
+        // and refuse to invoke PullModelAsync.
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        string? capturedTitle = null;
+        string? capturedMessage = null;
+        _dialogService
+            .Setup(d => d.Confirm(It.IsAny<string>(), It.IsAny<string>()))
+            .Returns((string m, string t) => { capturedMessage = m; capturedTitle = t; return false; });
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        await vm.SetStarterCatalogAsync(new[]
+        {
+            new StarterCatalogEntry(
+                Tag: "hf.co/bartowski/Qwen3-8B-GGUF",
+                SizeTier: "Custom",
+                BestAt: string.Empty,
+                PullCount: 100L,
+                Capabilities: Array.Empty<string>(),
+                ParametersBillion: 8.0,
+                LastUpdated: null,
+                Source: ModelSource.HuggingFace),
+        });
+        // No token set on purpose.
+        vm.ModelRows.Single(r => r.Name == "hf.co/bartowski/Qwen3-8B-GGUF").IsSelected = true;
+
+        vm.DownloadCommand.Execute(null);
+        await WaitForCommandAsync(vm.DownloadCommand);
+
+        Assert.Equal("Hugging Face token required", capturedTitle);
+        Assert.Contains("huggingface.co", capturedMessage ?? string.Empty);
+        Assert.Equal("Hugging Face token required", vm.StatusText);
+        _modelService.Verify(m => m.PullModelAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
+            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public void HuggingFaceSelectionNeedsToken_FlipsWithTokenAndSelectionState()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.ModelRows.Add(new ModelGridRow(
+            "hf.co/bartowski/Qwen3-8B-GGUF", "Not downloaded", "Recommended",
+            "OK", "—", "—", "—",
+            isOnDiskOnly: false, isPresentOnDrive: false,
+            sourceKind: ModelSource.HuggingFace));
+
+        Assert.False(vm.HuggingFaceSelectionNeedsToken);  // nothing selected
+        vm.ModelRows[^1].IsSelected = true;
+        Assert.True(vm.HuggingFaceSelectionNeedsToken);   // selected + no token
+        vm.HuggingFaceTokenInput = "hf_xxx";
+        Assert.False(vm.HuggingFaceSelectionNeedsToken);  // token present
+        vm.HuggingFaceTokenInput = "  ";
+        Assert.True(vm.HuggingFaceSelectionNeedsToken);   // whitespace-only = empty
+    }
+
+    [Fact]
+    public void ModelGridRow_IsRowSelectable_FalseOnlyForHfParents()
+    {
+        // 2026-05-12: HF parent rows (IsExpandable=true) get the row
+        // checkbox disabled in WPF + Mac via IsRowSelectable. Quant
+        // children + Ollama rows stay selectable.
+        var ollama = new ModelGridRow(
+            "llama3:8b", "Not downloaded", "Recommended", "OK", "—", "—", "—",
+            isOnDiskOnly: false, isPresentOnDrive: false);
+        Assert.True(ollama.IsRowSelectable);
+
+        var hfParent = new ModelGridRow(
+            "hf.co/owner/repo", "Not downloaded", "Recommended", "OK", "—", "—", "—",
+            isOnDiskOnly: false, isPresentOnDrive: false,
+            sourceKind: ModelSource.HuggingFace, isExpandable: true);
+        Assert.False(hfParent.IsRowSelectable);
+
+        var hfChild = new ModelGridRow(
+            "hf.co/owner/repo:Q4_K_M", "Not downloaded", "Recommended", "OK", "—", "—", "—",
+            isOnDiskOnly: false, isPresentOnDrive: false,
+            sourceKind: ModelSource.HuggingFace, isExpandable: false,
+            parentRepoId: "owner/repo", quantLabel: "Q4_K_M");
+        Assert.True(hfChild.IsRowSelectable);
+    }
+
+    [Fact]
+    public void ModelGridRow_IsCapabilityFadeEligible_FalseForHuggingFaceSource()
+    {
+        // 2026-05-12: HF rows never expose capability tags via the HF
+        // API, so the C25 pass-through fade was making every HF row
+        // look "disabled" under any chip. The XAML trigger now AND's
+        // with this getter to suppress the fade on HF rows.
+        var ollama = new ModelGridRow(
+            "llama3:8b", "Not downloaded", "Recommended", "OK", "—", "—", "—",
+            isOnDiskOnly: false, isPresentOnDrive: false);
+        Assert.True(ollama.IsCapabilityFadeEligible);
+
+        var hf = new ModelGridRow(
+            "hf.co/owner/repo:Q4_K_M", "Not downloaded", "Recommended", "OK", "—", "—", "—",
+            isOnDiskOnly: false, isPresentOnDrive: false,
+            sourceKind: ModelSource.HuggingFace);
+        Assert.False(hf.IsCapabilityFadeEligible);
+    }
+
+    [Fact]
     public void StripHuggingFacePrefix_ReturnsBareRepoId_WhenPrefixPresent()
     {
         // C27 Stage 2: helper recovers the bare repoId from a
@@ -1868,7 +1979,7 @@ public class PrepViewModelTests
         var serverHandle = new Mock<IOllamaServerHandle>();
         serverHandle.Setup(s => s.Host).Returns("http://127.0.0.1:11434");
         _ollamaPackageService
-            .Setup(o => o.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .Setup(o => o.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(), It.IsAny<IReadOnlyDictionary<string, string>?>()))
             .ReturnsAsync(serverHandle.Object);
         _modelService
             .Setup(m => m.PullModelAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
@@ -1891,6 +2002,7 @@ public class PrepViewModelTests
                 LastUpdated: null,
                 Source: ModelSource.HuggingFace),
         });
+        vm.HuggingFaceTokenInput = "hf_test_token";
         vm.ModelRows.Single(r => r.Name == "hf.co/bartowski/Qwen3-8B-GGUF").IsSelected = true;
 
         vm.DownloadCommand.Execute(null);
@@ -1942,6 +2054,7 @@ public class PrepViewModelTests
                 LastUpdated: null,
                 Source: ModelSource.HuggingFace),
         });
+        vm.HuggingFaceTokenInput = "hf_test_token";
         vm.ModelRows.Single(r => r.Name == "hf.co/Qwen/Qwen3-8B-GGUF").IsSelected = true;
 
         vm.DownloadCommand.Execute(null);
@@ -1977,7 +2090,7 @@ public class PrepViewModelTests
         var serverHandle = new Mock<IOllamaServerHandle>();
         serverHandle.Setup(s => s.Host).Returns("http://127.0.0.1:11434");
         _ollamaPackageService
-            .Setup(o => o.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .Setup(o => o.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(), It.IsAny<IReadOnlyDictionary<string, string>?>()))
             .ReturnsAsync(serverHandle.Object);
         _modelService
             .Setup(m => m.PullModelAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
@@ -2001,6 +2114,7 @@ public class PrepViewModelTests
                 LastUpdated: null,
                 Source: ModelSource.HuggingFace),
         });
+        vm.HuggingFaceTokenInput = "hf_test_token";
         vm.ModelRows.Single(r => r.Name == "hf.co/Qwen/Qwen3-8B-GGUF").IsSelected = true;
 
         vm.DownloadCommand.Execute(null);
@@ -2029,7 +2143,7 @@ public class PrepViewModelTests
         var serverHandle = new Mock<IOllamaServerHandle>();
         serverHandle.Setup(s => s.Host).Returns("http://127.0.0.1:11434");
         _ollamaPackageService
-            .Setup(o => o.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .Setup(o => o.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(), It.IsAny<IReadOnlyDictionary<string, string>?>()))
             .ReturnsAsync(serverHandle.Object);
         _modelService
             .Setup(m => m.PullModelAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
@@ -2053,6 +2167,7 @@ public class PrepViewModelTests
                 LastUpdated: null,
                 Source: ModelSource.HuggingFace),
         });
+        vm.HuggingFaceTokenInput = "hf_test_token";
         vm.ModelRows.Single(r => r.Name == "hf.co/Qwen/Qwen3-8B-GGUF").IsSelected = true;
 
         vm.DownloadCommand.Execute(null);

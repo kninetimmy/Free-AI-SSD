@@ -74,6 +74,35 @@ public sealed class PrepCoreConstructionTests : IDisposable
         Assert.NotEmpty(result.Catalog.Models);
     }
 
+    [Fact]
+    public void StarterModelCatalogLoader_BackfillsParametersBillionFromParamsToken()
+    {
+        // 2026-05-12 regression: bundled starter-models.json predates the
+        // ParametersBillion field, so the C3 ≤7B cap let `phi3:14b` /
+        // `qwen2.5:14b` / `codellama:13b` survive the filter (nil passes
+        // through). Loader now derives the numeric value from the human-
+        // readable `params` token at deserialize time. Pin: every shipped
+        // entry whose params is a recognizable size token must arrive with
+        // ParametersBillion populated.
+        var emptyDir = Path.Combine(_tempRoot, "backfill-check");
+        Directory.CreateDirectory(emptyDir);
+
+        var result = StarterModelCatalogLoader.Load(emptyDir);
+
+        Assert.NotNull(result.Catalog);
+        var fourteenB = result.Catalog.Models.FirstOrDefault(m => m.Tag == "phi3:14b");
+        Assert.NotNull(fourteenB);
+        Assert.Equal(14.0, fourteenB!.ParametersBillion);
+
+        var sevenB = result.Catalog.Models.FirstOrDefault(m => m.Tag == "mistral:7b");
+        Assert.NotNull(sevenB);
+        Assert.Equal(7.0, sevenB!.ParametersBillion);
+
+        var twoB = result.Catalog.Models.FirstOrDefault(m => m.Tag == "gemma2:2b");
+        Assert.NotNull(twoB);
+        Assert.Equal(2.0, twoB!.ParametersBillion);
+    }
+
     private sealed class DialogStub : IDialogService
     {
         public void ShowInfo(string message, string title) { }

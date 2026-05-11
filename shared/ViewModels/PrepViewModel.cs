@@ -654,6 +654,7 @@ public class PrepViewModel : BaseViewModel
                     this,
                     string.IsNullOrWhiteSpace(trimmed) ? null : trimmed.Trim());
                 OnPropertyChanged(nameof(IsHuggingFaceTokenPlaintextWarningVisible));
+                OnPropertyChanged(nameof(HuggingFaceSelectionNeedsToken));
             }
         }
     }
@@ -666,6 +667,26 @@ public class PrepViewModel : BaseViewModel
     /// </summary>
     public bool IsHuggingFaceTokenFieldVisible
         => _activeSource == ModelSource.HuggingFace;
+
+    /// <summary>
+    /// 2026-05-12 field test: HF pulls (even of public GGUFs) fail
+    /// without a Bearer token in Ollama's <c>HF_TOKEN</c> env — HF's
+    /// public-repo rate-limit refuses the unauth'd request and the
+    /// pull errors instantly, leaving a red "≥1 installed model"
+    /// on the readiness screen. True when any checked row is an HF
+    /// tag and the inline token field is empty. Drives the explainer
+    /// modal that fires when the user clicks Download anyway.
+    /// </summary>
+    public bool HuggingFaceSelectionNeedsToken
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(_huggingFaceTokenInput)) return false;
+            return ModelRows.Any(r => r.IsSelected
+                && r.SourceKind == ModelSource.HuggingFace
+                && !r.IsPresentOnDrive);
+        }
+    }
 
     /// <summary>M11: caption that announces the visible row count + cap
     /// reason. Empty when no filter or search is active. Mirrors the Mac
@@ -1143,6 +1164,49 @@ public class PrepViewModel : BaseViewModel
         var hfRows = checkedRows
             .Where(r => r.SourceKind == ModelSource.HuggingFace && !r.IsPresentOnDrive)
             .ToList();
+
+        // 2026-05-12 field test: HF pulls fail without a Bearer token
+        // in Ollama's HF_TOKEN env — even for public GGUFs (HF rate-
+        // limits anonymous downloads). Block the click and walk the
+        // user through obtaining a free read-only token; open the HF
+        // token settings page in their browser if they confirm.
+        if (hfRows.Count > 0 && string.IsNullOrWhiteSpace(_huggingFaceTokenInput))
+        {
+            var openTokenPage = _dialogService.Confirm(
+                "You checked one or more Hugging Face models. Ollama needs a free read-only " +
+                "token from huggingface.co to pull them — even for public GGUFs " +
+                "(HF rate-limits anonymous downloads).\n\n" +
+                "1. Sign in or sign up at huggingface.co (free).\n" +
+                "2. Open Settings → Access Tokens, click \"Create new token\".\n" +
+                "3. Choose \"Read\" (classic) — or \"Fine-grained\" with only " +
+                "\"Read access to contents of all public repos\" checked.\n" +
+                "4. Copy the token (starts with `hf_…`) and paste it into the HF token " +
+                "field on the Models tab.\n" +
+                "5. Click Download again.\n\n" +
+                "The token is stored on the SSD (sealed with AES-256-GCM when encryption " +
+                "is on; plaintext otherwise — a yellow warning surfaces in that case).\n\n" +
+                "Open the Hugging Face token page in your browser now?",
+                "Hugging Face token required");
+            if (openTokenPage)
+            {
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "https://huggingface.co/settings/tokens",
+                        UseShellExecute = true,
+                    });
+                }
+                catch (Exception ex)
+                {
+                    AppendLog($"Could not open browser for HF token page: {ex.Message}. " +
+                              "Visit https://huggingface.co/settings/tokens manually.");
+                }
+            }
+            AppendLog("Download blocked: Hugging Face models selected without a token.");
+            StatusText = "Hugging Face token required";
+            return;
+        }
 
         var selected = checkedRows
             .Where(r => !r.IsPresentOnDrive)

@@ -182,6 +182,19 @@ public class HuggingFaceCatalogServiceTests
     }
 
     [Fact]
+    public void BuildRequestUrl_IncludesOllamaAppsFilter()
+    {
+        // Pinned 2026-05-12: `apps=ollama` mirrors huggingface.co/models?apps=ollama
+        // exactly (top result mxbai-embed-large-v1 at 4.4M downloads).
+        // Without it, `filter=gguf` alone returned diffusion / text-to-video
+        // repos that Ollama can't pull (Sulphur-2-base, Z-Anime).
+        var url = HuggingFaceCatalogService.BuildRequestUrl(
+            "https://huggingface.co/api/models",
+            new HuggingFaceSearchQuery(Search: null));
+        Assert.Contains("apps=ollama", url);
+    }
+
+    [Fact]
     public void BuildRequestUrl_UrlEncodesSearchTerm()
     {
         // "qwen 3" → "qwen%203" (space → %20). Stand-in for any

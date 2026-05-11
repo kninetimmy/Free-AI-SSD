@@ -1,4 +1,5 @@
 using System.Reflection;
+using FreeAiSsd.PrepApp.Services;
 using FreeAiSsd.Shared.Models;
 
 namespace FreeAiSsd.PrepApp;
@@ -188,7 +189,16 @@ public static class StarterModelCatalogLoader
                     .Where(u => !string.IsNullOrWhiteSpace(u))
                     .Select(u => u.Trim())
                     .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList()
+                    .ToList(),
+                // Bug 2026-05-12: bundled starter-models.json predates the
+                // ParametersBillion field, so the C3 size-cap filter
+                // (StarterCatalogTypes.swift / WPF predicate) passed through
+                // every bundled row — ≤7B showed 14B models. Backfill from
+                // the human-readable `params` token at load time so the
+                // bundled catalog matches the live-scrape catalog's shape
+                // without duplicating the value in JSON.
+                ParametersBillion = m.ParametersBillion
+                    ?? LiveModelCatalogService.ParseParamsBillions(m.Params),
             })
             .ToList();
 

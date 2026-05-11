@@ -137,6 +137,25 @@ public sealed class ModelGridRow(
 
     /// <summary>C27 Stage 4: true iff this row is a quant child.</summary>
     public bool IsQuantChild => !string.IsNullOrEmpty(ParentRepoId);
+
+    /// <summary>
+    /// 2026-05-12: HF rows never carry capability tags from the HF API,
+    /// so the C25 pass-through fade made every HF row look "disabled"
+    /// when any chip was engaged. The opacity trigger now AND's with
+    /// this getter to suppress the fade on the HF source while keeping
+    /// it on Ollama configured / on-disk / custom rows.
+    /// </summary>
+    public bool IsCapabilityFadeEligible
+        => SourceKind != ModelSource.HuggingFace;
+
+    /// <summary>
+    /// 2026-05-12: Ollama can't pull an HF parent repo without a quant
+    /// suffix (e.g. <c>hf.co/owner/repo</c> alone errors instantly).
+    /// Disable the parent row's checkbox so users discover the chevron
+    /// + a quant child instead. Quant children + Ollama rows stay
+    /// selectable.
+    /// </summary>
+    public bool IsRowSelectable => !IsExpandable;
 }
 
 /// <summary>

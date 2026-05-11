@@ -360,9 +360,14 @@
                                             <DataGrid.RowStyle>
                                                 <Style TargetType="DataGridRow">
                                                     <Style.Triggers>
+                                                        <!-- IsCapabilityFadeEligible AND's HF rows out
+                                                             of the trigger — they never carry HF API
+                                                             capability tags, so fading every one made
+                                                             them look disabled under any chip. -->
                                                         <MultiDataTrigger>
                                                             <MultiDataTrigger.Conditions>
                                                                 <Condition Binding="{Binding Capabilities.Count}" Value="0"/>
+                                                                <Condition Binding="{Binding IsCapabilityFadeEligible}" Value="True"/>
                                                                 <Condition Binding="{Binding DataContext.HasActiveCapabilityFilter, RelativeSource={RelativeSource AncestorType=DataGrid}}" Value="True"/>
                                                             </MultiDataTrigger.Conditions>
                                                             <Setter Property="Opacity" Value="0.55"/>
@@ -384,9 +389,31 @@
                                                 <DataGridTemplateColumn Header="Select" Width="Auto">
                                                     <DataGridTemplateColumn.CellTemplate>
                                                         <DataTemplate>
+                                                            <!-- IsRowSelectable disables HF parent rows
+                                                                 (IsExpandable=true). Ollama can't pull
+                                                                 `hf.co/owner/repo` without a quant suffix —
+                                                                 force the user through the chevron + a
+                                                                 quant child instead. -->
                                                             <ToggleButton Style="{StaticResource NeonToggleSwitch}"
                                                                           IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                                          HorizontalAlignment="Center"/>
+                                                                          IsEnabled="{Binding IsRowSelectable}"
+                                                                          HorizontalAlignment="Center">
+                                                                <ToggleButton.ToolTip>
+                                                                    <ToolTip>
+                                                                        <ToolTip.Style>
+                                                                            <Style TargetType="ToolTip">
+                                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                <Style.Triggers>
+                                                                                    <DataTrigger Binding="{Binding IsExpandable}" Value="True">
+                                                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                                                    </DataTrigger>
+                                                                                </Style.Triggers>
+                                                                            </Style>
+                                                                        </ToolTip.Style>
+                                                                        <TextBlock Text="Expand the chevron and pick a quant (e.g. Q4_K_M) — Ollama can't pull an HF repo without a quant tag."/>
+                                                                    </ToolTip>
+                                                                </ToggleButton.ToolTip>
+                                                            </ToggleButton>
                                                         </DataTemplate>
                                                     </DataGridTemplateColumn.CellTemplate>
                                                 </DataGridTemplateColumn>
