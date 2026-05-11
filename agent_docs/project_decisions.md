@@ -2789,3 +2789,94 @@ bodies.
 multi-source feature (additional registries, search providers).
 
 Established PR #266 (`58f79a1`).
+
+---
+
+## 2026-05-12 — Shared VM stays free of prep-core service dependencies; view-host wires behavior via delegate hooks [C27 Stage 2]
+
+When wiring HF disk-budget warnings into `PrepViewModel.DownloadAsync`,
+the natural reach was to inject `IHuggingFaceCatalogService` as a
+constructor parameter on the VM. That failed at compile: `shared/`
+is referenced by `prep-core/` (where the HF service lives), so a
+`prep-core → shared` ProjectReference plus a `shared → prep-core`
+type reference is a cycle.
+
+**Chose: VM exposes a `Func<...>` delegate property; the view-host
+(MainWindow.xaml.cs on WPF, the host sidecar on Mac) wires it.**
+
+The Stage 2 surface:
+
+```csharp
+public Func<IReadOnlyList<string>, long, CancellationToken,
+            Task<IReadOnlyList<string>>>?
+    HuggingFaceSizingWarningsHook { get; set; }
+```
+
+Tests leave it null (HF disk-budget warnings skipped, pull still
+proceeds — same posture as any other catalog-metadata gap). The
+WPF view-host wires it to `FetchHuggingFaceSizingWarningsAsync`
+which owns the `_hfCatalogService` instance. The Mac equivalent
+lives entirely in the C# sidecar (`mac-prep-host` `PullModelAsync`
+arm fetches siblings directly before staging-precheck — Swift VM
+never sees the service).
+
+**Applies to:** Stage 3 HF token auth (token storage stays in
+encrypted config, accessed via a similar delegate; VM doesn't
+need an `IConfigStore` for HF auth specifically); any future
+catalog source that lives in prep-core (additional registries,
+search providers) — same hook pattern.
+
+**Why not move the HF service interface to `shared/`?** Considered
+and rejected: `HuggingFaceCatalogResult.Catalog` is
+`StarterModelCatalog`, which lives in prep-core for embedded-
+resource fallback reasons (per the 2026-04 prep-core boundary).
+Moving the interface would drag the catalog type along with it,
+inverting the established `shared (DTOs + VMs) → prep-core
+(services + catalog data)` direction.
+
+Established PR #268 (`e807e04`).
+
+---
+
+## 2026-05-12 — Model-pull disk-budget formula: warn when free disk < 2× expected payload [C27 Stage 2]
+
+`OllamaModelStager.EnsureStagingFreeSpace` has enforced a 2×
+free-disk requirement since MAC35 (staging copy + SSD copy
+co-exist during the merge window). C27 Stage 2 made the same rule
+explicit at the HF picker layer: when `siblings[].lfs.size` for
+the picked GGUF (or sum of multi-part files) exceeds half of free
+disk on the target drive, the user sees a confirm-dialog warning
+naming the file + total GB + free-space callout before the pull
+starts.
+
+**Formula:** `free_disk_bytes < (expected_payload_bytes * 2)` →
+warn (WPF: `ConfirmSizingWarnings` dialog; Mac: log line +
+`EnsureStagingFreeSpace` throws with a clear message before the
+pull starts). The 2× factor is conservative — it accounts for
+both the staging tree and the in-flight SSD merge holding
+overlapping copies until cleanup; under-warning means an
+in-progress pull dies with a disk-full from APFS / exFAT, which
+is a worse UX than a pre-flight refusal.
+
+**Where it's enforced:**
+
+- `OllamaModelStager.EnsureStagingFreeSpace(stagingRoot, estimatedBytes)`
+  — staging-side precheck for both Ollama and HF tags on Mac.
+- `PrepViewModel.ConfirmSizingWarningsIfNeededAsync` (WPF) —
+  surfaces HF-side warnings (via the
+  `HuggingFaceSizingWarningsHook` delegate) alongside Ollama-side
+  ones from `IModelService.BuildPullSelectionWarnings`.
+- WPF view-host's `FetchHuggingFaceSizingWarningsAsync` — formats
+  the warning string with `headroom = freeBytes - (totalBytes * 2L)`.
+
+**Applies to:** Stage 4 per-quant rows (the picked quant's size
+feeds the same formula); any future catalog source surfacing
+real file sizes (the formula stays; the source of `expectedBytes`
+varies).
+
+**Why not 1.5× or 3×?** 1.5× lost the cleanup-window safety in
+prior testing (intermittent disk-full mid-merge on exFAT). 3×
+over-warned for 70B-class models on smaller SSDs without buying
+real safety beyond the merge window.
+
+Established PR #268 (`e807e04`).
