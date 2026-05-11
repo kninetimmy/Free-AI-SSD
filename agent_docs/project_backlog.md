@@ -89,6 +89,10 @@ Three flat buckets, one counter per bucket:
 | C21 | X4 | Web chat UI bundled in Runner Kestrel | this file |
 | C22 | F5 | TTS settings UI | this file |
 | C23 | X14 | 50 MB upload silent-reject UX | this file |
+| C24 | (new) | Mac refresh-catalog missing parametersBillion + lastUpdated (Max-size + Sort no-op regression) | this file |
+| C25 | (new) | Visual differentiation for capability pass-through entries | this file |
+| C26 | (new) | Most-popular limit dropdown (10 / 15 / 25 / 50) | this file |
+| C27 | (new) | Hugging Face as a model source (full integration; multi-stage) | this file |
 | W1 | X11 | Companion keyboard PTT + first-run validation | this file |
 | W2 | F4 Stages 3-4 | Companion install target selector + installer | this file |
 | W3 | X16 | Unlock dialog dark theme (WPF) | this file |
@@ -129,9 +133,16 @@ Three flat buckets, one counter per bucket:
 
 > **C3+C4+C5** (model picker filter cluster) — **done** PR #259 (`9f81bd5`) 2026-05-10. One PR bundles parameter-cap dropdown (≤7B/≤14B/≤30B/≤70B), capability AND chips (tools/vision/thinking/audio), and sort dropdown (Popular/Newest/A–Z) across both WPF and Mac pickers. Scraper extended for `x-test-updated` + numeric param extraction (MoE-aware via largest-billion-wins so memory-budget filters exclude MoE); projection layer gains Capabilities/ParametersBillion/LastUpdated; new `ModelSortMode` enum drives WPF `SortDescription`s and Mac sort step. lastUpdated crosses the wire as ISO 8601 string (sorts lexically the same as instants). 51 new C# pins + 11 new Swift pins. CI green on second push (one-line `using System.ComponentModel;` fix for WPF code-behind). v1.3.23 dispatch in flight. Decision pinned in `project_decisions.md`.
 
-**P2 — Substantive UX (top of queue):**
+**P1.5 — Picker filter cluster follow-ons (filed 2026-05-10 post-v1.3.22 Mac field test; top of queue for next session):**
 
-1. **C6** — Detect-configured-drive flow (PrepApp UX; cross-OS)
+1. **C24** — Mac refresh-catalog payload missing `parametersBillion` + `lastUpdated` — **P0 regression** introduced by PR #259; Max-size and Sort: Newest are no-ops on Mac after Refresh. One-line host fix + Swift end-to-end pin.
+2. **C25** — Visual differentiation for capability pass-through entries (rows with empty `Capabilities` surviving active chip filter).
+3. **C26** — Most-popular limit dropdown (10 / 15 / 25 / 50) replacing the static 15.
+4. **C27** — Hugging Face as a model source (full integration; **Opus planning** at kickoff; multi-stage).
+
+**P2 — Substantive UX:**
+
+5. **C6** — Detect-configured-drive flow (PrepApp UX; cross-OS)
 
 **P3 — Existing critical / high items (deferred behind P1–P2):**
 
@@ -389,6 +400,159 @@ Items `B1`â€“`F4` below were triaged from Stephen's `Downloads/# Free-AI-SS
 **Affected files:** Same surfaces as C4 (scraper + filter UI).
 
 **Exit criterion:** Selecting "Newest" reorders the list by `LastUpdated` desc; composes with Most-popular and filters.
+
+---
+
+### C24 — Mac refresh-catalog payload missing parametersBillion + lastUpdated (Max-size and Sort no-op regression)
+
+**Status:** filed 2026-05-10 (post-v1.3.22 Mac field test). **P0 regression** introduced by PR #259 (C3+C4+C5). Cross-OS impact is Mac-only — WPF gets the live catalog in-process and is unaffected.
+**Scope:** Single-PR bugfix. One-line host change + Swift end-to-end pin.
+**Model:** Sonnet 4.6.
+
+**Driver (user 2026-05-10):** *"max model parameter size dropdown exists but does nothing… the sort by newest and popular dropdown exists but does nothing"* — Max-size and Sort: Newest in the Mac PrepApp picker have no visible effect after Refresh from Ollama, even though the caption reports correct filtered counts (e.g. "Showing 275 of 399 matching filter (≤7B, thinking+tools)").
+
+**Root cause (diagnosed pre-implementation):** `mac-prep-host/HostLifetime.cs` at the `refresh-catalog` arm (~line 522-530) emits per-entry: `tag, params, sizeTier, description, useCases, pullCount`. **Missing: `parametersBillion` AND `lastUpdated`** — both fields were added to the sibling `discover-catalog` arm at line 473-483 in PR #259 but never propagated to refresh. Swift's `StarterModelEntry` decodes both as nil for every live entry. The cap filter passes nil through (by design — keeps configured/on-disk rows visible) → ≤7B is a no-op. The Newest sort uses `lastUpdated ?? ""` → all empty strings tie → source order preserved → no-op. Capability AND filter works because `useCases` is in the payload (this is why the visible count drops to 275 but the list doesn't reorder/shrink). WPF is unaffected because its refresh path goes through `_liveModelCatalogService.FetchAsync` in-process and never crosses the JSON wire.
+
+**Affected files:**
+- `mac-prep-host/HostLifetime.cs:522-530` — mirror the discover-catalog projection (add `parametersBillion = m.ParametersBillion, lastUpdated = m.LastUpdated`).
+- `mac-prep-app/Tests/PrepAppTests.swift` — new end-to-end pin: feed a synthetic refresh-catalog payload through `decodeStarterEntries` + `applyStarterModelFilters` with `maxParametersBillion: 7` and assert qwen3:30b drops out and a date-ordered sort moves a newer entry above an older one. Pure logic pin already passes; this is the missing wire-format pin.
+
+**Watch for:**
+- This is the exact regression class PR #259's "lessons" called out — the projection layer was updated in three places (StarterModelEntry, StarterCatalogEntry, ModelGridRow) and the discover-catalog arm, but the refresh arm got missed. The new pin should exercise the refresh-catalog JSON shape specifically, not just the filter logic.
+- Cross-OS parity check: verify WPF behavior unchanged (its in-process path doesn't touch this code).
+
+**Exit criterion:** Mac PrepApp → Refresh from Ollama → set Max size ≤7B → 30B+ entries disappear from the list (not just the caption count). Set Sort: Newest → entries with scraped `x-test-updated` reorder by date desc; entries without sort to the bottom. Caption strings unchanged.
+
+---
+
+### C25 — Visual differentiation for capability pass-through entries (no-cap-data rows)
+
+**Status:** filed 2026-05-10 (post-C3+C4+C5 UX polish). Cross-OS UX polish.
+**Scope:** One-shot, cross-OS bundle. Picker-UI-only.
+**Model:** Sonnet 4.6.
+
+**Driver (user 2026-05-10):** *"the capabilities seem to work but not every model has those tags so the ones that have no tags are always there — not a bad thing but maybe we could differentiate the ones that have applicable tags?"*
+
+**Design tension:** C4 capability AND filter intentionally passes through entries with `capabilities.Count == 0` so on-disk + configured + bundled-pre-Refresh rows aren't accidentally hidden when the user narrows the recommended list. The user doesn't want to break that — they want the *reason* a row survives to be visible.
+
+**Approach (options to refine at kickoff):**
+- **Option A (lightweight):** subtle visual marker on capability-empty rows surviving an active chip filter. Could be a muted `(no cap data)` micro-tag rendered after the size tier, or a lower opacity (≈70%) on the row's entire body. Only renders when at least one capability chip is active — keeps the picker quiet when no filter is engaged.
+- **Option B (caption-only):** extend `StarterRowCountCaption.Format` (+ Swift mirror) to break down the visible count: `Showing 275 of 399 matching filter (thinking+tools; 47 surviving via pass-through).` Cheap to implement, no per-row UI churn.
+- **Option C (segmented view):** group the visible list into two sections — "Matches all filters" and "Surviving via pass-through (no capability data)". Most informative, most disruptive to the current scrolling layout.
+
+**Recommendation:** Start with **Option A** (lightweight per-row marker). Option B is additive and could land in the same PR if the user wants the count breakdown. Option C is over-engineered for what's effectively a polish item.
+
+**Cross-OS audit:** Both pickers need the marker. WPF: bind `Capabilities.Count == 0` to a converter for opacity or template visibility. Mac: SwiftUI `.opacity()` on the entry row based on `entry.capabilities.isEmpty && !vm.requiredCapabilities.isEmpty`.
+
+**Affected files:**
+- `prep-app/MainWindow.xaml` — row template tweak with a converter.
+- `shared/ViewModels/PrepViewModel.cs` — possibly expose an `IsPassThroughRow` derived property on `ModelGridRow` if the converter approach is awkward.
+- `mac-prep-app/Sources/main.swift` — row body in `starterPickerBody`.
+- `shared/Models/StarterRowCountCaption.cs` + Swift mirror — only if Option B lands too.
+- `tests/` — pin: row marker only renders when chip filter active AND row has empty caps.
+
+**Watch for:**
+- Don't apply the marker to rows surviving the *parameter cap* pass-through — that one isn't tied to a missing-data condition the user cares about. Only the capability chip pass-through is confusing.
+- Tooltip on the marker should explain why ("No capability data for this entry — surviving the filter via pass-through. Refresh from Ollama to populate.").
+
+**Exit criterion:** With at least one capability chip active, entries with empty `Capabilities` render with a visible cue (muted opacity or `(no cap data)` micro-tag); entries with populated caps render normally. Marker disappears when all chips are cleared.
+
+---
+
+### C26 — Most-popular limit dropdown (10 / 15 / 25 / 50)
+
+**Status:** filed 2026-05-10 (post-C3+C4+C5 UX polish). Cross-OS UX polish. Small.
+**Scope:** One-shot, cross-OS bundle.
+**Model:** Sonnet 4.6.
+
+**Driver (user 2026-05-10):** *"the most popular button seems to just limit the models listed to 15 but is that dynamic? what's it base on."*
+
+**Current behavior:** `MostPopularLimit = 15` (C# constant in `shared/ViewModels/PrepViewModel.cs:85`) and `mostPopularCount = 15` (Swift constant in `mac-prep-app/Sources/PrepViewModel.swift:61`). Static. Sorted by `PullCount` desc from the live ollama.com/library scrape. Pre-Refresh (bundled catalog only) the field is null on every entry so the toggle yields zero visible rows — already covered by M11's empty-state caption.
+
+**Approach:** Replace the constant with a small dropdown next to the Most-popular toggle: "Top 10 / Top 15 / Top 25 / Top 50". Default stays 15 (no behavioral regression). Tooltip on the toggle explains the count is by pull count desc from the live catalog.
+
+**Cross-OS audit:** Both pickers. WPF gains a `ComboBox` next to the existing `ToggleButton`; Mac gains a SwiftUI `Picker(.menu)` next to the Most-popular `Button`.
+
+**Affected files:**
+- `shared/ViewModels/PrepViewModel.cs` — replace `const` with a `MostPopularLimitOptions` array and a `@Published` selected value; update `RecomputeTopPopularStarterTags` to read it.
+- `mac-prep-app/Sources/PrepViewModel.swift` — same pattern with `@Published var mostPopularLimit: Int = 15`.
+- `prep-app/MainWindow.xaml(.cs)` — ComboBox + binding.
+- `mac-prep-app/Sources/main.swift` — Picker in the action row.
+- `shared/Models/StarterRowCountCaption.cs` + Swift mirror — caption already says "top NN" via interpolation; just confirm the dynamic value flows through.
+- `tests/` — pin: changing the dropdown recomputes the visible top-N.
+
+**Watch for:**
+- Don't let "Top 50" inflate the picker beyond the visible scroll comfort. 50 is a reasonable upper cap; 100 starts feeling like "show all" without the explicit toggle.
+- The shared `MostPopularLimit` constant is referenced from XAML resources or hardcoded captions — grep before deleting.
+
+**Exit criterion:** Most-popular toggle ON + select "Top 25" from the new dropdown → list shows top 25 by pulls. Caption updates to "Showing top 25 of 399 by pulls."
+
+---
+
+### C27 — Hugging Face as a model source (full integration)
+
+**Status:** filed 2026-05-10. **Substantial feature.** Cross-OS, multi-stage. Opus planning required at kickoff.
+**Scope:** Multi-stage. Likely 3-4 stages spread across multiple PRs.
+**Model:** Opus 4.7 for planning + Stage 1; Sonnet 4.6 for follow-on stages.
+
+**Driver (user 2026-05-10):** *"how difficult would it be to incorporate something like Hugging Face? so maybe a dropdown to select which place we want to search or pull from."*
+
+**End-state vision:** PrepApp picker gains a "Source" dropdown (Ollama / Hugging Face) above or beside the existing filter row. Switching to Hugging Face queries the HF model search API and surfaces results in the same row layout. Pulling an HF model uses Ollama's `ollama pull hf.co/<repo>:<quant>` syntax (Ollama natively supports HF GGUF pulls). Non-GGUF HF repos are filtered out at the catalog layer with a clear UI message.
+
+**Why this is non-trivial:**
+1. **HF's catalog is huge** — millions of repos vs. ollama.com's ~400. The picker UX needs server-side search (HF has a Search API), not client-side filter. The current "load 399 rows, filter locally" pattern won't work.
+2. **Auth.** HF supports anonymous read for public repos but private/gated repos need a user token. Token storage has to go through the same encrypted-config posture as the Ollama API key (per `project_arch.md` Security invariants — AES-256-GCM under `SsdEncryption`).
+3. **Model format detection.** HF repos can contain GGUF, safetensors, raw PyTorch, ONNX, GPTQ, etc. Ollama only natively pulls GGUF (via `hf.co/<repo>:<quant>`). The catalog adapter must filter to GGUF-bearing repos and surface quant variants as separate picker rows (e.g., `hf.co/bartowski/Qwen3-8B-GGUF:Q4_K_M`).
+4. **Disk-budget warnings.** HF GGUF files often run 5-50GB per quant. `ModelManagementService.GetSizingWarnings` already exists for Ollama tags; HF adapter needs to feed it real file-size metadata from HF API.
+5. **Cross-OS bridge.** The Mac path runs catalog fetches through `mac-prep-host` over JSON IPC. New `discover-hf-catalog` and `search-hf` arms needed alongside the existing `discover-catalog` and `refresh-catalog`.
+6. **Capability metadata gap.** HF doesn't surface ollama.com's capability tags (tools/vision/thinking/audio). The chip filter won't apply to HF entries — UX needs to either disable the chips or pass-through HF rows like other empty-cap entries (C25 marker becomes load-bearing here).
+
+**Stage outline (refine in planning):**
+
+- **Stage 1 — HF catalog adapter + Source dropdown (Opus).**
+  - New `prep-core/Services/HuggingFaceCatalogService.cs` calling `https://huggingface.co/api/models?filter=gguf&search=<query>&sort=downloads&limit=NN`.
+  - New `ModelSource` enum (Ollama / HuggingFace) on the PrepViewModel.
+  - UI: Source dropdown next to Refresh button. Switching sources clears the catalog and refetches.
+  - WPF + Mac UI parity from the start.
+  - Anonymous read only — token auth defers to Stage 3.
+
+- **Stage 2 — HF pull integration (Sonnet).**
+  - Wire `ModelManagementService.PullModelAsync` to detect `hf.co/...` tags and route through Ollama's HF pull path.
+  - Disk-budget warnings: feed HF API `siblings[].size` into `GetSizingWarnings`.
+  - Cancel/resume parity with existing Ollama pulls.
+
+- **Stage 3 — HF token auth (Sonnet, security-adjacent).**
+  - Optional HF token field in PrepApp settings, stored under the existing encrypted config (`SsdEncryption.SealConfig` / `OpenConfig` posture). Used as `Authorization: Bearer <token>` on HF API calls.
+  - Gated repos and private repos surface in search results when token grants access.
+
+- **Stage 4 — Quant variant surfacing + capability marker UX (Sonnet).**
+  - Each HF GGUF repo expands to N picker rows, one per quant (Q4_K_M, Q5_K_M, Q8_0, F16, etc.). UI groups them visually under a single repo header — collapsible.
+  - Wire C25's no-cap-data marker (if landed) so HF rows render with the pass-through cue.
+  - Per-quant size + recommended-hardware caption.
+
+**Cross-OS audit:** Cross-OS from Stage 1. Same scraper + UI dropdown + JSON IPC arms on Mac. Stage 2 onward leans on the existing `ModelManagementService` which already runs on both OSes via Mac runner's HTTP route (C2/M14 path).
+
+**Affected files (Stage 1 — expected):**
+- New `prep-core/Services/HuggingFaceCatalogService.cs`.
+- `shared/Models/PrepModels.cs` — new `ModelSource` enum, possibly new `HuggingFaceCatalogEntry` (or fold into a `ModelSource` field on `StarterCatalogEntry`).
+- `shared/ViewModels/PrepViewModel.cs` — source state + dispatch logic.
+- `prep-app/MainWindow.xaml(.cs)` — Source dropdown.
+- `mac-prep-app/Sources/PrepViewModel.swift` + `main.swift` — Mac equivalent.
+- `mac-prep-host/HostLifetime.cs` — new `discover-hf-catalog` and `search-hf` arms.
+- `tests/` — new `HuggingFaceCatalogServiceTests.cs` with response fixture; cross-source dropdown integration pins.
+
+**Decisions to lock at planning:**
+1. **API rate limit posture.** HF anonymous API caps requests; do we cache results locally (and where — `SsdLayout` cache dir?) or just live with rate limits for now?
+2. **GGUF-only filter at catalog or UI layer.** Catalog-layer filter is more efficient but locks us out of surfacing non-GGUF repos with a "convert needed" warning later. UI-layer filter is more flexible but ships unusable rows.
+3. **Search vs. browse UX.** HF is search-first (millions of repos); ollama.com is browse-first (hundreds). The Source dropdown swap may need to morph the picker from "scrolling list" to "search-and-fetch" when HF is active. Could keep a static "popular" default query for the initial load.
+4. **Manifest verification.** Ollama-side pulls use SHA-256 (per Security invariants). HF doesn't expose the same checksum format on GGUF files. Plan how to enforce the spirit of the security invariant — possibly file-size assertion + manifest signature from HF API.
+
+**Watch for:**
+- **Security invariants are non-negotiable** (per `CLAUDE.md`). HF token storage must use `SsdEncryption`; HF pulls must respect URL allowlist semantics — likely an allowlist entry for `huggingface.co` and `hf.co` proxies.
+- **Don't conflate this with F2** (live model list fetch from ollama.com — done in v1.3.22). F2 was scope-bounded to ollama.com; C27 is the larger "multi-source catalog" feature F2's filing hinted at but deferred.
+- Search-first UX may need debouncing — typing into the search box hits HF API on every keystroke without it.
+
+**Exit criterion:** Source dropdown in PrepApp picker on both OSes. Switching to Hugging Face surfaces GGUF-only HF repos via search; pulling an HF row downloads via Ollama's HF integration; private repos accessible with optional token; disk-budget warnings populated from HF file sizes.
 
 ---
 
