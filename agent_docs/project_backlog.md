@@ -71,7 +71,7 @@ Three flat buckets, one counter per bucket:
 | C3 | (new) | Model picker: filter by parameter count | this file |
 | C4 | (new) | Model picker: filter by capability (tools/vision/thinking/coding) | this file |
 | C5 | (new) | Model picker: sort by newest | this file |
-| C6 | (new) | PrepApp: detect already-configured drive, skip-format flow | this file |
+| ~~C6~~ | (new) | ~~PrepApp: detect already-configured drive, skip-format flow~~ — **done** PR #274 (`93a677d`) 2026-05-12 | this file |
 | C7 | X9 | Encrypted config persistence lifecycle | this file |
 | C8 | X10 | Document replacement + rebuild consistency | this file |
 | C9 | X12 | DownloadManager verify-before-move | this file |
@@ -113,6 +113,7 @@ Three flat buckets, one counter per bucket:
 | ~~M12~~ | (new) | ~~Mac runner chat UI parity to X13 (surface real failures)~~ — **done** PR #251 (`a52572c`) 2026-05-10 | mac_project_backlog.md |
 | ~~M13~~ | (new) | ~~"Expose API on LAN" toggle reverts itself on Mac~~ — **done** PR #249 (`e6b958e`) 2026-05-10 | mac_project_backlog.md |
 | ~~M14~~ | (new) | ~~Mac runner "Pull embedding model" UI button (parity with WPF; defense-in-depth for C2)~~ — **done** PR #257 (`31f1bbc`) 2026-05-10 | mac_project_backlog.md |
+| M15 | (new) | Mac PrepApp: don't auto-advance past pull failure (surface inline so user can read error) | mac_project_backlog.md |
 
 **Closed on this pass (no new ID):**
 
@@ -575,8 +576,9 @@ Stages 3+4 bundled into one PR per user direction. C27 is fully shipped: HF rows
 
 ### C6 — PrepApp: detect already-configured drive, skip-format flow
 
-**Status:** filed 2026-05-10. **Substantive UX.** Cross-OS.
-**Scope:** Multi-stage. Opus planning at kickoff (touches PrepApp boot flow + drive detection + FTUE).
+**Status:** **done** — PR #274 merged `93a677d` (2026-05-12). Architectural decisions pinned in `project_decisions.md` (3-state detector, detector in `shared/` not `prep-core/`, picker extraction pattern, sidecar `remove-model` server lifecycle, light-touch `runManageModelsStartup`, encrypted = read-only, FTUE in-session suppression, Swift reimplementation + cross-language parity tests, `.manageModels` → `.modelPull` → return via flag). Field-test pin tracked in `project_state.md` Open questions. **Follow-up:** long-term split-port server fix for the `remove-model` arm so it doesn't have to refuse with `pull-in-flight` (out of scope for C6).
+
+**Original scope (kept as historical context):** Multi-stage. Opus planning at kickoff (touches PrepApp boot flow + drive detection + FTUE).
 **Model:** Opus 4.7 for planning; Sonnet for stages.
 
 **Driver (user 2026-05-10):** *"Runner app should have ability to detect if drive was previously configured and skip format and go straight to adding or removing models. Maybe a contextual thing where if it's detected as configured we have 2 buttons. One that says format or start over, and one that says manage models."*
