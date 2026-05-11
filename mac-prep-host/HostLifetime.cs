@@ -3,6 +3,7 @@ using FreeAiSsd.MacPrepHost.Services;
 using FreeAiSsd.PrepApp;
 using FreeAiSsd.PrepApp.Services;
 using FreeAiSsd.Shared;
+using FreeAiSsd.Shared.Models;
 using FreeAiSsd.Shared.Services;
 
 namespace FreeAiSsd.MacPrepHost;
@@ -174,6 +175,17 @@ internal sealed class HostLifetime : IAsyncDisposable
                 break;
             case "search-hf":
                 await SearchHuggingFaceAsync(payload, ct);
+                break;
+            case "set-hf-token":
+                // C27 Stage 3: install (or clear) the Bearer token on
+                // the sidecar's catalog service so subsequent search /
+                // siblings / pull-model HF arms carry the header.
+                SetHuggingFaceToken(payload);
+                break;
+            case "hf-siblings":
+                // C27 Stage 4: fetch + project per-quant rows for a
+                // single HF repo. Payload: bare repoId (owner/repo).
+                await FetchHuggingFaceSiblingsAsync(payload, ct);
                 break;
             default:
                 await _stderr.WriteLineAsync($"Unknown command: {command}");
@@ -359,8 +371,18 @@ internal sealed class HostLifetime : IAsyncDisposable
             // through this sidecar now stages.
             if (_ollamaServer is null)
             {
+                // C27 Stage 3: if the user installed an HF token via
+                // set-hf-token, propagate it into the Ollama server env
+                // so gated / private GGUF pulls can authenticate. Ollama
+                // reads HF_TOKEN (and the older HUGGING_FACE_HUB_TOKEN
+                // alias) at /api/pull request time. The server starts
+                // ONCE per sidecar lifetime and is reused, so the token
+                // installed before the first pull persists across the
+                // batch — token rotation during a session requires
+                // restarting the sidecar (acceptable per Stage 3 scope).
+                var extraEnv = BuildHuggingFaceEnv(_hfCatalogService.AuthToken);
                 _ollamaServer = await _ollamaPackage.StartTemporaryServerAsync(
-                    ollamaExe, stagingRoot, EmitLog, pullCts.Token);
+                    ollamaExe, stagingRoot, EmitLog, pullCts.Token, extraEnv);
             }
 
             // Each NDJSON frame from Ollama's /api/pull is rendered to a
@@ -746,6 +768,136 @@ internal sealed class HostLifetime : IAsyncDisposable
     }
 
     /// <summary>
+    /// C27 Stage 4: fetch <c>siblings[]</c> for a Hugging Face repo and
+    /// emit a JSON payload the SwiftUI host can fold into its picker
+    /// as per-quant child rows. Mirrors the WPF
+    /// <c>FetchHuggingFaceQuantsAsync</c> path: gated/private repos
+    /// emit an empty children list with a typed reason so the host
+    /// surfaces the Stage 3 token nudge.
+    /// </summary>
+    private async Task FetchHuggingFaceSiblingsAsync(string payload, CancellationToken ct)
+    {
+        var repoId = (payload ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(repoId))
+        {
+            EmitResult("hf-siblings", new
+            {
+                ok = false,
+                reason = "InvalidPayload",
+                error = "hf-siblings requires a repoId argument (owner/repo).",
+            });
+            return;
+        }
+
+        HuggingFaceModelDetails details;
+        try
+        {
+            details = await _hfCatalogService.FetchSiblingsAsync(repoId, ct);
+        }
+        catch (LiveCatalogFetchException ex)
+        {
+            EmitLog($"hf-siblings fetch failed for {repoId}: {ex.Message}");
+            EmitResult("hf-siblings", new
+            {
+                ok = false,
+                repoId,
+                reason = ex.Reason.ToString(),
+                error = ex.Message,
+                statusCode = ex.StatusCode,
+            });
+            return;
+        }
+
+        if (details.Gated || details.Private)
+        {
+            var kind = details.Gated ? "gated" : "private";
+            EmitResult("hf-siblings", new
+            {
+                ok = true,
+                repoId,
+                gated = details.Gated,
+                @private = details.Private,
+                reason = $"hf-{kind}",
+                quants = Array.Empty<object>(),
+            });
+            return;
+        }
+
+        EmitResult("hf-siblings", new
+        {
+            ok = true,
+            repoId,
+            gated = false,
+            @private = false,
+            quants = HuggingFaceQuantProjector.ProjectAsWirePayload(repoId, details.Siblings),
+        });
+    }
+
+    /// <summary>
+    /// C27 Stage 3: build the env-var dictionary passed into the temp
+    /// Ollama server for HF GGUF pulls. Returns null (= no extra env)
+    /// when the token is missing/empty so we don't grow the process
+    /// env unnecessarily. <c>HF_TOKEN</c> is the modern name; we also
+    /// set <c>HUGGING_FACE_HUB_TOKEN</c> for older Ollama builds that
+    /// haven't picked up the rename. Internal for direct unit testing.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string>? BuildHuggingFaceEnv(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return null;
+        var trimmed = token.Trim();
+        return new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["HF_TOKEN"] = trimmed,
+            ["HUGGING_FACE_HUB_TOKEN"] = trimmed,
+        };
+    }
+
+    /// <summary>
+    /// C27 Stage 3: install (or clear) the Bearer token on the sidecar's
+    /// catalog service. Payload is a single-line JSON object:
+    /// <c>{"token":"hf_..."}</c>; empty / missing token clears the
+    /// installed value and reverts to anonymous mode. Defense-in-depth:
+    /// we never log the token value, only whether one was installed or
+    /// cleared — the JSON payload echoes through the EmitLog NDJSON
+    /// stream and ultimately to a SwiftUI log strip that the user can
+    /// screenshot.
+    /// </summary>
+    private void SetHuggingFaceToken(string payload)
+    {
+        string? token = null;
+        if (!string.IsNullOrWhiteSpace(payload))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(payload);
+                if (doc.RootElement.TryGetProperty("token", out var t)
+                    && t.ValueKind == JsonValueKind.String)
+                {
+                    var raw = t.GetString();
+                    token = string.IsNullOrWhiteSpace(raw) ? null : raw.Trim();
+                }
+            }
+            catch (JsonException ex)
+            {
+                EmitLog($"set-hf-token payload parse failed: {ex.Message}");
+                EmitResult("set-hf-token", new
+                {
+                    ok = false,
+                    reason = "InvalidPayload",
+                    error = ex.Message,
+                });
+                return;
+            }
+        }
+
+        _hfCatalogService.UpdateAuthToken(token);
+        EmitLog(token is null
+            ? "Hugging Face token cleared; subsequent HF requests anonymous."
+            : "Hugging Face token installed; subsequent HF requests authenticated.");
+        EmitResult("set-hf-token", new { ok = true, tokenInstalled = token is not null });
+    }
+
+    /// <summary>
     /// C27 Stage 1: parse a <c>search-hf</c> payload. Accepts the JSON
     /// object shape <c>{"search":"...","limit":50,"sort":"downloads"}</c>;
     /// missing fields fall back to the <see cref="HuggingFaceSearchQuery"/>
@@ -795,6 +947,10 @@ internal sealed class HostLifetime : IAsyncDisposable
             parametersBillion = m.ParametersBillion,
             lastUpdated = m.LastUpdated,
             source = m.Source.ToString(),
+            // C27 Stage 4: HF rows are repo-level — the SwiftUI host
+            // surfaces a DisclosureGroup chevron whose click triggers
+            // the `hf-siblings` arm to populate quant children.
+            isExpandable = m.Source == ModelSource.HuggingFace,
         }).ToArray<object>();
 
     // --- Output helpers --------------------------------------------------

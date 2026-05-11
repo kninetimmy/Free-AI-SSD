@@ -351,6 +351,33 @@ struct EncryptionSetupStepView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            // C27 Stage 3: inline Hugging Face token field. Visible only
+            // when activeSource == .huggingFace. Token is pushed to the
+            // sidecar via the `set-hf-token` arm on every change so the
+            // catalog service immediately attaches the Bearer header.
+            // Persisted to portable-config.huggingFaceToken at finalize
+            // time (encrypted when enableEncryption is true).
+            if vm.activeSource == .huggingFace {
+                HStack(spacing: 8) {
+                    Text("HF token (optional)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    SecureField("hf_…", text: $vm.huggingFaceToken)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 320)
+                        .help("Personal Hugging Face access token. Required for gated or private GGUF repos. Stored on the SSD; sealed with AES-256-GCM when SSD encryption is on. Leave blank for anonymous browsing.")
+                        .onChange(of: vm.huggingFaceToken) { newValue in
+                            Task { await vm.pushHuggingFaceTokenToSidecar(newValue) }
+                        }
+                }
+                if !vm.enableEncryption && !vm.huggingFaceToken.isEmpty {
+                    Text("⚠ Encryption is off — your Hugging Face token will be stored in plaintext on the SSD. Enable encryption on the next step for defense in depth.")
+                        .font(.caption)
+                        .foregroundColor(Color.brandStatusWarning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             // C3 / C4 / C5: second filter row — parameter cap, capability
             // chips, sort mode. Mirrors the WPF MainWindow.xaml layout so
             // the Mac picker offers the same affordances. macOS 11.0
@@ -462,38 +489,72 @@ struct EncryptionSetupStepView: View {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(entries) { entry in
                         let isPassThrough = entry.capabilities.isEmpty && !vm.requiredCapabilities.isEmpty
-                        Toggle(isOn: Binding(
-                            get: { vm.selectedStarterModels.contains(entry.tag) },
-                            set: { sel in
-                                if sel { vm.selectedStarterModels.insert(entry.tag) }
-                                else   { vm.selectedStarterModels.remove(entry.tag) }
+                        let repoId = vm.stripHuggingFacePrefix(entry.tag)
+                        let isExpanded = vm.expandedRepoIds.contains(repoId)
+                        let isExpanding = vm.huggingFaceExpansionInFlight.contains(repoId)
+                        HStack(spacing: 4) {
+                            // C27 Stage 4: chevron for HF parents, indent
+                            // glyph for quant children, blank for everything
+                            // else. Keeps parent + children visually nested
+                            // without a TreeView (SwiftUI doesn't ship one
+                            // on the macOS 11 baseline).
+                            if entry.isExpandable {
+                                Button {
+                                    Task { await vm.toggleRepoExpansion(parent: entry) }
+                                } label: {
+                                    Text(isExpanding ? "…" : (isExpanded ? "▼" : "▶"))
+                                        .font(.system(size: 10))
+                                        .frame(width: 14)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Show or hide the GGUF quants for this Hugging Face repo. First expand fetches sizes from huggingface.co.")
+                            } else if entry.isQuantChild {
+                                Text("⌞")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(Color.brandAccentCyan)
+                                    .frame(width: 14)
+                                    .padding(.leading, 14)
+                            } else {
+                                Spacer().frame(width: 14)
                             }
-                        )) {
-                            VStack(alignment: .leading, spacing: 1) {
-                                HStack(spacing: 6) {
-                                    Text(entry.tag).font(.body).bold()
-                                    Text(entry.sizeTier)
-                                        .font(.caption2)
-                                        .padding(.horizontal, 5).padding(.vertical, 1)
-                                        .background(Color.brandStatusInfo.opacity(0.15))
-                                        .foregroundColor(Color.brandStatusInfo)
-                                        .clipShape(RoundedRectangle(cornerRadius: 3))
-                                    if let count = entry.pullCount {
-                                        Text(formatPullCount(count) + " pulls")
+                            Toggle(isOn: Binding(
+                                get: { vm.selectedStarterModels.contains(entry.tag) },
+                                set: { sel in
+                                    if sel { vm.selectedStarterModels.insert(entry.tag) }
+                                    else   { vm.selectedStarterModels.remove(entry.tag) }
+                                }
+                            )) {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    HStack(spacing: 6) {
+                                        Text(entry.tag).font(.body).bold()
+                                        Text(entry.sizeTier)
                                             .font(.caption2)
+                                            .padding(.horizontal, 5).padding(.vertical, 1)
+                                            .background(Color.brandStatusInfo.opacity(0.15))
+                                            .foregroundColor(Color.brandStatusInfo)
+                                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                                        if let count = entry.pullCount {
+                                            Text(formatPullCount(count) + " pulls")
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        if let size = entry.quantSizeBytes, size > 0 {
+                                            Text(formatQuantSize(size))
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                        }
+                                    }
+                                    if !entry.bestAt.isEmpty {
+                                        Text(entry.bestAt)
+                                            .font(.caption)
                                             .foregroundColor(.secondary)
+                                            .lineLimit(2)
+                                            .fixedSize(horizontal: false, vertical: true)
                                     }
                                 }
-                                if !entry.bestAt.isEmpty {
-                                    Text(entry.bestAt)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(2)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
                             }
+                            .toggleStyle(.checkbox)
                         }
-                        .toggleStyle(.checkbox)
                         // C25: mute rows that survive an active chip filter
                         // only because their capabilities list is empty
                         // (configured / on-disk / custom — anything outside
@@ -510,6 +571,13 @@ struct EncryptionSetupStepView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// C27 Stage 4: format a per-quant size in GB with one decimal.
+    /// Mirrors the C# `FormatSize` posture for the picker child rows.
+    private func formatQuantSize(_ bytes: Int64) -> String {
+        let gb = Double(bytes) / (1024.0 * 1024.0 * 1024.0)
+        return String(format: "%.1f GB", gb)
     }
 
     /// C4: a single capability chip — a Button-with-checkmark mirror of

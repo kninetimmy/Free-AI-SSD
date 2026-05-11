@@ -139,6 +139,21 @@ public sealed class PortableConfig
     /// <summary>Maximum audio upload size for LAN STT/voice endpoints in megabytes.</summary>
     public int NetworkMaxAudioUploadMB { get; set; } = 10;
 
+    // ── Hugging Face (C27 Stage 3) ───────────────────────────────────────
+
+    /// <summary>
+    /// C27 Stage 3: optional Hugging Face access token used to authenticate
+    /// catalog search, siblings metadata fetch, and Ollama-mediated pulls of
+    /// gated or private GGUF repos. Stored alongside the rest of the config;
+    /// when SSD encryption is enabled this field rides the AES-256-GCM seal.
+    /// Plaintext when encryption is off — the UI surfaces a defense-in-depth
+    /// warning at finalize time so the user explicitly consents.
+    /// Distinct from <see cref="NetworkApiKey"/>: this is a personal credential
+    /// for upstream HF requests, not a LAN-advertised shared secret, so the
+    /// <see cref="NetworkRequireApiKey"/> fail-closed write guard does not apply.
+    /// </summary>
+    public string? HuggingFaceToken { get; set; }
+
     // ── Text-to-Speech ────────────────────────────────────────────────────
 
     /// <summary>Whether text-to-speech of AI responses is enabled.</summary>

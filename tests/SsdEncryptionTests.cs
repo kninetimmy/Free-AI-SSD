@@ -415,6 +415,77 @@ public sealed class SsdEncryptionTests
     private static string StatePath(string root) => Path.Combine(root, SsdLayout.Config, SsdEncryption.StateFileName);
     private static string EncryptedPath(string root) => Path.Combine(root, SsdLayout.Config, SsdEncryption.EncryptedConfigFileName);
 
+    /// <summary>
+    /// C27 Stage 3: round-trip a non-null HuggingFaceToken through the
+    /// encrypted-config seal so a re-prep doesn't quietly drop the
+    /// user's HF credential. Pins both the field's presence in the
+    /// encrypted JSON and its value-preserving decode.
+    /// </summary>
+    [Fact]
+    public async Task EnableConfigEncryption_PreservesHuggingFaceToken()
+    {
+        var root = CreateTempRoot();
+        try
+        {
+            SsdLayout.EnsureStructure(root);
+            var configPath = Path.Combine(root, "config", "portable-config.json");
+            var config = new PortableConfig
+            {
+                OllamaPort = 12500,
+                HuggingFaceToken = "hf_test_abc123",
+                Models = new List<ModelConfigEntry>
+                {
+                    new() { Name = "llama3.2:3b", Status = ModelInstallStatus.Installed }
+                }
+            };
+            await config.SaveAsync(configPath);
+            await SsdEncryption.EnableConfigEncryptionAsync(root, configPath, "test-password-c27");
+
+            var unlocked = SsdEncryption.TryUnlockPortableConfig(
+                root, "test-password-c27", out var decrypted, out var error);
+
+            Assert.True(unlocked);
+            Assert.NotNull(decrypted);
+            Assert.True(string.IsNullOrWhiteSpace(error));
+            Assert.Equal("hf_test_abc123", decrypted!.HuggingFaceToken);
+        }
+        finally
+        {
+            CleanupTempRoot(root);
+        }
+    }
+
+    /// <summary>
+    /// C27 Stage 3: HuggingFaceToken is optional — old drives sealed
+    /// before Stage 3 lacked the field entirely. Pin that decoding
+    /// such a payload yields a null token (no exception, no garbage
+    /// default) so unlock stays backward compatible.
+    /// </summary>
+    [Fact]
+    public async Task EnableConfigEncryption_NullHuggingFaceToken_RoundTripsAsNull()
+    {
+        var root = CreateTempRoot();
+        try
+        {
+            SsdLayout.EnsureStructure(root);
+            var configPath = Path.Combine(root, "config", "portable-config.json");
+            var config = new PortableConfig { OllamaPort = 12500 };
+            await config.SaveAsync(configPath);
+            await SsdEncryption.EnableConfigEncryptionAsync(root, configPath, "p");
+
+            var unlocked = SsdEncryption.TryUnlockPortableConfig(
+                root, "p", out var decrypted, out _);
+
+            Assert.True(unlocked);
+            Assert.NotNull(decrypted);
+            Assert.Null(decrypted!.HuggingFaceToken);
+        }
+        finally
+        {
+            CleanupTempRoot(root);
+        }
+    }
+
     private static string CreateTempRoot()
     {
         var root = Path.Combine(Path.GetTempPath(), "free-ai-ssd-tests", Guid.NewGuid().ToString("N"));

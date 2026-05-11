@@ -2065,4 +2065,243 @@ public class PrepViewModelTests
             Times.Once);
         _dialogService.Verify(d => d.ConfirmSizingWarnings(It.IsAny<IReadOnlyList<string>>()), Times.Never);
     }
+
+    // ── C27 Stage 3: HF token + finalize plumbing ─────────────────────
+
+    [Fact]
+    public void HuggingFaceTokenInput_RaisesChangedEvent_WithTrimmedValue()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        string? observed = "<unset>";
+        vm.HuggingFaceTokenChanged += (_, t) => observed = t;
+
+        vm.HuggingFaceTokenInput = "  hf_test_abc  ";
+
+        Assert.Equal("hf_test_abc", observed);
+    }
+
+    [Fact]
+    public void HuggingFaceTokenInput_EmptyValue_RaisesNullToken()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        // First install something so the setter sees a real change.
+        vm.HuggingFaceTokenInput = "hf_initial";
+
+        string? observed = "<unset>";
+        vm.HuggingFaceTokenChanged += (_, t) => observed = t;
+
+        vm.HuggingFaceTokenInput = "   ";
+
+        Assert.Null(observed);
+    }
+
+    [Fact]
+    public void IsHuggingFaceTokenFieldVisible_TracksActiveSource()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        Assert.False(vm.IsHuggingFaceTokenFieldVisible);
+
+        vm.ActiveSource = ModelSource.HuggingFace;
+        Assert.True(vm.IsHuggingFaceTokenFieldVisible);
+
+        vm.ActiveSource = ModelSource.Ollama;
+        Assert.False(vm.IsHuggingFaceTokenFieldVisible);
+    }
+
+    [Fact]
+    public void IsHuggingFaceTokenPlaintextWarningVisible_OnlyWhenAllConditionsMet()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+
+        // No source, no token, no encryption → no warning.
+        Assert.False(vm.IsHuggingFaceTokenPlaintextWarningVisible);
+
+        vm.ActiveSource = ModelSource.HuggingFace;
+        Assert.False(vm.IsHuggingFaceTokenPlaintextWarningVisible); // empty token
+
+        vm.HuggingFaceTokenInput = "hf_xyz";
+        Assert.True(vm.IsHuggingFaceTokenPlaintextWarningVisible); // HF + token + no encryption
+
+        vm.EnableEncryption = true;
+        Assert.False(vm.IsHuggingFaceTokenPlaintextWarningVisible); // encryption flips it off
+
+        vm.EnableEncryption = false;
+        vm.ActiveSource = ModelSource.Ollama;
+        Assert.False(vm.IsHuggingFaceTokenPlaintextWarningVisible); // wrong source
+    }
+
+    [Fact]
+    public void BuildHuggingFaceEnv_NullOrEmpty_ReturnsNull()
+    {
+        Assert.Null(PrepViewModel.BuildHuggingFaceEnv(null));
+        Assert.Null(PrepViewModel.BuildHuggingFaceEnv(""));
+        Assert.Null(PrepViewModel.BuildHuggingFaceEnv("   "));
+    }
+
+    [Fact]
+    public void BuildHuggingFaceEnv_NonEmpty_SetsBothEnvVars()
+    {
+        var env = PrepViewModel.BuildHuggingFaceEnv("  hf_abc  ");
+        Assert.NotNull(env);
+        Assert.Equal("hf_abc", env!["HF_TOKEN"]);
+        Assert.Equal("hf_abc", env["HUGGING_FACE_HUB_TOKEN"]);
+    }
+
+    // ── C27 Stage 4: lazy quant expansion ────────────────────────────
+
+    private static ModelGridRow MakeHfParent(string repoTag)
+        => new(
+            name: repoTag,
+            status: "Not downloaded",
+            source: "Recommended",
+            sizingWarning: "OK",
+            sizeDisplay: "—",
+            shaPreview: "—",
+            lastVerifiedDisplay: "—",
+            isOnDiskOnly: false,
+            isPresentOnDrive: false,
+            tier: "Custom",
+            sourceKind: ModelSource.HuggingFace,
+            isExpandable: true);
+
+    [Fact]
+    public async Task ToggleRepoExpansionAsync_FirstExpand_InsertsChildrenBelowParent()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        var parent = MakeHfParent("hf.co/Qwen/Qwen3-8B-GGUF");
+        vm.ModelRows.Add(parent);
+
+        vm.HuggingFaceQuantExpansionHook = (repoId, _) =>
+        {
+            Assert.Equal("Qwen/Qwen3-8B-GGUF", repoId);
+            return Task.FromResult<IReadOnlyList<StarterCatalogEntry>>(new[]
+            {
+                new StarterCatalogEntry(
+                    Tag: "hf.co/Qwen/Qwen3-8B-GGUF:Q4_K_M",
+                    SizeTier: "Custom",
+                    BestAt: "Q4_K_M",
+                    PullCount: null,
+                    Capabilities: Array.Empty<string>(),
+                    ParametersBillion: null,
+                    LastUpdated: null,
+                    Source: ModelSource.HuggingFace,
+                    IsExpandable: false,
+                    ParentRepoId: "Qwen/Qwen3-8B-GGUF",
+                    QuantLabel: "Q4_K_M",
+                    QuantSizeBytes: 4_500_000_000),
+            });
+        };
+
+        await vm.ToggleRepoExpansionAsync(parent);
+
+        Assert.True(parent.IsExpanded);
+        Assert.Equal(2, vm.ModelRows.Count);
+        Assert.Equal("hf.co/Qwen/Qwen3-8B-GGUF:Q4_K_M", vm.ModelRows[1].Name);
+        Assert.Equal("Qwen/Qwen3-8B-GGUF", vm.ModelRows[1].ParentRepoId);
+        Assert.True(vm.ModelRows[1].IsQuantChild);
+    }
+
+    [Fact]
+    public async Task ToggleRepoExpansionAsync_SecondToggle_CollapsesWithoutFetch()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        var parent = MakeHfParent("hf.co/owner/repo");
+        vm.ModelRows.Add(parent);
+        var fetchCount = 0;
+        vm.HuggingFaceQuantExpansionHook = (_, _) =>
+        {
+            fetchCount++;
+            return Task.FromResult<IReadOnlyList<StarterCatalogEntry>>(new[]
+            {
+                new StarterCatalogEntry("hf.co/owner/repo:Q4_K_M", "Custom", "Q4_K_M",
+                    Source: ModelSource.HuggingFace, IsExpandable: false,
+                    ParentRepoId: "owner/repo", QuantLabel: "Q4_K_M", QuantSizeBytes: 1_000_000_000),
+            });
+        };
+
+        await vm.ToggleRepoExpansionAsync(parent); // expand
+        await vm.ToggleRepoExpansionAsync(parent); // collapse
+
+        Assert.False(parent.IsExpanded);
+        Assert.Equal(1, fetchCount); // only the expand fired
+        // Child row remains in ModelRows; visibility filter hides it.
+        Assert.Equal(2, vm.ModelRows.Count);
+        Assert.False(vm.IsModelRowVisible(vm.ModelRows[1]));
+    }
+
+    [Fact]
+    public async Task ToggleRepoExpansionAsync_HookThrows_LogsAndLeavesUncollapsed()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        var parent = MakeHfParent("hf.co/owner/repo");
+        vm.ModelRows.Add(parent);
+        vm.HuggingFaceQuantExpansionHook = (_, _) =>
+            throw new HttpRequestException("simulated 503");
+
+        await vm.ToggleRepoExpansionAsync(parent);
+
+        Assert.False(parent.IsExpanded);
+        Assert.Single(vm.ModelRows); // no children inserted
+    }
+
+    [Fact]
+    public async Task ToggleRepoExpansionAsync_NoHook_LogsAndDoesNothing()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        var parent = MakeHfParent("hf.co/owner/repo");
+        vm.ModelRows.Add(parent);
+        // HuggingFaceQuantExpansionHook stays null (default).
+
+        await vm.ToggleRepoExpansionAsync(parent);
+
+        Assert.False(parent.IsExpanded);
+        Assert.Single(vm.ModelRows);
+    }
+
+    [Fact]
+    public async Task ToggleRepoExpansionAsync_NonExpandableRow_NoOp()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        var ollamaRow = new ModelGridRow(
+            "llama3.2:3b", "Not downloaded", "Recommended", "OK",
+            "—", "—", "—", isOnDiskOnly: false, isPresentOnDrive: false,
+            tier: "Small", isExpandable: false);
+        vm.ModelRows.Add(ollamaRow);
+        var hookCalled = false;
+        vm.HuggingFaceQuantExpansionHook = (_, _) =>
+        {
+            hookCalled = true;
+            return Task.FromResult<IReadOnlyList<StarterCatalogEntry>>(Array.Empty<StarterCatalogEntry>());
+        };
+
+        await vm.ToggleRepoExpansionAsync(ollamaRow);
+
+        Assert.False(hookCalled);
+        Assert.False(ollamaRow.IsExpanded);
+    }
+
+    [Fact]
+    public async Task ToggleRepoExpansionAsync_EmptyChildren_LogsAndMarksExpanded()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        var parent = MakeHfParent("hf.co/owner/repo");
+        vm.ModelRows.Add(parent);
+        vm.HuggingFaceQuantExpansionHook = (_, _) =>
+            Task.FromResult<IReadOnlyList<StarterCatalogEntry>>(Array.Empty<StarterCatalogEntry>());
+
+        await vm.ToggleRepoExpansionAsync(parent);
+
+        Assert.True(parent.IsExpanded); // chevron flips even with no children
+        Assert.Single(vm.ModelRows);
+    }
 }

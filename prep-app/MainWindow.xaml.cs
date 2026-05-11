@@ -84,6 +84,16 @@ public partial class MainWindow : Window
         // shared assembly that hosts the VM). The view-host owns the
         // service and feeds the VM through a delegate hook.
         _viewModel.HuggingFaceSizingWarningsHook = FetchHuggingFaceSizingWarningsAsync;
+        // C27 Stage 3: when the user edits the inline HF token field,
+        // push the new value into the catalog service so subsequent
+        // search / siblings requests carry the Bearer header. The token
+        // also lands in PortableConfig.HuggingFaceToken at finalize time.
+        _viewModel.HuggingFaceTokenChanged += OnHuggingFaceTokenChanged;
+        // C27 Stage 4: lazy per-quant row expansion. The VM fires this
+        // hook when the user clicks the chevron on an HF parent row;
+        // we project siblings[] into one StarterCatalogEntry per GGUF
+        // quant and the VM inserts the resulting child rows.
+        _viewModel.HuggingFaceQuantExpansionHook = FetchHuggingFaceQuantsAsync;
 
         // Thread the parsed command-line intent through to the view
         // model so the elevation banner binds correctly and the
@@ -266,6 +276,31 @@ public partial class MainWindow : Window
             : ModelSource.Ollama;
     }
 
+    /// <summary>
+    /// C27 Stage 3: PasswordBox doesn't expose two-way Binding to its
+    /// .Password property (by design — the plaintext never lands in the
+    /// XAML tree). We sync into the VM on every change here. The
+    /// PasswordBox itself remains the storage of record while PrepApp is
+    /// running; finalize reads <see cref="PrepViewModel.HuggingFaceTokenInput"/>
+    /// to seal into the encrypted config.
+    /// </summary>
+    private void HuggingFaceTokenBox_PasswordChanged(object sender, RoutedEventArgs e)
+    {
+        if (sender is not PasswordBox box) return;
+        _viewModel.HuggingFaceTokenInput = box.Password ?? string.Empty;
+    }
+
+    /// <summary>
+    /// C27 Stage 3: VM raised <see cref="PrepViewModel.HuggingFaceTokenChanged"/>;
+    /// push the new value into the catalog service so subsequent search /
+    /// siblings requests carry the Bearer header. Null = clear the token
+    /// (reverts to anonymous mode).
+    /// </summary>
+    private void OnHuggingFaceTokenChanged(object? sender, string? token)
+    {
+        _hfCatalogService.UpdateAuthToken(token);
+    }
+
     /// <summary>C27 Stage 1: routes a source change to the right fetch.
     /// Cancels any in-flight refresh first (the plan's cancel-and-
     /// restart decision avoids a stale fetch landing on top of the
@@ -419,7 +454,7 @@ public partial class MainWindow : Window
                 {
                     warnings.Add(
                         $"hf.co/{repoId}: Hugging Face refused the metadata request ({ex.StatusCode}). " +
-                        "If the repo is gated or private, token auth lands in Stage 3.");
+                        "If the repo is gated or private, enter your HF token in the field above the model list.");
                 }
                 else
                 {
@@ -435,7 +470,7 @@ public partial class MainWindow : Window
                 warnings.Add(
                     $"hf.co/{repoId}: this repo is " +
                     (details.Gated ? "gated" : "private") +
-                    " and requires a Hugging Face token. Token auth lands in Stage 3 — pull will fail without it.");
+                    " and requires a Hugging Face token. Enter your HF token in the field above the model list, then retry.");
                 continue;
             }
 
@@ -481,6 +516,41 @@ public partial class MainWindow : Window
         return warnings;
     }
 
+    /// <summary>
+    /// C27 Stage 4: chevron click handler on a parent HF row. Delegates
+    /// to the VM's <see cref="PrepViewModel.ToggleRepoExpansionAsync"/>;
+    /// the VM fetches via <see cref="FetchHuggingFaceQuantsAsync"/>
+    /// (wired as <see cref="PrepViewModel.HuggingFaceQuantExpansionHook"/>)
+    /// and inserts the resulting children.
+    /// </summary>
+    private async void RepoExpandToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement fe || fe.DataContext is not ModelGridRow row) return;
+        await _viewModel.ToggleRepoExpansionAsync(row);
+    }
+
+    /// <summary>
+    /// C27 Stage 4: VM-supplied hook to fetch per-quant rows for an HF
+    /// repo. Reuses the existing <see cref="HuggingFaceCatalogService.FetchSiblingsAsync"/>
+    /// path (cache-friendly — Stage 2 already populated it for the
+    /// disk-budget warning), then projects each GGUF sibling into a
+    /// quant child entry. Multi-part series collapse into a single
+    /// entry via <see cref="ProjectQuantChildren"/>.
+    /// </summary>
+    private async Task<IReadOnlyList<StarterCatalogEntry>> FetchHuggingFaceQuantsAsync(
+        string repoId, CancellationToken ct)
+    {
+        var details = await _hfCatalogService.FetchSiblingsAsync(repoId, ct);
+        if (details.Gated || details.Private)
+        {
+            // Surface as no children — the parent stays in the picker
+            // and the user gets the Stage-3 token nudge from the inline
+            // PasswordBox above the picker.
+            return Array.Empty<StarterCatalogEntry>();
+        }
+        return HuggingFaceQuantProjector.Project(repoId, details.Siblings);
+    }
+
     /// <summary>C27 Stage 1: cancel any in-flight refresh so a source
     /// switch never leaves a stale fetch landing on top of the new
     /// source's catalog.</summary>
@@ -513,7 +583,11 @@ public partial class MainWindow : Window
                 Capabilities: m.UseCases.ToList(),
                 ParametersBillion: m.ParametersBillion,
                 LastUpdated: m.LastUpdated,
-                Source: m.Source))
+                Source: m.Source,
+                // C27 Stage 4: HF rows are repo-level — clicking the
+                // chevron lazy-fetches per-quant children via the
+                // HuggingFaceQuantExpansionHook wired in MainWindow.
+                IsExpandable: m.Source == ModelSource.HuggingFace))
             .ToList();
     }
 

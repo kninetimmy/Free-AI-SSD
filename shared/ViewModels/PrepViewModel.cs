@@ -33,6 +33,25 @@ public class PrepViewModel : BaseViewModel
     /// </summary>
     public Func<IReadOnlyList<string>, long, CancellationToken, Task<IReadOnlyList<string>>>? HuggingFaceSizingWarningsHook { get; set; }
 
+    /// <summary>
+    /// C27 Stage 4: view-host-supplied hook that lazily fetches the per-
+    /// quant GGUF rows for a Hugging Face repo. Receives the bare repoId
+    /// (no <c>hf.co/</c> prefix); returns the projected quant child rows
+    /// the VM inserts beneath the parent. Same delegate-hook posture as
+    /// <see cref="HuggingFaceSizingWarningsHook"/> — keeps <c>shared/</c>
+    /// free of a direct dependency on <c>prep-core/</c>.
+    /// </summary>
+    public Func<string, CancellationToken, Task<IReadOnlyList<StarterCatalogEntry>>>? HuggingFaceQuantExpansionHook { get; set; }
+
+    /// <summary>
+    /// C27 Stage 3: raised when <see cref="HuggingFaceTokenInput"/> changes
+    /// so the view-host can push the new token into its
+    /// <c>HuggingFaceCatalogService</c> instance (or, on Mac, into the
+    /// sidecar's per-request payload). Carrying the token through an event
+    /// keeps the VM free of any direct reference to the service.
+    /// </summary>
+    public event EventHandler<string?>? HuggingFaceTokenChanged;
+
     private IReadOnlyList<DriveTarget> _drives = Array.Empty<DriveTarget>();
     private DriveTarget? _selectedDrive;
     private bool _showFixedDrives;
@@ -103,6 +122,23 @@ public class PrepViewModel : BaseViewModel
     // Most-popular toggle) survives the switch — switching source is
     // about *which* catalog feeds the picker, not how it's narrowed.
     private ModelSource _activeSource = ModelSource.Ollama;
+
+    // C27 Stage 3: optional Hugging Face token entered inline next to
+    // the Source dropdown when ActiveSource == HuggingFace. Stored to
+    // the encrypted portable-config at finalize time. Empty by default
+    // (anonymous read). Setter raises HuggingFaceTokenChanged so the
+    // view-host can push the new token into its catalog service / IPC
+    // payload immediately — important when the user types a token to
+    // unlock a gated row mid-session.
+    private string _huggingFaceTokenInput = string.Empty;
+
+    // C27 Stage 4: set of repoIds whose per-quant children have been
+    // materialized into ModelRows. Tracked so a re-collapse can locate
+    // and remove the child rows without re-fetching, and so a follow-on
+    // expand of the same repo skips the API roundtrip. Keys are bare
+    // repoIds (no `hf.co/` prefix).
+    private readonly HashSet<string> _expandedRepos =
+        new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>C26: choices surfaced in the Most-popular limit dropdown.
     /// 50 is the upper cap — anything higher starts feeling like "show
@@ -314,8 +350,27 @@ public class PrepViewModel : BaseViewModel
     public bool EnableEncryption
     {
         get => _enableEncryption;
-        set => SetProperty(ref _enableEncryption, value);
+        set
+        {
+            if (SetProperty(ref _enableEncryption, value))
+            {
+                // C27 Stage 3: encryption toggle drives the HF token's
+                // plaintext-warning banner.
+                OnPropertyChanged(nameof(IsHuggingFaceTokenPlaintextWarningVisible));
+            }
+        }
     }
+
+    /// <summary>
+    /// C27 Stage 3: surface a yellow defense-in-depth warning when the
+    /// user has entered an HF token but left encryption off. Persists the
+    /// token (the user's call), but makes the trade-off visible. Bound
+    /// to the inline UI banner under the token field.
+    /// </summary>
+    public bool IsHuggingFaceTokenPlaintextWarningVisible
+        => !_enableEncryption
+           && _activeSource == ModelSource.HuggingFace
+           && !string.IsNullOrWhiteSpace(_huggingFaceTokenInput);
 
     public string VolumeLabel
     {
@@ -572,9 +627,45 @@ public class PrepViewModel : BaseViewModel
             if (SetProperty(ref _activeSource, value))
             {
                 ActiveSourceChanged?.Invoke(this, EventArgs.Empty);
+                // C27 Stage 3: token field + plaintext warning track source.
+                OnPropertyChanged(nameof(IsHuggingFaceTokenFieldVisible));
+                OnPropertyChanged(nameof(IsHuggingFaceTokenPlaintextWarningVisible));
             }
         }
     }
+
+    /// <summary>
+    /// C27 Stage 3: Hugging Face access token entered inline next to the
+    /// Source dropdown. Persisted to <c>PortableConfig.HuggingFaceToken</c>
+    /// at <see cref="FinalizeAsync"/> time; rides the AES-256-GCM seal
+    /// when encryption is on. Empty default = anonymous mode. Setter
+    /// raises <see cref="HuggingFaceTokenChanged"/> so the view-host can
+    /// refresh the service's auth header without waiting for finalize.
+    /// </summary>
+    public string HuggingFaceTokenInput
+    {
+        get => _huggingFaceTokenInput;
+        set
+        {
+            var trimmed = value ?? string.Empty;
+            if (SetProperty(ref _huggingFaceTokenInput, trimmed))
+            {
+                HuggingFaceTokenChanged?.Invoke(
+                    this,
+                    string.IsNullOrWhiteSpace(trimmed) ? null : trimmed.Trim());
+                OnPropertyChanged(nameof(IsHuggingFaceTokenPlaintextWarningVisible));
+            }
+        }
+    }
+
+    /// <summary>
+    /// C27 Stage 3: Hugging Face token entry is only relevant when the
+    /// active source is HuggingFace. Bound to the inline PasswordBox /
+    /// SecureField visibility so the field disappears under the Ollama
+    /// source.
+    /// </summary>
+    public bool IsHuggingFaceTokenFieldVisible
+        => _activeSource == ModelSource.HuggingFace;
 
     /// <summary>M11: caption that announces the visible row count + cap
     /// reason. Empty when no filter or search is active. Mirrors the Mac
@@ -603,6 +694,15 @@ public class PrepViewModel : BaseViewModel
     /// state; safe to unit-test.</summary>
     public bool IsModelRowVisible(ModelGridRow row)
     {
+        // C27 Stage 4: hide quant child rows whose parent repo is not
+        // currently expanded. Children stay in ModelRows so a re-expand
+        // doesn't re-hit the API — visibility is purely a filter pass.
+        if (!string.IsNullOrEmpty(row.ParentRepoId)
+            && !_expandedRepos.Contains(row.ParentRepoId))
+        {
+            return false;
+        }
+
         var needle = _modelSearchText.Trim();
         if (needle.Length > 0)
         {
@@ -1132,6 +1232,147 @@ public class PrepViewModel : BaseViewModel
     }
 
     /// <summary>
+    /// C27 Stage 4: toggle expansion of a Hugging Face repo row. On
+    /// first expand, invokes <see cref="HuggingFaceQuantExpansionHook"/>
+    /// to fetch <c>siblings[]</c>, projects each GGUF into a quant
+    /// child entry, and inserts the children directly below the
+    /// parent in <see cref="ModelRows"/>. Subsequent toggles flip
+    /// expansion state and add/remove the same children from the
+    /// view's filter pass (rows survive in the collection — the
+    /// filter callback gates visibility via <see cref="ModelGridRow.ParentRepoId"/>).
+    /// No-op (with a log line) when the hook is null — the WPF host
+    /// wires it from <c>HuggingFaceCatalogService.FetchSiblingsAsync</c>
+    /// and the Mac sidecar wires it from the <c>hf-siblings</c> IPC arm.
+    /// </summary>
+    public async Task ToggleRepoExpansionAsync(ModelGridRow parent, CancellationToken ct = default)
+    {
+        if (parent is null) throw new ArgumentNullException(nameof(parent));
+        if (!parent.IsExpandable) return;
+        if (parent.IsExpanding) return;
+
+        var repoId = StripHuggingFacePrefix(parent.Name);
+        if (string.IsNullOrWhiteSpace(repoId)) return;
+
+        // Re-collapse: flip the bit and refresh the filter callback so
+        // the children fall out of the visible set. The child rows stay
+        // in ModelRows so a follow-on expand is instant (no API call).
+        if (parent.IsExpanded)
+        {
+            parent.IsExpanded = false;
+            _expandedRepos.Remove(repoId);
+            ModelRowsViewInvalidated?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        // Already materialized? Just flip the bit and refresh.
+        if (_expandedRepos.Contains(repoId)
+            && ModelRows.Any(r => string.Equals(r.ParentRepoId, repoId, StringComparison.OrdinalIgnoreCase)))
+        {
+            parent.IsExpanded = true;
+            ModelRowsViewInvalidated?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        var hook = HuggingFaceQuantExpansionHook;
+        if (hook is null)
+        {
+            AppendLog($"Cannot expand {parent.Name}: no Hugging Face quant-expansion hook is wired.");
+            return;
+        }
+
+        parent.IsExpanding = true;
+        try
+        {
+            IReadOnlyList<StarterCatalogEntry> children;
+            try
+            {
+                children = await hook(repoId, ct);
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"Could not fetch quants for hf.co/{repoId}: {ex.Message}");
+                return;
+            }
+
+            if (children.Count == 0)
+            {
+                AppendLog($"hf.co/{repoId} has no GGUF quants to expand.");
+                parent.IsExpanded = true; // Still mark expanded so the chevron flips.
+                _expandedRepos.Add(repoId);
+                return;
+            }
+
+            var parentIndex = ModelRows.IndexOf(parent);
+            if (parentIndex < 0)
+            {
+                AppendLog($"Parent row for hf.co/{repoId} missing from picker; aborting expand.");
+                return;
+            }
+
+            // Children inherit the parent's PullCount + LastUpdated so
+            // they sort adjacent to the parent under Popular / Newest;
+            // alphabetical sort uses the tag (parent + ":quant") which
+            // naturally clusters them. The chevron + indent in WPF / Mac
+            // is the visual hierarchy cue.
+            var insertAt = parentIndex + 1;
+            foreach (var child in children)
+            {
+                var childRow = new ModelGridRow(
+                    name: child.Tag,
+                    status: "Not downloaded",
+                    source: "Recommended",
+                    sizingWarning: "OK",
+                    sizeDisplay: child.QuantSizeBytes is { } q && q > 0 ? FormatSize(q) : "—",
+                    shaPreview: "—",
+                    lastVerifiedDisplay: "—",
+                    isOnDiskOnly: false,
+                    isPresentOnDrive: false,
+                    tier: parent.Tier,
+                    bestAt: child.BestAt,
+                    pullCount: parent.PullCount,
+                    capabilities: parent.Capabilities,
+                    parametersBillion: parent.ParametersBillion,
+                    lastUpdated: parent.LastUpdated,
+                    sourceKind: ModelSource.HuggingFace,
+                    isExpandable: false,
+                    parentRepoId: repoId,
+                    quantLabel: child.QuantLabel,
+                    quantSizeBytes: child.QuantSizeBytes);
+                ModelRows.Insert(insertAt++, childRow);
+            }
+
+            parent.IsExpanded = true;
+            _expandedRepos.Add(repoId);
+            ModelRowsViewInvalidated?.Invoke(this, EventArgs.Empty);
+        }
+        finally
+        {
+            parent.IsExpanding = false;
+        }
+    }
+
+    /// <summary>
+    /// C27 Stage 3: build the env-var dictionary passed into the temp
+    /// Ollama server for HF GGUF pulls. Returns null (= no extra env)
+    /// when the token is missing/empty so the server's env doesn't grow
+    /// unnecessarily. <c>HF_TOKEN</c> is the modern Ollama variable
+    /// name; we also set <c>HUGGING_FACE_HUB_TOKEN</c> for older builds
+    /// that haven't picked up the rename. Internal for direct unit
+    /// testing — the helper is pure so a token round-trip pin can run
+    /// without spinning up a real Ollama process.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string>? BuildHuggingFaceEnv(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return null;
+        var trimmed = token.Trim();
+        return new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["HF_TOKEN"] = trimmed,
+            ["HUGGING_FACE_HUB_TOKEN"] = trimmed,
+        };
+    }
+
+    /// <summary>
     /// C27 Stage 2: strip the <c>hf.co/</c> prefix from an HF row's tag
     /// to recover the bare repoId (<c>owner/repo</c>) that
     /// <see cref="HuggingFaceSizingWarningsHook"/> expects. Returns the
@@ -1186,8 +1427,14 @@ public class PrepViewModel : BaseViewModel
             // icons, persist after the app exits, and cause crashes).
             ProgressIsIndeterminate = true;
             StatusText = "Starting temporary Ollama server...";
+            // C27 Stage 3: pass the user's HF token (if any) into the
+            // temp server's env so gated/private `hf.co/...` pulls
+            // can authenticate. Ollama reads HF_TOKEN /
+            // HUGGING_FACE_HUB_TOKEN at /api/pull time. Non-HF pulls
+            // ignore the env entries — harmless to set unconditionally.
+            var hfEnv = BuildHuggingFaceEnv(_huggingFaceTokenInput);
             serverHandle = await _ollamaPackageService.StartTemporaryServerAsync(
-                ollamaExe, modelsRoot, AppendLog, _modelOperationCts.Token);
+                ollamaExe, modelsRoot, AppendLog, _modelOperationCts.Token, hfEnv);
 
             foreach (var model in models)
             {
@@ -1805,6 +2052,19 @@ public class PrepViewModel : BaseViewModel
                 config.NetworkApiKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(32))
                     .ToLowerInvariant();
             }
+
+            // C27 Stage 3: thread the user-entered HF token through. Trim
+            // whitespace; empty input *preserves* any existing token on
+            // the drive (re-finalize is idempotent for credentials —
+            // the user shouldn't have to re-type the token every time).
+            // Mirrors the NetworkApiKey idempotent-re-finalize posture
+            // a few lines above.
+            var hfToken = (_huggingFaceTokenInput ?? string.Empty).Trim();
+            if (hfToken.Length > 0)
+            {
+                config.HuggingFaceToken = hfToken;
+            }
+
             await _modelService.SaveConfigAsync(configPath, config);
             await RefreshModelStatusesAsync();
 
@@ -2137,7 +2397,10 @@ public class PrepViewModel : BaseViewModel
                 "Not downloaded",
                 "Recommended",
                 warnings.Count == 0 ? "OK" : string.Join("; ", warnings),
-                "—", "—", "—",
+                // C27 Stage 4: quant child rows carry a real size from
+                // siblings[].lfs.size; parents still render "—".
+                entry.QuantSizeBytes is { } q && q > 0 ? FormatSize(q) : "—",
+                "—", "—",
                 isOnDiskOnly: false,
                 isPresentOnDrive: false,
                 tier: entry.SizeTier,
@@ -2146,7 +2409,11 @@ public class PrepViewModel : BaseViewModel
                 capabilities: entry.Capabilities ?? Array.Empty<string>(),
                 parametersBillion: entry.ParametersBillion,
                 lastUpdated: entry.LastUpdated,
-                sourceKind: entry.Source);
+                sourceKind: entry.Source,
+                isExpandable: entry.IsExpandable,
+                parentRepoId: entry.ParentRepoId,
+                quantLabel: entry.QuantLabel,
+                quantSizeBytes: entry.QuantSizeBytes);
             row.IsSelected = false;
             yield return row;
         }

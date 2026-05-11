@@ -281,4 +281,57 @@ public sealed class MacEncryptedConfigCrossLanguageTests
         var testsDir = Path.GetDirectoryName(thisFile)!;
         return Path.Combine(testsDir, "Fixtures", "MacEncryptedConfig", "swift-prep-encrypted");
     }
+
+    // ----------------------------------------------------------------------
+    // C27 Stage 3: HF token cross-language field-shape pin
+    //
+    // The Swift PrepApp's `InitialPortableConfigPayload` emits the HF token
+    // under the JSON key `huggingFaceToken`. PortableConfig (C#) deserializes
+    // via JsonNamingPolicy.CamelCase, so the Swift-side key must match the
+    // C# property name in camelCase. This test pins the round-trip from a
+    // Swift-style raw JSON dict through C# decryption — catches drift if
+    // either side ever renames the field.
+    // ----------------------------------------------------------------------
+
+    [Fact]
+    public async Task CSharpUnlock_OfPayloadWithHuggingFaceToken_PreservesValue()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "free-ai-ssd-tests",
+            "c27-hf-cross-lang-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            SsdLayout.EnsureStructure(root);
+            var configPath = Path.Combine(root, SsdLayout.Config, "portable-config.json");
+            // Mimic what Swift's `InitialPortableConfigPayload.asDictionary()`
+            // emits with a token set: a flat JSON object with camelCase keys.
+            // Writing the raw JSON (rather than a PortableConfig instance)
+            // pins that the Swift wire format remains C#-decodable end-to-end.
+            var swiftStyleJson = """
+                {
+                  "ollamaPort": 13577,
+                  "networkModeEnabled": false,
+                  "networkBindAddress": "127.0.0.1",
+                  "networkPort": 41555,
+                  "networkRequireApiKey": true,
+                  "networkApiKey": "swift-side-fake-key-0123456789abcdef",
+                  "preferredCompute": "cpu",
+                  "models": [],
+                  "huggingFaceToken": "hf_swift_origin_token_xyz"
+                }
+                """;
+            await File.WriteAllTextAsync(configPath, swiftStyleJson);
+            await SsdEncryption.EnableConfigEncryptionAsync(root, configPath, "c27-cross-lang-pw");
+
+            var unlocked = SsdEncryption.TryUnlockPortableConfig(
+                root, "c27-cross-lang-pw", out var decrypted, out _);
+
+            Assert.True(unlocked);
+            Assert.NotNull(decrypted);
+            Assert.Equal("hf_swift_origin_token_xyz", decrypted!.HuggingFaceToken);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
 }

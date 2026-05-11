@@ -931,6 +931,48 @@ struct PrepAppTestsMain {
                        "llama should sort newest first, got \(out.first?.tag ?? "nil")")
         }
 
+        runner.test("C27 Stage 4: HF entries decode isExpandable=true") {
+            let payload = makeC27HuggingFacePayloadStage4()
+            let decoded = decodeStarterEntries(from: payload)
+            try expect(decoded.allSatisfy { $0.isExpandable == true },
+                       "stage 4 sidecar payload should mark every HF row expandable")
+            let display = decoded.map(StarterModelDisplayEntry.from)
+            try expect(display.allSatisfy { $0.isExpandable },
+                       "display rows should carry isExpandable through the projection")
+        }
+
+        runner.test("C27 Stage 4: pre-Stage-4 payload defaults isExpandable=false") {
+            // Old sidecar (Stage 1/2 era) emits no `isExpandable` field —
+            // the `Bool?` decode falls through and `from(_:)` resolves to
+            // false so the chevron stays hidden.
+            let payload = makeC27HuggingFacePayload()
+            let display = decodeStarterEntries(from: payload).map(StarterModelDisplayEntry.from)
+            try expect(display.allSatisfy { !$0.isExpandable },
+                       "pre-Stage-4 payload should leave rows non-expandable")
+        }
+
+        runner.test("C27 Stage 4: quant child constructor wires parent + size") {
+            // Pin the Swift display constructor's quant-child branch:
+            // parentRepoId + quantLabel + size flow through and isQuantChild
+            // is true. Mirrors the C# `IsQuantChild` predicate.
+            let child = StarterModelDisplayEntry(
+                tag: "hf.co/Qwen/Qwen3-8B-GGUF:Q4_K_M",
+                sizeTier: "Custom",
+                bestAt: "Q4_K_M",
+                pullCount: 245321,
+                capabilities: [],
+                parametersBillion: nil,
+                lastUpdated: nil,
+                sourceKind: .huggingFace,
+                isExpandable: false,
+                parentRepoId: "Qwen/Qwen3-8B-GGUF",
+                quantLabel: "Q4_K_M",
+                quantSizeBytes: 4_500_000_000)
+            try expect(child.isQuantChild, "expected isQuantChild to be true")
+            try expect(child.quantLabel == "Q4_K_M", "quant label mismatch")
+            try expect(child.quantSizeBytes == 4_500_000_000, "size mismatch")
+        }
+
         runner.test("C27: HF rows with nil parametersBillion pass through cap filter") {
             // The HF service emits a best-effort parametersBillion from
             // the repo id (e.g., "8B" → 8.0). A repo without a numeric
@@ -1110,6 +1152,44 @@ private func makeC27HuggingFacePayload() -> [String: Any] {
                 "parametersBillion": 7.0,
                 "lastUpdated": "2026-05-02T10:03:45+00:00",
                 "source": "HuggingFace",
+            ],
+        ],
+    ]
+}
+
+/// C27 Stage 4: same shape as `makeC27HuggingFacePayload` but with the
+/// new `isExpandable=true` field every entry — mirrors the wire format
+/// the post-Stage-4 sidecar emits.
+private func makeC27HuggingFacePayloadStage4() -> [String: Any] {
+    return [
+        "ok": true,
+        "fetchedAt": "2026-05-12T09:00:00+00:00",
+        "sourceUrl": "https://huggingface.co/api/models",
+        "query": NSNull(),
+        "entries": [
+            [
+                "tag": "hf.co/Qwen/Qwen3-8B-GGUF",
+                "params": "",
+                "sizeTier": "Custom",
+                "description": "",
+                "useCases": [String](),
+                "pullCount": Int64(245321),
+                "parametersBillion": 8.0,
+                "lastUpdated": "2026-04-28T14:22:11+00:00",
+                "source": "HuggingFace",
+                "isExpandable": true,
+            ],
+            [
+                "tag": "hf.co/Qwen/Qwen3-70B-GGUF",
+                "params": "",
+                "sizeTier": "Custom",
+                "description": "",
+                "useCases": [String](),
+                "pullCount": Int64(99012),
+                "parametersBillion": 70.0,
+                "lastUpdated": "2026-05-01T08:11:33+00:00",
+                "source": "HuggingFace",
+                "isExpandable": true,
             ],
         ],
     ]

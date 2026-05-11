@@ -610,6 +610,208 @@ public class HuggingFaceCatalogServiceTests
         return File.ReadAllText(path);
     }
 
+    // ── C27 Stage 3: token auth ────────────────────────────────────────
+
+    [Fact]
+    public async Task SearchAsync_WithAuthToken_AddsBearerHeader()
+    {
+        string? observedAuth = null;
+        using var handler = new StubHandler((req, _) =>
+        {
+            observedAuth = req.Headers.Authorization?.ToString();
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("[]", Encoding.UTF8, "application/json")
+            });
+        });
+        using var client = new HttpClient(handler);
+        using var svc = new HuggingFaceCatalogService(client);
+
+        svc.UpdateAuthToken("hf_test_abc123");
+        await svc.SearchAsync(new HuggingFaceSearchQuery(), CancellationToken.None);
+
+        Assert.Equal("Bearer hf_test_abc123", observedAuth);
+    }
+
+    [Fact]
+    public async Task FetchSiblingsAsync_WithAuthToken_AddsBearerHeader()
+    {
+        string? observedAuth = null;
+        using var handler = new StubHandler((req, _) =>
+        {
+            observedAuth = req.Headers.Authorization?.ToString();
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"id\":\"o/r\",\"siblings\":[]}", Encoding.UTF8, "application/json")
+            });
+        });
+        using var client = new HttpClient(handler);
+        using var svc = new HuggingFaceCatalogService(client);
+
+        svc.UpdateAuthToken("  hf_token_xyz  ");
+        await svc.FetchSiblingsAsync("owner/repo", CancellationToken.None);
+
+        Assert.Equal("Bearer hf_token_xyz", observedAuth);
+    }
+
+    [Fact]
+    public async Task SearchAsync_WithoutToken_OmitsAuthHeader()
+    {
+        string? observedAuth = "<unset>";
+        using var handler = new StubHandler((req, _) =>
+        {
+            observedAuth = req.Headers.Authorization?.ToString();
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("[]", Encoding.UTF8, "application/json")
+            });
+        });
+        using var client = new HttpClient(handler);
+        using var svc = new HuggingFaceCatalogService(client);
+
+        await svc.SearchAsync(new HuggingFaceSearchQuery(), CancellationToken.None);
+
+        Assert.Null(observedAuth);
+    }
+
+    [Fact]
+    public void UpdateAuthToken_NormalizesEmptyToNull()
+    {
+        using var svc = new HuggingFaceCatalogService();
+        svc.UpdateAuthToken("hf_xyz");
+        Assert.Equal("hf_xyz", svc.AuthToken);
+        svc.UpdateAuthToken("   ");
+        Assert.Null(svc.AuthToken);
+    }
+
+    [Fact]
+    public async Task UpdateAuthToken_DropsCachedSiblings()
+    {
+        var calls = 0;
+        using var handler = new StubHandler((_, _) =>
+        {
+            calls++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"id\":\"o/r\",\"siblings\":[]}", Encoding.UTF8, "application/json")
+            });
+        });
+        using var client = new HttpClient(handler);
+        using var svc = new HuggingFaceCatalogService(client);
+
+        // First call populates cache.
+        await svc.FetchSiblingsAsync("owner/repo", CancellationToken.None);
+        // Second call hits the cache.
+        await svc.FetchSiblingsAsync("owner/repo", CancellationToken.None);
+        Assert.Equal(1, calls);
+
+        // Token install drops the cache; next fetch hits the network again.
+        svc.UpdateAuthToken("hf_token");
+        await svc.FetchSiblingsAsync("owner/repo", CancellationToken.None);
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public async Task SearchAsync_With401_SurfacesNonSuccessStatus()
+    {
+        using var handler = new StubHandler((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)));
+        using var client = new HttpClient(handler);
+        using var svc = new HuggingFaceCatalogService(client);
+
+        var ex = await Assert.ThrowsAsync<LiveCatalogFetchException>(
+            () => svc.SearchAsync(new HuggingFaceSearchQuery(), CancellationToken.None));
+        Assert.Equal(LiveCatalogFetchReason.NonSuccessStatus, ex.Reason);
+        Assert.Equal("401", ex.StatusCode);
+    }
+
+    // ── C27 Stage 4: per-quant projection ──────────────────────────────
+
+    [Fact]
+    public void ProjectQuantChildren_ProducesOneRowPerDistinctQuant()
+    {
+        var siblings = new List<HuggingFaceSiblingFile>
+        {
+            new("README.md", null),
+            new("Qwen3-8B-Q4_K_M.gguf", 4_500_000_000),
+            new("Qwen3-8B-Q5_K_M.gguf", 5_500_000_000),
+            new("Qwen3-8B-Q8_0.gguf", 8_700_000_000),
+        };
+
+        var children = HuggingFaceQuantProjector.Project("Qwen/Qwen3-8B-GGUF", siblings);
+
+        Assert.Equal(3, children.Count);
+        // Sort order: Q4 → Q5 → Q8 (smallest → largest by digit).
+        Assert.Equal("Q4_K_M", children[0].QuantLabel);
+        Assert.Equal("Q5_K_M", children[1].QuantLabel);
+        Assert.Equal("Q8_0", children[2].QuantLabel);
+        Assert.All(children, c => Assert.Equal("Qwen/Qwen3-8B-GGUF", c.ParentRepoId));
+        Assert.All(children, c => Assert.Equal(ModelSource.HuggingFace, c.Source));
+        Assert.All(children, c => Assert.False(c.IsExpandable));
+        Assert.Equal("hf.co/Qwen/Qwen3-8B-GGUF:Q4_K_M", children[0].Tag);
+        Assert.Equal(4_500_000_000L, children[0].QuantSizeBytes);
+    }
+
+    [Fact]
+    public void ProjectQuantChildren_SumsMultiPartSeries()
+    {
+        var siblings = new List<HuggingFaceSiblingFile>
+        {
+            new("Qwen3-70B-Q4_K_M-00001-of-00003.gguf", 10_000_000_000),
+            new("Qwen3-70B-Q4_K_M-00002-of-00003.gguf", 10_000_000_000),
+            new("Qwen3-70B-Q4_K_M-00003-of-00003.gguf", 10_000_000_000),
+        };
+
+        var children = HuggingFaceQuantProjector.Project("Qwen/Qwen3-70B-GGUF", siblings);
+
+        Assert.Single(children);
+        var only = children[0];
+        Assert.Equal("Q4_K_M", only.QuantLabel);
+        Assert.Equal(30_000_000_000L, only.QuantSizeBytes);
+        Assert.Contains("3-part split", only.BestAt);
+    }
+
+    [Fact]
+    public void ProjectQuantChildren_SkipsNonGgufAndUnlabeled()
+    {
+        var siblings = new List<HuggingFaceSiblingFile>
+        {
+            new("README.md", null),
+            new("config.json", null),
+            new("model-no-quant-label.gguf", 1_000_000),
+            new("Qwen3-8B-Q4_K_M.gguf", 5_000_000_000),
+        };
+
+        var children = HuggingFaceQuantProjector.Project("Qwen/Qwen3-8B-GGUF", siblings);
+
+        Assert.Single(children);
+        Assert.Equal("Q4_K_M", children[0].QuantLabel);
+    }
+
+    [Fact]
+    public void ExtractQuantLabel_HandlesCommonPatterns()
+    {
+        Assert.Equal("Q4_K_M", HuggingFaceQuantProjector.ExtractQuantLabel("Qwen3-8B-Q4_K_M.gguf"));
+        Assert.Equal("Q8_0", HuggingFaceQuantProjector.ExtractQuantLabel("Llama-3.1-8B.Q8_0.gguf"));
+        Assert.Equal("F16", HuggingFaceQuantProjector.ExtractQuantLabel("Mistral-7B.F16.gguf"));
+        Assert.Equal("BF16", HuggingFaceQuantProjector.ExtractQuantLabel("Phi-3-mini-BF16.gguf"));
+        Assert.Equal("IQ2_XXS", HuggingFaceQuantProjector.ExtractQuantLabel("Qwen3-30B-IQ2_XXS.gguf"));
+        Assert.Null(HuggingFaceQuantProjector.ExtractQuantLabel("README.md"));
+        Assert.Null(HuggingFaceQuantProjector.ExtractQuantLabel("model.gguf"));
+    }
+
+    [Fact]
+    public void QuantSortOrder_OrdersSmallToLarge()
+    {
+        var labels = new[] { "Q8_0", "Q4_K_M", "F16", "Q5_K_M", "IQ2_XXS", "BF16", "F32" };
+        var ordered = labels
+            .OrderBy(l => HuggingFaceQuantProjector.QuantSortOrder(l), StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        Assert.Equal(new[] { "IQ2_XXS", "Q4_K_M", "Q5_K_M", "Q8_0", "BF16", "F16", "F32" }, ordered);
+    }
+
     private sealed class StubHandler : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _handler;

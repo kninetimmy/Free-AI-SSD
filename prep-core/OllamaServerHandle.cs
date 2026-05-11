@@ -44,7 +44,11 @@ public sealed class OllamaServerHandle : IOllamaServerHandle
     /// <param name="ct">Cancellation token.</param>
     /// <returns>A handle that must be disposed to stop the server.</returns>
     public static async Task<OllamaServerHandle> StartAsync(
-        string ollamaExe, string modelsRoot, Action<string> onLog, CancellationToken ct)
+        string ollamaExe,
+        string modelsRoot,
+        Action<string> onLog,
+        CancellationToken ct,
+        IReadOnlyDictionary<string, string>? extraEnv = null)
     {
         var port = FindAvailablePort();
         var host = $"127.0.0.1:{port}";
@@ -61,6 +65,21 @@ public sealed class OllamaServerHandle : IOllamaServerHandle
             CreateNoWindow = true
         };
         startInfo.ArgumentList.Add("serve");
+        // C27 Stage 3: extra env first, then OLLAMA_* — the latter MUST win
+        // so callers can't accidentally redirect the server off the staging
+        // root or to a wrong host. Token values are never logged: the
+        // process env is opaque to the parent's stdout, and we don't print
+        // it here.
+        if (extraEnv is not null)
+        {
+            foreach (var kv in extraEnv)
+            {
+                if (string.IsNullOrEmpty(kv.Key)) continue;
+                if (string.Equals(kv.Key, "OLLAMA_MODELS", StringComparison.OrdinalIgnoreCase)) continue;
+                if (string.Equals(kv.Key, "OLLAMA_HOST", StringComparison.OrdinalIgnoreCase)) continue;
+                startInfo.Environment[kv.Key] = kv.Value ?? string.Empty;
+            }
+        }
         startInfo.Environment["OLLAMA_MODELS"] = modelsRoot;
         startInfo.Environment["OLLAMA_HOST"] = host;
 

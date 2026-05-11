@@ -17,16 +17,47 @@ public sealed class ModelGridRow(
     IReadOnlyList<string>? capabilities = null,
     double? parametersBillion = null,
     DateTimeOffset? lastUpdated = null,
-    ModelSource sourceKind = ModelSource.Ollama)
+    ModelSource sourceKind = ModelSource.Ollama,
+    bool isExpandable = false,
+    string? parentRepoId = null,
+    string? quantLabel = null,
+    long? quantSizeBytes = null)
     : BaseViewModel
 {
     private bool _isSelected;
+    private bool _isExpanded;
+    private bool _isExpanding;
 
     /// <summary>Whether this row is checked for bulk actions in the merged grid.</summary>
     public bool IsSelected
     {
         get => _isSelected;
         set => SetProperty(ref _isSelected, value);
+    }
+
+    /// <summary>
+    /// C27 Stage 4: expansion state of a Hugging Face repo row.
+    /// Toggled by <see cref="FreeAiSsd.Shared.ViewModels.PrepViewModel.ToggleRepoExpansionAsync"/>.
+    /// The chevron in WPF / DisclosureGroup label in SwiftUI binds here
+    /// — the actual child-row insertion lives on the VM so unit tests
+    /// can drive expansion without a UI.
+    /// </summary>
+    public bool IsExpanded
+    {
+        get => _isExpanded;
+        set => SetProperty(ref _isExpanded, value);
+    }
+
+    /// <summary>
+    /// C27 Stage 4: true while <see cref="FreeAiSsd.Shared.ViewModels.PrepViewModel.ToggleRepoExpansionAsync"/>
+    /// is fetching siblings for this parent row. Drives a "Loading…"
+    /// placeholder child + disables the chevron so a double-click
+    /// doesn't fire two parallel fetches against the HF API.
+    /// </summary>
+    public bool IsExpanding
+    {
+        get => _isExpanding;
+        set => SetProperty(ref _isExpanding, value);
     }
 
     public string Name { get; } = name;
@@ -73,6 +104,39 @@ public sealed class ModelGridRow(
     /// string <see cref="Source"/> column ("Recommended"/"Config"/"Disk").
     /// </summary>
     public ModelSource SourceKind { get; } = sourceKind;
+
+    /// <summary>
+    /// C27 Stage 4: this row is a Hugging Face repo whose per-quant
+    /// children can be lazily fetched via the chevron. False for
+    /// configured/on-disk rows, bundled Ollama entries, and the quant
+    /// child rows themselves.
+    /// </summary>
+    public bool IsExpandable { get; } = isExpandable;
+
+    /// <summary>
+    /// C27 Stage 4: set on a per-quant child row to the parent repoId
+    /// (no <c>hf.co/</c> prefix). Null on parents + non-HF rows. Used
+    /// by the VM to find and remove children on collapse, and by the
+    /// sort comparator to keep parent + children adjacent.
+    /// </summary>
+    public string? ParentRepoId { get; } = parentRepoId;
+
+    /// <summary>
+    /// C27 Stage 4: the quant label shown on a child row (e.g.
+    /// <c>Q4_K_M</c>, <c>Q8_0</c>, <c>F16</c>). Null on parents.
+    /// </summary>
+    public string? QuantLabel { get; } = quantLabel;
+
+    /// <summary>
+    /// C27 Stage 4: byte count of a quant child's primary GGUF (sums
+    /// multi-part series, mirroring <c>PickSizingFile</c>). Null on
+    /// parents. Renders into the existing <see cref="SizeDisplay"/>
+    /// column for child rows via the projection in PrepViewModel.
+    /// </summary>
+    public long? QuantSizeBytes { get; } = quantSizeBytes;
+
+    /// <summary>C27 Stage 4: true iff this row is a quant child.</summary>
+    public bool IsQuantChild => !string.IsNullOrEmpty(ParentRepoId);
 }
 
 /// <summary>
@@ -110,7 +174,21 @@ public sealed record StarterCatalogEntry(
     /// JSON and the existing live ollama.com projection compile
     /// unchanged. Hugging Face entries set <see cref="ModelSource.HuggingFace"/>
     /// so the picker can gate source-scoped affordances.</summary>
-    ModelSource Source = ModelSource.Ollama);
+    ModelSource Source = ModelSource.Ollama,
+    /// <summary>C27 Stage 4: true when this entry represents an HF repo
+    /// whose per-quant children are lazily fetched on chevron click.
+    /// False on Ollama entries, configured/on-disk rows, and the quant
+    /// child entries themselves.</summary>
+    bool IsExpandable = false,
+    /// <summary>C27 Stage 4: bare repoId (no <c>hf.co/</c>) of the
+    /// parent for a per-quant child entry; null on parents.</summary>
+    string? ParentRepoId = null,
+    /// <summary>C27 Stage 4: quant label shown on the child entry
+    /// (e.g. <c>Q4_K_M</c>). Null on parents.</summary>
+    string? QuantLabel = null,
+    /// <summary>C27 Stage 4: byte count of the child entry's primary
+    /// GGUF (sums multi-part series). Null on parents.</summary>
+    long? QuantSizeBytes = null);
 
 /// <summary>C27 Stage 1: model catalog source. <see cref="Ollama"/>
 /// covers the bundled <c>starter-models.json</c> and the live

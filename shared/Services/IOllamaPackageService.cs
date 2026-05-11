@@ -27,6 +27,19 @@ public interface IOllamaPackageService
     /// operations. This prevents Ollama CLI from auto-starting an uncontrolled server
     /// that can interfere with the host system (opens tray icons, persists after exit).
     /// The returned handle must be disposed to stop the server.
+    ///
+    /// <paramref name="extraEnv"/> (C27 Stage 3): optional extra environment
+    /// variables to inject into the server process. Used to pass
+    /// <c>HF_TOKEN</c> / <c>HUGGING_FACE_HUB_TOKEN</c> for gated or private
+    /// Hugging Face GGUF pulls; the server reads these at request time.
+    /// Null or empty = no extra env. Existing <c>OLLAMA_MODELS</c> /
+    /// <c>OLLAMA_HOST</c> bindings always win, so callers can't accidentally
+    /// override those.
     /// </summary>
-    Task<IOllamaServerHandle> StartTemporaryServerAsync(string ollamaExe, string modelsRoot, Action<string> onLog, CancellationToken ct);
+    Task<IOllamaServerHandle> StartTemporaryServerAsync(
+        string ollamaExe,
+        string modelsRoot,
+        Action<string> onLog,
+        CancellationToken ct,
+        IReadOnlyDictionary<string, string>? extraEnv = null);
 }

@@ -55,13 +55,19 @@ struct InitialPortableConfigPayload {
     /// `RunnerLocalApiService`.
     var networkApiKey: String = Self.generateRandomApiKey()
     var preferredCompute: String = "cpu"
+    /// C27 Stage 3: optional Hugging Face access token. Defaults to nil
+    /// (anonymous mode). When the user types a token into the PrepApp
+    /// SecureField at prep time, this field carries it into the
+    /// `huggingFaceToken` JSON key on the initial config write. Rides
+    /// the AES-256-GCM seal when encryption is on; plaintext otherwise.
+    var huggingFaceToken: String? = nil
 
     /// Render as the `[String: Any]` dictionary SsdEncryption expects.
     /// Keys must stay camelCase — PortableConfig.SaveAsync uses
     /// JsonNamingPolicy.CamelCase. PortableConfig deserialization is
     /// permissive, so missing fields take their C# defaults.
     func asDictionary() -> [String: Any] {
-        return [
+        var dict: [String: Any] = [
             "ollamaPort": ollamaPort,
             "networkModeEnabled": networkModeEnabled,
             "networkBindAddress": networkBindAddress,
@@ -71,6 +77,13 @@ struct InitialPortableConfigPayload {
             "preferredCompute": preferredCompute,
             "models": [],
         ]
+        // C27 Stage 3: emit huggingFaceToken only when set so empty input
+        // leaves the field absent in JSON; PortableConfig.HuggingFaceToken
+        // defaults to null on deserialization.
+        if let token = huggingFaceToken, !token.isEmpty {
+            dict["huggingFaceToken"] = token
+        }
+        return dict
     }
 
     /// MAC34: 32 bytes from `SecRandomCopyBytes`, hex-encoded. Falls back
