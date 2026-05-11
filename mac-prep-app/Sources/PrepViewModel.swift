@@ -57,8 +57,13 @@ final class PrepViewModel: ObservableObject {
     // to Refresh first, by design).
     @Published var modelSearchText: String = ""
     @Published var showOnlyMostPopular: Bool = false
-    /// F2a: how many entries the "Most popular" filter exposes.
-    static let mostPopularCount: Int = 15
+    /// C26: how many entries the "Most popular" filter exposes.
+    /// Mirrors the WPF dropdown — default 15, options 10/15/25/50.
+    @Published var mostPopularLimit: Int = 15
+    /// C26: choices surfaced in the Most-popular limit dropdown.
+    /// 50 is the upper cap; anything higher trends toward "show all"
+    /// without the explicit toggle.
+    static let mostPopularLimitOptions: [Int] = [10, 15, 25, 50]
 
     // C3 / C4 / C5 picker filter state. Defaults match the F2a v1.3.22
     // behavior: no parameter cap, no capability requirement, popular
@@ -165,7 +170,7 @@ final class PrepViewModel: ObservableObject {
             to: starterCatalog,
             search: modelSearchText,
             showOnlyMostPopular: showOnlyMostPopular,
-            popularLimit: Self.mostPopularCount,
+            popularLimit: mostPopularLimit,
             maxParametersBillion: maxParametersBillion,
             requiredCapabilities: requiredCapabilities,
             sortMode: sortMode)

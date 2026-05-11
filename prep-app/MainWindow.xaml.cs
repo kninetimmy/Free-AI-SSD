@@ -211,6 +211,18 @@ public partial class MainWindow : Window
         };
     }
 
+    /// <summary>C26: dropdown selection → VM <c>MostPopularLimit</c>.
+    /// Tag carries the integer cap; falls back to the default if the
+    /// tag can't be parsed (defensive — XAML hardcodes the strings).</summary>
+    private void MostPopularLimitCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ComboBox combo || combo.SelectedItem is not ComboBoxItem item) return;
+        if (item.Tag is string raw && int.TryParse(raw, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var limit))
+        {
+            _viewModel.MostPopularLimit = limit;
+        }
+    }
+
     /// <summary>
     /// Project the rich <see cref="StarterModelEntry"/> into the lighter
     /// <see cref="StarterCatalogEntry"/> the merged grid consumes.

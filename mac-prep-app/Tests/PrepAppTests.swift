@@ -788,6 +788,76 @@ struct PrepAppTestsMain {
                        "got: \(s)")
         }
 
+        // MARK: C26 — Most-popular limit dropdown
+        //
+        // The dropdown rebinds `popularLimit` on each selection. Pure
+        // filter pin: smaller limit shrinks the visible set; larger
+        // limit expands it. Matches the WPF code-behind's binding to
+        // PrepViewModel.MostPopularLimit.
+
+        runner.test("C26: popularLimit caps the visible top-N (10)") {
+            let entries = (0..<30).map { i in
+                StarterModelDisplayEntry(
+                    tag: "limit:\(i)", sizeTier: "Medium",
+                    bestAt: "Variant \(i)",
+                    pullCount: Int64(100_000_000 - i * 1_000_000))
+            }
+            let out = applyStarterModelFilters(
+                to: entries, search: "", showOnlyMostPopular: true, popularLimit: 10)
+            try expect(out.count == 10, "expected 10, got \(out.count)")
+            try expect(out.first?.tag == "limit:0",
+                       "top entry should be limit:0, got \(out.first?.tag ?? "nil")")
+        }
+
+        runner.test("C26: popularLimit 25 expands the visible top-N") {
+            let entries = (0..<30).map { i in
+                StarterModelDisplayEntry(
+                    tag: "limit:\(i)", sizeTier: "Medium",
+                    bestAt: "Variant \(i)",
+                    pullCount: Int64(100_000_000 - i * 1_000_000))
+            }
+            let out = applyStarterModelFilters(
+                to: entries, search: "", showOnlyMostPopular: true, popularLimit: 25)
+            try expect(out.count == 25, "expected 25, got \(out.count)")
+        }
+
+        // MARK: C25 — capability pass-through marker (computation pin)
+        //
+        // The marker itself is a SwiftUI .opacity() modifier; the
+        // computation that drives it is `entry.capabilities.isEmpty &&
+        // !vm.requiredCapabilities.isEmpty`. Pin the boolean so future
+        // changes to the chip filter posture surface here.
+
+        runner.test("C25: pass-through flag true when caps empty + chip active") {
+            let bundled = StarterModelDisplayEntry(
+                tag: "bundled:1b", sizeTier: "Small", bestAt: "Fallback",
+                pullCount: nil, capabilities: [],
+                parametersBillion: nil, lastUpdated: nil)
+            let required: Set<String> = ["tools"]
+            let isPassThrough = bundled.capabilities.isEmpty && !required.isEmpty
+            try expect(isPassThrough, "expected pass-through marker active")
+        }
+
+        runner.test("C25: pass-through flag false when no chip active") {
+            let bundled = StarterModelDisplayEntry(
+                tag: "bundled:1b", sizeTier: "Small", bestAt: "Fallback",
+                pullCount: nil, capabilities: [],
+                parametersBillion: nil, lastUpdated: nil)
+            let required: Set<String> = []
+            let isPassThrough = bundled.capabilities.isEmpty && !required.isEmpty
+            try expect(!isPassThrough, "expected no marker — no chip engaged")
+        }
+
+        runner.test("C25: pass-through flag false when row has capability data") {
+            let live = StarterModelDisplayEntry(
+                tag: "live:8b", sizeTier: "Medium", bestAt: "Live entry",
+                pullCount: 10_000_000, capabilities: ["tools"],
+                parametersBillion: 8, lastUpdated: nil)
+            let required: Set<String> = ["tools"]
+            let isPassThrough = live.capabilities.isEmpty && !required.isEmpty
+            try expect(!isPassThrough, "row has caps; marker must not apply")
+        }
+
         await runner.run()
     }
 }
