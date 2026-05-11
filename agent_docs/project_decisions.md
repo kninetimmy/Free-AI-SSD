@@ -2676,3 +2676,77 @@ Mechanism: `mac-prep-host/HostLifetime.cs:473-485` (discover-catalog
 projection), `:520-532` (refresh-catalog projection, now mirroring), and
 `mac-prep-app/Tests/PrepAppTests.swift` "C24:" pins (the Swift-side
 regression cover until the C# seam exists).
+
+---
+
+## 2026-05-11 — Picker filter visual-cue gating: VM exposes a `HasActiveXFilter` derived signal so per-row markers only render when the filter is engaged [C25 lesson]
+
+PR #264 (`3f299fe`) added the C25 capability pass-through marker. The
+design tension: C4's capability AND filter intentionally passes through
+entries with empty `Capabilities` so configured / on-disk / custom rows
+aren't accidentally hidden when the user narrows the recommended list —
+but pre-C25 the user had no way to see *why* a row survived a chip
+filter. The fix is a visual cue (opacity 0.55 + tooltip on both OSes)
+that needs a gating signal so it only renders when at least one chip
+is engaged; otherwise the picker would look "broken" in the default
+view (every row with empty caps would render muted for no apparent
+reason).
+
+**Rule:** when a picker filter intentionally passes through rows that
+lack the data the filter keys on, expose a derived `HasActiveXFilter`
+boolean on the VM (e.g. `HasActiveCapabilityFilter =>
+_requiredCapabilities.Count > 0`) and raise `PropertyChanged` for it
+inside the same setter that mutates the filter set. The picker UI
+binds the per-row visual cue to *both* the row's null-data condition
+AND that VM signal, so the cue stays invisible in the default view
+and only surfaces when the user is actively narrowing.
+
+**WPF mechanism:** `DataGrid.RowStyle` with a `MultiDataTrigger`
+combining a row-level `<Condition Binding="{Binding X.Count}"
+Value="0"/>` and a VM-level `<Condition Binding="{Binding
+DataContext.HasActiveXFilter, RelativeSource={RelativeSource
+AncestorType=DataGrid}}" Value="True"/>`. No `IMultiValueConverter`
+needed — the `RelativeSource AncestorType` form resolves the VM via
+inherited DataContext.
+
+**SwiftUI mechanism:** local `let isPassThrough = entry.X.isEmpty &&
+!vm.requiredX.isEmpty` at the top of the `ForEach` body, then
+`.opacity(isPassThrough ? 0.55 : 1.0)` + `.help(isPassThrough ? "…" :
+"")` on the row container.
+
+**Option A vs. B vs. C — decision and reasoning.** The C25 filing
+offered three options at picker-design time:
+- **Option A (per-row opacity marker)** — visual cue on each affected
+  row, gated on the active-filter signal. Picked.
+- **Option B (caption-only count breakdown)** — extend
+  `StarterRowCountCaption.Format` to surface a "N surviving via
+  pass-through" sentence. Rejected as the *primary* mechanism (could
+  layer in additively later) — the user's request was "differentiate
+  the ones that have applicable tags," which is a per-row concern,
+  not a count concern.
+- **Option C (segmented sections)** — split the visible list into
+  "Matches all filters" vs. "Surviving via pass-through (no
+  capability data)". Rejected as over-engineered for what's
+  effectively polish; a future picker mode-switch (e.g. C27 HF source)
+  could revisit segmentation if the cross-source UX warrants it.
+
+**Specific don't-do:** do NOT apply the marker to rows surviving the
+*parameter cap* pass-through (the `ParametersBillion == null` branch
+of `IsModelRowVisible`). That pass-through isn't tied to a
+missing-data condition the user cares about — it just keeps
+configured/on-disk rows visible when the user narrows by hardware
+budget, which is the obviously-correct posture. Only the capability
+chip pass-through is confusing because the chip vocabulary doesn't
+overlap with the bundled `UseCases` vocabulary, so live-scrape
+ignorance reads as "no capabilities" from the user's perspective.
+
+**Pattern applies to future filters.** When C27 (Hugging Face source)
+lands, HF rows will lack ollama.com capability tags — the chip filter
+will pass them through. The C25 marker becomes load-bearing for that
+flow (HF rows render muted when chips are active, signaling "we don't
+have capability metadata for HF entries; Ollama-only narrowing").
+
+Mechanism: `shared/ViewModels/PrepViewModel.cs:HasActiveCapabilityFilter`,
+`prep-app/MainWindow.xaml` (DataGrid.RowStyle MultiDataTrigger),
+`mac-prep-app/Sources/main.swift` (isPassThrough computation +
+`.opacity()` + `.help()` modifiers on the `Toggle` row).

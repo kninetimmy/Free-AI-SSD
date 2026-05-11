@@ -90,8 +90,8 @@ Three flat buckets, one counter per bucket:
 | C22 | F5 | TTS settings UI | this file |
 | C23 | X14 | 50 MB upload silent-reject UX | this file |
 | C24 | (new) | Mac refresh-catalog missing parametersBillion + lastUpdated (Max-size + Sort no-op regression) | this file |
-| C25 | (new) | Visual differentiation for capability pass-through entries | this file |
-| C26 | (new) | Most-popular limit dropdown (10 / 15 / 25 / 50) | this file |
+| ~~C25~~ | (new) | ~~Visual differentiation for capability pass-through entries~~ — **done** PR #264 (`3f299fe`) 2026-05-11 | this file |
+| ~~C26~~ | (new) | ~~Most-popular limit dropdown (10 / 15 / 25 / 50)~~ — **done** PR #264 (`3f299fe`) 2026-05-11 | this file |
 | C27 | (new) | Hugging Face as a model source (full integration; multi-stage) | this file |
 | W1 | X11 | Companion keyboard PTT + first-run validation | this file |
 | W2 | F4 Stages 3-4 | Companion install target selector + installer | this file |
@@ -133,12 +133,12 @@ Three flat buckets, one counter per bucket:
 
 > **C3+C4+C5** (model picker filter cluster) — **done** PR #259 (`9f81bd5`) 2026-05-10. One PR bundles parameter-cap dropdown (≤7B/≤14B/≤30B/≤70B), capability AND chips (tools/vision/thinking/audio), and sort dropdown (Popular/Newest/A–Z) across both WPF and Mac pickers. Scraper extended for `x-test-updated` + numeric param extraction (MoE-aware via largest-billion-wins so memory-budget filters exclude MoE); projection layer gains Capabilities/ParametersBillion/LastUpdated; new `ModelSortMode` enum drives WPF `SortDescription`s and Mac sort step. lastUpdated crosses the wire as ISO 8601 string (sorts lexically the same as instants). 51 new C# pins + 11 new Swift pins. CI green on second push (one-line `using System.ComponentModel;` fix for WPF code-behind). v1.3.23 dispatch in flight. Decision pinned in `project_decisions.md`.
 
-**P1.5 — Picker filter cluster follow-ons (filed 2026-05-10 post-v1.3.22 Mac field test; top of queue for next session):**
+**P1.5 — Picker filter cluster follow-ons (filed 2026-05-10 post-v1.3.22 Mac field test; partial — C24/C25/C26 cleared, C27 remains):**
 
 1. ~~**C24**~~ — **done** PR #262 (`34a66b8`) 2026-05-11. Two-line host projection mirror at `mac-prep-host/HostLifetime.cs:522-532` + 2 Swift end-to-end pins; CI green first run.
-2. **C25** — Visual differentiation for capability pass-through entries (rows with empty `Capabilities` surviving active chip filter).
-3. **C26** — Most-popular limit dropdown (10 / 15 / 25 / 50) replacing the static 15.
-4. **C27** — Hugging Face as a model source (full integration; **Opus planning** at kickoff; multi-stage).
+2. ~~**C25**~~ — **done** PR #264 (`3f299fe`) 2026-05-11. Option A (per-row opacity 0.55 + tooltip on empty-Capabilities rows) gated on new VM `HasActiveCapabilityFilter` derived signal. WPF `DataGrid.RowStyle` `MultiDataTrigger` + Mac SwiftUI `.opacity()` + `.help()`. Picker stays quiet in the default view. 3 new Swift pins + 2 new C# pins. Decision pinned in `project_decisions.md`.
+3. ~~**C26**~~ — **done** PR #264 (`3f299fe`) 2026-05-11. `const int MostPopularLimit = 15` → instance property (default 15 preserved via new `DefaultMostPopularLimit`); new `MostPopularLimitOptions = [10, 15, 25, 50]`. WPF `ComboBox` + Mac `Picker(.menu)` next to the Most-popular toggle. Setter recomputes top-tag set + invalidates view. 2 new Swift pins + 2 new C# pins.
+4. **C27** — Hugging Face as a model source (full integration; **Opus planning** at kickoff; multi-stage). **Top of queue.**
 
 **P2 — Substantive UX:**
 
