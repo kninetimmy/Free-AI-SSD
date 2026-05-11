@@ -94,7 +94,7 @@ Three flat buckets, one counter per bucket:
 | ~~C26~~ | (new) | ~~Most-popular limit dropdown (10 / 15 / 25 / 50)~~ — **done** PR #264 (`3f299fe`) 2026-05-11 | this file |
 | C27 Stage 1 | (new) | ~~Hugging Face as a model source — catalog adapter + Source dropdown~~ — **done** PR #266 (`58f79a1`) 2026-05-11 | this file |
 | C27 Stage 2 | (new) | ~~HF pull integration via `hf.co/...` tags + `siblings[].size` disk-budget warnings~~ — **done** PR #268 (`e807e04`) 2026-05-12 | this file |
-| C27 Stage 3-4 | (new) | Hugging Face: token auth (Stage 3) + per-quant row expansion (Stage 4) | this file |
+| C27 Stage 3-4 | (new) | ~~Hugging Face: token auth (Stage 3) + per-quant row expansion (Stage 4)~~ — **done** PR #270 (`42c4bdc`) 2026-05-12 | this file |
 | W1 | X11 | Companion keyboard PTT + first-run validation | this file |
 | W2 | F4 Stages 3-4 | Companion install target selector + installer | this file |
 | W3 | X16 | Unlock dialog dark theme (WPF) | this file |
@@ -496,9 +496,19 @@ Items `B1`â€“`F4` below were triaged from Stephen's `Downloads/# Free-AI-SS
 
 ---
 
-### C27 — Hugging Face as a model source (full integration)
+### C27 — Hugging Face as a model source (full integration) — **done**
 
-**Status:** filed 2026-05-10. **Substantial feature.** Cross-OS, multi-stage. Opus planning required at kickoff.
+**Status:** filed 2026-05-10. **Done 2026-05-12.** All four stages shipped:
+- Stage 1 — catalog adapter + Source dropdown — PR #266 (`58f79a1`).
+- Stage 2 — pull integration + disk-budget warnings — PR #268 (`e807e04`).
+- Stage 3 — token auth via encrypted-config storage — PR #270 (`42c4bdc`).
+- Stage 4 — lazy per-quant row expansion — PR #270 (`42c4bdc`).
+
+Stages 3+4 bundled into one PR per user direction. C27 is fully shipped: HF rows browse, search, pull, gated/private work with a token, per-quant rows expand on chevron click. Decisions recorded in `project_decisions.md` (2026-05-12 entries).
+
+**Original spec follows for historical reference.**
+
+**Original status:** filed 2026-05-10. **Substantial feature.** Cross-OS, multi-stage. Opus planning required at kickoff.
 **Scope:** Multi-stage. Likely 3-4 stages spread across multiple PRs.
 **Model:** Opus 4.7 for planning + Stage 1; Sonnet 4.6 for follow-on stages.
 
