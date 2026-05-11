@@ -515,7 +515,13 @@ public sealed class HuggingFaceCatalogService : IHuggingFaceCatalogService, IDis
         var limit = query.Limit <= 0 ? DefaultLimit : query.Limit;
         var sb = new System.Text.StringBuilder();
         sb.Append(baseUrl);
-        sb.Append("?filter=gguf");
+        // `apps=ollama` is the same filter huggingface.co/models?apps=ollama
+        // applies on the website — it restricts to repos that publish an
+        // Ollama-pullable manifest. `filter=gguf` alone returned diffusion
+        // and text-to-video junk (Sulphur-2-base, Z-Anime); combined with
+        // apps=ollama the API matches the website list exactly (verified
+        // 2026-05-12: top result mxbai-embed-large-v1 at 4.4M downloads).
+        sb.Append("?filter=gguf&apps=ollama");
         sb.Append("&sort=");
         sb.Append(Uri.EscapeDataString(sort));
         sb.Append("&limit=");

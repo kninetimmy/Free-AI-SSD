@@ -318,8 +318,12 @@ internal sealed class HostLifetime : IAsyncDisposable
         long estimatedBytes;
         if (modelTag.StartsWith("hf.co/", StringComparison.OrdinalIgnoreCase))
         {
-            var repoId = modelTag["hf.co/".Length..];
-            estimatedBytes = await EstimateHuggingFaceSizeAsync(repoId, modelTag, ct);
+            // 2026-05-12 field test: a quant-child tag arrives here as
+            // `hf.co/owner/repo:Q4_K_M`; HF's /api/models endpoint takes
+            // bare `owner/repo` only — the `:tag` suffix yields a 404.
+            // Strip it so the sibling fetch hits the right URL.
+            var bareRepoId = ExtractHuggingFaceBareRepoId(modelTag);
+            estimatedBytes = await EstimateHuggingFaceSizeAsync(bareRepoId, modelTag, ct);
             if (estimatedBytes < 0)
             {
                 // EstimateHuggingFaceSizeAsync already emitted the
@@ -421,6 +425,23 @@ internal sealed class HostLifetime : IAsyncDisposable
             EmitLog($"Pull cancelled for {modelTag}.");
             EmitResult("pull-model", new { ok = false, modelTag, cancelled = true });
         }
+        catch (Exception ex)
+        {
+            // 2026-05-12 field test: Ollama can return 400 from /api/pull
+            // after a 100% download (manifest-assembly failure for some
+            // HF quants — e.g. Qwen3.5-9B-GGUF:IQ2_M). Without this catch,
+            // the exception bubbled to Program.cs which wrote to stderr
+            // only — Swift's PrepHostController waited forever for the
+            // pull-model result line and the UI hung at 100%. Emit a
+            // failure result so the caller can render the message and
+            // advance past the pull step.
+            var hint = modelTag.StartsWith("hf.co/", StringComparison.OrdinalIgnoreCase)
+                ? " Try a different quant (Q4_K_M is the broadest-compatible) or a different HF repo."
+                : string.Empty;
+            var message = $"Pull failed for {modelTag}: {ex.Message}.{hint}";
+            EmitLog(message);
+            EmitResult("pull-model", new { ok = false, modelTag, reason = "pull-exception", message });
+        }
         finally
         {
             lock (_pullCtsLock)
@@ -431,6 +452,24 @@ internal sealed class HostLifetime : IAsyncDisposable
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// 2026-05-12: strip the <c>hf.co/</c> prefix AND any trailing
+    /// <c>:quant</c> suffix from an Ollama-formatted HF tag so HF's
+    /// <c>/api/models/{repoId}</c> endpoint accepts it. Field test of
+    /// the previous behavior (forwarding the full tag) produced a 404
+    /// for every quant-child pull and forced the fallback heuristic.
+    /// Internal for direct unit testing.
+    /// </summary>
+    internal static string ExtractHuggingFaceBareRepoId(string modelTag)
+    {
+        if (string.IsNullOrEmpty(modelTag)) return string.Empty;
+        var afterPrefix = modelTag.StartsWith("hf.co/", StringComparison.OrdinalIgnoreCase)
+            ? modelTag["hf.co/".Length..]
+            : modelTag;
+        var colonIdx = afterPrefix.IndexOf(':');
+        return colonIdx >= 0 ? afterPrefix[..colonIdx] : afterPrefix;
     }
 
     /// <summary>

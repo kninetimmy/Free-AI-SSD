@@ -139,6 +139,30 @@ namespace FreeAiSsd.MacPrepHost
                         }
                         catch (Exception ex)
                         {
+                            // 2026-05-12 field test: PullModelAsync's
+                            // inner catch already emits ok=false for
+                            // exceptions inside the main pull path.
+                            // This is the belt-and-suspenders layer for
+                            // anything that throws BEFORE the inner try
+                            // (e.g. ollamaExe missing, staging-precheck
+                            // disk-full): emit a stdout result line so
+                            // Swift's PrepHostController unblocks rather
+                            // than waiting forever on a stderr message
+                            // it never reads.
+                            var modelTag = ExtractPullModelTag(pullLine);
+                            try
+                            {
+                                await stdout.WriteLineAsync(
+                                    "result: pull-model " +
+                                    System.Text.Json.JsonSerializer.Serialize(new
+                                    {
+                                        ok = false,
+                                        modelTag,
+                                        reason = "pull-exception",
+                                        message = ex.Message,
+                                    }));
+                            }
+                            catch { /* parent likely gone */ }
                             try { await stderr.WriteLineAsync($"Command failed ('{pullLine}'): {ex.Message}"); }
                             catch { /* parent likely gone; loop will observe stdin EOF and exit */ }
                         }
@@ -208,6 +232,22 @@ namespace FreeAiSsd.MacPrepHost
             // — never something like "pull-modelfoo".
             if (trimmed.Length == pullModel.Length) return true;
             return trimmed[pullModel.Length] == ' ' || trimmed[pullModel.Length] == '\t';
+        }
+
+        /// <summary>
+        /// 2026-05-12: surface the model tag from a `pull-model <tag>`
+        /// command line so the fallback exception-result emitter can
+        /// echo it back to Swift. Returns empty when the line has no
+        /// payload — the result still unblocks the waiter.
+        /// </summary>
+        internal static string ExtractPullModelTag(string line)
+        {
+            if (string.IsNullOrWhiteSpace(line)) return string.Empty;
+            var trimmed = line.TrimStart();
+            const string pullModel = "pull-model";
+            if (!trimmed.StartsWith(pullModel, StringComparison.OrdinalIgnoreCase)) return string.Empty;
+            if (trimmed.Length <= pullModel.Length) return string.Empty;
+            return trimmed[pullModel.Length..].Trim();
         }
     }
 }

@@ -710,6 +710,19 @@ final class PrepViewModel: ObservableObject {
             currentStep = .failed(message: "No mount point.")
             return
         }
+
+        // 2026-05-12 field test: HF pulls (even of public GGUFs) fail
+        // without a Bearer token in Ollama's `HF_TOKEN` env — HF's
+        // public-repo rate-limit refuses the unauth'd request and the
+        // pull errors instantly. Block the Continue press if any HF
+        // tag is selected and the inline token field is empty so the
+        // user understands what's required before we hit `.modelPull`
+        // and the readiness screen shows a red "≥1 installed model".
+        if huggingFaceSelectionNeedsToken() {
+            presentHuggingFaceTokenRequired()
+            return
+        }
+
         isBusy = true
         defer { isBusy = false }
 
@@ -721,6 +734,51 @@ final class PrepViewModel: ObservableObject {
         } else {
             await writePlaintextAndAdvance(mount: mount)
         }
+    }
+
+    /// True when the user has selected any `hf.co/...` tag (parent
+    /// or quant child) but left the inline token field empty.
+    func huggingFaceSelectionNeedsToken() -> Bool {
+        let trimmed = huggingFaceToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty else { return false }
+        return selectedStarterModels.contains { $0.hasPrefix("hf.co/") }
+    }
+
+    /// Explainer modal — fired when the user clicks Continue with HF
+    /// tags selected but no token. Walks them through where to get a
+    /// free read-only token. Opens the HF token settings page in the
+    /// default browser when they pick "Open Hugging Face".
+    private func presentHuggingFaceTokenRequired() {
+#if canImport(AppKit)
+        let alert = NSAlert()
+        alert.messageText = "Hugging Face token required"
+        alert.informativeText = """
+        You picked one or more Hugging Face models. Ollama needs a free \
+        read-only token from huggingface.co to pull them — even for \
+        public GGUFs (HF rate-limits anonymous downloads).
+
+        1. Sign in or sign up at huggingface.co (free).
+        2. Open Settings → Access Tokens, click "Create new token".
+        3. Choose "Read" (classic) — or "Fine-grained" with only \
+        "Read access to contents of all public repos" checked.
+        4. Copy the token (starts with `hf_…`) and paste it into the \
+        "HF token" field on this page.
+        5. Click Continue again.
+
+        The token is stored on the SSD (sealed with AES-256-GCM when \
+        encryption is on; plaintext otherwise — a yellow warning surfaces \
+        on this page in that case).
+        """
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Open Hugging Face")
+        alert.addButton(withTitle: "Cancel")
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn,
+           let url = URL(string: "https://huggingface.co/settings/tokens") {
+            NSWorkspace.shared.open(url)
+        }
+#endif
     }
 
     private func writeEncryptedAndAdvance(mount: URL) async {

@@ -431,6 +431,17 @@ struct EncryptionSetupStepView: View {
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            // Field-test gate: HF pulls fail without a token even for
+            // public GGUFs (HF rate-limits anon). Surface the requirement
+            // inline so users see it before the Continue click — the
+            // click itself also re-checks and pops an explainer modal.
+            if vm.huggingFaceSelectionNeedsToken() {
+                Text("⚠ Hugging Face models selected — paste a free read-only HF token above before continuing. Click Continue for setup instructions.")
+                    .font(.caption)
+                    .foregroundColor(Color.brandStatusWarning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             HStack {
                 Spacer()
                 Button(vm.enableEncryption ? "Write encryption & continue" : "Continue without encryption") {
@@ -488,7 +499,16 @@ struct EncryptionSetupStepView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
                     ForEach(entries) { entry in
-                        let isPassThrough = entry.capabilities.isEmpty && !vm.requiredCapabilities.isEmpty
+                        // C25 pass-through fade only applies to Ollama rows
+                        // whose capability list happens to be empty. HF rows
+                        // never expose capability tags via the HF API, so
+                        // fading every HF row looks "disabled" when any chip
+                        // is engaged — even though the chip is letting them
+                        // through. Suppress the fade for HF on both parent
+                        // and quant-child rows.
+                        let isPassThrough = entry.capabilities.isEmpty
+                            && !vm.requiredCapabilities.isEmpty
+                            && entry.sourceKind != .huggingFace
                         let repoId = vm.stripHuggingFacePrefix(entry.tag)
                         let isExpanded = vm.expandedRepoIds.contains(repoId)
                         let isExpanding = vm.huggingFaceExpansionInFlight.contains(repoId)
@@ -517,13 +537,30 @@ struct EncryptionSetupStepView: View {
                             } else {
                                 Spacer().frame(width: 14)
                             }
+                            // HF parent rows can't be pulled directly — Ollama
+                            // needs a specific `:quant` tag. Disable the
+                            // checkbox so the only path forward is the
+                            // chevron + a quant child. Field test of the
+                            // previous behavior produced a "flash log →
+                            // Done with ≥1 model Fail" because the parent
+                            // tag (e.g. `hf.co/mixedbread-ai/mxbai-embed-
+                            // large-v1` with no quant) was unpullable.
+                            let isHfParent = entry.isExpandable
                             Toggle(isOn: Binding(
                                 get: { vm.selectedStarterModels.contains(entry.tag) },
                                 set: { sel in
+                                    if isHfParent {
+                                        // Repurpose the click into "expand"
+                                        // so users still discover the quant
+                                        // children below.
+                                        Task { await vm.toggleRepoExpansion(parent: entry) }
+                                        return
+                                    }
                                     if sel { vm.selectedStarterModels.insert(entry.tag) }
                                     else   { vm.selectedStarterModels.remove(entry.tag) }
                                 }
-                            )) {
+                            ))
+                            {
                                 VStack(alignment: .leading, spacing: 1) {
                                     HStack(spacing: 6) {
                                         Text(entry.tag).font(.body).bold()
