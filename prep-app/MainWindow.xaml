@@ -101,6 +101,39 @@
                                                Margin="0,4,0,0"
                                                Visibility="Collapsed"/>
 
+                                    <!-- C27 Stage 3: inline HF token entry. Visible only when
+                                         the Source dropdown is set to Hugging Face. The token
+                                         is pushed into the catalog service on PasswordChanged
+                                         so gated/private repos unlock immediately; persists
+                                         to PortableConfig.HuggingFaceToken at finalize time
+                                         (sealed under AES-256-GCM when encryption is on). -->
+                                    <Grid x:Name="HuggingFaceTokenRow"
+                                          Margin="0,8,0,0"
+                                          Visibility="{Binding IsHuggingFaceTokenFieldVisible, Converter={StaticResource BoolToVisibilityConverter}}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0"
+                                                   Text="HF token (optional)"
+                                                   Style="{StaticResource CaptionText}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,8,0"
+                                                   ToolTip="Personal Hugging Face access token. Required for gated or private GGUF repos. Stored on the SSD; sealed with AES-256-GCM when SSD encryption is on. Leave blank for anonymous browsing."/>
+                                        <PasswordBox x:Name="HuggingFaceTokenBox"
+                                                     Grid.Column="1"
+                                                     Padding="8,4"
+                                                     VerticalAlignment="Center"
+                                                     PasswordChanged="HuggingFaceTokenBox_PasswordChanged"
+                                                     ToolTip="Paste your HF token (hf_...). Token never leaves this machine; sent only over HTTPS to huggingface.co."/>
+                                    </Grid>
+                                    <TextBlock x:Name="HuggingFaceTokenPlaintextWarning"
+                                               Margin="0,4,0,0"
+                                               Foreground="{StaticResource StatusWarningBrush}"
+                                               TextWrapping="Wrap"
+                                               Text="⚠ Encryption is off — your Hugging Face token will be stored in plaintext on the SSD. Enable encryption (Drive tab) for defense in depth."
+                                               Visibility="{Binding IsHuggingFaceTokenPlaintextWarningVisible, Converter={StaticResource BoolToVisibilityConverter}}"/>
+
                                     <!-- F2a: search + Most popular cap. C26 adds the
                                          limit dropdown next to the toggle. The Refresh
                                          button stays in the title row above; this row
@@ -357,7 +390,62 @@
                                                         </DataTemplate>
                                                     </DataGridTemplateColumn.CellTemplate>
                                                 </DataGridTemplateColumn>
-                                                <DataGridTextColumn Header="Tag" Binding="{Binding Name}" Width="2*" IsReadOnly="True"/>
+                                                <!-- C27 Stage 4: chevron column. Visible only on
+                                                     HF parent rows (IsExpandable=true). Toggles
+                                                     between ▶ collapsed and ▼ expanded; the click
+                                                     handler delegates to ToggleRepoExpansionAsync
+                                                     which lazy-fetches siblings on first expand. -->
+                                                <DataGridTemplateColumn Header="" Width="28">
+                                                    <DataGridTemplateColumn.CellTemplate>
+                                                        <DataTemplate>
+                                                            <!-- IsEnabled gating omitted: the VM's
+                                                                 ToggleRepoExpansionAsync no-ops if a
+                                                                 fetch is already in flight (parent.IsExpanding),
+                                                                 so a double-click is harmless. -->
+                                                            <Button Click="RepoExpandToggle_Click"
+                                                                    BorderThickness="0"
+                                                                    Background="Transparent"
+                                                                    Padding="2"
+                                                                    MinWidth="0" MinHeight="0"
+                                                                    HorizontalAlignment="Center"
+                                                                    Visibility="{Binding IsExpandable, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                                    ToolTip="Show or hide the GGUF quants for this Hugging Face repo. First expand fetches sizes from huggingface.co.">
+                                                                <TextBlock FontFamily="Segoe UI Symbol"
+                                                                           FontSize="11">
+                                                                    <TextBlock.Style>
+                                                                        <Style TargetType="TextBlock">
+                                                                            <Setter Property="Text" Value="▶"/>
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                                                                    <Setter Property="Text" Value="▼"/>
+                                                                                </DataTrigger>
+                                                                                <DataTrigger Binding="{Binding IsExpanding}" Value="True">
+                                                                                    <Setter Property="Text" Value="…"/>
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </TextBlock.Style>
+                                                                </TextBlock>
+                                                            </Button>
+                                                        </DataTemplate>
+                                                    </DataGridTemplateColumn.CellTemplate>
+                                                </DataGridTemplateColumn>
+                                                <DataGridTemplateColumn Header="Tag" Width="2*">
+                                                    <DataGridTemplateColumn.CellTemplate>
+                                                        <DataTemplate>
+                                                            <!-- C27 Stage 4: quant child rows render with a 20px
+                                                                 indent + ⌞ glyph so they nest visually under the
+                                                                 parent. Parent + non-HF rows have no indent. -->
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <TextBlock Text="⌞ "
+                                                                           Foreground="{StaticResource AccentCyanBrush}"
+                                                                           Margin="14,0,2,0"
+                                                                           Visibility="{Binding IsQuantChild, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                                                                <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
+                                                            </StackPanel>
+                                                        </DataTemplate>
+                                                    </DataGridTemplateColumn.CellTemplate>
+                                                </DataGridTemplateColumn>
                                                 <DataGridTextColumn Header="Tier" Binding="{Binding Tier}" Width="*" IsReadOnly="True"/>
                                                 <DataGridTextColumn Header="Best at" Binding="{Binding BestAt}" Width="3*" IsReadOnly="True"/>
                                                 <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="*" IsReadOnly="True"/>

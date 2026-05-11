@@ -39,6 +39,10 @@ struct StarterModelEntry: Codable, Hashable {
     /// pre-C27 payloads (and the test-mode payloads that emit no
     /// entries) decode without churn.
     let source: String?
+    /// C27 Stage 4: emitted by `BuildCatalogEntries` — true for HF
+    /// rows that surface a chevron in the picker. Optional so pre-
+    /// Stage-4 payloads decode unchanged.
+    let isExpandable: Bool?
 }
 
 /// C27 Stage 1: catalog source enum mirroring the C# `ModelSource`.
@@ -89,12 +93,25 @@ struct StarterModelDisplayEntry: Identifiable, Hashable {
     /// source-scoped picker affordances (e.g., the Stage-2 "pulls
     /// land later" gate).
     let sourceKind: ModelSourceKind
+    /// C27 Stage 4: true when the picker should surface a chevron on
+    /// this row. Only HF parent rows set this; quant children + Ollama
+    /// rows are false.
+    let isExpandable: Bool
+    /// C27 Stage 4: set on a per-quant child row to the parent repoId
+    /// (without `hf.co/`). Nil on parents + non-HF rows.
+    let parentRepoId: String?
+    /// C27 Stage 4: quant label rendered as the badge on a child row
+    /// (e.g. `Q4_K_M`). Nil on parents.
+    let quantLabel: String?
+    /// C27 Stage 4: byte count of the child row's primary GGUF. Nil
+    /// on parents.
+    let quantSizeBytes: Int64?
     var id: String { tag }
 
-    /// Custom init with defaults for the C3/C4/C5 fields so existing
-    /// fixtures (notably <c>makeF2aFixture</c> in PrepAppTests) keep
-    /// compiling. Production code in <c>from(_:)</c> always passes
-    /// every argument.
+    /// Custom init with defaults for the C3/C4/C5/C27-Stage-4 fields so
+    /// existing fixtures (notably <c>makeF2aFixture</c> in PrepAppTests)
+    /// keep compiling. Production code in <c>from(_:)</c> passes the
+    /// catalog-derived values explicitly.
     init(
         tag: String,
         sizeTier: String,
@@ -103,7 +120,11 @@ struct StarterModelDisplayEntry: Identifiable, Hashable {
         capabilities: [String] = [],
         parametersBillion: Double? = nil,
         lastUpdated: String? = nil,
-        sourceKind: ModelSourceKind = .ollama
+        sourceKind: ModelSourceKind = .ollama,
+        isExpandable: Bool = false,
+        parentRepoId: String? = nil,
+        quantLabel: String? = nil,
+        quantSizeBytes: Int64? = nil
     ) {
         self.tag = tag
         self.sizeTier = sizeTier
@@ -113,7 +134,13 @@ struct StarterModelDisplayEntry: Identifiable, Hashable {
         self.parametersBillion = parametersBillion
         self.lastUpdated = lastUpdated
         self.sourceKind = sourceKind
+        self.isExpandable = isExpandable
+        self.parentRepoId = parentRepoId
+        self.quantLabel = quantLabel
+        self.quantSizeBytes = quantSizeBytes
     }
+    /// C27 Stage 4: convenience predicate matching ModelGridRow.IsQuantChild on the C# side.
+    var isQuantChild: Bool { parentRepoId != nil && !(parentRepoId?.isEmpty ?? true) }
 
     /// "Best at" combines description + comma-joined use cases —
     /// matches MainWindow.xaml.cs:ProjectCatalog so Mac and Windows
@@ -136,7 +163,8 @@ struct StarterModelDisplayEntry: Identifiable, Hashable {
             capabilities: useCases,
             parametersBillion: entry.parametersBillion,
             lastUpdated: entry.lastUpdated,
-            sourceKind: ModelSourceKind.parse(entry.source))
+            sourceKind: ModelSourceKind.parse(entry.source),
+            isExpandable: entry.isExpandable ?? false)
     }
 }
 

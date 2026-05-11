@@ -81,6 +81,29 @@ final class PrepViewModel: ObservableObject {
     // source switch — only the underlying catalog rows are replaced.
     @Published var activeSource: ModelSourceKind = .ollama
 
+    // C27 Stage 3: optional Hugging Face access token. Entered inline
+    // when activeSource == .huggingFace via a SecureField. Threaded
+    // through the IPC envelope (search-hf / discover-hf-catalog /
+    // pull-model arms accept an optional "token" field) so the sidecar
+    // pushes it into its HuggingFaceCatalogService before the request.
+    // Persisted to portable-config.huggingFaceToken at finalize time —
+    // sealed under AES-256-GCM when enableEncryption is true.
+    @Published var huggingFaceToken: String = ""
+
+    // C27 Stage 4: parent repoIds the user has chosen to expand. Drives
+    // both the picker's chevron state and the interleaved-child layout
+    // in `visibleStarterModels`. Mirrors the C# `_expandedRepos`.
+    @Published var expandedRepoIds: Set<String> = []
+
+    // C27 Stage 4: cache of fetched per-quant children keyed by parent
+    // repoId. Re-expand replays the cache without touching the sidecar.
+    @Published var huggingFaceQuantChildren: [String: [StarterModelDisplayEntry]] = [:]
+
+    // C27 Stage 4: parent repoIds currently fetching from the sidecar.
+    // Drives a "Loading…" affordance on the chevron + guards a
+    // double-click from spawning a second `hf-siblings` arm.
+    @Published var huggingFaceExpansionInFlight: Set<String> = []
+
     // C27 Stage 1: debounce token for the HF search box. When
     // activeSource == .huggingFace and modelSearchText changes, we
     // schedule a Task to fire search-hf after 350ms. Cancelling the
@@ -157,7 +180,27 @@ final class PrepViewModel: ObservableObject {
         return mount
     }
 
-    var availableStarterModels: [StarterModelDisplayEntry] { starterCatalog }
+    /// C27 Stage 4: starter catalog with per-quant child rows interleaved
+    /// directly below each expanded parent. The picker renders this list
+    /// rather than `starterCatalog` so the chevron toggle produces a
+    /// visually-nested hierarchy without the sidecar emitting children
+    /// upfront. Pre-expansion + Ollama-source listings flow through
+    /// unchanged.
+    var availableStarterModels: [StarterModelDisplayEntry] {
+        guard !expandedRepoIds.isEmpty else { return starterCatalog }
+        var output: [StarterModelDisplayEntry] = []
+        for parent in starterCatalog {
+            output.append(parent)
+            // The parent's tag is "hf.co/owner/repo" — strip the prefix to
+            // get the repoId we keyed the children under.
+            let repoId = stripHuggingFacePrefix(parent.tag)
+            if parent.isExpandable && expandedRepoIds.contains(repoId),
+               let children = huggingFaceQuantChildren[repoId] {
+                output.append(contentsOf: children)
+            }
+        }
+        return output
+    }
 
     /// M11: caption that announces the picker's visible row count + cap
     /// reason. Empty when no filter or search is active — `catalogStatusText`
@@ -180,8 +223,13 @@ final class PrepViewModel: ObservableObject {
     /// `applyStarterModelFilters` so the test binary can cover the
     /// filter composition order without spinning up a view-model.
     var visibleStarterModels: [StarterModelDisplayEntry] {
+        // C27 Stage 4: filter the interleaved-with-children list rather
+        // than the bare catalog so per-quant rows appear in the picker
+        // when their parent is expanded. Filters skip child rows when
+        // the parent isn't expanded by virtue of `availableStarterModels`
+        // omitting them in that case.
         applyStarterModelFilters(
-            to: starterCatalog,
+            to: availableStarterModels,
             search: modelSearchText,
             showOnlyMostPopular: showOnlyMostPopular,
             popularLimit: mostPopularLimit,
@@ -482,6 +530,124 @@ final class PrepViewModel: ObservableObject {
         }
     }
 
+    /// C27 Stage 4: toggle expansion of a Hugging Face repo row. On
+    /// first expand, calls the sidecar `hf-siblings` arm and decodes
+    /// the per-quant child rows into `huggingFaceQuantChildren`.
+    /// Subsequent toggles flip `expandedRepoIds` and rely on the cache.
+    /// Sidecar failures log + leave the row collapsed; the user can
+    /// retry by clicking the chevron again.
+    func toggleRepoExpansion(parent: StarterModelDisplayEntry) async {
+        guard parent.isExpandable else { return }
+        let repoId = stripHuggingFacePrefix(parent.tag)
+        if repoId.isEmpty { return }
+
+        if expandedRepoIds.contains(repoId) {
+            expandedRepoIds.remove(repoId)
+            return
+        }
+
+        if huggingFaceQuantChildren[repoId] != nil {
+            expandedRepoIds.insert(repoId)
+            return
+        }
+
+        if huggingFaceExpansionInFlight.contains(repoId) { return }
+        huggingFaceExpansionInFlight.insert(repoId)
+        defer { huggingFaceExpansionInFlight.remove(repoId) }
+
+        do {
+            // Pass the bare repoId as the payload — `hf-siblings` parses
+            // it directly (no JSON wrapping needed).
+            let result = try await hostController.send("hf-siblings \(repoId)", timeout: 30)
+            let ok = result.payload["ok"] as? Bool ?? false
+            if !ok {
+                let reason = result.payload["reason"] as? String ?? "unknown"
+                let errMsg = result.payload["error"] as? String ?? ""
+                appendLog("Could not expand hf.co/\(repoId): \(reason)\(errMsg.isEmpty ? "" : " (\(errMsg))")")
+                return
+            }
+            // Gated / private surfaces with a reason + empty quants array.
+            if let reason = result.payload["reason"] as? String,
+               reason.hasPrefix("hf-") {
+                appendLog("hf.co/\(repoId) is \(reason.dropFirst(3)). Enter your Hugging Face token to access the per-quant list.")
+                // Insert an empty children entry so re-expand doesn't re-fetch.
+                huggingFaceQuantChildren[repoId] = []
+                expandedRepoIds.insert(repoId)
+                return
+            }
+            let quants = (result.payload["quants"] as? [[String: Any]]) ?? []
+            let children = quants.compactMap { decodeQuantChild(parent: parent, repoId: repoId, payload: $0) }
+            huggingFaceQuantChildren[repoId] = children
+            expandedRepoIds.insert(repoId)
+        } catch {
+            appendLog("Could not expand hf.co/\(repoId): \(error.localizedDescription)")
+        }
+    }
+
+    /// C27 Stage 4: decode a single quant payload from `hf-siblings`
+    /// into a display entry. Inherits the parent's pullCount / lastUpdated
+    /// so the child sorts adjacent to the parent under the picker's
+    /// existing sort modes; capabilities stay empty (HF doesn't surface
+    /// them, and the C25 pass-through marker handles it).
+    private func decodeQuantChild(
+        parent: StarterModelDisplayEntry,
+        repoId: String,
+        payload: [String: Any]
+    ) -> StarterModelDisplayEntry? {
+        guard let tag = payload["tag"] as? String,
+              let quantLabel = payload["quantLabel"] as? String
+        else { return nil }
+        let sizeBytes = (payload["quantSizeBytes"] as? Int64)
+            ?? (payload["quantSizeBytes"] as? Int).map(Int64.init)
+        let partCount = (payload["partCount"] as? Int) ?? 1
+        let bestAt = partCount > 1 ? "\(quantLabel) (\(partCount)-part split)" : quantLabel
+        return StarterModelDisplayEntry(
+            tag: tag,
+            sizeTier: "Custom",
+            bestAt: bestAt,
+            pullCount: parent.pullCount,
+            capabilities: [],
+            parametersBillion: nil,
+            lastUpdated: parent.lastUpdated,
+            sourceKind: .huggingFace,
+            isExpandable: false,
+            parentRepoId: repoId,
+            quantLabel: quantLabel,
+            quantSizeBytes: sizeBytes)
+    }
+
+    /// C27 Stage 4: mirror the C# `StripHuggingFacePrefix`. Returns the
+    /// input unchanged when the prefix is absent.
+    func stripHuggingFacePrefix(_ tag: String) -> String {
+        let prefix = "hf.co/"
+        return tag.lowercased().hasPrefix(prefix)
+            ? String(tag.dropFirst(prefix.count))
+            : tag
+    }
+
+    /// C27 Stage 3: push the current HF token to the sidecar so its
+    /// catalog service attaches the Bearer header on subsequent
+    /// search-hf / discover-hf-catalog / pull-model arms. Token is
+    /// trimmed before send; empty input clears the token on the
+    /// sidecar (anonymous mode). Failures are logged but non-fatal —
+    /// the user's next attempt to hit a gated repo will surface the
+    /// underlying 401/403 naturally.
+    func pushHuggingFaceTokenToSidecar(_ token: String) async {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Defense-in-depth: never echo the token into the log.
+        let escaped = trimmed
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let command = trimmed.isEmpty
+            ? "set-hf-token {}"
+            : "set-hf-token {\"token\":\"\(escaped)\"}"
+        do {
+            _ = try await hostController.send(command, timeout: 5)
+        } catch {
+            appendLog("Could not push HF token to sidecar: \(error.localizedDescription)")
+        }
+    }
+
     /// C27 Stage 1: HF Search via the sidecar's `discover-hf-catalog`
     /// (empty search = popular GGUF) or `search-hf` (user-typed query).
     /// Soft-failure mirrors `refreshCatalog`: the existing catalog
@@ -569,7 +735,18 @@ final class PrepViewModel: ObservableObject {
         // this hop.
         let writer = self.encryptedConfigWriter
         let pass = self.passphrase
-        let payload = InitialPortableConfigPayload()
+        // C27 Stage 3: thread the inline HF token into the initial
+        // encrypted config write. Empty input becomes nil so JSON omits
+        // the field; PortableConfig defaults HuggingFaceToken to null.
+        // Build via an immediate closure so the captured `payload` is a
+        // `let` — Swift's strict-concurrency check on Task.detached
+        // refuses to capture a mutated var.
+        let payload: InitialPortableConfigPayload = {
+            var p = InitialPortableConfigPayload()
+            let trimmed = self.huggingFaceToken.trimmingCharacters(in: .whitespacesAndNewlines)
+            p.huggingFaceToken = trimmed.isEmpty ? nil : trimmed
+            return p
+        }()
         do {
             try await Task.detached(priority: .userInitiated) {
                 try writer.writeInitialEncryptedConfig(
@@ -593,7 +770,15 @@ final class PrepViewModel: ObservableObject {
 
     private func writePlaintextAndAdvance(mount: URL) async {
         let writer = self.plaintextConfigWriter
-        let payload = InitialPortableConfigPayload()
+        // C27 Stage 3: same token threading as the encrypted branch.
+        // Closure-init keeps the captured `payload` immutable for
+        // Swift's strict-concurrency check on Task.detached.
+        let payload: InitialPortableConfigPayload = {
+            var p = InitialPortableConfigPayload()
+            let trimmed = self.huggingFaceToken.trimmingCharacters(in: .whitespacesAndNewlines)
+            p.huggingFaceToken = trimmed.isEmpty ? nil : trimmed
+            return p
+        }()
         do {
             try await Task.detached(priority: .userInitiated) {
                 try writer.writeInitialPlaintextConfig(

@@ -62,9 +62,13 @@ public sealed class OllamaPackageService : IOllamaPackageService
     }
 
     public async Task<IOllamaServerHandle> StartTemporaryServerAsync(
-        string ollamaExe, string modelsRoot, Action<string> onLog, CancellationToken ct)
+        string ollamaExe,
+        string modelsRoot,
+        Action<string> onLog,
+        CancellationToken ct,
+        IReadOnlyDictionary<string, string>? extraEnv = null)
     {
-        return await OllamaServerHandle.StartAsync(ollamaExe, modelsRoot, onLog, ct);
+        return await OllamaServerHandle.StartAsync(ollamaExe, modelsRoot, onLog, ct, extraEnv);
     }
 
     public string? ResolveOllamaExe(string ollamaDir)

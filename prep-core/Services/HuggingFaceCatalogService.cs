@@ -28,10 +28,29 @@ public interface IHuggingFaceCatalogService
     /// <c>/api/models/{repoId}</c> so the disk-budget precheck can size
     /// the pull off real bytes (HF's LFS sizes) instead of the
     /// <see cref="ModelSizingCatalog"/>'s parameter-count heuristic.
-    /// Anonymous read only — gated/private repos surface a typed error
-    /// pointing at Stage 3.
+    /// Gated/private repos surface a typed error unless a valid Hugging
+    /// Face token has been supplied via <see cref="UpdateAuthToken"/>.
     /// </summary>
     Task<HuggingFaceModelDetails> FetchSiblingsAsync(string repoId, CancellationToken ct);
+
+    /// <summary>
+    /// C27 Stage 3: install (or clear) the Hugging Face Bearer token used
+    /// for subsequent <see cref="SearchAsync"/> + <see cref="FetchSiblingsAsync"/>
+    /// requests. Passing <c>null</c> or an empty string clears the token
+    /// and reverts to anonymous mode. Mutates the in-memory siblings cache
+    /// (drops it) so a freshly-authenticated user immediately re-fetches
+    /// gated/private results instead of returning the cached anonymous
+    /// "gated=true" stub.
+    /// </summary>
+    void UpdateAuthToken(string? token);
+
+    /// <summary>
+    /// C27 Stage 3: read-only view of the currently-installed token. Used
+    /// by callers that need to forward the token into a separate process
+    /// env (e.g. the temporary Ollama server's <c>HF_TOKEN</c>) rather
+    /// than rebuild their own copy. Returns null when anonymous.
+    /// </summary>
+    string? AuthToken { get; }
 }
 
 /// <summary>C27 Stage 1: shape of an HF Search API call. Defaults mirror
@@ -144,6 +163,16 @@ public sealed class HuggingFaceCatalogService : IHuggingFaceCatalogService, IDis
     private readonly TimeSpan _timeout;
     private readonly string _userAgent;
 
+    // C27 Stage 3: optional Bearer token. Updated via UpdateAuthToken so
+    // the view-host can push the user's HF token into the service after
+    // the encrypted config is unlocked (or after the user edits the
+    // inline token field in PrepApp). Reads are non-locked: the only
+    // mutation path is UpdateAuthToken which takes the cache lock; the
+    // SendAsync paths read the reference atomically and use the snapshot
+    // for the lifetime of the request — token rotation mid-request is
+    // acceptable because the next request picks up the new token.
+    private string? _authToken;
+
     private readonly object _cacheLock = new();
     private readonly Dictionary<string, HuggingFaceCatalogResult> _cache =
         new(StringComparer.Ordinal);
@@ -178,6 +207,9 @@ public sealed class HuggingFaceCatalogService : IHuggingFaceCatalogService, IDis
 
     public string SourceUrl => _sourceUrl;
     public string ModelDetailsBaseUrl => _modelDetailsBaseUrl;
+
+    /// <inheritdoc />
+    public string? AuthToken => _authToken;
 
     public async Task<HuggingFaceCatalogResult> SearchAsync(HuggingFaceSearchQuery query, CancellationToken ct)
     {
@@ -216,6 +248,7 @@ public sealed class HuggingFaceCatalogService : IHuggingFaceCatalogService, IDis
         // header keeps the request portable across HF's API tiers.
         request.Headers.UserAgent.TryParseAdd(_userAgent);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        ApplyAuthHeader(request);
 
         HttpResponseMessage response;
         try
@@ -349,6 +382,7 @@ public sealed class HuggingFaceCatalogService : IHuggingFaceCatalogService, IDis
         using var request = new HttpRequestMessage(HttpMethod.Get, requestUrl);
         request.Headers.UserAgent.TryParseAdd(_userAgent);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        ApplyAuthHeader(request);
 
         HttpResponseMessage response;
         try
@@ -430,6 +464,39 @@ public sealed class HuggingFaceCatalogService : IHuggingFaceCatalogService, IDis
         if (_ownsClient)
         {
             _httpClient.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// C27 Stage 3: install (or clear) the Hugging Face Bearer token.
+    /// Drops the search cache + per-repo siblings cache so a freshly-
+    /// authenticated user immediately re-fetches gated/private results
+    /// instead of returning the cached anonymous "gated=true" stub.
+    /// </summary>
+    public void UpdateAuthToken(string? token)
+    {
+        var normalized = string.IsNullOrWhiteSpace(token) ? null : token!.Trim();
+        if (string.Equals(_authToken, normalized, StringComparison.Ordinal))
+        {
+            return;
+        }
+        _authToken = normalized;
+        lock (_cacheLock) _cache.Clear();
+        lock (_siblingsCacheLock) _siblingsCache.Clear();
+    }
+
+    /// <summary>
+    /// C27 Stage 3: applies the Bearer token (if set) to an outgoing HF
+    /// request. Single-callsite helper so SearchAsync and FetchSiblingsAsync
+    /// stay in sync — adding a new HF endpoint later just calls this.
+    /// </summary>
+    private void ApplyAuthHeader(HttpRequestMessage request)
+    {
+        var token = _authToken;
+        if (!string.IsNullOrEmpty(token))
+        {
+            request.Headers.Authorization =
+                new AuthenticationHeaderValue("Bearer", token);
         }
     }
 

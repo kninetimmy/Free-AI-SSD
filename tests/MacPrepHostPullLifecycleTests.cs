@@ -211,11 +211,18 @@ public sealed class MacPrepHostPullLifecycleTests : IDisposable
 
         public string? ResolveOllamaExe(string ollamaDir) => _resolvedExe;
 
+        public IReadOnlyDictionary<string, string>? LastExtraEnv { get; private set; }
+
         public Task<IOllamaServerHandle> StartTemporaryServerAsync(
-            string ollamaExe, string modelsRoot, Action<string> onLog, CancellationToken ct)
+            string ollamaExe,
+            string modelsRoot,
+            Action<string> onLog,
+            CancellationToken ct,
+            IReadOnlyDictionary<string, string>? extraEnv = null)
         {
             StartTemporaryServerCallCount++;
             LastModelsRoot = modelsRoot;
+            LastExtraEnv = extraEnv;
             LastHandle = new FakeOllamaServerHandle(_host);
             return Task.FromResult<IOllamaServerHandle>(LastHandle);
         }
