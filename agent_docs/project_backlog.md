@@ -125,37 +125,35 @@ Three flat buckets, one counter per bucket:
 > **M13** (Expose-API-on-LAN toggle reverts on Mac) — **done** PR #249 (`e6b958e`) 2026-05-10. Root cause was the async `.stopped` callback overwriting user intent on every restart; fix removes the auto-clear from `.stopped` and lets `.crashed` own involuntary state changes. Decision pinned in `project_decisions.md`.
 > **C2** (embedding-model provisioning gap) — **done** PR #247 (`1df4431`) 2026-05-10. Body retained below at line 286 with status banner; decision pinned in `project_decisions.md`.
 
-**P1 — F2a model-picker cluster (top of queue):**
+**P1 — F2a model-picker cluster — CLEARED 2026-05-10.** All three bundled in one PR:
 
-1. **C3** — Parameter-count filter (data already in scrape — cheapest)
-2. **C4** — Capability filter (scraper extension)
-3. **C5** — Sort by newest (scraper extension)
+> **C3+C4+C5** (model picker filter cluster) — **done** PR #259 (`9f81bd5`) 2026-05-10. One PR bundles parameter-cap dropdown (≤7B/≤14B/≤30B/≤70B), capability AND chips (tools/vision/thinking/audio), and sort dropdown (Popular/Newest/A–Z) across both WPF and Mac pickers. Scraper extended for `x-test-updated` + numeric param extraction (MoE-aware via largest-billion-wins so memory-budget filters exclude MoE); projection layer gains Capabilities/ParametersBillion/LastUpdated; new `ModelSortMode` enum drives WPF `SortDescription`s and Mac sort step. lastUpdated crosses the wire as ISO 8601 string (sorts lexically the same as instants). 51 new C# pins + 11 new Swift pins. CI green on second push (one-line `using System.ComponentModel;` fix for WPF code-behind). v1.3.23 dispatch in flight. Decision pinned in `project_decisions.md`.
 
-**P2 — Substantive UX:**
+**P2 — Substantive UX (top of queue):**
 
-4. **C6** — Detect-configured-drive flow (PrepApp UX; cross-OS)
+1. **C6** — Detect-configured-drive flow (PrepApp UX; cross-OS)
 
 **P3 — Existing critical / high items (deferred behind P1–P2):**
 
-5. **C7** (was X9) — encrypted config persistence lifecycle *(Critical, Opus planning)*
-6. **C8** (was X10) — document replacement consistency *(plan locked 2026-04-19)*
-7. **W1** (was X11) — companion keyboard PTT
-8. **C9** (was X12) — download verify-before-move
-9. **C10** (was F4 Stage 2) — post-setup launch flow
-10. **W2** (was F4 Stages 3-4) — companion install target + installer
-11. **C11** (was B2) — LAN discovery
-12. **C12** (was R1 Stage 2) — runner-cli slash-commands
-13. **M7** (was MAC20) — cross-platform release ZIP layout rework
+2. **C7** (was X9) — encrypted config persistence lifecycle *(Critical, Opus planning)*
+3. **C8** (was X10) — document replacement consistency *(plan locked 2026-04-19)*
+4. **W1** (was X11) — companion keyboard PTT
+5. **C9** (was X12) — download verify-before-move
+6. **C10** (was F4 Stage 2) — post-setup launch flow
+7. **W2** (was F4 Stages 3-4) — companion install target + installer
+8. **C11** (was B2) — LAN discovery
+9. **C12** (was R1 Stage 2) — runner-cli slash-commands
+10. **M7** (was MAC20) — cross-platform release ZIP layout rework
 
 **P4 — RAG audit batch (slot when v1.3.x feature work resumes):**
 
-14. **C13** (was X18) — ingest observability
-15. **C14** (was X15) — RAG file-size and chunk-size caps
-16. **C15** (was X19) — hybrid retrieval
-17. **C16** (was X20) — section-aware chunking
-18. **C17** (was X22) — prompt packing
-19. **C18** (was X23) — test fixtures
-20. **C19** (was X17) — textless-page diagnostic
+11. **C13** (was X18) — ingest observability
+12. **C14** (was X15) — RAG file-size and chunk-size caps
+13. **C15** (was X19) — hybrid retrieval
+14. **C16** (was X20) — section-aware chunking
+15. **C17** (was X22) — prompt packing
+16. **C18** (was X23) — test fixtures
+17. **C19** (was X17) — textless-page diagnostic
 
 **P5 — Polish:**
 
@@ -334,7 +332,7 @@ Items `B1`â€“`F4` below were triaged from Stephen's `Downloads/# Free-AI-SS
 
 ### C3 — Model picker: filter by parameter count
 
-**Status:** filed 2026-05-10 from v1.3.22 mac field test. F2a follow-on. **Cheapest of the picker cluster — data is already in the scrape.**
+**Status:** **done** — PR #259 merged `9f81bd5` (2026-05-10) as part of the C3+C4+C5 cross-OS bundle. Field-test pin tracked in `project_state.md` Open questions. Recon confirmed the scrape already carried size tokens; only numeric extraction (`ParseParamsBillions`, MoE-aware via largest-billion-wins) and projection-layer plumbing were new.
 **Scope:** One-shot, cross-OS bundle.
 **Model:** Sonnet 4.6.
 
@@ -358,7 +356,7 @@ Items `B1`â€“`F4` below were triaged from Stephen's `Downloads/# Free-AI-SS
 
 ### C4 — Model picker: filter by capability (tools / vision / thinking / coding)
 
-**Status:** filed 2026-05-10 from v1.3.22 mac field test. F2a follow-on. **Depends on scraper extension.**
+**Status:** **done** — PR #259 merged `9f81bd5` (2026-05-10) as part of the C3+C4+C5 cross-OS bundle. The scraper already captured capabilities via `x-test-capability` (validated against the 2026-05-07 fixture); only projection plumbing + AND-semantics filter UI were new. Capabilities forwarded as opaque lowercase strings; UI gates on the four chips (tools/vision/thinking/audio).
 **Scope:** One-shot, cross-OS bundle. Bigger than C3 — capability tags are scraped per-model, not per-tag.
 **Model:** Sonnet 4.6.
 
@@ -378,7 +376,7 @@ Items `B1`â€“`F4` below were triaged from Stephen's `Downloads/# Free-AI-SS
 
 ### C5 — Model picker: sort by newest
 
-**Status:** filed 2026-05-10 from v1.3.22 mac field test. F2a follow-on. **Depends on scraper extension.**
+**Status:** **done** — PR #259 merged `9f81bd5` (2026-05-10) as part of the C3+C4+C5 cross-OS bundle. New `x-test-updated` regex + `ParseRelativeDate` (months/years approximated for ordinal sort); `LastUpdated: DateTimeOffset?` plumbed through projection and across the wire as ISO 8601 string (Swift sorts lexically). New `ModelSortMode` enum drives WPF `SortDescription`s and Mac sort step.
 **Scope:** One-shot, cross-OS bundle.
 **Model:** Sonnet 4.6.
 
