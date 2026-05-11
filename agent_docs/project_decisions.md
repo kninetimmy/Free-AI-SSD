@@ -2880,3 +2880,239 @@ over-warned for 70B-class models on smaller SSDs without buying
 real safety beyond the merge window.
 
 Established PR #268 (`e807e04`).
+
+---
+
+## 2026-05-12 — Hugging Face token: inline field next to Source dropdown, sealed alongside the rest of the portable-config [C27 Stage 3]
+
+C27 Stage 3 had three live options for where the HF token UI
+lives: (a) inline next to the Source dropdown when HF is
+selected, (b) a separate PrepApp Settings tab, (c) a modal that
+fires when the user clicks Download on a gated/private row.
+Option (a) wins.
+
+**Why inline (not Settings):** the picker workflow is where the
+user sees gated rows fail; making the user leave the picker tab
+to enter a token would be a friction trap. The field is hidden
+when source ≠ HuggingFace so it never adds noise to the default
+Ollama posture.
+
+**Why inline (not modal):** a modal would only fire on Download
+click, which means the user can't pre-set the token before
+browsing — and search results themselves benefit from
+authentication (HF returns gated repos in search results when
+authenticated). Inline lets the user authenticate the whole
+session.
+
+**Storage:** the token is a new optional `HuggingFaceToken`
+field on `PortableConfig`. When SSD encryption is on, it rides
+the AES-256-GCM seal alongside `NetworkApiKey`. When encryption
+is off, it persists in plaintext — but the picker surfaces a
+yellow defense-in-depth banner: "Encryption is off — your
+Hugging Face token will be stored in plaintext on the SSD."
+The user keeps control; we don't refuse the write (an HF token
+is a personal credential, not a LAN-advertised shared secret,
+so it doesn't trip the existing `NetworkRequireApiKey` save
+guard).
+
+**UI control:** WPF `PasswordBox` (masked, can't two-way bind
+XAML → `.Password` by design; `PasswordChanged` code-behind
+handler writes plaintext into the VM only at the submission
+boundary). Mac SwiftUI `SecureField`. The token value is never
+logged: the sidecar's `set-hf-token` log line records install
+vs clear, not the value. The Mac IPC envelope passes the token
+as a JSON payload to a new `set-hf-token` arm rather than
+piggybacking on every command — keeps the token off most log
+surfaces.
+
+**Idempotent re-finalize:** at finalize time, empty input
+*preserves* any existing token on the drive (the user
+shouldn't have to re-type the token on every re-prep). Same
+posture as `NetworkApiKey` (generated once, preserved across
+re-finalize).
+
+Established PR #270 (`42c4bdc`).
+
+---
+
+## 2026-05-12 — Ollama server inherits `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` from the user's PrepApp token entry, not env-at-launch [C27 Stage 3]
+
+Ollama's `/api/pull` endpoint authenticates `hf.co/...` GGUF
+pulls via the `HF_TOKEN` (modern) or `HUGGING_FACE_HUB_TOKEN`
+(older builds) env variables. For gated/private repos to be
+pullable, the *temp Ollama server process* needs these env vars
+— the CLI client invocation goes through the server's
+`/api/pull`, so client-side env doesn't help.
+
+**Solution:** `IOllamaPackageService.StartTemporaryServerAsync`
+gains an optional `extraEnv` dictionary parameter. Both the WPF
+`PrepViewModel.PullModelsAsync` and the Mac sidecar's
+`PullModelAsync` build this dictionary from the current HF
+token (via a `BuildHuggingFaceEnv` helper) and pass it on
+server start. `OllamaServerHandle.StartAsync` merges `extraEnv`
+into `ProcessStartInfo.Environment` *before* setting
+`OLLAMA_MODELS` / `OLLAMA_HOST`, so callers can never
+accidentally override the SSD-pinned model root or the
+loopback host binding.
+
+**Why not env-at-launch:** the user enters their token after
+PrepApp starts, not before. Reading `HF_TOKEN` from the parent
+process env (mac-prep-host or PrepApp.exe) would require the
+user to set the env var system-wide before launching the app —
+a poor UX for a one-off token entry. Reading from the user's
+in-memory input keeps the token entry inline with the rest of
+the picker workflow.
+
+**Token rotation during a session:** the temp Ollama server
+starts ONCE per sidecar lifetime and is reused across the pull
+batch. Token rotation mid-session requires restarting the
+sidecar. Acceptable for Stage 3 scope (the typical workflow is
+"enter token once at prep time, pull").
+
+Established PR #270 (`42c4bdc`).
+
+---
+
+## 2026-05-12 — Per-quant rows are lazy: chevron-click triggers a single `FetchSiblingsAsync` call, not bulk fetch on Refresh [C27 Stage 4]
+
+C27 Stage 4 had three options for when per-quant child rows
+materialize: (a) lazy — chevron click fetches siblings for that
+one repo; (b) eager — every Refresh fetches siblings for all
+~50 popular HF repos; (c) hybrid — first Refresh is lazy,
+expanded repos persist in config and re-fetch on next Refresh.
+Option (a) wins.
+
+**Why lazy:** ~1 API call per chevron click vs ~50 calls per
+Refresh. HF's anonymous rate limit (~1000 req/hour) doesn't
+flinch at lazy expansion but would blow up eager fetch on a
+typical session. Hybrid would add persisted state without
+buying real UX — most users will explore a few repos, not pin
+favorites across sessions.
+
+**Cache:** the existing per-repo `FetchSiblingsAsync` cache
+already prevents redundant API calls within a session (Stage 2
+populated it for the disk-budget warning; Stage 4 reads from
+the same cache). Re-expand a collapsed parent → instant, no
+network call. The VM tracks `_expandedRepos` as a `HashSet<string>`
+so a follow-on toggle just flips visibility via the existing
+filter callback — child rows stay in `ModelRows`.
+
+**Multi-part summing:** GGUF files split across multiple files
+(`...-Q4_K_M-00001-of-00003.gguf`) collapse to a *single* quant
+child row whose `QuantSizeBytes` sums the parts. Otherwise the
+user would see three identical-label rows each at 1/3 the real
+disk cost — which is exactly the under-warning problem Stage 2
+solved at the disk-budget layer. The `BestAt` column for
+multi-part rows reads `Q4_K_M (3-part split)` so the user knows
+why one logical quant is one row.
+
+**Quant sort order:** smallest → largest as the visual default
+(`IQ` < `Q2` < `Q3` < `Q4` < `Q5` < `Q6` < `Q8` <
+`BF16`/`F16` < `F32`). Inexact — `Q4_K_M` vs `Q4_0` tie on the
+digit and fall to a `ThenBy` alphabetic — but stable enough
+that the user sees the smallest viable quant first when
+scrolling.
+
+**No capability inference:** HF doesn't surface ollama.com's
+`tools` / `vision` / `thinking` / `audio` tags. Inferring from
+model names ("qwen3" → thinking, "llama3.1" → tools) is
+brittle. Quant child rows inherit the parent's
+`Capabilities` list (which is empty for all HF rows), so the
+C25 pass-through marker handles the chip-filter UX without new
+inference code. If a future need for HF capability tags
+emerges, add a dedicated stage.
+
+Established PR #270 (`42c4bdc`).
+
+---
+
+## 2026-05-12 — One shared per-quant projector in `prep-core`; never let the WPF + Mac sidecar copies drift [C24 lesson, cashed in a second time]
+
+C27 Stage 4 needed the same "collapse `siblings[]` into one
+row per distinct GGUF quant label, sum multi-part series" logic
+on both Windows (WPF view-host) and Mac (sidecar `hf-siblings`
+arm). First-cut implementation had separate copies in
+`MainWindow.xaml.cs` and `HostLifetime.cs` — same algorithm,
+two regex constants, two sort tables.
+
+**Fix:** factored into `prep-core/Services/HuggingFaceQuantProjector.cs`
+with two entry points:
+- `Project(repoId, siblings)` returns `IReadOnlyList<StarterCatalogEntry>`
+  for the WPF VM path.
+- `ProjectAsWirePayload(repoId, siblings)` returns the
+  JSON-friendly `object[]` the Mac sidecar emits over IPC
+  (the SwiftUI host's `decodeQuantChild` consumes it).
+
+Both helpers share the same `AggregateByQuant` private function
++ `ExtractQuantLabel` regex + `QuantSortOrder` ordinal. WPF
+references it directly; Mac sidecar references it via
+`prep-core/`'s already-existing project reference. Tests live
+once.
+
+**Why this matters:** the C24 incident (refresh-catalog dropped
+`parametersBillion` + `lastUpdated` after PR #259 added them to
+discover-catalog only) showed how easily paired-implementation
+drift becomes a regression on one host but not the other. Every
+new feature that needs to land on both WPF and the Mac sidecar
+should ask: "is there a single C# helper that should own this
+algorithm?" before duplicating.
+
+**Pattern:** if a new prep-time helper is needed by both WPF and
+the Mac sidecar, it lands in `prep-core/Services/` (or
+`prep-core/Helpers/`) — never in `prep-app/` or `mac-prep-host/`
+exclusively, because either repo would lock the other out.
+
+Established PR #270 (`42c4bdc`); reinforces the lesson from
+PR #262 (C24).
+
+---
+
+## 2026-05-12 — Swift `Task.detached` captures must be `let`, not `var`; closure-init is the workaround [C27 Stage 3 mac CI surprise]
+
+Swift's strict-concurrency check on `Task.detached { ... }`
+refuses to capture a local `var` that's mutated after
+declaration. CI's `arm64-apple-macos11.0` `swiftc` flagged it;
+local Xcode SourceKit did not (different concurrency-checking
+posture between the toolchains).
+
+**Failure mode:** PR #270's first push (`2266a31`) built the
+HF-token-aware `InitialPortableConfigPayload` via:
+
+```swift
+var payload = InitialPortableConfigPayload()
+let trimmed = self.huggingFaceToken.trimmingCharacters(in: .whitespacesAndNewlines)
+payload.huggingFaceToken = trimmed.isEmpty ? nil : trimmed
+do {
+    try await Task.detached(priority: .userInitiated) {
+        try writer.writeInitialEncryptedConfig(
+            ssdRoot: mount, payload: payload, passphrase: pass)
+    }.value
+```
+
+→ `error: reference to captured var 'payload' in concurrently-executing code`.
+
+**Fix (commit `e27f88f`):** build the payload through an
+immediate closure so the captured value is `let`:
+
+```swift
+let payload: InitialPortableConfigPayload = {
+    var p = InitialPortableConfigPayload()
+    let trimmed = self.huggingFaceToken.trimmingCharacters(in: .whitespacesAndNewlines)
+    p.huggingFaceToken = trimmed.isEmpty ? nil : trimmed
+    return p
+}()
+```
+
+The mutation happens inside the closure scope (where `var p`
+stays inside `Task.detached`-free territory), and the final
+captured value is the closure's `let` return.
+
+**Pattern:** whenever a Swift value type needs setup before
+crossing into `Task.detached` / `Task.init` / any
+`@Sendable` boundary, build it through an immediate closure.
+Don't rely on local SourceKit catching this — assume CI's
+strict-concurrency posture and write `let`-capturable code from
+the start.
+
+Established PR #270 (`42c4bdc`, fix in `e27f88f`).
+
