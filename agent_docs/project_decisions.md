@@ -2750,3 +2750,42 @@ Mechanism: `shared/ViewModels/PrepViewModel.cs:HasActiveCapabilityFilter`,
 `prep-app/MainWindow.xaml` (DataGrid.RowStyle MultiDataTrigger),
 `mac-prep-app/Sources/main.swift` (isPassThrough computation +
 `.opacity()` + `.help()` modifiers on the `Toggle` row).
+
+---
+
+## 2026-05-11 — Multi-source catalogs use a single discriminator field on the shared entry, not parallel types [C27 Stage 1]
+
+When adding Hugging Face as a second catalog source alongside the
+existing ollama.com scrape, the choice was between (a) extending the
+shared `StarterCatalogEntry` record with a `ModelSource Source` field
+plus nullable HF-specific fields, or (b) introducing a parallel
+`HuggingFaceCatalogEntry` type and unioning the two at the view-model
+layer.
+
+**Chose (a) — single discriminator field on `StarterCatalogEntry`.**
+
+The C24 lesson (2026-05-11) is binding here: duplicating projections
+is exactly the regression class C24 named — the refresh-catalog arm
+dropping `parametersBillion` + `lastUpdated` because the
+discover-catalog arm's projection was copied, not shared. A parallel
+type would have threaded a discriminated union through ten "remember
+to handle the HF branch" sites: `ModelGridRow` ctor, `StarterMeta`
+lookup, both XAML data templates, the Swift `StarterModelDisplayEntry`,
+`applyStarterModelFilters`, both new host IPC arms
+(`discover-hf-catalog` + `search-hf`), and the projection helpers on
+both OSes. The single discriminator collapses those to one branch
+site per concern (the eventual download-action gate) and keeps the
+filter pipeline source-agnostic.
+
+The C24 lesson is also cashed in concretely on the same PR:
+`HostLifetime.BuildCatalogEntries` is now the single projection helper
+backing all four catalog-emitting arms (discover-catalog,
+refresh-catalog, discover-hf-catalog, search-hf), so adding a wire
+field becomes a one-site change instead of drifting across four arm
+bodies.
+
+**Applies to:** Stage 4 per-quant row expansion (each row still a
+`StarterCatalogEntry`, distinguished by tag suffix); any future
+multi-source feature (additional registries, search providers).
+
+Established PR #266 (`58f79a1`).
