@@ -8,14 +8,21 @@ Last released: **v1.3.22** (2026-05-10; F2a — full-page picker, search, Most p
 
 **Currently between tasks.** PR #259 (`9f81bd5`) shipped C3+C4+C5
 as one cross-OS bundle, clearing the entire P1 F2a model-picker
-cluster. With M11/C1/M12/M13/C2/M14 (P0) + C3/C4/C5 (P1) all
-merged, the v1.3.22 mac field-test bug surface is closed and the
-next user-visible feature work is **P2 C6** (PrepApp detect-
-already-configured-drive, skip-format flow). Back-burnered: **M2**
-(signing + notarization, awaiting Apple Developer cert renewal),
-**M10** (Mac PrepApp finalize observability, cold-load wait
-acceptable post-MAC39). Ancestor-walk consolidation into
-`prep-core/BundleContentRoots` remains overdue.
+cluster. **Post-v1.3.22 Mac field test (2026-05-10) surfaced four
+follow-ons filed for next session** — see `project_backlog.md`
+P1.5 cluster: **C24** (P0 regression — Mac refresh-catalog payload
+missing `parametersBillion` + `lastUpdated`, makes Max-size and
+Sort: Newest no-ops on Mac; one-line host fix), **C25** (visual
+differentiation for capability pass-through entries), **C26**
+(Most-popular limit dropdown 10/15/25/50 replacing the static 15),
+**C27** (Hugging Face as a model source — full integration,
+multi-stage, Opus planning at kickoff). User wants C24-C27 picked
+up next session ahead of **P2 C6** (PrepApp detect-already-
+configured-drive). Back-burnered: **M2** (signing + notarization,
+awaiting Apple Developer cert renewal), **M10** (Mac PrepApp
+finalize observability, cold-load wait acceptable post-MAC39).
+Ancestor-walk consolidation into `prep-core/BundleContentRoots`
+remains overdue.
 
 ## Recently shipped
 
@@ -41,11 +48,12 @@ acceptable post-MAC39). Ancestor-walk consolidation into
 
 1. **P0 field-test bug surface — cleared.** M11, C1, M12, M13, C2, M14 all merged this session-cluster.
 2. **P1 F2a model-picker cluster — cleared** (C3+C4+C5 bundled in PR #259 `9f81bd5`).
-3. **P2 substantive UX (top of queue):** `C6` (PrepApp detect-configured-drive flow).
-4. **P3 critical pre-existing:** `C7` (was X9, encrypted config persistence), `C8` (was X10, document replacement consistency), `W1` (was X11, companion keyboard PTT), `C9` (was X12, download verify-before-move), `C10` (was F4 Stage 2, post-setup launch flow), `W2` (was F4 Stages 3-4, companion installer), `C11` (was B2, LAN discovery), `C12` (was R1 Stage 2, runner-cli slash-commands), `M7` (was MAC20, cross-platform release ZIP layout rework).
-5. **P4 RAG audit batch** (slot when v1.3.x feature work resumes): `C13` (X18), `C14` (X15), `C15` (X19), `C16` (X20), `C17` (X22), `C18` (X23), `C19` (X17).
-6. **Back-burnered per user:** `M2` (was MAC11, signing + notarization, awaiting Apple Developer cert renewal), `M10` (was MAC37, finalize observability, cold-load wait acceptable post-MAC39).
-7. **Cleanup follow-up (now overdue):** fold `MacArtifactAvailability.EnumerateContentRoots`, `ArtifactStagingService.EnumerateBundledContentRoots`, and `PrereqService.EnumerateBundleRoots` into one shared `prep-core/BundleContentRoots` helper. All three are byte-identical ancestor-walk enumerators.
+3. **P1.5 picker filter cluster follow-ons (new — 2026-05-10):** `C24` (Mac refresh-catalog payload regression; P0 priority within this cluster), `C25` (capability pass-through visual marker), `C26` (Most-popular limit dropdown), `C27` (Hugging Face source integration; Opus planning).
+4. **P2 substantive UX:** `C6` (PrepApp detect-configured-drive flow).
+5. **P3 critical pre-existing:** `C7` (was X9, encrypted config persistence), `C8` (was X10, document replacement consistency), `W1` (was X11, companion keyboard PTT), `C9` (was X12, download verify-before-move), `C10` (was F4 Stage 2, post-setup launch flow), `W2` (was F4 Stages 3-4, companion installer), `C11` (was B2, LAN discovery), `C12` (was R1 Stage 2, runner-cli slash-commands), `M7` (was MAC20, cross-platform release ZIP layout rework).
+6. **P4 RAG audit batch** (slot when v1.3.x feature work resumes): `C13` (X18), `C14` (X15), `C15` (X19), `C16` (X20), `C17` (X22), `C18` (X23), `C19` (X17).
+7. **Back-burnered per user:** `M2` (was MAC11, signing + notarization, awaiting Apple Developer cert renewal), `M10` (was MAC37, finalize observability, cold-load wait acceptable post-MAC39).
+8. **Cleanup follow-up (now overdue):** fold `MacArtifactAvailability.EnumerateContentRoots`, `ArtifactStagingService.EnumerateBundledContentRoots`, and `PrereqService.EnumerateBundleRoots` into one shared `prep-core/BundleContentRoots` helper. All three are byte-identical ancestor-walk enumerators.
 
 **RAG audit backlog:** X17-X23 cover audit findings; X10/X13/X15 scope expansions recorded. Plan: `C:\Users\Kninetimmy\.claude\plans\okay-i-want-to-glowing-galaxy.md`. v1.3.x sequence: X18 -> X15 (expanded) -> X19 -> X20 -> X22 -> X23. X17 reduced to Stage 1 textless-page diagnostic (full OCR deferred — workload is text-layer PDFs).
 
