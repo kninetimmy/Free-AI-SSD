@@ -79,6 +79,12 @@ public partial class MainWindow : Window
         _viewModel.SystemRamGb = SystemResources.GetTotalSystemRamGb();
         _viewModel.GpuVramGb = SystemResources.GetGpuVramGb();
 
+        // C27 Stage 2: VM stays free of an IHuggingFaceCatalogService
+        // dependency (HF service lives in prep-core, downstream of the
+        // shared assembly that hosts the VM). The view-host owns the
+        // service and feeds the VM through a delegate hook.
+        _viewModel.HuggingFaceSizingWarningsHook = FetchHuggingFaceSizingWarningsAsync;
+
         // Thread the parsed command-line intent through to the view
         // model so the elevation banner binds correctly and the
         // auto-resume-format path can fire after Initialize() runs.
@@ -377,6 +383,102 @@ public partial class MainWindow : Window
             _activeRefreshCts?.Dispose();
             _activeRefreshCts = null;
         }
+    }
+
+    /// <summary>
+    /// C27 Stage 2: fetches HF siblings for each <paramref name="repoIds"/>
+    /// entry and produces human-readable disk-budget warnings. Mirrors
+    /// the <see cref="ModelService.BuildPullSelectionWarnings"/> output
+    /// shape so the existing <c>ConfirmSizingWarnings</c> dialog renders
+    /// HF warnings alongside Ollama-side ones with no shape changes.
+    ///
+    /// Gated/private repos surface a Stage-3 pointer instead of a size.
+    /// Per-repo fetch failures fall through (logged via the VM's
+    /// <c>AppendLog</c> indirectly when the hook throws — this method
+    /// catches at the inner level so one bad repo doesn't poison the
+    /// whole batch).
+    /// </summary>
+    private async Task<IReadOnlyList<string>> FetchHuggingFaceSizingWarningsAsync(
+        IReadOnlyList<string> repoIds,
+        long freeBytes,
+        CancellationToken ct)
+    {
+        var warnings = new List<string>();
+        foreach (var repoId in repoIds)
+        {
+            if (ct.IsCancellationRequested) break;
+            HuggingFaceModelDetails details;
+            try
+            {
+                details = await _hfCatalogService.FetchSiblingsAsync(repoId, ct);
+            }
+            catch (LiveCatalogFetchException ex)
+            {
+                if (ex.Reason == LiveCatalogFetchReason.NonSuccessStatus
+                    && (ex.StatusCode == "401" || ex.StatusCode == "403"))
+                {
+                    warnings.Add(
+                        $"hf.co/{repoId}: Hugging Face refused the metadata request ({ex.StatusCode}). " +
+                        "If the repo is gated or private, token auth lands in Stage 3.");
+                }
+                else
+                {
+                    warnings.Add(
+                        $"hf.co/{repoId}: could not fetch file sizes ({ex.Reason}: {ex.Message}). " +
+                        "Pull will proceed without a disk-budget check.");
+                }
+                continue;
+            }
+
+            if (details.Gated || details.Private)
+            {
+                warnings.Add(
+                    $"hf.co/{repoId}: this repo is " +
+                    (details.Gated ? "gated" : "private") +
+                    " and requires a Hugging Face token. Token auth lands in Stage 3 — pull will fail without it.");
+                continue;
+            }
+
+            var pick = HuggingFaceCatalogService.PickSizingFile(details.Siblings);
+            if (pick is null || pick.TotalBytes <= 0)
+            {
+                // No sized GGUF in the manifest — surface as info, not
+                // a blocker. Ollama may still pull successfully.
+                warnings.Add(
+                    $"hf.co/{repoId}: no GGUF file sizes available on Hugging Face. " +
+                    "Pull will proceed without a disk-budget check.");
+                continue;
+            }
+
+            var sizeGb = pick.TotalBytes / (1024.0 * 1024 * 1024);
+            var headroom = freeBytes > 0
+                ? freeBytes - (pick.TotalBytes * 2L)
+                : long.MinValue;
+            var partSuffix = pick.PartCount > 1
+                ? $" ({pick.PartCount}-part split)"
+                : string.Empty;
+
+            if (freeBytes <= 0)
+            {
+                // Free space unknown — surface size only; don't pretend
+                // we know whether it fits.
+                warnings.Add(
+                    $"hf.co/{repoId}: {pick.PrimaryFilename} ≈ {sizeGb:F1} GB{partSuffix}. " +
+                    "Free space on the target drive could not be determined.");
+            }
+            else if (headroom < 0)
+            {
+                // Less than 2× headroom — the precondition
+                // OllamaModelStager.EnsureStagingFreeSpace enforces.
+                var freeGb = freeBytes / (1024.0 * 1024 * 1024);
+                warnings.Add(
+                    $"hf.co/{repoId}: {pick.PrimaryFilename} ≈ {sizeGb:F1} GB{partSuffix}; " +
+                    $"target drive has {freeGb:F1} GB free — leaves under 2× headroom " +
+                    "(Ollama needs staging space for the merge).");
+            }
+            // else: fits comfortably — no warning needed.
+        }
+        return warnings;
     }
 
     /// <summary>C27 Stage 1: cancel any in-flight refresh so a source

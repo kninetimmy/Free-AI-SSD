@@ -21,6 +21,18 @@ public class PrepViewModel : BaseViewModel
     private readonly ILogService _logService;
     private readonly IElevationService _elevationService;
 
+    /// <summary>
+    /// C27 Stage 2: view-host-supplied hook that fetches HF disk-budget
+    /// warnings for the HF rows in a Download batch. Receives repo IDs
+    /// (already stripped of the <c>hf.co/</c> prefix) plus the drive's
+    /// free disk bytes; returns one warning string per repo that needs
+    /// flagging (empty list = no warnings). Null hook (default) skips
+    /// HF disk-budget warnings — pull still proceeds. Keeps the VM free
+    /// of a direct dependency on <c>IHuggingFaceCatalogService</c> (which
+    /// lives in <c>prep-core</c>, downstream of this assembly).
+    /// </summary>
+    public Func<IReadOnlyList<string>, long, CancellationToken, Task<IReadOnlyList<string>>>? HuggingFaceSizingWarningsHook { get; set; }
+
     private IReadOnlyList<DriveTarget> _drives = Array.Empty<DriveTarget>();
     private DriveTarget? _selectedDrive;
     private bool _showFixedDrives;
@@ -1023,18 +1035,14 @@ public class PrepViewModel : BaseViewModel
             return;
         }
 
-        // C27 Stage 1: Hugging Face rows are browse-only in this stage.
-        // Stage 2 wires `hf.co/<repo>:<quant>` tags through Ollama's
-        // native HF pull syntax. Refuse the whole batch up front so a
-        // half-fulfilled download (Ollama rows pulled, HF rows silently
-        // ignored) can't ship a confusing UX.
-        var hfRows = checkedRows.Where(r => r.SourceKind == ModelSource.HuggingFace).ToList();
-        if (hfRows.Count > 0)
-        {
-            StatusText = $"Hugging Face pulls land in Stage 2 — {hfRows.Count} checked row(s) skipped.";
-            AppendLog($"Stage 1 of the Hugging Face integration is browse-only. Uncheck {hfRows.Count} HF row(s) ({string.Join(", ", hfRows.Take(3).Select(r => r.Name))}{(hfRows.Count > 3 ? ", …" : string.Empty)}) and retry, or switch back to the Ollama source.");
-            return;
-        }
+        // C27 Stage 2: HF rows are now downloadable. Ollama natively
+        // accepts `hf.co/<owner>/<repo>` tags and pulls the default
+        // quant (Q4_K_M when present). Disk-budget warnings come from
+        // HuggingFaceSizingWarningsHook (view-host-supplied) which
+        // fetches `siblings[].lfs.size` per repo for the checked rows.
+        var hfRows = checkedRows
+            .Where(r => r.SourceKind == ModelSource.HuggingFace && !r.IsPresentOnDrive)
+            .ToList();
 
         var selected = checkedRows
             .Where(r => !r.IsPresentOnDrive)
@@ -1054,16 +1062,64 @@ public class PrepViewModel : BaseViewModel
 
         _driveService.EnsureSsdStructure(_selectedDrive.RootPath);
 
-        if (!ConfirmSizingWarningsIfNeeded(selected)) return;
+        if (!await ConfirmSizingWarningsIfNeededAsync(selected, hfRows)) return;
         await PullModelsAsync(selected);
         ClearSelection();
     }
 
-    private bool ConfirmSizingWarningsIfNeeded(IReadOnlyList<string> models)
+    private async Task<bool> ConfirmSizingWarningsIfNeededAsync(
+        IReadOnlyList<string> models,
+        IReadOnlyList<ModelGridRow> hfRows)
     {
         if (_selectedDrive is null) return true;
 
-        var warnings = _modelService.BuildPullSelectionWarnings(models, _selectedDrive.RootPath, _systemRamGb, _gpuVramGb);
+        var warnings = new List<string>(
+            _modelService.BuildPullSelectionWarnings(models, _selectedDrive.RootPath, _systemRamGb, _gpuVramGb));
+
+        // C27 Stage 2: HF rows in the batch get their own warnings
+        // computed from real bytes (`siblings[].lfs.size`) rather than
+        // the parameter-count heuristic. Hook is null in tests that
+        // don't exercise HF — that's fine, pull still proceeds without
+        // a disk-budget warning, matching the posture for any other
+        // catalog metadata gap.
+        var hook = HuggingFaceSizingWarningsHook;
+        if (hfRows.Count > 0 && hook is not null)
+        {
+            var repoIds = hfRows
+                .Select(r => StripHuggingFacePrefix(r.Name))
+                .Where(r => !string.IsNullOrWhiteSpace(r))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (repoIds.Count > 0)
+            {
+                // GetFreeDiskSpaceGb returns int? — null when the drive
+                // is detached or unreadable. Treat that as "free space
+                // unknown" and pass 0 so the hook can still surface
+                // approximate-size warnings (Stage 2's warnings are
+                // primarily about the actual download size, not a hard
+                // failure if free disk is unmeasurable).
+                var freeGb = _driveService.GetFreeDiskSpaceGb(_selectedDrive.RootPath);
+                var freeBytes = (long)(freeGb ?? 0) * 1024L * 1024 * 1024;
+                try
+                {
+                    var hfWarnings = await hook(repoIds, freeBytes, CancellationToken.None);
+                    if (hfWarnings is { Count: > 0 })
+                    {
+                        warnings.AddRange(hfWarnings);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Hook failure (HF API 4xx/5xx, network) is non-
+                    // fatal — log and proceed. The pull itself may
+                    // still fail with disk-full mid-stream, but that's
+                    // a less common path than HF rate-limiting on the
+                    // metadata fetch.
+                    AppendLog($"Could not fetch Hugging Face disk-budget data: {ex.Message}");
+                }
+            }
+        }
+
         if (warnings.Count > 0)
         {
             if (!_dialogService.ConfirmSizingWarnings(warnings))
@@ -1073,6 +1129,21 @@ public class PrepViewModel : BaseViewModel
             }
         }
         return true;
+    }
+
+    /// <summary>
+    /// C27 Stage 2: strip the <c>hf.co/</c> prefix from an HF row's tag
+    /// to recover the bare repoId (<c>owner/repo</c>) that
+    /// <see cref="HuggingFaceSizingWarningsHook"/> expects. Returns the
+    /// input unchanged when the prefix is absent.
+    /// </summary>
+    internal static string StripHuggingFacePrefix(string tag)
+    {
+        if (string.IsNullOrWhiteSpace(tag)) return tag;
+        const string prefix = "hf.co/";
+        return tag.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            ? tag[prefix.Length..]
+            : tag;
     }
 
     private async Task PullModelsAsync(IReadOnlyList<string> models)

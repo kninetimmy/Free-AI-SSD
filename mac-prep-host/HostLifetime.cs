@@ -296,8 +296,32 @@ internal sealed class HostLifetime : IAsyncDisposable
         // qwen2.5:7b. Staging eliminates the chunk-stall storm; the
         // sequential merge writes the SSD at exFAT's actual speed.
         var stagingRoot = _stagingRootResolver();
-        var sizing = ModelSizingCatalog.Suggest(modelTag);
-        OllamaModelStager.EnsureStagingFreeSpace(stagingRoot, sizing.ApproxDiskGb * 1024L * 1024 * 1024);
+
+        // C27 Stage 2: for HF tags (`hf.co/owner/repo`) the parameter-
+        // count heuristic in ModelSizingCatalog under-counts wildly
+        // (defaults to 10 GB regardless of repo size). Fetch siblings
+        // up front so EnsureStagingFreeSpace gets real bytes and the
+        // user sees the picked filename + size before the pull starts.
+        // Gated/private repos refuse early — token auth lands in Stage 3.
+        long estimatedBytes;
+        if (modelTag.StartsWith("hf.co/", StringComparison.OrdinalIgnoreCase))
+        {
+            var repoId = modelTag["hf.co/".Length..];
+            estimatedBytes = await EstimateHuggingFaceSizeAsync(repoId, modelTag, ct);
+            if (estimatedBytes < 0)
+            {
+                // EstimateHuggingFaceSizeAsync already emitted the
+                // failure result; bail without touching the staging
+                // precheck (the user has already seen a clear refusal).
+                return;
+            }
+        }
+        else
+        {
+            var sizing = ModelSizingCatalog.Suggest(modelTag);
+            estimatedBytes = sizing.ApproxDiskGb * 1024L * 1024 * 1024;
+        }
+        OllamaModelStager.EnsureStagingFreeSpace(stagingRoot, estimatedBytes);
 
         // MAC31: linked CTS lets the cancel-pull arm signal this pull
         // without touching any other command's token. Stored under
@@ -385,6 +409,73 @@ internal sealed class HostLifetime : IAsyncDisposable
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// C27 Stage 2: fetch <c>siblings[].lfs.size</c> for a Hugging Face
+    /// repo and return the picked-file byte count so the staging
+    /// precheck can size off real bytes. Returns -1 (and emits a
+    /// pull-model failure result) when the repo is gated/private —
+    /// caller should bail without invoking the precheck. Returns 0
+    /// when siblings exist but no GGUF size is available; the
+    /// EnsureStagingFreeSpace 5 GB floor takes over in that case.
+    /// API failures (4xx/5xx other than 401/403) log and fall through
+    /// to the heuristic estimate (returns the ModelSizingCatalog
+    /// value), matching the WPF posture of "pull still proceeds".
+    /// </summary>
+    private async Task<long> EstimateHuggingFaceSizeAsync(string repoId, string modelTag, CancellationToken ct)
+    {
+        HuggingFaceModelDetails details;
+        try
+        {
+            details = await _hfCatalogService.FetchSiblingsAsync(repoId, ct);
+        }
+        catch (LiveCatalogFetchException ex)
+        {
+            if (ex.Reason == LiveCatalogFetchReason.NonSuccessStatus
+                && (ex.StatusCode == "401" || ex.StatusCode == "403"))
+            {
+                var msg = $"Hugging Face refused the metadata request for {repoId} ({ex.StatusCode}). " +
+                          "If the repo is gated or private, token auth lands in Stage 3.";
+                EmitLog(msg);
+                EmitResult("pull-model", new { ok = false, modelTag, reason = "hf-auth-required", message = msg });
+                return -1;
+            }
+            EmitLog($"Could not fetch Hugging Face siblings for {repoId} ({ex.Reason}: {ex.Message}); " +
+                    "falling back to heuristic size estimate.");
+            var fallback = ModelSizingCatalog.Suggest(modelTag);
+            return fallback.ApproxDiskGb * 1024L * 1024 * 1024;
+        }
+        catch (Exception ex)
+        {
+            EmitLog($"Could not fetch Hugging Face siblings for {repoId}: {ex.Message}; " +
+                    "falling back to heuristic size estimate.");
+            var fallback = ModelSizingCatalog.Suggest(modelTag);
+            return fallback.ApproxDiskGb * 1024L * 1024 * 1024;
+        }
+
+        if (details.Gated || details.Private)
+        {
+            var kind = details.Gated ? "gated" : "private";
+            var msg = $"hf.co/{repoId} is {kind} and requires a Hugging Face token. " +
+                      "Token auth lands in Stage 3 — pull will fail without it.";
+            EmitLog(msg);
+            EmitResult("pull-model", new { ok = false, modelTag, reason = $"hf-{kind}", message = msg });
+            return -1;
+        }
+
+        var pick = HuggingFaceCatalogService.PickSizingFile(details.Siblings);
+        if (pick is null || pick.TotalBytes <= 0)
+        {
+            EmitLog($"No GGUF file sizes published by Hugging Face for {repoId}; " +
+                    "proceeding without a sized disk-budget check.");
+            return 0;
+        }
+
+        var sizeGb = pick.TotalBytes / (1024.0 * 1024 * 1024);
+        var partSuffix = pick.PartCount > 1 ? $" ({pick.PartCount}-part split)" : string.Empty;
+        EmitLog($"Sizing hf.co/{repoId} from {pick.PrimaryFilename} ≈ {sizeGb:F1} GB{partSuffix}.");
+        return pick.TotalBytes;
     }
 
     /// <summary>

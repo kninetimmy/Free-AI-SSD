@@ -387,6 +387,220 @@ public class HuggingFaceCatalogServiceTests
         Assert.Null(HuggingFaceCatalogService.TryExtractParamsFromRepoId(repoId));
     }
 
+    // ── C27 Stage 2: FetchSiblingsAsync transport contract ─────────────
+
+    [Fact]
+    public async Task FetchSiblingsAsync_RefusesNonAllowlistedUrl()
+    {
+        using var handler = new StubHandler((_, _) =>
+            Task.FromException<HttpResponseMessage>(new InvalidOperationException("Should never reach the network")));
+        using var client = new HttpClient(handler);
+        using var svc = new HuggingFaceCatalogService(client, modelDetailsBaseUrl: "https://evil.example.com/api/models/");
+
+        var ex = await Assert.ThrowsAsync<LiveCatalogFetchException>(
+            () => svc.FetchSiblingsAsync("owner/repo", CancellationToken.None));
+        Assert.Equal(LiveCatalogFetchReason.UrlNotAllowed, ex.Reason);
+        Assert.Equal(0, handler.CallCount);
+    }
+
+    [Fact]
+    public async Task FetchSiblingsAsync_RefusesMalformedRepoId()
+    {
+        using var handler = new StubHandler((_, _) =>
+            Task.FromException<HttpResponseMessage>(new InvalidOperationException("Should never reach the network")));
+        using var client = new HttpClient(handler);
+        using var svc = new HuggingFaceCatalogService(client);
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => svc.FetchSiblingsAsync("no-slash-here", CancellationToken.None));
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => svc.FetchSiblingsAsync("too/many/slashes", CancellationToken.None));
+        Assert.Equal(0, handler.CallCount);
+    }
+
+    [Fact]
+    public async Task FetchSiblingsAsync_BuildsExpectedUrl()
+    {
+        string? capturedUrl = null;
+        using var handler = new StubHandler((req, _) =>
+        {
+            capturedUrl = req.RequestUri?.ToString();
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"id":"owner/repo","siblings":[]}""", Encoding.UTF8, "application/json")
+            });
+        });
+        using var client = new HttpClient(handler);
+        using var svc = new HuggingFaceCatalogService(client);
+
+        await svc.FetchSiblingsAsync("Qwen/Qwen3-8B-GGUF", CancellationToken.None);
+        Assert.Equal("https://huggingface.co/api/models/Qwen/Qwen3-8B-GGUF", capturedUrl);
+    }
+
+    [Fact]
+    public async Task FetchSiblingsAsync_SurfacesAuthStatusForGatedRepo()
+    {
+        using var handler = new StubHandler((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized)));
+        using var client = new HttpClient(handler);
+        using var svc = new HuggingFaceCatalogService(client);
+
+        var ex = await Assert.ThrowsAsync<LiveCatalogFetchException>(
+            () => svc.FetchSiblingsAsync("meta-llama/Llama-3.3-70B-Instruct-GGUF", CancellationToken.None));
+        Assert.Equal(LiveCatalogFetchReason.NonSuccessStatus, ex.Reason);
+        Assert.Equal("401", ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task FetchSiblingsAsync_RateLimitSurfaces429()
+    {
+        using var handler = new StubHandler((_, _) =>
+            Task.FromResult(new HttpResponseMessage((HttpStatusCode)429)));
+        using var client = new HttpClient(handler);
+        using var svc = new HuggingFaceCatalogService(client);
+
+        var ex = await Assert.ThrowsAsync<LiveCatalogFetchException>(
+            () => svc.FetchSiblingsAsync("owner/repo", CancellationToken.None));
+        Assert.Equal("429", ex.StatusCode);
+    }
+
+    [Fact]
+    public async Task FetchSiblingsAsync_CachesByRepoId()
+    {
+        using var handler = new StubHandler((_, _) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"id":"owner/repo","siblings":[]}""", Encoding.UTF8, "application/json")
+            }));
+        using var client = new HttpClient(handler);
+        using var svc = new HuggingFaceCatalogService(client);
+
+        await svc.FetchSiblingsAsync("owner/repo", CancellationToken.None);
+        await svc.FetchSiblingsAsync("owner/repo", CancellationToken.None);
+        Assert.Equal(1, handler.CallCount);
+    }
+
+    // ── C27 Stage 2: ParseModelDetailsResponse + flag parsing ──────────
+
+    [Fact]
+    public void ParseModelDetailsResponse_PrefersLfsSizeOverTopLevelSize()
+    {
+        const string json = """
+            {
+              "id": "owner/repo",
+              "siblings": [
+                {"rfilename": "model-Q4_K_M.gguf", "size": 100, "lfs": {"size": 4900000000}},
+                {"rfilename": "README.md", "size": 1024}
+              ]
+            }
+            """;
+        var details = HuggingFaceCatalogService.ParseModelDetailsResponse("owner/repo", json);
+        var gguf = details.Siblings.Single(s => s.Filename.EndsWith(".gguf"));
+        Assert.Equal(4_900_000_000L, gguf.SizeBytes);
+        var readme = details.Siblings.Single(s => s.Filename == "README.md");
+        Assert.Equal(1024L, readme.SizeBytes);
+    }
+
+    [Fact]
+    public void ParseModelDetailsResponse_GatedString_RecognizedAsGated()
+    {
+        // HF's gated field is polymorphic: "auto"/"manual"/false/true.
+        const string jsonAuto = """{"id":"owner/repo","gated":"auto","siblings":[]}""";
+        const string jsonManual = """{"id":"owner/repo","gated":"manual","siblings":[]}""";
+        const string jsonFalse = """{"id":"owner/repo","gated":"false","siblings":[]}""";
+        const string jsonBool = """{"id":"owner/repo","gated":true,"siblings":[]}""";
+
+        Assert.True(HuggingFaceCatalogService.ParseModelDetailsResponse("owner/repo", jsonAuto).Gated);
+        Assert.True(HuggingFaceCatalogService.ParseModelDetailsResponse("owner/repo", jsonManual).Gated);
+        Assert.False(HuggingFaceCatalogService.ParseModelDetailsResponse("owner/repo", jsonFalse).Gated);
+        Assert.True(HuggingFaceCatalogService.ParseModelDetailsResponse("owner/repo", jsonBool).Gated);
+    }
+
+    [Fact]
+    public void ParseModelDetailsResponse_PrivateFlagDefaultsFalse()
+    {
+        const string json = """{"id":"owner/repo","siblings":[]}""";
+        var details = HuggingFaceCatalogService.ParseModelDetailsResponse("owner/repo", json);
+        Assert.False(details.Private);
+        Assert.False(details.Gated);
+    }
+
+    // ── C27 Stage 2: PickSizingFile heuristic ──────────────────────────
+
+    [Fact]
+    public void PickSizingFile_PrefersQ4_K_M_WhenPresent()
+    {
+        var siblings = new List<HuggingFaceSiblingFile>
+        {
+            new("model-Q2_K.gguf", 2_500_000_000L),
+            new("model-Q4_K_M.gguf", 4_900_000_000L),
+            new("model-Q8_0.gguf", 8_500_000_000L),
+            new("README.md", 1024L),
+        };
+        var pick = HuggingFaceCatalogService.PickSizingFile(siblings);
+        Assert.NotNull(pick);
+        Assert.Equal("model-Q4_K_M.gguf", pick!.PrimaryFilename);
+        Assert.Equal(4_900_000_000L, pick.TotalBytes);
+        Assert.Equal(1, pick.PartCount);
+    }
+
+    [Fact]
+    public void PickSizingFile_FallsBackToSmallestGguf_WhenNoQ4_K_M()
+    {
+        var siblings = new List<HuggingFaceSiblingFile>
+        {
+            new("model-Q5_K_M.gguf", 5_500_000_000L),
+            new("model-Q8_0.gguf", 8_500_000_000L),
+            new("model-Q2_K.gguf", 2_500_000_000L),
+        };
+        var pick = HuggingFaceCatalogService.PickSizingFile(siblings);
+        Assert.NotNull(pick);
+        Assert.Equal("model-Q2_K.gguf", pick!.PrimaryFilename);
+        Assert.Equal(2_500_000_000L, pick.TotalBytes);
+    }
+
+    [Fact]
+    public void PickSizingFile_ReturnsNull_WhenNoGguf()
+    {
+        var siblings = new List<HuggingFaceSiblingFile>
+        {
+            new("README.md", 1024L),
+            new("config.json", 512L),
+        };
+        Assert.Null(HuggingFaceCatalogService.PickSizingFile(siblings));
+    }
+
+    [Fact]
+    public void PickSizingFile_SumsMultiPartGgufFiles()
+    {
+        // Real-world example: Llama-3.1-70B-Instruct-Q4_K_M split into
+        // 3 parts. Sum must reflect the total disk cost, not just part 1.
+        var siblings = new List<HuggingFaceSiblingFile>
+        {
+            new("Llama-3.1-70B-Q4_K_M-00001-of-00003.gguf", 14_000_000_000L),
+            new("Llama-3.1-70B-Q4_K_M-00002-of-00003.gguf", 14_000_000_000L),
+            new("Llama-3.1-70B-Q4_K_M-00003-of-00003.gguf", 14_000_000_000L),
+            new("README.md", 1024L),
+        };
+        var pick = HuggingFaceCatalogService.PickSizingFile(siblings);
+        Assert.NotNull(pick);
+        Assert.Equal(3, pick!.PartCount);
+        Assert.Equal(42_000_000_000L, pick.TotalBytes);
+        Assert.Contains("-00001-of-00003", pick.PrimaryFilename);
+    }
+
+    [Fact]
+    public void PickSizingFile_HandlesNullSizesGracefully()
+    {
+        var siblings = new List<HuggingFaceSiblingFile>
+        {
+            new("model-Q4_K_M.gguf", null),
+        };
+        var pick = HuggingFaceCatalogService.PickSizingFile(siblings);
+        Assert.NotNull(pick);
+        Assert.Equal(0L, pick!.TotalBytes);
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────
 
     private static string LoadFixture([CallerFilePath] string thisFile = "")
