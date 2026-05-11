@@ -710,6 +710,50 @@ struct PrepAppTestsMain {
             try expect(tags == sorted, "tags=\(tags) sorted=\(sorted)")
         }
 
+        // MARK: C24 — refresh-catalog wire-format pin
+        //
+        // Regression pin for the PR #259 host omission: mac-prep-host
+        // refresh-catalog projected `tag/params/sizeTier/useCases/pullCount`
+        // but dropped `parametersBillion` and `lastUpdated`, so Max-size
+        // and Sort: Newest were no-ops on Mac after Refresh. Drives the
+        // payload through decodeStarterEntries (the exact path
+        // PrepViewModel.refreshFromOllama uses) and asserts the new
+        // fields survive the round-trip into the typed entries.
+
+        runner.test("C24: refresh-catalog payload exposes parametersBillion to the cap filter") {
+            let payload = makeC24RefreshCatalogPayload()
+            let decoded = decodeStarterEntries(from: payload)
+            try expect(decoded.count == 3, "got \(decoded.count) entries")
+            // Round-trip check — the regression manifested as nil here.
+            let big = decoded.first { $0.tag == "deepseek-r1:30b" }
+            try expect(big?.parametersBillion == 30.0,
+                       "parametersBillion missing from wire: \(big?.parametersBillion as Any)")
+            let display = decoded.map(StarterModelDisplayEntry.from)
+            let out = applyStarterModelFilters(
+                to: display, search: "", showOnlyMostPopular: false, popularLimit: 15,
+                maxParametersBillion: 7)
+            try expect(!out.contains(where: { $0.tag == "deepseek-r1:30b" }),
+                       "30B should drop under ≤7B cap: \(out.map(\.tag))")
+            try expect(out.contains(where: { $0.tag == "qwen2.5:7b" }),
+                       "7B should survive: \(out.map(\.tag))")
+        }
+
+        runner.test("C24: refresh-catalog payload exposes lastUpdated to the newest sort") {
+            let payload = makeC24RefreshCatalogPayload()
+            let decoded = decodeStarterEntries(from: payload)
+            // Round-trip check — the regression manifested as nil here.
+            let newer = decoded.first { $0.tag == "qwen2.5:7b" }
+            try expect(newer?.lastUpdated == "2026-05-08T00:00:00+00:00",
+                       "lastUpdated missing from wire: \(newer?.lastUpdated as Any)")
+            let display = decoded.map(StarterModelDisplayEntry.from)
+            let out = applyStarterModelFilters(
+                to: display, search: "", showOnlyMostPopular: false, popularLimit: 15,
+                sortMode: .newest)
+            let firstNonNil = out.first { $0.lastUpdated != nil }
+            try expect(firstNonNil?.tag == "qwen2.5:7b",
+                       "newest non-nil expected qwen2.5:7b, got \(firstNonNil?.tag ?? "nil")")
+        }
+
         // MARK: caption — new branches
 
         runner.test("caption: parameter-cap-only emits matching-filter line") {
@@ -823,6 +867,52 @@ private func makeC3C4C5Fixture() -> [StarterModelDisplayEntry] {
             capabilities: [],
             parametersBillion: nil,
             lastUpdated: nil),
+    ]
+}
+
+/// C24 fixture — synthetic mac-prep-host refresh-catalog payload.
+/// Mirrors the JSON shape emitted by HostLifetime.RefreshCatalogAsync
+/// so this test catches drift between the C# projection and Swift
+/// decode. The PR #259 regression was that this payload was emitted
+/// without `parametersBillion` and `lastUpdated`, so the round-trip
+/// asserts on both fields are the load-bearing pin.
+private func makeC24RefreshCatalogPayload() -> [String: Any] {
+    return [
+        "ok": true,
+        "fetchedAt": "2026-05-10T12:00:00+00:00",
+        "sourceUrl": "https://ollama.com/library",
+        "entries": [
+            [
+                "tag": "qwen2.5:7b",
+                "params": "7B",
+                "sizeTier": "Medium",
+                "description": "Versatile small model",
+                "useCases": ["tools"],
+                "pullCount": Int64(50_000_000),
+                "parametersBillion": 7.0,
+                "lastUpdated": "2026-05-08T00:00:00+00:00",
+            ],
+            [
+                "tag": "deepseek-r1:30b",
+                "params": "30B",
+                "sizeTier": "Large",
+                "description": "Large reasoning model",
+                "useCases": ["thinking"],
+                "pullCount": Int64(20_000_000),
+                "parametersBillion": 30.0,
+                "lastUpdated": "2026-03-20T00:00:00+00:00",
+            ],
+            [
+                "tag": "llama3.2:3b",
+                "params": "3B",
+                "sizeTier": "Small",
+                "description": "Lightweight assistant",
+                "useCases": ["general"],
+                "pullCount": Int64(90_000_000),
+                "parametersBillion": 3.0,
+                "lastUpdated": "2026-04-15T00:00:00+00:00",
+            ],
+        ],
     ]
 }
 
