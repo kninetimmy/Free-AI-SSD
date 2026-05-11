@@ -74,6 +74,20 @@ final class PrepViewModel: ObservableObject {
     @Published var requiredCapabilities: Set<String> = []
     @Published var sortMode: PickerSortMode = .popular
 
+    // C27 Stage 1: catalog source. `.ollama` covers the bundled
+    // catalog + live ollama.com scrape (via the existing discover-/
+    // refresh-catalog arms); `.huggingFace` routes through the new
+    // discover-hf-catalog / search-hf arms. Filter state survives a
+    // source switch — only the underlying catalog rows are replaced.
+    @Published var activeSource: ModelSourceKind = .ollama
+
+    // C27 Stage 1: debounce token for the HF search box. When
+    // activeSource == .huggingFace and modelSearchText changes, we
+    // schedule a Task to fire search-hf after 350ms. Cancelling the
+    // task aborts the previous schedule when the user keeps typing.
+    private var hfSearchDebounceTask: Task<Void, Never>?
+    private static let hfSearchDebounceNs: UInt64 = 350_000_000
+
     /// C4: the four capability chips surfaced in the picker. Lowercase
     /// matches the scraped `x-test-capability` vocabulary.
     static let capabilityTools: String = "tools"
@@ -428,6 +442,100 @@ final class PrepViewModel: ObservableObject {
         } catch {
             catalogStatusText = "Refresh failed: \(error.localizedDescription). Existing list kept."
             appendLog("Catalog refresh failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// C27 Stage 1: invoked by the SwiftUI Source picker's onChange.
+    /// Clears the catalog state and dispatches the appropriate fetch.
+    /// Mirrors WPF's OnActiveSourceChanged. The HF refresh path uses
+    /// the same debounce-friendly entry point as a search-box change,
+    /// just with an empty search (= popular GGUF default page).
+    func handleSourceSwitch() async {
+        // Drop the prior source's selections — an Ollama-selected
+        // `llama3.2:3b` makes no sense under HF, and vice versa.
+        selectedStarterModels.removeAll()
+        starterCatalog = []
+        hfSearchDebounceTask?.cancel()
+        hfSearchDebounceTask = nil
+        switch activeSource {
+        case .huggingFace:
+            await refreshHuggingFaceCatalog(search: nil)
+        case .ollama:
+            // Re-load the bundled list synchronously; the user can
+            // click Refresh to hit ollama.com again.
+            await discoverCatalog()
+        }
+    }
+
+    /// C27 Stage 1: schedule (or reschedule) the debounced HF search.
+    /// Called by the SwiftUI onChange of `modelSearchText` when the
+    /// active source is HF; under Ollama the search is purely local
+    /// so no debounce / network roundtrip is required.
+    func scheduleHuggingFaceSearch(for text: String) {
+        hfSearchDebounceTask?.cancel()
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let needle = trimmed.isEmpty ? nil : trimmed
+        hfSearchDebounceTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: PrepViewModel.hfSearchDebounceNs)
+            if Task.isCancelled { return }
+            await self?.refreshHuggingFaceCatalog(search: needle)
+        }
+    }
+
+    /// C27 Stage 1: HF Search via the sidecar's `discover-hf-catalog`
+    /// (empty search = popular GGUF) or `search-hf` (user-typed query).
+    /// Soft-failure mirrors `refreshCatalog`: the existing catalog
+    /// stays in place if anything goes wrong.
+    func refreshHuggingFaceCatalog(search: String?) async {
+        if isRefreshingCatalog { return }
+        isRefreshingCatalog = true
+        defer { isRefreshingCatalog = false }
+
+        do {
+            let command: String
+            if let needle = search, !needle.isEmpty {
+                // search-hf payload: single-line JSON object so we
+                // don't collide with the host's space-split parser.
+                let escaped = needle
+                    .replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "\"", with: "\\\"")
+                command = "search-hf {\"search\":\"\(escaped)\"}"
+            } else {
+                command = "discover-hf-catalog"
+            }
+            let result = try await hostController.send(command, timeout: 30)
+            let ok = result.payload["ok"] as? Bool ?? false
+            if ok {
+                let entries = decodeStarterEntries(from: result.payload)
+                let display = entries.map(StarterModelDisplayEntry.from)
+                starterCatalog = display
+                let sourceUrl = result.payload["sourceUrl"] as? String ?? "huggingface.co"
+                if display.isEmpty {
+                    catalogStatusText = (search ?? "").isEmpty
+                        ? "No GGUF repos returned by Hugging Face."
+                        : "No GGUF repos match '\(search ?? "")'. Try a different search or clear it to see popular GGUF."
+                } else {
+                    catalogStatusText = (search ?? "").isEmpty
+                        ? "Hugging Face: \(display.count) popular GGUF repos from \(sourceUrl)."
+                        : "Hugging Face: \(display.count) GGUF repos matching '\(search ?? "")'."
+                    appendLog("Refreshed HF catalog with \(display.count) entries.")
+                }
+                // Selection housekeeping mirrors refreshCatalog: drop
+                // selections that fell out of the new result set.
+                let liveTags = Set(display.map(\.tag))
+                selectedStarterModels.formIntersection(liveTags)
+            } else {
+                let reason = result.payload["reason"] as? String ?? "unknown"
+                let errorMsg = result.payload["error"] as? String ?? "(no detail)"
+                let statusCode = result.payload["statusCode"] as? String
+                catalogStatusText = (reason == "NonSuccessStatus" && statusCode == "429")
+                    ? "Hugging Face is rate-limiting requests. Wait a minute and try again."
+                    : "Hugging Face fetch failed (\(reason)): \(errorMsg). Switch back to Ollama to keep going."
+                appendLog("HF catalog fetch failed: \(errorMsg)")
+            }
+        } catch {
+            catalogStatusText = "Hugging Face fetch failed: \(error.localizedDescription)."
+            appendLog("HF catalog fetch failed: \(error.localizedDescription)")
         }
     }
 

@@ -1781,4 +1781,102 @@ public class PrepViewModelTests
         public FakeOllamaServerHandle(string host) { Host = host; }
         public void Dispose() { Disposed = true; }
     }
+
+    // ───── C27 Stage 1: ActiveSource picker source dropdown ─────
+
+    [Fact]
+    public void ActiveSource_DefaultsToOllama()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        Assert.Equal(ModelSource.Ollama, vm.ActiveSource);
+    }
+
+    [Fact]
+    public void ActiveSource_ChangeRaisesActiveSourceChanged()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+
+        var fired = 0;
+        vm.ActiveSourceChanged += (_, _) => fired++;
+
+        vm.ActiveSource = ModelSource.HuggingFace;
+        Assert.Equal(1, fired);
+        Assert.Equal(ModelSource.HuggingFace, vm.ActiveSource);
+
+        // No-op set must not fire — consistent with MostPopularLimit etc.
+        vm.ActiveSource = ModelSource.HuggingFace;
+        Assert.Equal(1, fired);
+
+        vm.ActiveSource = ModelSource.Ollama;
+        Assert.Equal(2, fired);
+    }
+
+    [Fact]
+    public async Task ActiveSource_HuggingFaceCatalog_TagsRowsWithSourceKind()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+
+        var entries = new List<StarterCatalogEntry>
+        {
+            new(
+                Tag: "hf.co/bartowski/Qwen3-8B-GGUF",
+                SizeTier: "Custom",
+                BestAt: string.Empty,
+                PullCount: 12345L,
+                Capabilities: Array.Empty<string>(),
+                ParametersBillion: 8.0,
+                LastUpdated: DateTimeOffset.UtcNow,
+                Source: ModelSource.HuggingFace),
+        };
+        await vm.SetStarterCatalogAsync(entries);
+
+        var row = vm.ModelRows.Single(r => r.Name == "hf.co/bartowski/Qwen3-8B-GGUF");
+        Assert.Equal(ModelSource.HuggingFace, row.SourceKind);
+    }
+
+    [Fact]
+    public async Task DownloadCommand_RefusesBatchWithHuggingFaceRow()
+    {
+        // C27 Stage 1: Stage 1 is browse-only for HF; the picker
+        // refuses any batch that includes an HF-sourced row so the
+        // user can't accidentally get a half-fulfilled download.
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        _modelService.Setup(m => m.BuildPullSelectionWarnings(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int?>())).Returns(new List<string>());
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+
+        await vm.SetStarterCatalogAsync(new[]
+        {
+            new StarterCatalogEntry(
+                Tag: "hf.co/bartowski/Qwen3-8B-GGUF",
+                SizeTier: "Custom",
+                BestAt: string.Empty,
+                PullCount: 100L,
+                Capabilities: Array.Empty<string>(),
+                ParametersBillion: 8.0,
+                LastUpdated: null,
+                Source: ModelSource.HuggingFace),
+        });
+        vm.ModelRows.Single(r => r.Name == "hf.co/bartowski/Qwen3-8B-GGUF").IsSelected = true;
+
+        vm.DownloadCommand.Execute(null);
+        await WaitForCommandAsync(vm.DownloadCommand);
+
+        // No pull attempted — the HF-only batch was refused with a log
+        // line, not silently executed.
+        _modelService.Verify(m => m.PullModelAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+            It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
+            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()),
+            Times.Never);
+        Assert.Contains("Hugging Face pulls", vm.StatusText);
+    }
 }

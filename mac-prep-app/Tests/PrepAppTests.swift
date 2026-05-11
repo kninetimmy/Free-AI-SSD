@@ -858,6 +858,96 @@ struct PrepAppTestsMain {
             try expect(!isPassThrough, "row has caps; marker must not apply")
         }
 
+        // MARK: C27 Stage 1 — Hugging Face source dropdown wire round-trip
+
+        runner.test("C27: ModelSourceKind.parse defaults to .ollama when missing") {
+            // Pre-C27 payloads omit the `source` field. Defensive default
+            // so a stale sidecar doesn't break the picker.
+            try expect(ModelSourceKind.parse(nil) == .ollama,
+                       "nil should default to .ollama")
+            try expect(ModelSourceKind.parse("Ollama") == .ollama,
+                       "Ollama string should parse to .ollama")
+        }
+
+        runner.test("C27: ModelSourceKind.parse maps HuggingFace string") {
+            try expect(ModelSourceKind.parse("HuggingFace") == .huggingFace,
+                       "HuggingFace string should parse to .huggingFace")
+        }
+
+        runner.test("C27: ModelSourceKind.parse falls back to .ollama on unknown") {
+            // Future host enum values land here without crashing.
+            try expect(ModelSourceKind.parse("WeirdNewSource") == .ollama,
+                       "unknown source should fall back to .ollama")
+        }
+
+        runner.test("C27: discover-hf-catalog payload decodes with source field") {
+            let payload = makeC27HuggingFacePayload()
+            let decoded = decodeStarterEntries(from: payload)
+            try expect(decoded.count == 2, "got \(decoded.count) entries")
+            try expect(decoded.first?.source == "HuggingFace",
+                       "source string missing: \(decoded.first?.source as Any)")
+        }
+
+        runner.test("C27: StarterModelDisplayEntry.from maps HF source") {
+            let payload = makeC27HuggingFacePayload()
+            let decoded = decodeStarterEntries(from: payload)
+            let display = decoded.map(StarterModelDisplayEntry.from)
+            try expect(display.allSatisfy { $0.sourceKind == .huggingFace },
+                       "all rows should be .huggingFace: \(display.map { ($0.tag, $0.sourceKind) })")
+        }
+
+        runner.test("C27: HF rows with empty capabilities pass through chip filter") {
+            // HF anonymous payloads carry no capability tags. The C25
+            // pass-through posture means a user narrowing by `tools`
+            // still sees HF rows (the row-style opacity marker signals
+            // why).
+            let payload = makeC27HuggingFacePayload()
+            let display = decodeStarterEntries(from: payload).map(StarterModelDisplayEntry.from)
+            let out = applyStarterModelFilters(
+                to: display, search: "", showOnlyMostPopular: false, popularLimit: 15,
+                requiredCapabilities: ["tools"])
+            try expect(out.count == display.count,
+                       "all HF rows should pass through: \(out.map(\.tag))")
+        }
+
+        runner.test("C27: HF rows participate in Most-popular sort") {
+            let payload = makeC27HuggingFacePayload()
+            let display = decodeStarterEntries(from: payload).map(StarterModelDisplayEntry.from)
+            let out = applyStarterModelFilters(
+                to: display, search: "", showOnlyMostPopular: true, popularLimit: 5)
+            // qwen3 has 245321 downloads, llama has 188204 — qwen ranks first.
+            try expect(out.first?.tag == "hf.co/bartowski/Qwen3-8B-GGUF",
+                       "qwen3 should rank first by pullCount, got \(out.first?.tag ?? "nil")")
+        }
+
+        runner.test("C27: HF rows participate in Newest sort") {
+            let payload = makeC27HuggingFacePayload()
+            let display = decodeStarterEntries(from: payload).map(StarterModelDisplayEntry.from)
+            let out = applyStarterModelFilters(
+                to: display, search: "", showOnlyMostPopular: false, popularLimit: 15,
+                sortMode: .newest)
+            // llama lastModified is later than qwen3.
+            try expect(out.first?.tag == "hf.co/lmstudio-community/Llama-3.2-7B-Instruct-GGUF",
+                       "llama should sort newest first, got \(out.first?.tag ?? "nil")")
+        }
+
+        runner.test("C27: HF rows with nil parametersBillion pass through cap filter") {
+            // The HF service emits a best-effort parametersBillion from
+            // the repo id (e.g., "8B" → 8.0). A repo without a numeric
+            // hint must still survive the ≤7B cap so users searching by
+            // model family aren't accidentally hidden.
+            let nilParamHfRow = StarterModelDisplayEntry(
+                tag: "hf.co/owner/Mystery-Model-GGUF",
+                sizeTier: "Custom", bestAt: "",
+                pullCount: 100, capabilities: [],
+                parametersBillion: nil, lastUpdated: nil,
+                sourceKind: .huggingFace)
+            let out = applyStarterModelFilters(
+                to: [nilParamHfRow], search: "", showOnlyMostPopular: false,
+                popularLimit: 15, maxParametersBillion: 7)
+            try expect(out.count == 1, "nil-params HF row should pass through cap filter")
+        }
+
         await runner.run()
     }
 }
@@ -981,6 +1071,45 @@ private func makeC24RefreshCatalogPayload() -> [String: Any] {
                 "pullCount": Int64(90_000_000),
                 "parametersBillion": 3.0,
                 "lastUpdated": "2026-04-15T00:00:00+00:00",
+            ],
+        ],
+    ]
+}
+
+/// C27 Stage 1: synthetic discover-hf-catalog payload matching the
+/// wire shape `HostLifetime.BuildCatalogEntries` emits for HF entries.
+/// `source` is the new C27 field; the helper pins it on every row so
+/// the Swift decode + display projection can be exercised without a
+/// real sidecar process. lastModified values are intentionally ordered
+/// so qwen3 < llama under the newest-sort assertion.
+private func makeC27HuggingFacePayload() -> [String: Any] {
+    return [
+        "ok": true,
+        "fetchedAt": "2026-05-11T12:00:00+00:00",
+        "sourceUrl": "https://huggingface.co/api/models",
+        "query": NSNull(),
+        "entries": [
+            [
+                "tag": "hf.co/bartowski/Qwen3-8B-GGUF",
+                "params": "",
+                "sizeTier": "Custom",
+                "description": "",
+                "useCases": [String](),
+                "pullCount": Int64(245321),
+                "parametersBillion": 8.0,
+                "lastUpdated": "2026-04-28T14:22:11+00:00",
+                "source": "HuggingFace",
+            ],
+            [
+                "tag": "hf.co/lmstudio-community/Llama-3.2-7B-Instruct-GGUF",
+                "params": "",
+                "sizeTier": "Custom",
+                "description": "",
+                "useCases": [String](),
+                "pullCount": Int64(188204),
+                "parametersBillion": 7.0,
+                "lastUpdated": "2026-05-02T10:03:45+00:00",
+                "source": "HuggingFace",
             ],
         ],
     ]

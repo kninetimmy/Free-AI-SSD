@@ -82,6 +82,16 @@ public class PrepViewModel : BaseViewModel
     private readonly HashSet<string> _requiredCapabilities = new(StringComparer.OrdinalIgnoreCase);
     private ModelSortMode _sortMode = ModelSortMode.Popular;
 
+    // C27 Stage 1: catalog source dropdown. Ollama covers the bundled
+    // catalog + live ollama.com scrape; HuggingFace covers the HF
+    // Search API path. Switching sources clears _starterCatalog and
+    // raises ActiveSourceChanged so the view-host can dispatch a
+    // source-appropriate fetch (default popular GGUF for HF, bundled
+    // load for Ollama). Filter state (search/cap/capabilities/sort/
+    // Most-popular toggle) survives the switch — switching source is
+    // about *which* catalog feeds the picker, not how it's narrowed.
+    private ModelSource _activeSource = ModelSource.Ollama;
+
     /// <summary>C26: choices surfaced in the Most-popular limit dropdown.
     /// 50 is the upper cap — anything higher starts feeling like "show
     /// all" without the explicit toggle.</summary>
@@ -104,6 +114,14 @@ public class PrepViewModel : BaseViewModel
     /// <summary>F2a: emitted when the picker filter state changes so
     /// the view-host can refresh its CollectionView.</summary>
     public event EventHandler? ModelRowsViewInvalidated;
+
+    /// <summary>C27 Stage 1: emitted when <see cref="ActiveSource"/>
+    /// changes so the view-host can clear its catalog state and
+    /// dispatch a source-appropriate fetch (Ollama = bundled load;
+    /// HuggingFace = popular-GGUF default query). Separate from
+    /// <see cref="ModelRowsViewInvalidated"/> because a source switch
+    /// is a fetch trigger, not just a view-refresh trigger.</summary>
+    public event EventHandler? ActiveSourceChanged;
 
     public PrepViewModel(
         IDriveService driveService,
@@ -522,6 +540,27 @@ public class PrepViewModel : BaseViewModel
         {
             if (SetProperty(ref _sortMode, value))
                 ModelRowsViewInvalidated?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>C27 Stage 1: which catalog source the picker is
+    /// currently browsing. Switching sources clears the starter
+    /// catalog (configured + on-disk rows stay visible — they're real
+    /// local state, not source-derived) and raises
+    /// <see cref="ActiveSourceChanged"/> so the view-host can refetch.
+    /// Filter state (search / cap / capabilities / sort / Most-popular
+    /// toggle) is intentionally preserved: switching source changes
+    /// the data underneath the filters, not the user's filter intent.
+    /// </summary>
+    public ModelSource ActiveSource
+    {
+        get => _activeSource;
+        set
+        {
+            if (SetProperty(ref _activeSource, value))
+            {
+                ActiveSourceChanged?.Invoke(this, EventArgs.Empty);
+            }
         }
     }
 
@@ -981,6 +1020,19 @@ public class PrepViewModel : BaseViewModel
         {
             StatusText = "No models checked — check one or more models to download";
             AppendLog("Check one or more models to download.");
+            return;
+        }
+
+        // C27 Stage 1: Hugging Face rows are browse-only in this stage.
+        // Stage 2 wires `hf.co/<repo>:<quant>` tags through Ollama's
+        // native HF pull syntax. Refuse the whole batch up front so a
+        // half-fulfilled download (Ollama rows pulled, HF rows silently
+        // ignored) can't ship a confusing UX.
+        var hfRows = checkedRows.Where(r => r.SourceKind == ModelSource.HuggingFace).ToList();
+        if (hfRows.Count > 0)
+        {
+            StatusText = $"Hugging Face pulls land in Stage 2 — {hfRows.Count} checked row(s) skipped.";
+            AppendLog($"Stage 1 of the Hugging Face integration is browse-only. Uncheck {hfRows.Count} HF row(s) ({string.Join(", ", hfRows.Take(3).Select(r => r.Name))}{(hfRows.Count > 3 ? ", …" : string.Empty)}) and retry, or switch back to the Ollama source.");
             return;
         }
 
@@ -1965,7 +2017,8 @@ public class PrepViewModel : BaseViewModel
                 pullCount: meta.pullCount,
                 capabilities: meta.capabilities,
                 parametersBillion: meta.parametersBillion,
-                lastUpdated: meta.lastUpdated));
+                lastUpdated: meta.lastUpdated,
+                sourceKind: meta.source));
         }
 
         var configuredNames = new HashSet<string>(configured.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
@@ -1986,7 +2039,8 @@ public class PrepViewModel : BaseViewModel
                 pullCount: meta.pullCount,
                 capabilities: meta.capabilities,
                 parametersBillion: meta.parametersBillion,
-                lastUpdated: meta.lastUpdated));
+                lastUpdated: meta.lastUpdated,
+                sourceKind: meta.source));
         }
 
         // Third pass: recommended starters that aren't in config or on-disk.
@@ -2020,7 +2074,8 @@ public class PrepViewModel : BaseViewModel
                 pullCount: entry.PullCount,
                 capabilities: entry.Capabilities ?? Array.Empty<string>(),
                 parametersBillion: entry.ParametersBillion,
-                lastUpdated: entry.LastUpdated);
+                lastUpdated: entry.LastUpdated,
+                sourceKind: entry.Source);
             row.IsSelected = false;
             yield return row;
         }
@@ -2032,7 +2087,8 @@ public class PrepViewModel : BaseViewModel
         long? pullCount,
         IReadOnlyList<string> capabilities,
         double? parametersBillion,
-        DateTimeOffset? lastUpdated);
+        DateTimeOffset? lastUpdated,
+        ModelSource source);
 
     private static StarterMeta LookupStarterMeta(
         Dictionary<string, StarterCatalogEntry> catalogByTag, string name)
@@ -2045,9 +2101,10 @@ public class PrepViewModel : BaseViewModel
                 entry.PullCount,
                 entry.Capabilities ?? Array.Empty<string>(),
                 entry.ParametersBillion,
-                entry.LastUpdated);
+                entry.LastUpdated,
+                entry.Source);
         }
-        return new StarterMeta("Custom", string.Empty, null, Array.Empty<string>(), null, null);
+        return new StarterMeta("Custom", string.Empty, null, Array.Empty<string>(), null, null, ModelSource.Ollama);
     }
 
     private void RefreshReadinessItems(List<ReadinessItem> checks)

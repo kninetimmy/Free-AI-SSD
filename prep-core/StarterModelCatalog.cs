@@ -1,4 +1,5 @@
 using System.Reflection;
+using FreeAiSsd.Shared.Models;
 
 namespace FreeAiSsd.PrepApp;
 
@@ -54,6 +55,15 @@ public sealed record StarterModelEntry
     /// this field). Drives the C3 parameter-count cap filter.
     /// </summary>
     public double? ParametersBillion { get; init; }
+
+    /// <summary>
+    /// C27 Stage 1: which catalog source produced this entry. Defaults
+    /// to <see cref="ModelSource.Ollama"/> so JSON-deserialized bundled
+    /// catalog entries and the existing ollama.com scrape projection
+    /// stay correct without churn. <see cref="LiveModelCatalogService"/>
+    /// emits Ollama; <c>HuggingFaceCatalogService</c> emits HuggingFace.
+    /// </summary>
+    public ModelSource Source { get; init; } = ModelSource.Ollama;
 }
 
 /// <summary>

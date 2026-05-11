@@ -1,0 +1,50 @@
+[
+  {
+    "id": "bartowski/Qwen3-8B-GGUF",
+    "downloads": 245321,
+    "likes": 412,
+    "tags": ["gguf", "text-generation", "qwen3", "transformers"],
+    "lastModified": "2026-04-28T14:22:11.000Z",
+    "pipeline_tag": "text-generation"
+  },
+  {
+    "id": "lmstudio-community/Llama-3.2-7B-Instruct-GGUF",
+    "downloads": 188204,
+    "likes": 301,
+    "tags": ["gguf", "llama", "instruct", "transformers"],
+    "lastModified": "2026-05-02T10:03:45.000Z",
+    "pipeline_tag": "text-generation"
+  },
+  {
+    "id": "bartowski/Qwen3-30B-A3B-Instruct-GGUF",
+    "downloads": 99812,
+    "likes": 220,
+    "tags": ["gguf", "qwen3", "moe", "transformers"],
+    "lastModified": "2026-04-15T08:55:00.000Z",
+    "pipeline_tag": "text-generation"
+  },
+  {
+    "id": "TheBloke/Mistral-7B-OpenOrca-GGUF",
+    "downloads": 76340,
+    "likes": 154,
+    "tags": ["gguf", "mistral", "transformers"],
+    "lastModified": "2025-12-19T19:00:00.000Z",
+    "pipeline_tag": "text-generation"
+  },
+  {
+    "id": "ggml-org/embedding-only-no-gguf-tag",
+    "downloads": 42,
+    "likes": 1,
+    "tags": ["embeddings", "transformers"],
+    "lastModified": "2025-09-01T00:00:00.000Z",
+    "pipeline_tag": "feature-extraction"
+  },
+  {
+    "id": "unsloth/tiny-500M-Instruct-GGUF",
+    "downloads": 21055,
+    "likes": 88,
+    "tags": ["gguf", "tiny", "transformers"],
+    "lastModified": "2026-05-09T03:14:00.000Z",
+    "pipeline_tag": "text-generation"
+  }
+]

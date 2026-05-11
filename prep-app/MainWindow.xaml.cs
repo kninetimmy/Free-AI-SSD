@@ -21,7 +21,22 @@ public partial class MainWindow : Window
     // long-lived (MainWindow == app lifetime) and the fetch only fires
     // on user click, so HttpClientFactory churn isn't worth the wiring.
     private readonly LiveModelCatalogService _liveModelCatalogService = new();
+    // C27 Stage 1: same posture for Hugging Face. Long-lived; owns its
+    // own HttpClient. Cache is per-instance, so reusing the field
+    // across source switches preserves hot-results between toggles.
+    private readonly HuggingFaceCatalogService _hfCatalogService = new();
     private bool _isRefreshingCatalog;
+    // C27 Stage 1: in-flight CTS so toggling source mid-refresh cancels
+    // the stale fetch. The plan's "cancel and restart" decision avoids
+    // a race where a slow Ollama fetch lands after the user switched to
+    // HF and overwrites the HF catalog with stale Ollama rows.
+    private CancellationTokenSource? _activeRefreshCts;
+    // C27 Stage 1: 350ms debounce on the search box when ActiveSource
+    // is HuggingFace — HF needs server-side search. Local Ollama
+    // filtering is unchanged (the textbox keeps driving
+    // ModelSearchText / IsModelRowVisible).
+    private DispatcherTimer? _hfSearchDebounceTimer;
+    private static readonly TimeSpan HfSearchDebounce = TimeSpan.FromMilliseconds(350);
 
     // FTUE state
     private int _ftueStepIndex;
@@ -131,6 +146,15 @@ public partial class MainWindow : Window
 
         await _viewModel.SetStarterCatalogAsync(ProjectCatalog(loadResult.Catalog));
 
+        // C27 Stage 1: subscribe once so a Source dropdown change kicks
+        // off the appropriate refetch. Wiring lives in the OnLoaded
+        // path so the VM is fully constructed before we attach.
+        _viewModel.ActiveSourceChanged += OnActiveSourceChanged;
+        // C27 Stage 1: ModelSearchText fires on every keystroke; under
+        // the HF source we debounce and re-fire search-hf rather than
+        // hitting the API on each character.
+        _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+
         // Group the merged grid by Tier so Small / Medium / Large / Custom
         // show as visual sections (same affordance the pre-merge Starter
         // grid offered, now applied to the unified ModelRows collection).
@@ -223,6 +247,174 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>C27 Stage 1: dropdown selection → VM <c>ActiveSource</c>.
+    /// The setter raises <see cref="PrepViewModel.ActiveSourceChanged"/>,
+    /// which <see cref="OnActiveSourceChanged"/> picks up and dispatches
+    /// the source-appropriate fetch.</summary>
+    private void SourceCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ComboBox combo || combo.SelectedItem is not ComboBoxItem item) return;
+        var raw = item.Tag as string;
+        _viewModel.ActiveSource = string.Equals(raw, "HuggingFace", StringComparison.Ordinal)
+            ? ModelSource.HuggingFace
+            : ModelSource.Ollama;
+    }
+
+    /// <summary>C27 Stage 1: routes a source change to the right fetch.
+    /// Cancels any in-flight refresh first (the plan's cancel-and-
+    /// restart decision avoids a stale fetch landing on top of the
+    /// freshly switched source).</summary>
+    private async void OnActiveSourceChanged(object? sender, EventArgs e)
+    {
+        CancelActiveRefresh();
+        switch (_viewModel.ActiveSource)
+        {
+            case ModelSource.HuggingFace:
+                await RefreshHuggingFaceCatalogAsync(search: null);
+                break;
+            case ModelSource.Ollama:
+            default:
+                // Restore the bundled list synchronously so the picker
+                // refills immediately; the user can then click Refresh
+                // to hit ollama.com again.
+                await LoadBundledOllamaCatalogAsync();
+                break;
+        }
+    }
+
+    /// <summary>C27 Stage 1: re-load the bundled starter-models.json
+    /// after a source switch back to Ollama. Mirrors the boot-time
+    /// path in <see cref="LoadStarterCatalogAsync"/> but skips the
+    /// CollectionView wiring (already attached) and the warning
+    /// banner (a switch back has no surface for the bundled-load
+    /// warning to retrigger).</summary>
+    private async Task LoadBundledOllamaCatalogAsync()
+    {
+        var loadResult = StarterModelCatalogLoader.Load(AppContext.BaseDirectory);
+        await _viewModel.SetStarterCatalogAsync(ProjectCatalog(loadResult.Catalog));
+        CatalogLastUpdatedText.Text = loadResult.Catalog.Models.Count > 0
+            ? $"Bundled Ollama list: {loadResult.Catalog.Models.Count} models. Click Refresh to fetch the latest from ollama.com."
+            : "Bundled list empty. Click Refresh to fetch from ollama.com.";
+        CatalogLastUpdatedText.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>C27 Stage 1: PropertyChanged listener that fires the
+    /// HF debounce timer when ActiveSource == HuggingFace and the
+    /// search text changes. Under Ollama the textbox stays a pure
+    /// local filter (no host roundtrip).</summary>
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(PrepViewModel.ModelSearchText)) return;
+        if (_viewModel.ActiveSource != ModelSource.HuggingFace) return;
+
+        if (_hfSearchDebounceTimer is null)
+        {
+            _hfSearchDebounceTimer = new DispatcherTimer { Interval = HfSearchDebounce };
+            _hfSearchDebounceTimer.Tick += async (_, _) =>
+            {
+                _hfSearchDebounceTimer!.Stop();
+                await RefreshHuggingFaceCatalogAsync(
+                    search: string.IsNullOrWhiteSpace(_viewModel.ModelSearchText) ? null : _viewModel.ModelSearchText);
+            };
+        }
+        _hfSearchDebounceTimer.Stop();
+        _hfSearchDebounceTimer.Start();
+    }
+
+    /// <summary>C27 Stage 1: shared HF refresh path used by Source
+    /// switch, search debounce, and the Refresh button when the active
+    /// source is HF. Soft failure mirrors
+    /// <see cref="RefreshCatalogButton_Click"/>.</summary>
+    private async Task RefreshHuggingFaceCatalogAsync(string? search)
+    {
+        if (_isRefreshingCatalog) return;
+        _isRefreshingCatalog = true;
+        RefreshCatalogButton.IsEnabled = false;
+        var originalContent = RefreshCatalogButton.Content;
+        RefreshCatalogButton.Content = "Refreshing…";
+
+        _activeRefreshCts = new CancellationTokenSource();
+        var ct = _activeRefreshCts.Token;
+
+        try
+        {
+            var query = new HuggingFaceSearchQuery(search);
+            var result = await _hfCatalogService.SearchAsync(query, ct);
+            await _viewModel.SetStarterCatalogAsync(ProjectHuggingFaceCatalog(result.Catalog));
+
+            StarterCatalogWarningText.Text = string.Empty;
+            StarterCatalogWarningText.Visibility = Visibility.Collapsed;
+
+            CatalogLastUpdatedText.Text = result.Catalog.Models.Count > 0
+                ? $"Hugging Face: {result.Catalog.Models.Count} GGUF repos{(string.IsNullOrWhiteSpace(search) ? " (popular)" : $" for '{search}'")} (fetched {result.FetchedAt.LocalDateTime:g})."
+                : string.IsNullOrWhiteSpace(search)
+                    ? "No GGUF repos returned by Hugging Face. The list will repopulate on the next refresh."
+                    : $"No GGUF repos match '{search}'. Try a different search or clear it to see popular GGUF models.";
+            CatalogLastUpdatedText.Visibility = Visibility.Visible;
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation from a source switch or a follow-on debounce
+            // tick — the next refresh path owns the UI; do nothing.
+        }
+        catch (LiveCatalogFetchException ex)
+        {
+            CatalogLastUpdatedText.Text = ex.Reason == LiveCatalogFetchReason.NonSuccessStatus && ex.StatusCode == "429"
+                ? "Hugging Face is rate-limiting requests. Wait a minute and try again."
+                : $"Hugging Face fetch failed ({ex.Reason}): {ex.Message}. Switch back to Ollama to keep going.";
+            CatalogLastUpdatedText.Visibility = Visibility.Visible;
+        }
+        catch (Exception ex)
+        {
+            CatalogLastUpdatedText.Text = $"Hugging Face fetch failed unexpectedly: {ex.Message}.";
+            CatalogLastUpdatedText.Visibility = Visibility.Visible;
+        }
+        finally
+        {
+            RefreshCatalogButton.Content = originalContent;
+            RefreshCatalogButton.IsEnabled = true;
+            _isRefreshingCatalog = false;
+            _activeRefreshCts?.Dispose();
+            _activeRefreshCts = null;
+        }
+    }
+
+    /// <summary>C27 Stage 1: cancel any in-flight refresh so a source
+    /// switch never leaves a stale fetch landing on top of the new
+    /// source's catalog.</summary>
+    private void CancelActiveRefresh()
+    {
+        try
+        {
+            _activeRefreshCts?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Already finished and disposed — nothing to cancel.
+        }
+        _hfSearchDebounceTimer?.Stop();
+    }
+
+    /// <summary>C27 Stage 1: HF catalog → <see cref="StarterCatalogEntry"/>
+    /// projection. HF entries carry empty Capabilities (no 1:1 mapping
+    /// to ollama.com's tools/vision/thinking/audio) and empty Description
+    /// (Stage 1 doesn't fetch READMEs). The C25 pass-through marker on
+    /// the picker handles "no capability data" gracefully.</summary>
+    private static IReadOnlyList<StarterCatalogEntry> ProjectHuggingFaceCatalog(StarterModelCatalog catalog)
+    {
+        return catalog.Models
+            .Select(m => new StarterCatalogEntry(
+                m.Tag,
+                m.SizeTier,
+                string.Empty,
+                m.PullCount,
+                Capabilities: m.UseCases.ToList(),
+                ParametersBillion: m.ParametersBillion,
+                LastUpdated: m.LastUpdated,
+                Source: m.Source))
+            .ToList();
+    }
+
     /// <summary>
     /// Project the rich <see cref="StarterModelEntry"/> into the lighter
     /// <see cref="StarterCatalogEntry"/> the merged grid consumes.
@@ -244,7 +436,8 @@ public partial class MainWindow : Window
                 m.PullCount,
                 Capabilities: m.UseCases.ToList(),
                 ParametersBillion: m.ParametersBillion,
-                LastUpdated: m.LastUpdated))
+                LastUpdated: m.LastUpdated,
+                Source: m.Source))
             .ToList();
     }
 
@@ -257,6 +450,16 @@ public partial class MainWindow : Window
     /// </summary>
     private async void RefreshCatalogButton_Click(object sender, RoutedEventArgs e)
     {
+        // C27 Stage 1: dispatch on ActiveSource. HF re-uses the existing
+        // search text (preserves the user's narrowing across a manual
+        // refresh); Ollama keeps the prior fetch path.
+        if (_viewModel.ActiveSource == ModelSource.HuggingFace)
+        {
+            await RefreshHuggingFaceCatalogAsync(
+                search: string.IsNullOrWhiteSpace(_viewModel.ModelSearchText) ? null : _viewModel.ModelSearchText);
+            return;
+        }
+
         if (_isRefreshingCatalog) return;
 
         _isRefreshingCatalog = true;
@@ -264,9 +467,12 @@ public partial class MainWindow : Window
         var originalContent = RefreshCatalogButton.Content;
         RefreshCatalogButton.Content = "Refreshing…";
 
+        _activeRefreshCts = new CancellationTokenSource();
+        var ct = _activeRefreshCts.Token;
+
         try
         {
-            var result = await _liveModelCatalogService.FetchAsync(CancellationToken.None);
+            var result = await _liveModelCatalogService.FetchAsync(ct);
             await _viewModel.SetStarterCatalogAsync(ProjectCatalog(result.Catalog));
 
             // The bundled-load path may have populated the warning text
@@ -277,6 +483,10 @@ public partial class MainWindow : Window
             CatalogLastUpdatedText.Text =
                 $"Last updated: {result.FetchedAt.LocalDateTime:g} (live, {result.Catalog.Models.Count} models from {result.SourceUrl}).";
             CatalogLastUpdatedText.Visibility = Visibility.Visible;
+        }
+        catch (OperationCanceledException)
+        {
+            // Source switch or follow-on refresh owns the UI from here.
         }
         catch (LiveCatalogFetchException ex)
         {
@@ -293,6 +503,8 @@ public partial class MainWindow : Window
             RefreshCatalogButton.Content = originalContent;
             RefreshCatalogButton.IsEnabled = true;
             _isRefreshingCatalog = false;
+            _activeRefreshCts?.Dispose();
+            _activeRefreshCts = null;
         }
     }
 
