@@ -990,8 +990,172 @@ struct PrepAppTestsMain {
             try expect(out.count == 1, "nil-params HF row should pass through cap filter")
         }
 
+        // MARK: C6 — DriveConfigurationDetector Swift parity
+
+        runner.test("C6: detect(nil) returns empty snapshot") {
+            let snap = DriveConfigurationDetector.detect(nil)
+            try expect(snap == DriveConfigurationSnapshot.empty,
+                       "nil root should map to empty snapshot")
+            try expect(snap.state == .unconfigured, "state should be .unconfigured")
+        }
+
+        runner.test("C6: detect(missing directory) returns empty snapshot") {
+            let url = URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("free-ai-ssd-tests")
+                .appendingPathComponent(UUID().uuidString)
+            // Deliberately don't create it.
+            let snap = DriveConfigurationDetector.detect(url)
+            try expect(snap == DriveConfigurationSnapshot.empty,
+                       "missing dir should map to empty snapshot")
+        }
+
+        runner.test("C6: detect(empty directory) returns unconfigured") {
+            let root = try makeC6TempRoot()
+            defer { cleanupC6TempRoot(root) }
+            let snap = DriveConfigurationDetector.detect(root)
+            try expect(snap.state == .unconfigured, "empty dir → unconfigured")
+            try expect(snap.hasOurConfig == false, "hasOurConfig must be false")
+            try expect(snap.modelManifestCount == 0, "manifest count must be 0")
+        }
+
+        runner.test("C6: detect(plaintext config only) returns configuredEmpty, not encrypted") {
+            let root = try makeC6TempRoot()
+            defer { cleanupC6TempRoot(root) }
+            try writeC6Config(at: root, plaintext: true, encrypted: false)
+            let snap = DriveConfigurationDetector.detect(root)
+            try expect(snap.state == .configuredEmpty, "plaintext config alone → configuredEmpty")
+            try expect(snap.hasOurConfig == true, "hasOurConfig must be true")
+            try expect(snap.isConfigEncrypted == false, "isConfigEncrypted must be false")
+            try expect(snap.hasModels == false, "hasModels must be false")
+        }
+
+        runner.test("C6: detect(encrypted config only) returns configuredEmpty + isEncrypted") {
+            let root = try makeC6TempRoot()
+            defer { cleanupC6TempRoot(root) }
+            try writeC6Config(at: root, plaintext: false, encrypted: true)
+            let snap = DriveConfigurationDetector.detect(root)
+            try expect(snap.state == .configuredEmpty, "encrypted config alone → configuredEmpty")
+            try expect(snap.isConfigEncrypted == true, "isConfigEncrypted must be true")
+        }
+
+        runner.test("C6: detect(both configs) prefers plaintext signal") {
+            // Mid-migration edge: both files present briefly. Plaintext-newer
+            // is the unlock-not-needed signal — match C#'s isConfigEncrypted=false.
+            let root = try makeC6TempRoot()
+            defer { cleanupC6TempRoot(root) }
+            try writeC6Config(at: root, plaintext: true, encrypted: true)
+            let snap = DriveConfigurationDetector.detect(root)
+            try expect(snap.state == .configuredEmpty, "both → configuredEmpty")
+            try expect(snap.isConfigEncrypted == false, "plaintext presence overrides encrypted signal")
+        }
+
+        runner.test("C6: detect(plaintext + one manifest) returns fullyConfigured") {
+            let root = try makeC6TempRoot()
+            defer { cleanupC6TempRoot(root) }
+            try writeC6Config(at: root, plaintext: true, encrypted: false)
+            try writeC6Manifest(at: root, model: "llama3", tag: "latest")
+            let snap = DriveConfigurationDetector.detect(root)
+            try expect(snap.state == .fullyConfigured, "config + manifest → fullyConfigured")
+            try expect(snap.hasModels == true, "hasModels must be true")
+            try expect(snap.modelManifestCount == 1, "manifest count must be 1")
+        }
+
+        runner.test("C6: detect(plaintext + many manifests) counts them") {
+            let root = try makeC6TempRoot()
+            defer { cleanupC6TempRoot(root) }
+            try writeC6Config(at: root, plaintext: true, encrypted: false)
+            try writeC6Manifest(at: root, model: "llama3", tag: "latest")
+            try writeC6Manifest(at: root, model: "qwen2.5", tag: "7b")
+            try writeC6Manifest(at: root, model: "phi3", tag: "3.8b")
+            let snap = DriveConfigurationDetector.detect(root)
+            try expect(snap.state == .fullyConfigured, "3 manifests → fullyConfigured")
+            try expect(snap.modelManifestCount == 3, "manifest count must be 3")
+        }
+
+        runner.test("C6: detect(manifests but no config) returns empty — foreign-data guard") {
+            // A user's own Ollama install on the same external disk must
+            // not be claimed as ours. The marker is our config file.
+            let root = try makeC6TempRoot()
+            defer { cleanupC6TempRoot(root) }
+            try writeC6Manifest(at: root, model: "llama3", tag: "latest")
+            try writeC6Manifest(at: root, model: "qwen2.5", tag: "7b")
+            let snap = DriveConfigurationDetector.detect(root)
+            try expect(snap == DriveConfigurationSnapshot.empty,
+                       "manifests-only must map to empty (foreign data)")
+        }
+
+        runner.test("C6: detect(config + empty manifests dir) returns configuredEmpty") {
+            let root = try makeC6TempRoot()
+            defer { cleanupC6TempRoot(root) }
+            try writeC6Config(at: root, plaintext: true, encrypted: false)
+            try FileManager.default.createDirectory(
+                at: root.appendingPathComponent("models/manifests"),
+                withIntermediateDirectories: true)
+            let snap = DriveConfigurationDetector.detect(root)
+            try expect(snap.state == .configuredEmpty, "empty manifests dir → configuredEmpty")
+        }
+
+        runner.test("C6: detect respects manifestEnumerationCap") {
+            let root = try makeC6TempRoot()
+            defer { cleanupC6TempRoot(root) }
+            try writeC6Config(at: root, plaintext: true, encrypted: false)
+            let manifestDir = root
+                .appendingPathComponent("models/manifests/registry.ollama.ai/library/spam")
+            try FileManager.default.createDirectory(
+                at: manifestDir, withIntermediateDirectories: true)
+            let total = DriveConfigurationDetector.manifestEnumerationCap + 10
+            for i in 0..<total {
+                try Data("{}".utf8).write(
+                    to: manifestDir.appendingPathComponent("m\(i)"))
+            }
+            let snap = DriveConfigurationDetector.detect(root)
+            try expect(snap.state == .fullyConfigured, "cap+10 manifests → fullyConfigured")
+            try expect(
+                snap.modelManifestCount == DriveConfigurationDetector.manifestEnumerationCap,
+                "manifest count must be capped at \(DriveConfigurationDetector.manifestEnumerationCap)")
+        }
+
         await runner.run()
     }
+}
+
+// MARK: - C6 Swift detector test fixtures
+//
+// Mirrors the C# `MakeTempDriveRoot` helper in tests/PrepViewModelTests.cs.
+// Creates an isolated temp directory and provides seeding helpers that
+// match C#'s file paths (config dir name, encrypted/plaintext filenames,
+// and the manifests/registry.ollama.ai/library/<model>/<tag> shape).
+
+private func makeC6TempRoot() throws -> URL {
+    let root = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("free-ai-ssd-tests")
+        .appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    return root
+}
+
+private func cleanupC6TempRoot(_ root: URL) {
+    try? FileManager.default.removeItem(at: root)
+}
+
+private func writeC6Config(at root: URL, plaintext: Bool, encrypted: Bool) throws {
+    let configDir = root.appendingPathComponent(SsdEncryptionConstants.configDirName)
+    try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+    if plaintext {
+        try Data("{}".utf8).write(
+            to: configDir.appendingPathComponent(SsdEncryptionConstants.plaintextConfigFileName))
+    }
+    if encrypted {
+        try Data("{}".utf8).write(
+            to: configDir.appendingPathComponent(SsdEncryptionConstants.encryptedConfigFileName))
+    }
+}
+
+private func writeC6Manifest(at root: URL, model: String, tag: String) throws {
+    let manifestDir = root
+        .appendingPathComponent("models/manifests/registry.ollama.ai/library/\(model)")
+    try FileManager.default.createDirectory(at: manifestDir, withIntermediateDirectories: true)
+    try Data("{}".utf8).write(to: manifestDir.appendingPathComponent(tag))
 }
 
 // MARK: - F2a fixture

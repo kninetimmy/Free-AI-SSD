@@ -2419,4 +2419,305 @@ public class PrepViewModelTests
         Assert.True(parent.IsExpanded); // chevron flips even with no children
         Assert.Single(vm.ModelRows);
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // C6 — DriveConfiguration detection + already-configured banner
+    // ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Creates a temp directory and optionally seeds it with our config marker
+    /// and/or model manifests so the C6 detector returns the desired state.
+    /// Returns the root path and a cleanup delegate the test should invoke
+    /// in finally.
+    /// </summary>
+    private static (string root, Action cleanup) MakeTempDriveRoot(
+        bool hasPlaintextConfig = false,
+        bool hasEncryptedConfig = false,
+        int manifestCount = 0)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "free-ai-ssd-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        if (hasPlaintextConfig || hasEncryptedConfig)
+        {
+            var configDir = Path.Combine(root, SsdLayout.Config);
+            Directory.CreateDirectory(configDir);
+            if (hasPlaintextConfig)
+            {
+                File.WriteAllText(
+                    Path.Combine(configDir, DriveConfigurationDetector.PlaintextConfigFileName),
+                    "{}");
+            }
+            if (hasEncryptedConfig)
+            {
+                File.WriteAllText(
+                    Path.Combine(configDir, SsdEncryption.EncryptedConfigFileName),
+                    "{}");
+            }
+        }
+        if (manifestCount > 0)
+        {
+            var manifestDir = Path.Combine(
+                root, SsdLayout.Models, "manifests", "registry.ollama.ai", "library", "llama3");
+            Directory.CreateDirectory(manifestDir);
+            for (var i = 0; i < manifestCount; i++)
+            {
+                File.WriteAllText(Path.Combine(manifestDir, $"m{i}"), "{}");
+            }
+        }
+        return (root, () =>
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        });
+    }
+
+    [Fact]
+    public void SelectingUnconfiguredDrive_DriveConfigurationIsUnconfigured_NoBanner()
+    {
+        var (root, cleanup) = MakeTempDriveRoot();
+        try
+        {
+            SetupDefaultMocks(new List<DriveTarget> { MakeDrive(root) });
+
+            var vm = CreateViewModel();
+            vm.Initialize();
+
+            Assert.Equal(DriveConfigurationState.Unconfigured, vm.DriveConfiguration.State);
+            Assert.False(vm.ShowAlreadyConfiguredBanner);
+            Assert.False(vm.ShowManageModelsButton);
+            Assert.False(vm.ShowStartOverButton);
+            Assert.True(vm.CanInitiateFreshFormat); // format controls below stay enabled
+            Assert.Equal(string.Empty, vm.AlreadyConfiguredBannerText);
+        }
+        finally { cleanup(); }
+    }
+
+    [Fact]
+    public void SelectingConfiguredEmptyDrive_ShowsBanner_BothButtonsVisible_FreshFormatDisabled()
+    {
+        var (root, cleanup) = MakeTempDriveRoot(hasPlaintextConfig: true);
+        try
+        {
+            SetupDefaultMocks(new List<DriveTarget> { MakeDrive(root) });
+
+            var vm = CreateViewModel();
+            vm.Initialize();
+
+            Assert.Equal(DriveConfigurationState.ConfiguredEmpty, vm.DriveConfiguration.State);
+            Assert.True(vm.IsSelectedDriveConfiguredEmpty);
+            Assert.True(vm.ShowAlreadyConfiguredBanner);
+            Assert.True(vm.ShowManageModelsButton);
+            Assert.True(vm.ShowStartOverButton);
+            Assert.False(vm.CanInitiateFreshFormat);
+            Assert.Equal("This SSD is prepared but has no models yet.", vm.AlreadyConfiguredBannerText);
+        }
+        finally { cleanup(); }
+    }
+
+    [Fact]
+    public void SelectingFullyConfiguredDrive_ShowsBanner_WithModelCount()
+    {
+        var (root, cleanup) = MakeTempDriveRoot(hasPlaintextConfig: true, manifestCount: 3);
+        try
+        {
+            SetupDefaultMocks(new List<DriveTarget> { MakeDrive(root) });
+
+            var vm = CreateViewModel();
+            vm.Initialize();
+
+            Assert.Equal(DriveConfigurationState.FullyConfigured, vm.DriveConfiguration.State);
+            Assert.True(vm.IsSelectedDriveFullyConfigured);
+            Assert.True(vm.ShowAlreadyConfiguredBanner);
+            Assert.True(vm.ShowManageModelsButton);
+            Assert.True(vm.ShowStartOverButton);
+            Assert.False(vm.CanInitiateFreshFormat);
+            Assert.Contains("already prepared", vm.AlreadyConfiguredBannerText);
+            Assert.Contains("3 models", vm.AlreadyConfiguredBannerText);
+        }
+        finally { cleanup(); }
+    }
+
+    [Fact]
+    public void SelectingFullyConfiguredDrive_SingleModel_BannerSaysOneModel()
+    {
+        var (root, cleanup) = MakeTempDriveRoot(hasPlaintextConfig: true, manifestCount: 1);
+        try
+        {
+            SetupDefaultMocks(new List<DriveTarget> { MakeDrive(root) });
+
+            var vm = CreateViewModel();
+            vm.Initialize();
+
+            Assert.Contains("1 model", vm.AlreadyConfiguredBannerText);
+            Assert.DoesNotContain("1 models", vm.AlreadyConfiguredBannerText);
+        }
+        finally { cleanup(); }
+    }
+
+    [Fact]
+    public void SelectingEncryptedFullyConfiguredDrive_DetectorReportsEncrypted_StartOverDisabled()
+    {
+        // C6: detector signals IsConfigEncrypted=true from filename presence
+        // alone (no decrypt). StartOverCommand respects CanMutateDrive (false
+        // on encrypted drives) so the destructive path is gated behind C7's
+        // future unlock flow.
+        var (root, cleanup) = MakeTempDriveRoot(hasEncryptedConfig: true, manifestCount: 2);
+        try
+        {
+            SetupDefaultMocks(new List<DriveTarget> { MakeDrive(root) }, encrypted: true);
+
+            var vm = CreateViewModel();
+            vm.Initialize();
+
+            Assert.True(vm.DriveConfiguration.IsConfigEncrypted);
+            Assert.True(vm.ShowAlreadyConfiguredBanner);
+            Assert.False(vm.CanMutateDrive);
+            Assert.False(vm.StartOverCommand.CanExecute(null));
+            // Manage-models stays enabled — it's navigation, not mutation.
+            Assert.True(vm.ManageModelsCommand.CanExecute(null));
+        }
+        finally { cleanup(); }
+    }
+
+    [Fact]
+    public void ManageModelsCommand_RaisesModelsTabRequestedEvent()
+    {
+        var (root, cleanup) = MakeTempDriveRoot(hasPlaintextConfig: true, manifestCount: 1);
+        try
+        {
+            SetupDefaultMocks(new List<DriveTarget> { MakeDrive(root) });
+
+            var vm = CreateViewModel();
+            vm.Initialize();
+            var raised = 0;
+            vm.ModelsTabRequested += (_, _) => raised++;
+
+            vm.ManageModelsCommand.Execute(null);
+
+            Assert.Equal(1, raised);
+        }
+        finally { cleanup(); }
+    }
+
+    [Fact]
+    public async Task StartOverCommand_UserDeclinesConfirm_DoesNotInvokeFormat()
+    {
+        var (root, cleanup) = MakeTempDriveRoot(hasPlaintextConfig: true, manifestCount: 2);
+        try
+        {
+            SetupDefaultMocks(new List<DriveTarget> { MakeDrive(root) });
+            _dialogService
+                .Setup(d => d.Confirm(It.IsAny<string>(), "Erase already-prepared SSD?"))
+                .Returns(false);
+
+            var vm = CreateViewModel();
+            vm.Initialize();
+            vm.StartOverCommand.Execute(null);
+            await WaitForCommandAsync(vm.StartOverCommand);
+
+            // ConfirmErase belongs to the existing FormatPrepareAsync flow —
+            // if we never got there, ConfirmErase is never called.
+            _dialogService.Verify(
+                d => d.ConfirmErase(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()),
+                Times.Never);
+            _driveService.Verify(
+                d => d.FormatAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                    It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+                Times.Never);
+        }
+        finally { cleanup(); }
+    }
+
+    [Fact]
+    public async Task StartOverCommand_UserApprovesConfirm_DelegatesToFormatPrepareAsync()
+    {
+        // Approve C6 pre-confirm → FormatPrepareAsync runs. The first thing
+        // it does is call _driveService.EnsureWritable("Format & Prepare Drive")
+        // — that invocation is the platform-agnostic proof of delegation.
+        // EnsureWritable returns false in this test, so FormatPrepareAsync
+        // bails before any destructive work; FormatAsync verifying never-
+        // called is the belt-and-braces safety pin.
+        var (root, cleanup) = MakeTempDriveRoot(hasPlaintextConfig: true, manifestCount: 2);
+        try
+        {
+            SetupDefaultMocks(new List<DriveTarget> { MakeDrive(root) });
+            _dialogService
+                .Setup(d => d.Confirm(It.IsAny<string>(), "Erase already-prepared SSD?"))
+                .Returns(true);
+            string? blockedMessage = null;
+            _driveService
+                .Setup(d => d.EnsureWritable(It.IsAny<string>(), "Format & Prepare Drive", out blockedMessage))
+                .Returns(false);
+
+            var vm = CreateViewModel();
+            vm.Initialize();
+            vm.StartOverCommand.Execute(null);
+            await WaitForCommandAsync(vm.StartOverCommand);
+
+            _dialogService.Verify(
+                d => d.Confirm(It.IsAny<string>(), "Erase already-prepared SSD?"),
+                Times.Once);
+            _driveService.Verify(
+                d => d.EnsureWritable(It.IsAny<string>(), "Format & Prepare Drive", out blockedMessage),
+                Times.Once);
+            _driveService.Verify(
+                d => d.FormatAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                    It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()),
+                Times.Never);
+        }
+        finally { cleanup(); }
+    }
+
+    [Fact]
+    public void ChangingDriveSelection_FromConfiguredToFreshTempDir_BannerHides()
+    {
+        var (configured, cleanupConfigured) = MakeTempDriveRoot(hasPlaintextConfig: true, manifestCount: 1);
+        var (fresh, cleanupFresh) = MakeTempDriveRoot();
+        try
+        {
+            var drives = new List<DriveTarget>
+            {
+                MakeDrive(configured, "Prepped"),
+                MakeDrive(fresh, "Fresh")
+            };
+            SetupDefaultMocks(drives);
+
+            var vm = CreateViewModel();
+            vm.Initialize();
+            // Initialize selects Drives[0] = configured.
+            Assert.True(vm.ShowAlreadyConfiguredBanner);
+
+            vm.SelectedDrive = drives[1];
+
+            Assert.False(vm.ShowAlreadyConfiguredBanner);
+            Assert.True(vm.CanInitiateFreshFormat);
+        }
+        finally
+        {
+            cleanupConfigured();
+            cleanupFresh();
+        }
+    }
+
+    [Fact]
+    public void DeselectingDrive_DriveConfigurationResetsToEmpty()
+    {
+        var (root, cleanup) = MakeTempDriveRoot(hasPlaintextConfig: true, manifestCount: 1);
+        try
+        {
+            SetupDefaultMocks(new List<DriveTarget> { MakeDrive(root) });
+
+            var vm = CreateViewModel();
+            vm.Initialize();
+            Assert.True(vm.ShowAlreadyConfiguredBanner);
+
+            vm.SelectedDrive = null;
+
+            Assert.Same(DriveConfigurationDetector.Empty, vm.DriveConfiguration);
+            Assert.False(vm.ShowAlreadyConfiguredBanner);
+        }
+        finally { cleanup(); }
+    }
 }

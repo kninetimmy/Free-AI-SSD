@@ -108,6 +108,11 @@ public partial class MainWindow : Window
 
         _viewModel.LogLines.CollectionChanged += LogLines_CollectionChanged;
 
+        // C6: banner's Manage-models button raises this event; switch the
+        // main TabControl to the Models tab (index 0). VM has no direct
+        // reference to MainTabs, hence the event hook.
+        _viewModel.ModelsTabRequested += (_, _) => MainTabs.SelectedIndex = 0;
+
         ShowModelDetailsToggle.Checked += OnShowModelDetailsChanged;
         ShowModelDetailsToggle.Unchecked += OnShowModelDetailsChanged;
 
@@ -135,7 +140,13 @@ public partial class MainWindow : Window
 
         _viewModel.OnPreferenceStateChanged = SaveCurrentPreferences;
 
-        if (!_ftueCompleted)
+        // C6: suppress FTUE when the auto-selected drive is already prepared.
+        // The Drive-tab spotlight steps point at controls that are now disabled
+        // by the banner, so the tour would be misleading. We don't mark FTUE
+        // complete — a first-time user who later plugs in a fresh SSD still
+        // gets the tour on their next launch.
+        if (!_ftueCompleted &&
+            _viewModel.DriveConfiguration.State == DriveConfigurationState.Unconfigured)
         {
             StartFtue();
         }

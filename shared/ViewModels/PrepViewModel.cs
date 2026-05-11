@@ -56,6 +56,12 @@ public class PrepViewModel : BaseViewModel
     private DriveTarget? _selectedDrive;
     private bool _showFixedDrives;
     private bool _isSelectedDriveEncrypted;
+
+    // C6: file-presence snapshot of the selected drive. Refreshed on every
+    // SelectedDrive change, alongside RefreshEncryptionState. The detector
+    // never reads config contents — encryption status is a filename-only
+    // signal, so this is safe to call on any candidate drive.
+    private DriveConfigurationSnapshot _driveConfiguration = DriveConfigurationDetector.Empty;
     private string _statusText = string.Empty;
     private double _progressValue;
     private bool _progressIsIndeterminate;
@@ -219,6 +225,17 @@ public class PrepViewModel : BaseViewModel
         FinalizeCommand = new AsyncRelayCommand(FinalizeAsync, () => CanMutateDrive && HasDriveSelected);
         CheckPrereqUpdatesCommand = new AsyncRelayCommand(CheckPrereqUpdatesAsync, () => CanMutateDrive && HasDriveSelected);
         CheckReadinessCommand = new AsyncRelayCommand(CheckReadinessAsync, () => CanMutateDrive && HasDriveSelected);
+
+        // C6: navigation + destructive-restart commands surfaced on the
+        // already-configured-drive banner. ManageModels is pure navigation
+        // (raises ModelsTabRequested for the view to handle); StartOver
+        // funnels through the existing FormatPrepareAsync gates after one
+        // C6-specific contextual confirm.
+        ManageModelsCommand = new RelayCommand(
+            () => ModelsTabRequested?.Invoke(this, EventArgs.Empty),
+            () => ShowManageModelsButton);
+        StartOverCommand = new AsyncRelayCommand(StartOverAsync,
+            () => ShowStartOverButton && CanMutateDrive);
     }
 
     public IReadOnlyList<DriveTarget> Drives
@@ -796,9 +813,88 @@ public class PrepViewModel : BaseViewModel
     public AsyncRelayCommand FinalizeCommand { get; }
     public AsyncRelayCommand CheckPrereqUpdatesCommand { get; }
     public AsyncRelayCommand CheckReadinessCommand { get; }
+    public RelayCommand ManageModelsCommand { get; }
+    public AsyncRelayCommand StartOverCommand { get; }
+
+    /// <summary>
+    /// C6: raised when the user clicks "Manage models" on an already-
+    /// configured drive's banner. The view layer subscribes and switches
+    /// the active tab (Windows TabControl) — the VM has no direct
+    /// reference to the WPF tab control, hence the event hook.
+    /// </summary>
+    public event EventHandler? ModelsTabRequested;
 
     public bool CanMutateDrive => !_isModelOperationRunning && !_isSelectedDriveEncrypted;
     public bool HasDriveSelected => _selectedDrive is not null;
+
+    /// <summary>
+    /// C6: current detection snapshot for the selected drive. Updated on
+    /// every <see cref="SelectedDrive"/> change. Defaults to
+    /// <see cref="DriveConfigurationDetector.Empty"/> when no drive is
+    /// selected.
+    /// </summary>
+    public DriveConfigurationSnapshot DriveConfiguration => _driveConfiguration;
+
+    /// <summary>C6: true when the selected drive carries our marker AND model manifests.</summary>
+    public bool IsSelectedDriveFullyConfigured =>
+        _driveConfiguration.State == DriveConfigurationState.FullyConfigured;
+
+    /// <summary>C6: true when the selected drive carries our marker but no manifests yet.</summary>
+    public bool IsSelectedDriveConfiguredEmpty =>
+        _driveConfiguration.State == DriveConfigurationState.ConfiguredEmpty;
+
+    /// <summary>
+    /// C6: drives the contextual banner above the Drive-preparation
+    /// GroupBox. Visible for both FullyConfigured and ConfiguredEmpty
+    /// drives — both carry our marker, so both deserve the skip-format
+    /// affordance.
+    /// </summary>
+    public bool ShowAlreadyConfiguredBanner =>
+        _driveConfiguration.State != DriveConfigurationState.Unconfigured;
+
+    /// <summary>C6: Manage-models button is shown whenever the banner is.</summary>
+    public bool ShowManageModelsButton => ShowAlreadyConfiguredBanner;
+
+    /// <summary>
+    /// C6: Start-over button is shown whenever the banner is. Both
+    /// FullyConfigured and ConfiguredEmpty drives can be wiped; the
+    /// banner's confirm dialog + the existing ConfirmErase + UAC are
+    /// the three safety gates.
+    /// </summary>
+    public bool ShowStartOverButton => ShowAlreadyConfiguredBanner;
+
+    /// <summary>
+    /// C6: drives <c>IsEnabled</c> on the Drive-preparation GroupBox
+    /// controls (Format button, volume label, encryption checkbox, prep
+    /// targets). False when an already-configured banner is showing —
+    /// the destructive path lives inside the banner's Start-over button,
+    /// not in those controls.
+    /// </summary>
+    public bool CanInitiateFreshFormat => !ShowAlreadyConfiguredBanner && CanMutateDrive;
+
+    /// <summary>
+    /// C6: contextual banner text. FullyConfigured includes a count of
+    /// installed models; ConfiguredEmpty surfaces the half-prepped state.
+    /// Returns empty string for Unconfigured (banner is hidden anyway).
+    /// </summary>
+    public string AlreadyConfiguredBannerText
+    {
+        get
+        {
+            switch (_driveConfiguration.State)
+            {
+                case DriveConfigurationState.FullyConfigured:
+                    var count = _driveConfiguration.ModelManifestCount;
+                    return count > 0
+                        ? $"This SSD is already prepared. {count} model{(count == 1 ? "" : "s")} on this drive."
+                        : "This SSD is already prepared.";
+                case DriveConfigurationState.ConfiguredEmpty:
+                    return "This SSD is prepared but has no models yet.";
+                default:
+                    return string.Empty;
+            }
+        }
+    }
 
     public string SelectedDriveWarning
     {
@@ -896,12 +992,59 @@ public class PrepViewModel : BaseViewModel
     private void OnSelectedDriveChanged()
     {
         RefreshEncryptionState();
+        // C6: detection runs on every drive-select change. Order matters —
+        // RefreshEncryptionState first so existing invariants hold, then
+        // detector, then property fan-out + command can-execute. Detection
+        // is file-presence only (no decrypt), so safe on encrypted drives.
+        RefreshDriveConfigurationState();
         OnPropertyChanged(nameof(SelectedDriveWarning));
         OnPropertyChanged(nameof(CanMutateDrive));
         OnPropertyChanged(nameof(HasDriveSelected));
         RaiseAllCommandsCanExecuteChanged();
         _ = RefreshModelStatusesAsync();
         _ = CheckAndPromptLibraryReindexAsync();
+    }
+
+    private void RefreshDriveConfigurationState()
+    {
+        _driveConfiguration = _selectedDrive is null
+            ? DriveConfigurationDetector.Empty
+            : DriveConfigurationDetector.Detect(_selectedDrive.RootPath);
+
+        OnPropertyChanged(nameof(DriveConfiguration));
+        OnPropertyChanged(nameof(IsSelectedDriveFullyConfigured));
+        OnPropertyChanged(nameof(IsSelectedDriveConfiguredEmpty));
+        OnPropertyChanged(nameof(ShowAlreadyConfiguredBanner));
+        OnPropertyChanged(nameof(ShowManageModelsButton));
+        OnPropertyChanged(nameof(ShowStartOverButton));
+        OnPropertyChanged(nameof(CanInitiateFreshFormat));
+        OnPropertyChanged(nameof(AlreadyConfiguredBannerText));
+    }
+
+    /// <summary>
+    /// C6: Start-over click on an already-configured drive's banner. Shows
+    /// one C6-specific contextual confirm (why we're framing it as
+    /// destruction of an already-prepared SSD, not a fresh format), then
+    /// delegates to <see cref="FormatPrepareAsync"/>. That method's own
+    /// ConfirmErase + UAC + EnsureWritable gates remain non-negotiable —
+    /// this is just the framing modal on top of them.
+    /// </summary>
+    private async Task StartOverAsync()
+    {
+        if (_selectedDrive is null) return;
+
+        var root = _selectedDrive.RootPath;
+        var confirmed = _dialogService.Confirm(
+            $"This SSD is already prepared. Starting over will erase {root} and re-run the full prep flow." + Environment.NewLine + Environment.NewLine +
+            "All models, configuration, and documents on this drive will be lost. Continue?",
+            "Erase already-prepared SSD?");
+        if (!confirmed)
+        {
+            AppendLog("Start over cancelled by user.");
+            return;
+        }
+
+        await FormatPrepareAsync();
     }
 
     private async Task CheckAndPromptLibraryReindexAsync()

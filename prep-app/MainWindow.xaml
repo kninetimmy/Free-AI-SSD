@@ -728,7 +728,42 @@
                                     </StackPanel>
                                 </Border>
 
-                                <GroupBox Header="Drive preparation" Margin="0,0,0,10">
+                                <!-- C6: contextual banner shown when the selected drive
+                                     was previously prepared by Free-AI-SSD. Offers two
+                                     skip-format paths and disables the Drive-preparation
+                                     controls below. -->
+                                <Border Margin="0,0,0,10" Padding="10,8"
+                                        Background="{StaticResource BgRaisedBrush}"
+                                        BorderBrush="{StaticResource AccentCyanBrush}"
+                                        BorderThickness="1" CornerRadius="6"
+                                        Visibility="{Binding ShowAlreadyConfiguredBanner, Converter={StaticResource BoolToVisibilityConverter}}">
+                                    <StackPanel>
+                                        <StackPanel Orientation="Horizontal">
+                                            <theme:LedStatusIndicator State="Ok" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                            <TextBlock Text="{Binding AlreadyConfiguredBannerText}"
+                                                       Foreground="{StaticResource AccentCyanBrush}"
+                                                       VerticalAlignment="Center"
+                                                       TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                            <Button Content="Manage models"
+                                                    Padding="14,4" MinHeight="0"
+                                                    Style="{StaticResource TactilePrimaryButton}"
+                                                    Command="{Binding ManageModelsCommand}"
+                                                    Visibility="{Binding ShowManageModelsButton, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                    ToolTip="Switch to the Models tab to add or remove models on this SSD."/>
+                                            <Button Content="Start over (formats drive)" Margin="8,0,0,0"
+                                                    Padding="14,4" MinHeight="0"
+                                                    Style="{StaticResource GhostSecondaryButton}"
+                                                    Command="{Binding StartOverCommand}"
+                                                    Visibility="{Binding ShowStartOverButton, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                    ToolTip="Erase this SSD and run the full prep flow again. All models, configuration, and documents will be lost."/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <GroupBox Header="Drive preparation" Margin="0,0,0,10"
+                                          IsEnabled="{Binding CanInitiateFreshFormat}">
                                     <StackPanel Margin="8">
                                         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                             <TextBlock Text="Prep targets:"

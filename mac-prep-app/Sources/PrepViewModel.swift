@@ -24,9 +24,34 @@ final class PrepViewModel: ObservableObject {
 
     // Drive selection
     @Published var candidates: [DiskCandidate] = []
-    @Published var selectedCandidate: DiskCandidate?
+    @Published var selectedCandidate: DiskCandidate? {
+        didSet {
+            // C6 Stage 3: detection runs on every selection change so the
+            // already-configured banner stays in sync. Detection is pure
+            // file-presence (no decrypt) — safe even on encrypted drives.
+            refreshDriveConfigurationState()
+        }
+    }
     @Published var prepareForWindowsToo: Bool = true   // default cross-platform
     @Published var volumeLabel: String = "FREEAI"
+
+    // C6 Stage 3: detection snapshot for the selected candidate's drive.
+    // Updated by `refreshDriveConfigurationState()` whenever
+    // `selectedCandidate` changes. Drives the contextual banner on
+    // DriveSelectionStepView and gates the Manage-models / Start-over
+    // affordances. Default `.empty` ≡ no drive selected.
+    @Published var driveConfiguration: DriveConfigurationSnapshot = .empty
+
+    // C6 Stage 3: disk-truth list of installed models on the configured
+    // drive. Populated by `refreshInstalledModels()` via the sidecar's
+    // `discover-models` command. Bound to the ManageModelsStepView list.
+    @Published var installedModels: [String] = []
+
+    // C6 Stage 3: marker that a pull was initiated from inside the
+    // .manageModels step. Branches the `pullPendingTags` tail so the
+    // user returns to .manageModels (refreshing installedModels)
+    // instead of falling through to .readiness.
+    @Published var isAddingModelInManagement: Bool = false
 
     // Status / progress / log
     @Published var statusMessage: String = ""
@@ -280,6 +305,225 @@ final class PrepViewModel: ObservableObject {
             return
         }
         currentStep = .eraseConfirmation
+    }
+
+    // MARK: - C6 Stage 3 — DriveConfiguration detection + Manage models
+
+    /// Re-runs the detector against the current `selectedCandidate.mountPoint`
+    /// and refreshes `driveConfiguration`. Fired from `selectedCandidate.didSet`
+    /// on every selection change. Safe on missing mount points (detector
+    /// returns `.empty`).
+    func refreshDriveConfigurationState() {
+        driveConfiguration = DriveConfigurationDetector.detect(selectedCandidate?.mountPoint)
+    }
+
+    /// C6: contextual banner is shown whenever the drive carries our
+    /// marker (FullyConfigured OR ConfiguredEmpty).
+    var showAlreadyConfiguredBanner: Bool {
+        driveConfiguration.state != .unconfigured
+    }
+
+    var showManageModelsButton: Bool { showAlreadyConfiguredBanner }
+    var showStartOverButton: Bool { showAlreadyConfiguredBanner }
+
+    /// C6: drives `.disabled()` on the volume-label Form + Continue
+    /// button in DriveSelectionStepView when the banner is visible.
+    /// The destructive path lives inside the banner's Start-over button
+    /// in that state, not in the inline fresh-format controls.
+    var canInitiateFreshFormat: Bool { !showAlreadyConfiguredBanner }
+
+    /// C6: Add/Remove on the new step are disabled on encrypted drives.
+    /// Punted to C7 — see decision D13 in the C6 plan.
+    var canManageModelsAdd: Bool { !driveConfiguration.isConfigEncrypted }
+    var canManageModelsRemove: Bool { !driveConfiguration.isConfigEncrypted }
+
+    /// C6: contextual banner text. FullyConfigured includes a model
+    /// count; ConfiguredEmpty calls out the half-prepped state.
+    var alreadyConfiguredBannerText: String {
+        switch driveConfiguration.state {
+        case .fullyConfigured:
+            let n = driveConfiguration.modelManifestCount
+            return n > 0
+                ? "This SSD is already prepared. \(n) model\(n == 1 ? "" : "s") on this drive."
+                : "This SSD is already prepared."
+        case .configuredEmpty:
+            return "This SSD is prepared but has no models yet."
+        case .unconfigured:
+            return ""
+        }
+    }
+
+    /// C6: banner's "Manage models" tap entry point. Transitions to
+    /// `.manageModels` and runs the light-touch sidecar startup
+    /// (decision D9.b — sidecar + ensure-structure + discover-catalog,
+    /// no re-staging). On failure routes to `.failed(message:)`.
+    func enterManageModels() async {
+        currentStep = .manageModels
+        await runManageModelsStartup()
+    }
+
+    /// C6: banner's "Start over (formats drive)" tap entry point.
+    /// Shows a `.warning` NSAlert pre-confirm framing the destructive
+    /// nature of wiping an already-prepared SSD, then delegates to
+    /// the existing `.eraseConfirmation` step which has its own
+    /// `.critical` NSAlert before `formatSelected()` runs (decision D3).
+    func startOverFromBanner() {
+#if canImport(AppKit)
+        guard let candidate = selectedCandidate else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Erase already-prepared SSD?"
+        alert.informativeText = """
+        This SSD is already prepared. Starting over will erase \
+        \(candidate.identifier) (\(candidate.sizeDisplay)) and re-run \
+        the full prep flow.
+
+        All models, configuration, and documents on this drive will be lost.
+        """
+        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: "Cancel")
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else {
+            appendLog("Start over cancelled by user.")
+            return
+        }
+        // Existing destructive gates fire next: .eraseConfirmation step
+        // hosts its own `.critical` NSAlert before formatSelected runs.
+        proceedToEraseConfirmation()
+#endif
+    }
+
+    /// C6: light-touch startup for an already-configured drive. Skips
+    /// the heavy `stage-runner` / `stage-ollama` / `stage-prereqs` arms
+    /// — the staged binaries are already on disk. Still calls
+    /// `ensure-structure` (cheap insurance against a manually-deleted
+    /// subdirectory) and `discoverCatalog` (so the Add picker has rows
+    /// to show). Mirrors `runStaging()` but truncated.
+    private func runManageModelsStartup() async {
+        guard let mount = selectedCandidate?.mountPoint else {
+            currentStep = .failed(message: "Selected drive has no mount point.")
+            return
+        }
+        isBusy = true
+        defer { isBusy = false }
+
+        do {
+            try FileManager.default.createDirectory(
+                at: mount.appendingPathComponent("logs"),
+                withIntermediateDirectories: true)
+        } catch {
+            currentStep = .failed(message: "Failed to create logs directory: \(error.localizedDescription)")
+            return
+        }
+
+        do {
+            try await hostController.startAndWaitReady(ssdRoot: mount)
+        } catch {
+            currentStep = .failed(message: "Sidecar startup failed: \(error.localizedDescription)")
+            return
+        }
+
+        do {
+            _ = try await hostController.send("ensure-structure")
+            appendLog("SSD layout verified.")
+        } catch {
+            currentStep = .failed(message: "Failed to verify SSD layout: \(error.localizedDescription)")
+            return
+        }
+
+        // Catalog discovery feeds the Add disclosure's picker. Soft
+        // failure: if it fails the picker stays empty; the user can
+        // still use what's already installed and the Remove path.
+        await discoverCatalog()
+
+        // Disk-truth installed list for the primary signal in the view.
+        await refreshInstalledModels()
+    }
+
+    /// C6: pulls the canonical installed-models list from the sidecar's
+    /// `discover-models` command (delegates to
+    /// `ModelOperations.DiscoverModelsOnDisk` in prep-core — single
+    /// source of truth across OSes). Sorted case-insensitive to match
+    /// the C# DiscoverInstalledModels projection.
+    func refreshInstalledModels() async {
+        do {
+            let result = try await hostController.send("discover-models")
+            // Sidecar payload shape: {"models": ["name:tag", …]} per
+            // HostLifetime.cs:151-153.
+            if let models = result.payload["models"] as? [String] {
+                installedModels = models.sorted { $0.lowercased() < $1.lowercased() }
+            } else {
+                installedModels = []
+            }
+        } catch {
+            appendLog("discover-models failed: \(error.localizedDescription)")
+            installedModels = []
+        }
+    }
+
+    /// C6: per-row Remove button handler. Shows a `.warning` NSAlert
+    /// pre-confirm, then routes to the sidecar's `remove-model` arm
+    /// (added in Sub-stage 3.3). Refreshes `installedModels` on
+    /// success so the row drops off the list. Gated by
+    /// `canManageModelsRemove` (false on encrypted drives, per D13).
+    func removeModel(tag: String) async {
+        guard canManageModelsRemove else {
+            appendLog("Remove blocked: drive is encrypted (C7 will land unlock).")
+            return
+        }
+#if canImport(AppKit)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Remove \(tag) from this drive?"
+        alert.informativeText = """
+        The model blobs will be deleted from \
+        \(selectedCandidate?.mountPoint?.lastPathComponent ?? "this SSD"). \
+        You can pull it again later from Manage models.
+        """
+        alert.addButton(withTitle: "Remove")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            appendLog("Remove cancelled for \(tag).")
+            return
+        }
+#endif
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            _ = try await hostController.send("remove-model \(tag)", timeout: 120)
+            appendLog("Removed \(tag).")
+            await refreshInstalledModels()
+        } catch {
+            appendLog("Remove failed for \(tag): \(error.localizedDescription)")
+        }
+    }
+
+    /// C6: "Pull selected" button handler on the Add disclosure. Sets
+    /// the `isAddingModelInManagement` flag so `pullPendingTags`'s tail
+    /// returns to `.manageModels` instead of `.readiness`, then routes
+    /// through the existing `.modelPull` view for in-place progress.
+    func pullSelectedFromManagement() async {
+        guard canManageModelsAdd else {
+            appendLog("Add blocked: drive is encrypted (C7 will land unlock).")
+            return
+        }
+        guard !selectedStarterModels.isEmpty else { return }
+        isAddingModelInManagement = true
+        currentStep = .modelPull
+        await pullStarterModels()
+    }
+
+    /// C6: "Done" button handler on ManageModelsStepView. Tears down
+    /// the sidecar so it isn't left running idle while the user is
+    /// back on the drive list — re-entering will spin it up again via
+    /// `runManageModelsStartup()`. Returns to `.driveSelection` with
+    /// the banner still visible.
+    func exitManageModels() async {
+        await hostController.shutdown()
+        installedModels = []
+        selectedStarterModels = []
+        isAddingModelInManagement = false
+        currentStep = .driveSelection
     }
 
     /// Show a native NSAlert with destructive styling. If the user
@@ -931,6 +1175,18 @@ final class PrepViewModel: ObservableObject {
 
         pendingPullTags = []
         pullProgressLine = ""
+
+        // C6 Stage 3: when the pull was initiated from inside
+        // .manageModels, return there (refreshing installedModels so the
+        // new model surfaces in the list) instead of falling through to
+        // .readiness — the user is mid-management, not mid-prep.
+        if isAddingModelInManagement {
+            isAddingModelInManagement = false
+            currentStep = .manageModels
+            await refreshInstalledModels()
+            return
+        }
+
         currentStep = .readiness
         await runReadiness()
     }

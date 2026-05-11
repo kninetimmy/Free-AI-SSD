@@ -18,6 +18,13 @@ enum PrepFlowStep: Equatable {
     /// the MAC17 MVP per the 2026-05-05 prep-parity decision.)
     case driveSelection
 
+    /// C6 Stage 3: user picked an already-configured drive and clicked
+    /// Manage models from the contextual banner. Surfaces installed
+    /// models + Add/Remove without re-running the destructive format
+    /// flow. Encrypted drives render a read-only variant (Add/Remove
+    /// disabled until C7 lands unlock UX).
+    case manageModels
+
     /// Native NSAlert sheet the user must dismiss with "Erase" before any
     /// destructive call. We do this in a dedicated step (rather than an
     /// inline alert) so a confirmation dismissal doesn't accidentally
