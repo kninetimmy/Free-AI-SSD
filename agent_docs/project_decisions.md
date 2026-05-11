@@ -2597,3 +2597,44 @@ Cross-OS parity is achieved at the *behavior* level, not the *transport*
 level.
 
 **Implementation reference.** PR #257 (M14, `31f1bbc`).
+
+---
+
+## 2026-05-10 — Picker filter posture: null-data pass-through, MoE largest-billion-wins, ISO-8601-as-string for newest sort [C3+C4+C5]
+
+PR #259 (`9f81bd5`) added three picker filters (parameter cap,
+capability AND, sort by newest) and locked three postures that
+future picker work should follow:
+
+1. **Null/empty data passes through every filter.** `IsModelRowVisible`
+   (C#) and `applyStarterModelFilters` (Swift) treat
+   `ParametersBillion == null`, empty `Capabilities`, and `LastUpdated
+   == null` as "unknown — don't hide." Same posture as the F2a
+   Most-popular toggle for missing `PullCount`. Reason: configured /
+   on-disk / bundled-pre-Refresh rows must remain visible while the
+   user narrows recommended entries; hiding them would surprise users
+   who think they're filtering the recommended list, not their own
+   library.
+
+2. **MoE size tokens parse to largest-billion-wins.** `ParseParamsBillions`
+   handles `"128x17b"` as 128 (the larger of the two numbers,
+   interpreted as billions). Conservative for memory-budget filters
+   (MoE loads every expert into VRAM even though only one fires per
+   token), so a "≤14B" cap correctly excludes MoE entries that would
+   otherwise mislead users sizing for hardware. Pinned by a `4x7B`
+   unit test where the larger second number wins.
+
+3. **Scraped dates cross the C#/Swift wire as ISO 8601 strings.**
+   `mac-prep-host` emits `lastUpdated` as `DateTimeOffset?` (System.
+   Text.Json default = ISO 8601). The Mac sidecar decodes it as
+   `String?` rather than `Date` because ISO 8601 strings sort
+   lexically the same as the underlying instants for newest-first
+   ordering, and using `String?` avoids changing
+   `JSONDecoder.dateDecodingStrategy` (which would risk breaking the
+   existing catalog decode path). Posture extends to any future
+   scraped-date fields.
+
+Mechanism: see `prep-core/Services/LiveModelCatalogService.cs`
+(`ParseRelativeDate`, `ParseParamsBillions`),
+`shared/ViewModels/PrepViewModel.cs:IsModelRowVisible`,
+`mac-prep-app/Sources/StarterCatalogTypes.swift:applyStarterModelFilters`.
