@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -140,13 +141,74 @@ public partial class MainWindow : Window
         // checks; the VM raises ModelRowsViewInvalidated on every state
         // change so we can refresh the live view in place.
         collectionView.Filter = item => item is not ModelGridRow row || _viewModel.IsModelRowVisible(row);
+        ApplySortDescriptions(collectionView, _viewModel.SortMode);
         _viewModel.ModelRowsViewInvalidated += (_, _) =>
         {
             // CollectionView.Refresh must run on the dispatcher thread —
             // the event may fire from a background catalog reload.
-            Dispatcher.BeginInvoke(new Action(collectionView.Refresh));
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                ApplySortDescriptions(collectionView, _viewModel.SortMode);
+                collectionView.Refresh();
+            }));
         };
         ModelStatusGrid.ItemsSource = collectionView;
+    }
+
+    /// <summary>
+    /// C5: translate the VM's <see cref="ModelSortMode"/> into
+    /// <see cref="SortDescription"/>s on the picker's
+    /// <see cref="ListCollectionView"/>. Sorting layers under the
+    /// existing Tier grouping — within each tier group rows order by
+    /// the chosen mode. Reapplied on every filter invalidation so a
+    /// dropdown change re-sorts in place without rebuilding the view.
+    /// </summary>
+    private static void ApplySortDescriptions(ListCollectionView view, ModelSortMode mode)
+    {
+        view.SortDescriptions.Clear();
+        switch (mode)
+        {
+            case ModelSortMode.Newest:
+                view.SortDescriptions.Add(new SortDescription(nameof(ModelGridRow.LastUpdated), ListSortDirection.Descending));
+                break;
+            case ModelSortMode.Alphabetical:
+                view.SortDescriptions.Add(new SortDescription(nameof(ModelGridRow.Name), ListSortDirection.Ascending));
+                break;
+            case ModelSortMode.Popular:
+            default:
+                view.SortDescriptions.Add(new SortDescription(nameof(ModelGridRow.PullCount), ListSortDirection.Descending));
+                break;
+        }
+    }
+
+    /// <summary>C3: dropdown selection → VM <c>MaxParametersBillion</c>.
+    /// Tag carries the cap as a string ("" = no cap, "7" = ≤7B etc).</summary>
+    private void ParameterCapCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ComboBox combo || combo.SelectedItem is not ComboBoxItem item) return;
+        var raw = item.Tag as string;
+        if (string.IsNullOrEmpty(raw))
+        {
+            _viewModel.MaxParametersBillion = null;
+            return;
+        }
+        if (double.TryParse(raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var cap))
+        {
+            _viewModel.MaxParametersBillion = cap;
+        }
+    }
+
+    /// <summary>C5: dropdown selection → VM <c>SortMode</c>. SelectedIndex
+    /// 0 = Popular, 1 = Newest, 2 = A–Z (matches the XAML item order).</summary>
+    private void SortModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ComboBox combo) return;
+        _viewModel.SortMode = combo.SelectedIndex switch
+        {
+            1 => ModelSortMode.Newest,
+            2 => ModelSortMode.Alphabetical,
+            _ => ModelSortMode.Popular,
+        };
     }
 
     /// <summary>
@@ -167,7 +229,10 @@ public partial class MainWindow : Window
                     : m.UseCases.Count == 0
                         ? m.Description
                         : $"{m.Description} ({string.Join(", ", m.UseCases)})",
-                m.PullCount))
+                m.PullCount,
+                Capabilities: m.UseCases.ToList(),
+                ParametersBillion: m.ParametersBillion,
+                LastUpdated: m.LastUpdated))
             .ToList();
     }
 

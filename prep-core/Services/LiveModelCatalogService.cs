@@ -225,6 +225,14 @@ public sealed class LiveModelCatalogService : ILiveModelCatalogService, IDisposa
         @"x-test-pull-count\b[^>]*>(?<count>[^<]+)<",
         RegexOptions.Compiled);
 
+    // C5: ollama.com renders relative dates like "yesterday",
+    // "2 days ago", "3 weeks ago", "1 year ago" in an x-test-updated
+    // span per model card. Anchored at the card so size variants
+    // share the same value (Ollama exposes the date per-model).
+    private static readonly Regex UpdatedRegex = new(
+        @"x-test-updated\b[^>]*>(?<updated>[^<]+)<",
+        RegexOptions.Compiled);
+
     /// <summary>
     /// Parses ollama.com/library HTML into a <see cref="StarterModelCatalog"/>.
     /// Emits one entry per (model, size) combination so the picker can
@@ -284,6 +292,10 @@ public sealed class LiveModelCatalogService : ILiveModelCatalogService, IDisposa
                 ? ParsePullCount(DecodeHtmlText(pullMatch.Groups["count"].Value))
                 : null;
 
+            var lastUpdated = UpdatedRegex.Match(cardBody) is { Success: true } updMatch
+                ? ParseRelativeDate(DecodeHtmlText(updMatch.Groups["updated"].Value), DateTimeOffset.UtcNow)
+                : null;
+
             var sizes = SizeRegex.Matches(cardBody)
                 .Select(m => DecodeHtmlText(m.Groups["size"].Value).Trim())
                 .Where(s => s.Length > 0)
@@ -314,6 +326,8 @@ public sealed class LiveModelCatalogService : ILiveModelCatalogService, IDisposa
                     Description = description,
                     UseCases = nonEmbeddingCapabilities,
                     PullCount = pullCount,
+                    LastUpdated = lastUpdated,
+                    ParametersBillion = ParseParamsBillions(size),
                 });
             }
         }
@@ -391,6 +405,99 @@ public sealed class LiveModelCatalogService : ILiveModelCatalogService, IDisposa
         if (value < 0) return null;
 
         return (long)Math.Round(value * multiplier);
+    }
+
+    /// <summary>
+    /// Parses ollama.com/library's <c>x-test-updated</c> relative-date
+    /// strings ("yesterday", "2 days ago", "3 weeks ago", "1 year ago")
+    /// into an approximate <see cref="DateTimeOffset"/> anchored to
+    /// <paramref name="now"/>. Months and years use 30/365-day
+    /// approximations because the only consumer is ordinal sort
+    /// ("Newest" picker mode); calendar accuracy is unnecessary.
+    /// Returns null on empty or unparseable input — callers treat that
+    /// as "unknown date" and the entry sorts last under newest-first.
+    /// </summary>
+    internal static DateTimeOffset? ParseRelativeDate(string? raw, DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var trimmed = raw.Trim().ToLowerInvariant();
+        if (trimmed == "yesterday") return now.AddDays(-1);
+        if (trimmed == "today" || trimmed == "just now") return now;
+
+        // Match "<n> <unit>[s] ago" — the only template ollama.com emits.
+        var match = RelativeDateRegex.Match(trimmed);
+        if (!match.Success) return null;
+
+        if (!int.TryParse(match.Groups["n"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)
+            || n < 0)
+        {
+            return null;
+        }
+
+        var unit = match.Groups["unit"].Value;
+        return unit switch
+        {
+            "second" => now.AddSeconds(-n),
+            "minute" => now.AddMinutes(-n),
+            "hour" => now.AddHours(-n),
+            "day" => now.AddDays(-n),
+            "week" => now.AddDays(-7L * n),
+            "month" => now.AddDays(-30L * n),
+            "year" => now.AddDays(-365L * n),
+            _ => null,
+        };
+    }
+
+    private static readonly Regex RelativeDateRegex = new(
+        @"^(?<n>\d+)\s+(?<unit>second|minute|hour|day|week|month|year)s?\s+ago$",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// Extracts a numeric parameter count in billions from the size
+    /// token ("8b" → 8.0, "1.5b" → 1.5, "335m" → 0.335). Mixture-of-
+    /// experts notation like "128x17b" returns the larger component
+    /// (128) so the C3 parameter cap excludes MoE models from
+    /// memory-constrained buckets — they nominally load every expert
+    /// even though only one fires per token, and surfacing them under
+    /// "≤14B" would mislead users sizing for VRAM.
+    /// Returns null on empty or unparseable input.
+    /// </summary>
+    internal static double? ParseParamsBillions(string? sizeToken)
+    {
+        if (string.IsNullOrWhiteSpace(sizeToken)) return null;
+
+        var trimmed = sizeToken.Trim().ToLowerInvariant();
+        var unit = trimmed[^1];
+        if (unit != 'b' && unit != 'm') return null;
+
+        var numericPart = trimmed[..^1];
+        if (numericPart.Length == 0) return null;
+
+        // MoE notation "AxB" — pick the larger of the two numbers and
+        // interpret it as the same unit as the trailing letter.
+        if (numericPart.Contains('x'))
+        {
+            var parts = numericPart.Split('x', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0) return null;
+            double largest = 0.0;
+            foreach (var part in parts)
+            {
+                if (!double.TryParse(part, NumberStyles.Float, CultureInfo.InvariantCulture, out var p)
+                    || p < 0)
+                {
+                    return null;
+                }
+                if (p > largest) largest = p;
+            }
+            return unit == 'm' ? largest / 1000.0 : largest;
+        }
+
+        if (!double.TryParse(numericPart, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+            || value < 0)
+        {
+            return null;
+        }
+        return unit == 'm' ? value / 1000.0 : value;
     }
 
     /// <summary>

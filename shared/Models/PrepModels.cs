@@ -13,7 +13,10 @@ public sealed class ModelGridRow(
     string name, string status, string source, string sizingWarning,
     string sizeDisplay, string shaPreview, string lastVerifiedDisplay, bool isOnDiskOnly,
     bool isPresentOnDrive, string tier = "Custom", string bestAt = "",
-    long? pullCount = null)
+    long? pullCount = null,
+    IReadOnlyList<string>? capabilities = null,
+    double? parametersBillion = null,
+    DateTimeOffset? lastUpdated = null)
     : BaseViewModel
 {
     private bool _isSelected;
@@ -43,6 +46,20 @@ public sealed class ModelGridRow(
     /// "Most popular" filter cap on the merged grid.
     /// </summary>
     public long? PullCount { get; } = pullCount;
+    /// <summary>
+    /// C4: capability tags from ollama.com/library (e.g. "tools",
+    /// "vision", "thinking", "audio"). Empty/null when not from the
+    /// live catalog — capability filter treats those as pass-through
+    /// so configured + on-disk rows stay visible while the user
+    /// narrows the recommended list.
+    /// </summary>
+    public IReadOnlyList<string> Capabilities { get; } = capabilities ?? Array.Empty<string>();
+    /// <summary>C3: numeric parameter count in billions (8.0, 1.5, 0.335).
+    /// Null when the source size token is absent or unparseable.</summary>
+    public double? ParametersBillion { get; } = parametersBillion;
+    /// <summary>C5: approximate last-updated timestamp scraped from
+    /// ollama.com. Null when not from the live catalog.</summary>
+    public DateTimeOffset? LastUpdated { get; } = lastUpdated;
 }
 
 /// <summary>
@@ -61,7 +78,20 @@ public sealed record StarterCatalogEntry(
     /// (which predates the field). Drives the "Most popular" picker
     /// filter — entries without a count fall outside the popular cap.
     /// </summary>
-    long? PullCount = null);
+    long? PullCount = null,
+    /// <summary>
+    /// C4: capability tags scraped per model card ("tools", "vision",
+    /// "thinking", "audio"). Empty for the bundled catalog and for
+    /// custom entries — the capability filter treats empty as
+    /// pass-through so it doesn't accidentally hide configured rows.
+    /// </summary>
+    IReadOnlyList<string>? Capabilities = null,
+    /// <summary>C3: numeric parameter count in billions; null when
+    /// unknown.</summary>
+    double? ParametersBillion = null,
+    /// <summary>C5: approximate last-updated timestamp from
+    /// ollama.com; null when unknown.</summary>
+    DateTimeOffset? LastUpdated = null);
 
 [Flags]
 public enum PrepTargets
@@ -69,6 +99,21 @@ public enum PrepTargets
     None = 0,
     Windows = 1,
     Mac = 2
+}
+
+/// <summary>
+/// C5: model picker sort mode. <c>Popular</c> matches ollama.com's
+/// natural insertion order (descending pull count) and is the default
+/// — composes with the Most-popular toggle's top-15 cap. <c>Newest</c>
+/// orders by scraped <c>x-test-updated</c> timestamp descending; rows
+/// without a timestamp (bundled / configured / on-disk) sort last.
+/// <c>Alphabetical</c> sorts by tag ascending, ignoring case.
+/// </summary>
+public enum ModelSortMode
+{
+    Popular,
+    Newest,
+    Alphabetical,
 }
 
 public enum ModelRemoveChoice

@@ -48,4 +48,72 @@ public class StarterRowCountCaptionTests
             StarterRowCountCaption.Format(visible: 4, total: 399,
                 showOnlyMostPopular: true, hasSearch: true));
     }
+
+    // C3 / C4 / C5 — new branches for parameter cap, capabilities, sort
+
+    [Fact]
+    public void ParameterCapOnly_EmitsMatchingFilterLine()
+    {
+        Assert.Equal("Showing 8 of 12 matching filter (≤14B).",
+            StarterRowCountCaption.Format(
+                visible: 8, total: 12,
+                showOnlyMostPopular: false, hasSearch: false,
+                maxParametersBillion: 14));
+    }
+
+    [Fact]
+    public void CapabilitiesAndCap_ComposeAlphabetically()
+    {
+        // Capabilities listed in the caption are joined alphabetically
+        // (case-insensitive) so wording is stable across selection orders.
+        Assert.Equal("Showing 3 of 12 matching filter (≤7B, tools+vision).",
+            StarterRowCountCaption.Format(
+                visible: 3, total: 12,
+                showOnlyMostPopular: false, hasSearch: false,
+                maxParametersBillion: 7,
+                requiredCapabilities: new[] { "vision", "tools" }));
+    }
+
+    [Fact]
+    public void NewestSort_AppendsSortedSentence()
+    {
+        Assert.Equal("Sorted by newest.",
+            StarterRowCountCaption.Format(
+                visible: 12, total: 12,
+                showOnlyMostPopular: false, hasSearch: false,
+                sortMode: ModelSortMode.Newest));
+    }
+
+    [Fact]
+    public void AlphabeticalSort_AppendsSortedSentence()
+    {
+        Assert.Equal("Sorted A–Z.",
+            StarterRowCountCaption.Format(
+                visible: 12, total: 12,
+                showOnlyMostPopular: false, hasSearch: false,
+                sortMode: ModelSortMode.Alphabetical));
+    }
+
+    [Fact]
+    public void PopularSearchFilterAndNewest_Combine()
+    {
+        Assert.Equal(
+            "Showing top 5 of 200 by pulls (filtered by search; ≤14B, tools). Sorted by newest.",
+            StarterRowCountCaption.Format(
+                visible: 5, total: 200,
+                showOnlyMostPopular: true, hasSearch: true,
+                maxParametersBillion: 14,
+                requiredCapabilities: new[] { "tools" },
+                sortMode: ModelSortMode.Newest));
+    }
+
+    [Fact]
+    public void SubBillionCap_RendersInMegabytes()
+    {
+        Assert.Equal("Showing 4 of 12 matching filter (≤500M).",
+            StarterRowCountCaption.Format(
+                visible: 4, total: 12,
+                showOnlyMostPopular: false, hasSearch: false,
+                maxParametersBillion: 0.5));
+    }
 }

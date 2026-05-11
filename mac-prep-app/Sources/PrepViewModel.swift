@@ -60,6 +60,32 @@ final class PrepViewModel: ObservableObject {
     /// F2a: how many entries the "Most popular" filter exposes.
     static let mostPopularCount: Int = 15
 
+    // C3 / C4 / C5 picker filter state. Defaults match the F2a v1.3.22
+    // behavior: no parameter cap, no capability requirement, popular
+    // sort. Each toggle/dropdown in the picker writes into one of
+    // these @Published fields; SwiftUI reactivity recomputes
+    // visibleStarterModels and starterRowCountCaption.
+    @Published var maxParametersBillion: Double? = nil
+    @Published var requiredCapabilities: Set<String> = []
+    @Published var sortMode: PickerSortMode = .popular
+
+    /// C4: the four capability chips surfaced in the picker. Lowercase
+    /// matches the scraped `x-test-capability` vocabulary.
+    static let capabilityTools: String = "tools"
+    static let capabilityVision: String = "vision"
+    static let capabilityThinking: String = "thinking"
+    static let capabilityAudio: String = "audio"
+
+    /// C4: SwiftUI binding helper — toggle a capability chip.
+    func toggleCapability(_ capability: String) {
+        let key = capability.lowercased()
+        if requiredCapabilities.contains(key) {
+            requiredCapabilities.remove(key)
+        } else {
+            requiredCapabilities.insert(key)
+        }
+    }
+
     // Readiness
     @Published var readinessItems: [ReadinessRow] = []
 
@@ -124,19 +150,25 @@ final class PrepViewModel: ObservableObject {
             visible: visibleStarterModels.count,
             total: starterCatalog.count,
             showOnlyMostPopular: showOnlyMostPopular,
-            hasSearch: !trimmed.isEmpty)
+            hasSearch: !trimmed.isEmpty,
+            maxParametersBillion: maxParametersBillion,
+            requiredCapabilities: requiredCapabilities,
+            sortMode: sortMode)
     }
 
-    /// F2a: the picker renders this list rather than `starterCatalog`
-    /// directly. Search runs first, then the popular filter caps to
-    /// the top N by pull count. Pure logic lives in
-    /// `applyStarterModelFilters` so the test binary can cover it.
+    /// F2a + C3/C4/C5: the picker renders this list rather than
+    /// `starterCatalog` directly. Pure logic lives in
+    /// `applyStarterModelFilters` so the test binary can cover the
+    /// filter composition order without spinning up a view-model.
     var visibleStarterModels: [StarterModelDisplayEntry] {
         applyStarterModelFilters(
             to: starterCatalog,
             search: modelSearchText,
             showOnlyMostPopular: showOnlyMostPopular,
-            popularLimit: Self.mostPopularCount)
+            popularLimit: Self.mostPopularCount,
+            maxParametersBillion: maxParametersBillion,
+            requiredCapabilities: requiredCapabilities,
+            sortMode: sortMode)
     }
 
     // MARK: - Step transitions

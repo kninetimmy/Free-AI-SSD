@@ -304,6 +304,52 @@ struct EncryptionSetupStepView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            // C3 / C4 / C5: second filter row — parameter cap, capability
+            // chips, sort mode. Mirrors the WPF MainWindow.xaml layout so
+            // the Mac picker offers the same affordances. macOS 11.0
+            // baseline keeps the chips as Buttons-with-checkmarks (same
+            // pattern as the Most-popular toggle above).
+            HStack(spacing: 10) {
+                Text("Max size")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Picker("", selection: parameterCapBinding(vm)) {
+                    Text("All").tag(Optional<Double>.none)
+                    Text("≤7B").tag(Optional<Double>.some(7))
+                    Text("≤14B").tag(Optional<Double>.some(14))
+                    Text("≤30B").tag(Optional<Double>.some(30))
+                    Text("≤70B").tag(Optional<Double>.some(70))
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(width: 90)
+                .help("Hide models with a parameter count above the chosen cap. Models without a known size pass through (your existing config and on-disk models stay visible).")
+
+                Text("Capabilities")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(.leading, 8)
+                capabilityChip(label: PrepViewModel.capabilityTools, vm: vm)
+                capabilityChip(label: PrepViewModel.capabilityVision, vm: vm)
+                capabilityChip(label: PrepViewModel.capabilityThinking, vm: vm)
+                capabilityChip(label: PrepViewModel.capabilityAudio, vm: vm)
+
+                Spacer(minLength: 6)
+
+                Text("Sort")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Picker("", selection: $vm.sortMode) {
+                    Text("Popular").tag(PickerSortMode.popular)
+                    Text("Newest").tag(PickerSortMode.newest)
+                    Text("A–Z").tag(PickerSortMode.alphabetical)
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(width: 110)
+                .help("Reorder the picker. Popular keeps the natural ollama.com order. Newest sorts by the scraped last-updated timestamp; entries without a timestamp sort last.")
+            }
+
             starterPickerBody
 
             Text("Starter model pull happens after encryption. If the pull fails (e.g. Mac Ollama isn't running yet), it's non-fatal — you can pull models later from Mac Runner.")
@@ -345,10 +391,18 @@ struct EncryptionSetupStepView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
+                } else if !vm.requiredCapabilities.isEmpty
+                            && vm.starterCatalog.allSatisfy({ $0.capabilities.isEmpty }) {
+                    Text("No capability data on the bundled catalog.")
+                        .font(.body)
+                    Text("Click Refresh from Ollama to populate capabilities, then reapply the chip filter.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
                 } else {
                     Text("No models match the current filter.")
                         .font(.body)
-                    Text("Clear the search box or toggle Most popular off to see all entries.")
+                    Text("Clear the search box, lower the size cap, or unselect capability chips to see more entries.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
@@ -399,6 +453,34 @@ struct EncryptionSetupStepView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    /// C4: a single capability chip — a Button-with-checkmark mirror of
+    /// the Most-popular toggle pattern (macOS 11.0 baseline rules out
+    /// `.toggleStyle(.button)` from macOS 12+). Toggles the underlying
+    /// set on the VM via `toggleCapability`.
+    @ViewBuilder
+    private func capabilityChip(label: String, vm: PrepViewModel) -> some View {
+        Button {
+            vm.toggleCapability(label)
+        } label: {
+            HStack(spacing: 3) {
+                Text(label)
+                if vm.requiredCapabilities.contains(label.lowercased()) {
+                    Text("✓").bold()
+                }
+            }
+        }
+        .help("Show only models that advertise the \(label) capability. Multiple chips compose with AND semantics.")
+    }
+
+    /// C3: SwiftUI Picker requires a single typed binding. The VM stores
+    /// the cap as `Double?`; this helper bridges the picker tags
+    /// (Optional<Double>) back to the VM property.
+    private func parameterCapBinding(_ vm: PrepViewModel) -> Binding<Double?> {
+        Binding<Double?>(
+            get: { vm.maxParametersBillion },
+            set: { vm.maxParametersBillion = $0 })
     }
 }
 
