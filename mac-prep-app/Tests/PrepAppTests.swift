@@ -634,6 +634,116 @@ struct PrepAppTestsMain {
             try expect(s == "Showing top 4 of 399 by pulls (filtered by search).", "got: \(s)")
         }
 
+        // MARK: C3 — parameter cap
+
+        runner.test("C3: parameter cap drops entries above the cap") {
+            let entries = makeC3C4C5Fixture()
+            let out = applyStarterModelFilters(
+                to: entries, search: "", showOnlyMostPopular: false, popularLimit: 15,
+                maxParametersBillion: 14)
+            // 7B and 14B pass; 70B drops; bundled (nil params) passes through.
+            try expect(out.allSatisfy { ($0.parametersBillion ?? 0) <= 14 || $0.parametersBillion == nil },
+                       "got params \(out.map { ($0.tag, $0.parametersBillion as Any) })")
+            try expect(!out.contains(where: { $0.tag == "deepseek-r1:70b" }),
+                       "70B should have been dropped: \(out.map(\.tag))")
+            try expect(out.contains(where: { $0.tag == "bundled-only:1b" }),
+                       "nil-params bundled entry should pass through: \(out.map(\.tag))")
+        }
+
+        runner.test("C3: nil cap is a no-op") {
+            let entries = makeC3C4C5Fixture()
+            let out = applyStarterModelFilters(
+                to: entries, search: "", showOnlyMostPopular: false, popularLimit: 15,
+                maxParametersBillion: nil)
+            try expect(out.count == entries.count, "got \(out.count) of \(entries.count)")
+        }
+
+        // MARK: C4 — capability AND filter
+
+        runner.test("C4: capability filter requires every selected cap (AND)") {
+            let entries = makeC3C4C5Fixture()
+            let out = applyStarterModelFilters(
+                to: entries, search: "", showOnlyMostPopular: false, popularLimit: 15,
+                requiredCapabilities: ["tools", "vision"])
+            // Only multi-tool:8b carries both tools+vision in the fixture.
+            // bundled-only has empty caps → passes through.
+            try expect(out.contains(where: { $0.tag == "multi-tool:8b" }),
+                       "multi-tool:8b missing: \(out.map(\.tag))")
+            try expect(out.contains(where: { $0.tag == "bundled-only:1b" }),
+                       "empty-caps bundled entry should pass through: \(out.map(\.tag))")
+            try expect(!out.contains(where: { $0.tag == "tools-only:7b" }),
+                       "tools-only entry should be excluded by AND: \(out.map(\.tag))")
+        }
+
+        runner.test("C4: empty capability set is a no-op") {
+            let entries = makeC3C4C5Fixture()
+            let out = applyStarterModelFilters(
+                to: entries, search: "", showOnlyMostPopular: false, popularLimit: 15,
+                requiredCapabilities: [])
+            try expect(out.count == entries.count, "got \(out.count) of \(entries.count)")
+        }
+
+        // MARK: C5 — sort by newest
+
+        runner.test("C5: sort by newest orders by lastUpdated desc, nils last") {
+            let entries = makeC3C4C5Fixture()
+            let out = applyStarterModelFilters(
+                to: entries, search: "", showOnlyMostPopular: false, popularLimit: 15,
+                sortMode: .newest)
+            // Fixture lastUpdated: multi-tool 2026-05-08, tools-only 2026-04-01,
+            // bundled-only nil. Verify the first non-nil entry is multi-tool.
+            let firstNonNil = out.first { $0.lastUpdated != nil }
+            try expect(firstNonNil?.tag == "multi-tool:8b",
+                       "expected multi-tool:8b first, got \(firstNonNil?.tag ?? "nil")")
+            // bundled-only:1b has nil lastUpdated → must sort to the end.
+            try expect(out.last?.tag == "bundled-only:1b",
+                       "nil-lastUpdated should sort last, got \(out.last?.tag ?? "nil")")
+        }
+
+        runner.test("C5: alphabetical sort orders by tag ascending") {
+            let entries = makeC3C4C5Fixture()
+            let out = applyStarterModelFilters(
+                to: entries, search: "", showOnlyMostPopular: false, popularLimit: 15,
+                sortMode: .alphabetical)
+            let tags = out.map(\.tag)
+            let sorted = tags.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            try expect(tags == sorted, "tags=\(tags) sorted=\(sorted)")
+        }
+
+        // MARK: caption — new branches
+
+        runner.test("caption: parameter-cap-only emits matching-filter line") {
+            let s = formatStarterRowCountCaption(
+                visible: 8, total: 12, showOnlyMostPopular: false, hasSearch: false,
+                maxParametersBillion: 14)
+            try expect(s == "Showing 8 of 12 matching filter (≤14B).", "got: \(s)")
+        }
+
+        runner.test("caption: capabilities + cap compose alphabetically") {
+            let s = formatStarterRowCountCaption(
+                visible: 3, total: 12, showOnlyMostPopular: false, hasSearch: false,
+                maxParametersBillion: 7,
+                requiredCapabilities: ["vision", "tools"])
+            try expect(s == "Showing 3 of 12 matching filter (≤7B, tools+vision).", "got: \(s)")
+        }
+
+        runner.test("caption: newest sort appends sentence") {
+            let s = formatStarterRowCountCaption(
+                visible: 12, total: 12, showOnlyMostPopular: false, hasSearch: false,
+                sortMode: .newest)
+            try expect(s == "Sorted by newest.", "got: \(s)")
+        }
+
+        runner.test("caption: popular + filter + newest combine") {
+            let s = formatStarterRowCountCaption(
+                visible: 5, total: 200, showOnlyMostPopular: true, hasSearch: true,
+                maxParametersBillion: 14,
+                requiredCapabilities: ["tools"],
+                sortMode: .newest)
+            try expect(s == "Showing top 5 of 200 by pulls (filtered by search; ≤14B, tools). Sorted by newest.",
+                       "got: \(s)")
+        }
+
         await runner.run()
     }
 }
@@ -666,6 +776,53 @@ private func makeF2aFixture() -> [StarterModelDisplayEntry] {
         StarterModelDisplayEntry(tag: "bundled-only:1b", sizeTier: "Small",
                                  bestAt: "Fallback bundled entry (chat)",
                                  pullCount: nil),
+    ]
+}
+
+/// C3/C4/C5 fixture — extends the F2a fixture with parametersBillion,
+/// capabilities, and lastUpdated so the new filter+sort tests can pin
+/// behavior without the production projection path. `multi-tool` and
+/// `tools-only` carry distinct capability vectors so the AND filter is
+/// distinguishable from any-of.
+private func makeC3C4C5Fixture() -> [StarterModelDisplayEntry] {
+    [
+        StarterModelDisplayEntry(
+            tag: "multi-tool:8b", sizeTier: "Medium",
+            bestAt: "Tool-using vision model",
+            pullCount: 50_000_000,
+            capabilities: ["tools", "vision"],
+            parametersBillion: 8.0,
+            lastUpdated: "2026-05-08T00:00:00+00:00"),
+        StarterModelDisplayEntry(
+            tag: "tools-only:7b", sizeTier: "Medium",
+            bestAt: "Tool-using small model",
+            pullCount: 30_000_000,
+            capabilities: ["tools"],
+            parametersBillion: 7.0,
+            lastUpdated: "2026-04-01T00:00:00+00:00"),
+        StarterModelDisplayEntry(
+            tag: "vision-only:14b", sizeTier: "Large",
+            bestAt: "Vision-capable mid model",
+            pullCount: 20_000_000,
+            capabilities: ["vision"],
+            parametersBillion: 14.0,
+            lastUpdated: "2026-02-10T00:00:00+00:00"),
+        StarterModelDisplayEntry(
+            tag: "deepseek-r1:70b", sizeTier: "Large",
+            bestAt: "Frontier reasoning",
+            pullCount: 25_000_000,
+            capabilities: ["thinking"],
+            parametersBillion: 70.0,
+            lastUpdated: "2026-03-20T00:00:00+00:00"),
+        // Bundled-style: no caps, no params, no date — pass-through
+        // under every filter, sorts last under newest.
+        StarterModelDisplayEntry(
+            tag: "bundled-only:1b", sizeTier: "Small",
+            bestAt: "Fallback bundled entry",
+            pullCount: nil,
+            capabilities: [],
+            parametersBillion: nil,
+            lastUpdated: nil),
     ]
 }
 

@@ -1277,6 +1277,173 @@ public class PrepViewModelTests
             "Fallback bundled entry (chat)", null),
     };
 
+    // ── C3 / C4 / C5 picker filter cluster ──────────────────────────
+
+    private static List<StarterCatalogEntry> C3C4C5Fixture() => new()
+    {
+        // Tools+vision multi-cap entry — the only one that survives an
+        // AND filter on {tools, vision}.
+        new StarterCatalogEntry("multi-tool:8b", "Medium", "Tool-using vision model",
+            PullCount: 50_000_000L,
+            Capabilities: new[] { "tools", "vision" },
+            ParametersBillion: 8.0,
+            LastUpdated: new DateTimeOffset(2026, 5, 8, 0, 0, 0, TimeSpan.Zero)),
+        new StarterCatalogEntry("tools-only:7b", "Medium", "Tool-using small model",
+            PullCount: 30_000_000L,
+            Capabilities: new[] { "tools" },
+            ParametersBillion: 7.0,
+            LastUpdated: new DateTimeOffset(2026, 4, 1, 0, 0, 0, TimeSpan.Zero)),
+        new StarterCatalogEntry("vision-only:14b", "Large", "Vision-capable mid model",
+            PullCount: 20_000_000L,
+            Capabilities: new[] { "vision" },
+            ParametersBillion: 14.0,
+            LastUpdated: new DateTimeOffset(2026, 2, 10, 0, 0, 0, TimeSpan.Zero)),
+        new StarterCatalogEntry("deepseek-r1:70b", "Large", "Frontier reasoning",
+            PullCount: 25_000_000L,
+            Capabilities: new[] { "thinking" },
+            ParametersBillion: 70.0,
+            LastUpdated: new DateTimeOffset(2026, 3, 20, 0, 0, 0, TimeSpan.Zero)),
+        // Bundled-style: empty caps + nil params + nil date — pass-through
+        // under every filter, sorts last under newest.
+        new StarterCatalogEntry("bundled-only:1b", "Small", "Fallback bundled entry",
+            PullCount: null,
+            Capabilities: Array.Empty<string>(),
+            ParametersBillion: null,
+            LastUpdated: null),
+    };
+
+    [Fact]
+    public async Task IsModelRowVisible_ParameterCap_DropsRowsAboveCap()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        await vm.SetStarterCatalogAsync(C3C4C5Fixture());
+
+        vm.MaxParametersBillion = 14.0;
+
+        var visible = vm.ModelRows
+            .Where(r => string.Equals(r.Source, "Recommended", StringComparison.OrdinalIgnoreCase))
+            .Where(vm.IsModelRowVisible)
+            .Select(r => r.Name)
+            .ToList();
+
+        Assert.DoesNotContain("deepseek-r1:70b", visible);
+        Assert.Contains("multi-tool:8b", visible);
+        Assert.Contains("tools-only:7b", visible);
+        Assert.Contains("vision-only:14b", visible);
+        // Null-params entry must pass through (matches the C4 capability
+        // and F2a Most-popular pass-through posture).
+        Assert.Contains("bundled-only:1b", visible);
+    }
+
+    [Fact]
+    public async Task IsModelRowVisible_ParameterCap_NullCapIsNoOp()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        await vm.SetStarterCatalogAsync(C3C4C5Fixture());
+
+        vm.MaxParametersBillion = null;
+
+        var visible = vm.ModelRows.Where(vm.IsModelRowVisible).ToList();
+        Assert.Equal(vm.ModelRows.Count, visible.Count);
+    }
+
+    [Fact]
+    public async Task IsModelRowVisible_Capabilities_AndSemantics()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        await vm.SetStarterCatalogAsync(C3C4C5Fixture());
+
+        vm.FilterCapabilityTools = true;
+        vm.FilterCapabilityVision = true;
+
+        var visibleRecommended = vm.ModelRows
+            .Where(r => string.Equals(r.Source, "Recommended", StringComparison.OrdinalIgnoreCase))
+            .Where(vm.IsModelRowVisible)
+            .Select(r => r.Name)
+            .ToList();
+
+        // Only multi-tool:8b carries both tools+vision.
+        Assert.Contains("multi-tool:8b", visibleRecommended);
+        Assert.DoesNotContain("tools-only:7b", visibleRecommended);
+        Assert.DoesNotContain("vision-only:14b", visibleRecommended);
+        Assert.DoesNotContain("deepseek-r1:70b", visibleRecommended);
+        // Empty-capabilities entry must still pass through.
+        Assert.Contains("bundled-only:1b", visibleRecommended);
+    }
+
+    [Fact]
+    public async Task IsModelRowVisible_Capabilities_EmptySetIsNoOp()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        await vm.SetStarterCatalogAsync(C3C4C5Fixture());
+
+        Assert.Empty(vm.ActiveCapabilityFilters);
+        var visible = vm.ModelRows.Where(vm.IsModelRowVisible).ToList();
+        Assert.Equal(vm.ModelRows.Count, visible.Count);
+    }
+
+    [Fact]
+    public async Task FilterCapabilityToggles_UpdateActiveSetAndRaiseInvalidation()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        await vm.SetStarterCatalogAsync(C3C4C5Fixture());
+
+        var fired = 0;
+        vm.ModelRowsViewInvalidated += (_, _) => fired++;
+
+        vm.FilterCapabilityTools = true;
+        Assert.Contains("tools", vm.ActiveCapabilityFilters);
+        Assert.Equal(1, fired);
+
+        vm.FilterCapabilityTools = true;   // no-op set
+        Assert.Equal(1, fired);
+
+        vm.FilterCapabilityTools = false;
+        Assert.DoesNotContain("tools", vm.ActiveCapabilityFilters);
+        Assert.Equal(2, fired);
+    }
+
+    [Fact]
+    public async Task SortMode_ChangeRaisesInvalidation()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        await vm.SetStarterCatalogAsync(C3C4C5Fixture());
+
+        var fired = 0;
+        vm.ModelRowsViewInvalidated += (_, _) => fired++;
+
+        vm.SortMode = ModelSortMode.Newest;
+        Assert.Equal(1, fired);
+        vm.SortMode = ModelSortMode.Newest;   // no-op
+        Assert.Equal(1, fired);
+        vm.SortMode = ModelSortMode.Alphabetical;
+        Assert.Equal(2, fired);
+    }
+
+    [Fact]
+    public async Task StarterRowCountCaption_IncludesParameterCap()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        await vm.SetStarterCatalogAsync(C3C4C5Fixture());
+
+        vm.MaxParametersBillion = 14.0;
+        Assert.Contains("≤14B", vm.StarterRowCountCaption);
+    }
+
     // ───── C2: embedding-model auto-pull pins ─────
 
     /// C2 Stage 1b. The user-facing failure mode pre-C2 was: prep a

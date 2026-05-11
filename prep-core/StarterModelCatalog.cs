@@ -35,6 +35,25 @@ public sealed record StarterModelEntry
     /// uses it to surface the F2a "Most popular" filter.
     /// </summary>
     public long? PullCount { get; init; }
+
+    /// <summary>
+    /// Approximate "last updated" timestamp scraped from
+    /// ollama.com/library's <c>x-test-updated</c> span (e.g.
+    /// "yesterday", "3 weeks ago"). Anchored to fetch time and
+    /// approximate by design — used for ordinal "Sort by newest" only.
+    /// Null for the bundled catalog (predates this field) and for
+    /// entries whose updated string can't be parsed.
+    /// </summary>
+    public DateTimeOffset? LastUpdated { get; init; }
+
+    /// <summary>
+    /// Numeric parameter count in billions extracted from the size
+    /// token (e.g. "8b" → 8.0, "335m" → 0.335, "128x17b" → 128.0 by
+    /// the largest-billion-number-wins rule). Null when the size token
+    /// is empty or unparseable, or for the bundled catalog (predates
+    /// this field). Drives the C3 parameter-count cap filter.
+    /// </summary>
+    public double? ParametersBillion { get; init; }
 }
 
 /// <summary>

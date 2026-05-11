@@ -72,8 +72,27 @@ public class PrepViewModel : BaseViewModel
     private bool _showOnlyMostPopular;
     private HashSet<string> _topPopularStarterTags = new(StringComparer.OrdinalIgnoreCase);
 
+    // C3 / C4 / C5 picker filter state. All three default to "no
+    // filter" (null cap, empty capability set, Popular sort) so the
+    // initial picker view matches the F2a v1.3.22 behavior; each
+    // setter raises ModelRowsViewInvalidated so the view-host can
+    // refresh its CollectionView in place.
+    private double? _maxParametersBillion;
+    private readonly HashSet<string> _requiredCapabilities = new(StringComparer.OrdinalIgnoreCase);
+    private ModelSortMode _sortMode = ModelSortMode.Popular;
+
     /// <summary>F2a: top-N cap for the "Most popular" filter.</summary>
     public const int MostPopularLimit = 15;
+
+    /// <summary>C4: the four capability toggles surfaced as picker
+    /// chips. Anchored as constants so the UI labels and the filter
+    /// keys stay in sync; lowercase matches the scraped values from
+    /// ollama.com's <c>x-test-capability</c> spans (validated against
+    /// the 2026-05-07 fixture).</summary>
+    public const string CapabilityTools = "tools";
+    public const string CapabilityVision = "vision";
+    public const string CapabilityThinking = "thinking";
+    public const string CapabilityAudio = "audio";
 
     /// <summary>F2a: emitted when the picker filter state changes so
     /// the view-host can refresh its CollectionView.</summary>
@@ -395,6 +414,84 @@ public class PrepViewModel : BaseViewModel
         }
     }
 
+    /// <summary>C3: upper bound on parameter count in billions; null
+    /// means no cap. Rows whose ParametersBillion is unknown pass
+    /// through (configured/custom and pre-Refresh bundled entries).</summary>
+    public double? MaxParametersBillion
+    {
+        get => _maxParametersBillion;
+        set
+        {
+            if (SetProperty(ref _maxParametersBillion, value))
+                ModelRowsViewInvalidated?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>C4: capability toggles. Each property mirrors a chip
+    /// in the picker. AND semantics — selecting tools+vision keeps
+    /// only entries advertising both. Backed by a single HashSet so
+    /// the predicate stays O(k) per row where k is the active
+    /// capability count.</summary>
+    public bool FilterCapabilityTools
+    {
+        get => _requiredCapabilities.Contains(CapabilityTools);
+        set => SetCapabilityFilter(CapabilityTools, value);
+    }
+
+    public bool FilterCapabilityVision
+    {
+        get => _requiredCapabilities.Contains(CapabilityVision);
+        set => SetCapabilityFilter(CapabilityVision, value);
+    }
+
+    public bool FilterCapabilityThinking
+    {
+        get => _requiredCapabilities.Contains(CapabilityThinking);
+        set => SetCapabilityFilter(CapabilityThinking, value);
+    }
+
+    public bool FilterCapabilityAudio
+    {
+        get => _requiredCapabilities.Contains(CapabilityAudio);
+        set => SetCapabilityFilter(CapabilityAudio, value);
+    }
+
+    private void SetCapabilityFilter(string capability, bool value)
+    {
+        var changed = value
+            ? _requiredCapabilities.Add(capability)
+            : _requiredCapabilities.Remove(capability);
+        if (!changed) return;
+        OnPropertyChanged(capability switch
+        {
+            CapabilityTools => nameof(FilterCapabilityTools),
+            CapabilityVision => nameof(FilterCapabilityVision),
+            CapabilityThinking => nameof(FilterCapabilityThinking),
+            CapabilityAudio => nameof(FilterCapabilityAudio),
+            _ => string.Empty,
+        });
+        ModelRowsViewInvalidated?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>C4: snapshot of the active capability filter set.
+    /// Exposed for the caption formatter and tests.</summary>
+    public IReadOnlyCollection<string> ActiveCapabilityFilters => _requiredCapabilities;
+
+    /// <summary>C5: sort mode applied to ModelRows by the view-host.
+    /// The VM exposes the property; the WPF code-behind translates it
+    /// to <c>SortDescription</c>s on the ListCollectionView, and the
+    /// Mac picker uses the value directly inside
+    /// <c>applyStarterModelFilters</c>.</summary>
+    public ModelSortMode SortMode
+    {
+        get => _sortMode;
+        set
+        {
+            if (SetProperty(ref _sortMode, value))
+                ModelRowsViewInvalidated?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
     /// <summary>M11: caption that announces the visible row count + cap
     /// reason. Empty when no filter or search is active. Mirrors the Mac
     /// picker's <c>starterRowCountCaption</c> via the shared
@@ -409,7 +506,10 @@ public class PrepViewModel : BaseViewModel
             var hasSearch = !string.IsNullOrWhiteSpace(_modelSearchText);
             return FreeAiSsd.Shared.Models.StarterRowCountCaption.Format(
                 visible: visible, total: total,
-                showOnlyMostPopular: _showOnlyMostPopular, hasSearch: hasSearch);
+                showOnlyMostPopular: _showOnlyMostPopular, hasSearch: hasSearch,
+                maxParametersBillion: _maxParametersBillion,
+                requiredCapabilities: _requiredCapabilities,
+                sortMode: _sortMode);
         }
     }
 
@@ -433,7 +533,33 @@ public class PrepViewModel : BaseViewModel
 
         if (_showOnlyMostPopular && IsStarterOnlyRecommendationRow(row))
         {
-            return _topPopularStarterTags.Contains(row.Name);
+            if (!_topPopularStarterTags.Contains(row.Name))
+                return false;
+        }
+
+        // C3: parameter cap. Rows whose ParametersBillion is unknown
+        // (configured/custom/on-disk and bundled-catalog entries
+        // before Refresh) pass through — same posture as the C4
+        // capability filter and the F2a Most-popular toggle for
+        // missing pull counts.
+        if (_maxParametersBillion.HasValue
+            && row.ParametersBillion.HasValue
+            && row.ParametersBillion.Value > _maxParametersBillion.Value)
+        {
+            return false;
+        }
+
+        // C4: AND semantics — entry must carry every selected
+        // capability. Rows with no capability list (configured/custom
+        // /bundled) pass through so users narrowing recommendations
+        // don't accidentally hide their already-installed models.
+        if (_requiredCapabilities.Count > 0 && row.Capabilities.Count > 0)
+        {
+            foreach (var required in _requiredCapabilities)
+            {
+                if (!row.Capabilities.Contains(required, StringComparer.OrdinalIgnoreCase))
+                    return false;
+            }
         }
 
         return true;
@@ -1790,7 +1916,7 @@ public class PrepViewModel : BaseViewModel
             var onDisk = discoveredOnDisk.Contains(model.Name);
             var state = DetermineConfiguredState(model, onDisk);
             var warnings = _modelService.GetSizingWarnings(model.Name, freeDiskGb, _systemRamGb, _gpuVramGb);
-            var (tier, bestAt, pullCount) = LookupStarterMeta(catalogByTag, model.Name);
+            var meta = LookupStarterMeta(catalogByTag, model.Name);
             rows.Add(new ModelGridRow(
                 model.Name,
                 state,
@@ -1801,16 +1927,19 @@ public class PrepViewModel : BaseViewModel
                 model.LastVerifiedUtc.HasValue ? model.LastVerifiedUtc.Value.ToLocalTime().ToString("u") : "—",
                 isOnDiskOnly: false,
                 isPresentOnDrive: onDisk,
-                tier: tier,
-                bestAt: bestAt,
-                pullCount: pullCount));
+                tier: meta.tier,
+                bestAt: meta.bestAt,
+                pullCount: meta.pullCount,
+                capabilities: meta.capabilities,
+                parametersBillion: meta.parametersBillion,
+                lastUpdated: meta.lastUpdated));
         }
 
         var configuredNames = new HashSet<string>(configured.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
         foreach (var discovered in discoveredOnDisk.Where(d => !configuredNames.Contains(d)).OrderBy(d => d, StringComparer.OrdinalIgnoreCase))
         {
             var warnings = _modelService.GetSizingWarnings(discovered, freeDiskGb, _systemRamGb, _gpuVramGb);
-            var (tier, bestAt, pullCount) = LookupStarterMeta(catalogByTag, discovered);
+            var meta = LookupStarterMeta(catalogByTag, discovered);
             rows.Add(new ModelGridRow(
                 discovered,
                 "On drive only",
@@ -1819,9 +1948,12 @@ public class PrepViewModel : BaseViewModel
                 "—", "—", "—",
                 isOnDiskOnly: true,
                 isPresentOnDrive: true,
-                tier: tier,
-                bestAt: bestAt,
-                pullCount: pullCount));
+                tier: meta.tier,
+                bestAt: meta.bestAt,
+                pullCount: meta.pullCount,
+                capabilities: meta.capabilities,
+                parametersBillion: meta.parametersBillion,
+                lastUpdated: meta.lastUpdated));
         }
 
         // Third pass: recommended starters that aren't in config or on-disk.
@@ -1852,18 +1984,37 @@ public class PrepViewModel : BaseViewModel
                 isPresentOnDrive: false,
                 tier: entry.SizeTier,
                 bestAt: entry.BestAt,
-                pullCount: entry.PullCount);
+                pullCount: entry.PullCount,
+                capabilities: entry.Capabilities ?? Array.Empty<string>(),
+                parametersBillion: entry.ParametersBillion,
+                lastUpdated: entry.LastUpdated);
             row.IsSelected = false;
             yield return row;
         }
     }
 
-    private static (string tier, string bestAt, long? pullCount) LookupStarterMeta(
+    private readonly record struct StarterMeta(
+        string tier,
+        string bestAt,
+        long? pullCount,
+        IReadOnlyList<string> capabilities,
+        double? parametersBillion,
+        DateTimeOffset? lastUpdated);
+
+    private static StarterMeta LookupStarterMeta(
         Dictionary<string, StarterCatalogEntry> catalogByTag, string name)
     {
         if (catalogByTag.TryGetValue(name, out var entry))
-            return (entry.SizeTier, entry.BestAt, entry.PullCount);
-        return ("Custom", string.Empty, null);
+        {
+            return new StarterMeta(
+                entry.SizeTier,
+                entry.BestAt,
+                entry.PullCount,
+                entry.Capabilities ?? Array.Empty<string>(),
+                entry.ParametersBillion,
+                entry.LastUpdated);
+        }
+        return new StarterMeta("Custom", string.Empty, null, Array.Empty<string>(), null, null);
     }
 
     private void RefreshReadinessItems(List<ReadinessItem> checks)

@@ -478,6 +478,8 @@ internal sealed class HostLifetime : IAsyncDisposable
                 description = m.Description,
                 useCases = m.UseCases.ToArray(),
                 pullCount = m.PullCount,
+                parametersBillion = m.ParametersBillion,
+                lastUpdated = m.LastUpdated,
             }).ToArray(),
         });
     }

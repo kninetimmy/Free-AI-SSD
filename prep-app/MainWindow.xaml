@@ -127,6 +127,72 @@
                                                Foreground="{StaticResource AccentCyanBrush}"
                                                Text="{Binding StarterRowCountCaption}"
                                                Visibility="{Binding StarterRowCountCaption, Converter={StaticResource EmptyToVisibilityConverter}, ConverterParameter=Inverted}"/>
+
+                                    <!-- C3 / C4 / C5: second filter row. Param cap dropdown
+                                         on the left, capability AND-toggles in the middle,
+                                         sort dropdown on the right. SelectionChanged handlers
+                                         in code-behind translate to the VM properties; the
+                                         capability ToggleButtons two-way bind via the four
+                                         FilterCapability* bool properties on PrepViewModel. -->
+                                    <Grid Margin="0,6,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock Text="Max size"
+                                                       Style="{StaticResource CaptionText}"
+                                                       VerticalAlignment="Center"
+                                                       Margin="0,0,6,0"/>
+                                            <ComboBox x:Name="ParameterCapCombo"
+                                                      MinWidth="80"
+                                                      VerticalAlignment="Center"
+                                                      SelectedIndex="0"
+                                                      SelectionChanged="ParameterCapCombo_SelectionChanged"
+                                                      ToolTip="Hide models with a parameter count above the chosen cap. Models without a known size pass through (your existing config and on-disk models stay visible).">
+                                                <ComboBoxItem Content="All" Tag=""/>
+                                                <ComboBoxItem Content="≤7B" Tag="7"/>
+                                                <ComboBoxItem Content="≤14B" Tag="14"/>
+                                                <ComboBoxItem Content="≤30B" Tag="30"/>
+                                                <ComboBoxItem Content="≤70B" Tag="70"/>
+                                            </ComboBox>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
+                                            <TextBlock Text="Capabilities"
+                                                       Style="{StaticResource CaptionText}"
+                                                       VerticalAlignment="Center"
+                                                       Margin="0,0,6,0"/>
+                                            <ToggleButton Content="tools" Padding="8,3" MinHeight="0" Margin="2,0"
+                                                          IsChecked="{Binding FilterCapabilityTools, Mode=TwoWay}"
+                                                          ToolTip="Show only models that advertise tool/function-calling support."/>
+                                            <ToggleButton Content="vision" Padding="8,3" MinHeight="0" Margin="2,0"
+                                                          IsChecked="{Binding FilterCapabilityVision, Mode=TwoWay}"
+                                                          ToolTip="Show only models that accept image input."/>
+                                            <ToggleButton Content="thinking" Padding="8,3" MinHeight="0" Margin="2,0"
+                                                          IsChecked="{Binding FilterCapabilityThinking, Mode=TwoWay}"
+                                                          ToolTip="Show only models with extended thinking / chain-of-thought support."/>
+                                            <ToggleButton Content="audio" Padding="8,3" MinHeight="0" Margin="2,0"
+                                                          IsChecked="{Binding FilterCapabilityAudio, Mode=TwoWay}"
+                                                          ToolTip="Show only models that accept audio input."/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock Text="Sort"
+                                                       Style="{StaticResource CaptionText}"
+                                                       VerticalAlignment="Center"
+                                                       Margin="0,0,6,0"/>
+                                            <ComboBox x:Name="SortModeCombo"
+                                                      MinWidth="100"
+                                                      VerticalAlignment="Center"
+                                                      SelectedIndex="0"
+                                                      SelectionChanged="SortModeCombo_SelectionChanged"
+                                                      ToolTip="Reorder the picker. Popular keeps the natural ollama.com order. Newest sorts by the scraped last-updated timestamp; entries without a timestamp sort last.">
+                                                <ComboBoxItem Content="Popular"/>
+                                                <ComboBoxItem Content="Newest"/>
+                                                <ComboBoxItem Content="A–Z"/>
+                                            </ComboBox>
+                                        </StackPanel>
+                                    </Grid>
                                 </StackPanel>
 
                                 <!-- Actions row: Download (primary), then ghost buttons. -->

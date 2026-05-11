@@ -323,6 +323,126 @@ public class LiveModelCatalogServiceTests
         Assert.Equal("Meta's \"new\" model & friends", catalog.Models[0].Description);
     }
 
+    // ── C3 — ParseParamsBillions ────────────────────────────────────────
+
+    [Theory]
+    [InlineData("8b", 8.0)]
+    [InlineData("1.5b", 1.5)]
+    [InlineData("70b", 70.0)]
+    [InlineData("405b", 405.0)]
+    [InlineData("335m", 0.335)]
+    [InlineData("110m", 0.110)]
+    [InlineData("128x17b", 128.0)]   // MoE — largest component wins
+    [InlineData("4x7B", 7.0)]        // MoE with caps + larger second number
+    public void ParseParamsBillions_ConvertsKnownTokens(string token, double expected)
+    {
+        var actual = LiveModelCatalogService.ParseParamsBillions(token);
+        Assert.NotNull(actual);
+        Assert.Equal(expected, actual!.Value, precision: 6);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(null)]
+    [InlineData("garbage")]
+    [InlineData("8")]                // missing unit
+    [InlineData("xb")]               // empty numeric
+    [InlineData("-7b")]              // negative
+    public void ParseParamsBillions_ReturnsNullForUnparseable(string? token)
+    {
+        Assert.Null(LiveModelCatalogService.ParseParamsBillions(token));
+    }
+
+    // ── C5 — ParseRelativeDate ──────────────────────────────────────────
+
+    [Fact]
+    public void ParseRelativeDate_YesterdayIsOneDayAgo()
+    {
+        var now = new DateTimeOffset(2026, 5, 10, 12, 0, 0, TimeSpan.Zero);
+        var actual = LiveModelCatalogService.ParseRelativeDate("yesterday", now);
+        Assert.Equal(now.AddDays(-1), actual);
+    }
+
+    [Theory]
+    [InlineData("2 days ago", 2)]
+    [InlineData("1 day ago", 1)]
+    public void ParseRelativeDate_DaysAgo(string raw, int days)
+    {
+        var now = new DateTimeOffset(2026, 5, 10, 12, 0, 0, TimeSpan.Zero);
+        var actual = LiveModelCatalogService.ParseRelativeDate(raw, now);
+        Assert.Equal(now.AddDays(-days), actual);
+    }
+
+    [Theory]
+    [InlineData("3 weeks ago", 21)]
+    [InlineData("1 week ago", 7)]
+    public void ParseRelativeDate_WeeksAgo(string raw, int days)
+    {
+        var now = new DateTimeOffset(2026, 5, 10, 12, 0, 0, TimeSpan.Zero);
+        var actual = LiveModelCatalogService.ParseRelativeDate(raw, now);
+        Assert.Equal(now.AddDays(-days), actual);
+    }
+
+    [Theory]
+    [InlineData("1 month ago", 30)]
+    [InlineData("11 months ago", 330)]
+    public void ParseRelativeDate_MonthsApproximated(string raw, int days)
+    {
+        var now = new DateTimeOffset(2026, 5, 10, 12, 0, 0, TimeSpan.Zero);
+        var actual = LiveModelCatalogService.ParseRelativeDate(raw, now);
+        Assert.Equal(now.AddDays(-days), actual);
+    }
+
+    [Theory]
+    [InlineData("1 year ago", 365)]
+    [InlineData("2 years ago", 730)]
+    public void ParseRelativeDate_YearsApproximated(string raw, int days)
+    {
+        var now = new DateTimeOffset(2026, 5, 10, 12, 0, 0, TimeSpan.Zero);
+        var actual = LiveModelCatalogService.ParseRelativeDate(raw, now);
+        Assert.Equal(now.AddDays(-days), actual);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(null)]
+    [InlineData("garbage")]
+    [InlineData("ago")]
+    [InlineData("100 fortnights ago")]
+    public void ParseRelativeDate_ReturnsNullForUnparseable(string? raw)
+    {
+        var now = new DateTimeOffset(2026, 5, 10, 12, 0, 0, TimeSpan.Zero);
+        Assert.Null(LiveModelCatalogService.ParseRelativeDate(raw, now));
+    }
+
+    [Fact]
+    public void ParseOllamaLibraryHtml_PopulatesParametersBillionAndLastUpdated()
+    {
+        const string html = """
+            <ul>
+              <li x-test-model>
+                <a href="/library/qwen3">
+                  <p class="max-w-lg break-words text-neutral-800 text-md">Qwen 3</p>
+                  <span x-test-size>14b</span>
+                  <span x-test-pull-count>1.2M</span>
+                  <span x-test-updated>2 weeks ago</span>
+                </a>
+              </li>
+            </ul>
+            """;
+        var catalog = LiveModelCatalogService.ParseOllamaLibraryHtml(html);
+        Assert.Single(catalog.Models);
+        var entry = catalog.Models[0];
+        Assert.Equal(14.0, entry.ParametersBillion);
+        Assert.NotNull(entry.LastUpdated);
+        // 2 weeks ago anchored to UtcNow at parse time → just sanity-check
+        // it's roughly 14 days behind today (allow 1d slack for clock drift).
+        var ageDays = (DateTimeOffset.UtcNow - entry.LastUpdated!.Value).TotalDays;
+        Assert.InRange(ageDays, 13.5, 14.5);
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────
 
     private static string LoadFixture([CallerFilePath] string thisFile = "")
