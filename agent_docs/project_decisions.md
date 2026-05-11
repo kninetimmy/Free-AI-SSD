@@ -3183,3 +3183,270 @@ Three contract assertions emerged from the v1.3.24 mac field run:
    path's result payload; internal for direct unit testing.
 
 Established PR #272 (`6b3ba7b`).
+
+---
+
+## 2026-05-12 — C6 PrepApp detect-configured-drive flow: architectural decisions
+
+PR #274 (`93a677d`) shipped the skip-format flow on both Windows
+and Mac in one bundle. The following decisions are locked and
+won't be revisited.
+
+### Three-state drive configuration detector
+
+`shared/DriveConfigurationDetector.cs` returns a
+`DriveConfigurationSnapshot { State, HasOurConfig,
+IsConfigEncrypted, HasModels, ModelManifestCount }` where State
+is `Unconfigured | ConfiguredEmpty | FullyConfigured`. Detection
+is pure file-presence (never reads or decrypts config contents).
+The marker is `config/portable-config.json` (plaintext or
+encrypted variant) — manifests alone are foreign data and never
+claimed.
+
+- **Why:** The "half-prepped drive" case (user formatted but
+  bailed before model pull) is realistic and useful — surfacing
+  Manage-models with no models is the right UX, not punishing
+  the user with a full re-format. A two-state model would force
+  the half-prepped case into the format path.
+- **How to apply:** Any future drive-state-aware feature
+  respects three states, not two. The foreign-data guard is
+  non-negotiable — a user's own Ollama install on an external
+  disk must never be claimed as ours.
+
+### Detector lives in `shared/`, not `prep-core/`
+
+The original plan put the detector in `prep-core/`. Mid-session
+it moved to `shared/DriveConfigurationDetector.cs` because
+`PrepViewModel` lives in `shared/ViewModels/` and `shared/` does
+not reference `prep-core/` (the dependency runs the other way).
+
+- **Why:** When a helper needs to be called from the VM, it has
+  to live in `shared/` or upstream of it. Putting it in
+  `prep-core/` would have required either a hook-delegate
+  pattern (like C27's `HuggingFaceSizingWarningsHook`) or
+  promoting prep-core into a `shared/` dependency — both
+  heavier than just moving the file.
+- **How to apply:** Future helpers slated for `prep-core/`
+  should first answer "does the VM need to call this?" — if
+  yes, default to `shared/`. `prep-core/` is for code paths
+  that downstream consumers (sidecars, prep-app code-behinds)
+  own, not VM-callable primitives.
+
+### Picker reuse via `StarterModelPickerView` SwiftUI component
+
+The ~400-line starter-model picker UI was previously inline
+inside `EncryptionSetupStepView`. C6 extracted it into
+`mac-prep-app/Sources/StarterModelPickerView.swift` so both the
+prep flow's encryption step and the new `ManageModelsStepView`
+Add disclosure embed it via `StarterModelPickerView(vm: vm)`.
+
+- **Why:** Duplication would create a drift surface — every
+  future C27/Cn picker tweak (chips, sort, HF token, lazy
+  quants) would have to land twice. Field tests catch the
+  second site only after release. The picker binds ~16 VM
+  fields; the surface area for drift is large.
+- **How to apply:** Any future Mac surface that needs the
+  starter picker embeds `StarterModelPickerView(vm: vm)`. Don't
+  duplicate the binding fan-out. C27/C25/C24 picker tests pin
+  behavior against the VM — extraction is pure UI restructuring
+  and those tests must remain green across any future picker
+  refactor.
+
+### Mac sidecar `remove-model` server lifecycle
+
+The new `remove-model` arm in `mac-prep-host/HostLifetime.cs`
+starts a **short-lived** temp Ollama server pinned to the
+**SSD models root** (`<ssd>/models`), NOT the staging root. The
+long-lived `_ollamaServer` field that `PullModelAsync` uses is
+pinned to the staging root — `ollama rm` against that server
+would no-op on SSD blobs (a silent data integrity bug).
+
+To avoid port-11434 collisions: if `_ollamaServer` is already
+non-null (a pull batch in this sidecar lifetime has bound the
+port), `remove-model` refuses with `reason=pull-in-flight` and
+the UI surfaces "wait until the pull finishes." The user
+retries after the pull batch completes.
+
+- **Why:** Two Ollama servers can't share port 11434. Reusing
+  the staging-pinned server against SSD blobs would silently
+  succeed-but-do-nothing. The pull-in-flight gate is the
+  simplest honest answer; juggling two ports adds complexity
+  out of scope for C6.
+- **How to apply:** Future sidecar arms that need Ollama
+  operations against the SSD models root (not staging) must
+  spin their own short-lived server and dispose it before
+  returning. If `_ollamaServer` is non-null, refuse with
+  `pull-in-flight`.
+- **Long-term:** Factor a "manage server" startup on a
+  different port so remove-model can run while a pull is in
+  flight — filed as a C6 follow-up.
+
+### Mac `runManageModelsStartup` skips `stage-*` arms
+
+When the user clicks Manage models on an already-configured
+drive, the Mac VM calls `runManageModelsStartup()` which
+mirrors `runStaging()` but **skips** `stage-runner` /
+`stage-ollama` / `stage-prereqs`. Those arms each copy hundreds
+of MB to the SSD; on a re-entered drive the binaries are
+already in place.
+
+The skipped path was proven safe by reading the sidecar:
+`pull-model`'s prerequisites are only that the staged ollama
+binary exists at `<ssd>/mac/tools/ollama` and the sidecar host
+is running. `ensure-structure` is kept as cheap insurance
+against a manually-deleted subdirectory.
+
+- **Why:** Re-staging on a drive that's already prepped is ~30
+  seconds of redundant copies that defeat the "skip the format
+  flow" UX win.
+- **How to apply:** Any future "re-enter prepped drive" flow
+  uses the same light-touch pattern: `startAndWaitReady +
+  ensure-structure + discoverCatalog + refreshInstalledModels`.
+  The `stage-*` arms are a fresh-prep concept; don't run them
+  on re-entry.
+
+### Encrypted-drive Manage models = read-only view
+
+Per locked decision D13, when the user clicks Manage models on
+an encrypted drive, the step renders normally with the
+installed-models list visible (filesystem walks don't need
+decryption). Add and Remove are disabled with an inline yellow
+banner: "This drive is encrypted. Unlock support for Add and
+Remove lands in C7."
+
+- **Why:** Hiding Manage models entirely on encrypted drives
+  hides useful info (the user can't confirm what's on the
+  drive). Prompting for passphrase inline contradicts the C6/C7
+  scope split. Read-only is honest about the limitation while
+  still providing useful information.
+- **How to apply:** Until C7 lands unlock UX, any "manage
+  existing drive" feature must gate Add/Remove on
+  `!isConfigEncrypted` while keeping the read path available.
+  The detector's `isConfigEncrypted` field is the gate (set by
+  filename presence — `portable-config.encrypted.json` exists
+  AND `portable-config.json` does not).
+
+### FTUE suppression for FullyConfigured drives doesn't mark complete
+
+On Windows, when the auto-selected drive on launch is
+FullyConfigured, FTUE is suppressed (the spotlight targets
+controls that are now disabled by the banner). But
+`FtueCompleted` is NOT written to `prepapp-settings.json`.
+
+- **Why:** A first-time user who plugs in a friend's prepped
+  USB stick still deserves the tour the next time they launch
+  with a fresh SSD selected. Marking complete on a
+  pre-prepped-drive launch would penalize that user.
+- **How to apply:** Future FTUE-context checks suppress
+  in-session without persisting completion. Only clicking
+  through all spotlight steps marks complete.
+
+### Cross-OS detection via Swift reimplementation + parity tests
+
+The C# `DriveConfigurationDetector` has a 1:1 Swift mirror in
+`mac-prep-app/Sources/DriveConfigurationDetector.swift`. Both
+are exercised by their own test suites (16 .NET tests + 10
+Swift tests) against identical filesystem fixtures.
+
+- **Why:** A sidecar roundtrip per drive-selection click is
+  overkill for ~30 lines of file-presence logic. Drift risk is
+  contained because the file paths are stable constants
+  (already-shared via `SsdEncryptionConstants` in
+  `mac-runner/Sources/SsdEncryption.swift`). Cross-language
+  parity tests are required.
+- **How to apply:** Future shared utilities under ~50 lines
+  with no external deps follow this pattern. Anything heavier
+  (encryption, complex parsing, network I/O) goes the sidecar
+  route — single source of truth in C# with Swift wire-protocol
+  clients.
+
+### `.manageModels` → pull routes through `.modelPull` → returns via flag
+
+When the user clicks "Pull selected" from inside Manage models,
+the VM sets `isAddingModelInManagement = true` and transitions
+to `.modelPull` (reuses the existing pull-progress view). On
+completion, `pullPendingTags()`'s tail branches on the flag and
+returns to `.manageModels` (refreshing `installedModels`)
+instead of falling through to `.readiness`.
+
+- **Why:** `.modelPull` is the right view for pull progress;
+  designing a new in-disclosure progress UI would duplicate
+  `ModelPullStepView`. The flag-and-return pattern preserves
+  the existing `.modelPull → .readiness` path for fresh prep.
+- **How to apply:** Any future step that wants to invoke an
+  existing flow and return to itself uses the same flag pattern
+  on the existing flow's tail. Keep the flag scoped to the
+  caller's lifetime — clear it on entry into the existing flow
+  if pre-set state could leak, and on the branch decision.
+
+Established PR #274 (`93a677d`).
+
+---
+
+## 2026-05-11 — Ollama writes HF GGUF manifests under hf.co/, not registry.ollama.ai/library/
+
+Locked architectural fact discovered via the v1.3.25 field run:
+Ollama's `/api/pull` for an `hf.co/<owner>/<repo>:<quant>` tag
+writes the manifest under
+`<OLLAMA_MODELS>/manifests/hf.co/<owner>/<repo>/<quant>`, NOT
+under the `registry.ollama.ai/library/<modelName>/<tag>` path
+used for ollama.com library models. The two subtrees coexist
+under `manifests/` in the same models root.
+
+**Why this matters:** Before PR #275,
+`ModelOperations.FindModelBlobForModel`,
+`EstimatePartialProgress`, `DiscoverModelsOnDisk`, and
+`OllamaModelStager.MergeToSsdAsync` all hardcoded
+`registry.ollama.ai/library/` paths. HF pulls always succeeded
+at the Ollama layer (NDJSON ended with `progress: success` and
+the manifest was on disk) but failed in our post-pull steps
+because the resolver looked in the wrong subtree. The user
+observed "downloads fully then fails and heads to the final
+screen" — and **no HF pull had ever worked**, regardless of
+token. PR #272's `pull-exception` catch surfaced the symptom
+without exposing the root cause.
+
+### Resolution
+
+`ModelOperations.TryResolveOllamaManifestPath(modelTag, out
+manifestSubdir, out manifestTag)` is the single dispatch point
+for both subtrees. All on-disk manifest path construction in
+`prep-core/` routes through it; `OllamaModelStager.MergeToSsdAsync`
+calls it instead of duplicating the dispatch. The duplicated
+private `IsSafeModelTag` / `TryParseModelReference` helpers
+were removed from both `ModelOperations.cs` and
+`OllamaModelStager.cs` — the resolver owns the safety contract.
+
+The resolver enforces per-segment safety:
+- Each component must match `[A-Za-z0-9._-]` (no `..`, no `/`
+  or `\`, no whitespace, no `:` inside a segment).
+- HF tags must be exactly two segments after the `hf.co/`
+  prefix (owner + repo). Three segments, a missing repo, or
+  path-traversal in any slot fails closed.
+- The tag (after the last `:`) must also pass the same
+  allowlist — a tag like `bad/tag` is refused.
+
+`DiscoverModelsOnDisk` was also updated: previously it
+reconstructed model tags from the last two path segments,
+which dropped the `hf.co/<owner>/` prefix and reported HF
+models under just `<repo>:<quant>`. The picker then couldn't
+reconcile installed HF rows against catalog rows (which carry
+the full `hf.co/...` tag), so freshly-pulled HF models still
+showed as "not on disk." Discovery now recognizes the `hf.co`
+subtree and emits the full tag.
+
+- **Why:** The Ollama on-disk layout is an upstream contract
+  but the two subtrees are not obvious from the API surface —
+  every consumer that touches the layout was duplicating the
+  registry-only assumption. A single dispatch point means
+  future Ollama subtrees (e.g. `ollama.com/` or private
+  registry paths) are an extension to one helper, not a hunt
+  through four consumers.
+- **How to apply:** Any new consumer of the Ollama on-disk
+  layout calls `TryResolveOllamaManifestPath`. Never hardcode
+  `registry.ollama.ai/library/` again. The lowercase-only
+  `IsSafeModelTag` helper is gone — segment-level safety is
+  built into the resolver and HF tags legitimately carry
+  uppercase characters (HF owner/repo names allow mixed case).
+
+Established PR #275 (`0a4a2e5`).

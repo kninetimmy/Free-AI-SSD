@@ -3509,3 +3509,42 @@ The two layers cover different failure modes (stale process vs kernel TIME_WAIT)
 
 **Watch for:** chat-stream interruption regressions; port-allocation conflicts with the production daemon; any C2 follow-up symptom that suggests the eager-pull path isn't enough.
 
+### M15 - Mac PrepApp: don't auto-advance past pull failure
+
+**Status:** filed 2026-05-12 from PR #275 wrap-up. **Observability gap exposed by the HF manifest path bug.** Mac-only (Windows PrepApp stays on the Models tab after Download and the LogLines ListBox is visible — Mac transitions to a separate readiness view that doesn't render `logLines`).
+**Scope:** Small. `mac-prep-app/Sources/PrepViewModel.swift` only.
+**Model:** Sonnet 4.6.
+
+**Driver (2026-05-12 field run of v1.3.25):** when a pull failed, the user saw "the model seems to download fully then fails and head to final screen. The log closes immediately so I can't screen-cap it." Diagnosis required pulling `<SSD>/logs/macos-prep-host-YYYYMMDD.log` off the drive after the fact because the Swift UI auto-advances from `.modelPull` to `.readiness` in `pullPendingTags()` regardless of whether any tag failed — the `ModelPullStepView` (which renders `logLines`) is destroyed when the view transitions, so the failure message becomes inaccessible.
+
+`mac-prep-app/Sources/PrepViewModel.swift:1153-1156`:
+
+```swift
+} catch {
+    self.appendLog("Pull failed for \(tag): \(error.localizedDescription)")
+    self.appendLog("(This is non-fatal — you can pull models later from Mac Runner.)")
+}
+```
+
+The catch logs but doesn't track a `failedTags` list, and the loop tail at `1190` unconditionally sets `currentStep = .readiness`. The HF manifest path bug (PR #275) is fixed at the root, but ANY future pull-fail class (Ollama 400, network failure, disk-full mid-stream, future Ollama version protocol drift) will hide the error the same way.
+
+**Approach (sketch):**
+- Track failed tags during the loop (parallel to `cancelledTag`).
+- If any failures: don't advance to `.readiness`. Instead set a new `.modelPullFailed(tags: [String], lastLogTail: [String])` step (or reuse `.modelPullPaused` with a failure flag — fewer step variants is better).
+- New step renders the same `ModelPullStepView`-style log surface with a "Continue to readiness" button and a "Retry failed pulls" button. User can read + screencap the error before advancing.
+- The `isAddingModelInManagement` flag's existing handling at line 1183 needs to coexist with the new failure path — likely: if in management AND any failure, return to `.manageModels` showing a banner with the failure message (manage-models flow already has a banner surface from C6).
+
+**Affected files (expected):**
+- `mac-prep-app/Sources/PrepViewModel.swift` — failure-tracking + new step routing.
+- `mac-prep-app/Sources/PrepFlowStep.swift` — new step variant (or paused-step reuse).
+- `mac-prep-app/Sources/main.swift` — route the new step to its view.
+- `mac-prep-app/Sources/ModelPullStepView.swift` (or a new `ModelPullFailedStepView.swift`) — render log + Continue/Retry buttons.
+- `tests/MacPrepHostPullLifecycleTests.cs` — sidecar-side pin that mixed success/failure batches still emit clean `ok=false` lines.
+- Swift PrepViewModelTests — pin the no-advance-on-failure behavior.
+
+**Cross-OS audit:** Windows side is fine — `PrepViewModel.PullModelsAsync` (`shared/ViewModels/PrepViewModel.cs:1684`) catches and continues, but the user stays on the Models tab and the `LogLines` ListBox keeps the failure visible. Optional Windows parity: wire `LogService.SetLogger(ssdRoot, "prep")` so `<SSD>/logs/prep-YYYYMMDD.log` actually gets written (currently `LogService.SetLogger` is never called, so PrepApp has no disk log — same observability shape the Mac side bridges via `SsdLogger`). Can be a sub-task or a separate W-item; user's call at pickup.
+
+**Exit criterion:** trigger any pull failure on Mac PrepApp (e.g. by deleting `OLLAMA_HOST`'s temp server mid-pull, or by picking a quant Ollama refuses). UI surfaces the failure inline on a new step or banner; user can screencap; "Continue" advances to readiness; "Retry" re-enters `.modelPull` with the failed tag.
+
+**Watch for:** the auto-advance was likely designed when pull-failures were rare and non-fatal; preserving the "non-fatal" framing matters (user should still be able to ship the drive without that one model). The new step is "see the error, then choose."
+
