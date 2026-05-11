@@ -36,6 +36,7 @@ internal sealed class HostLifetime : IAsyncDisposable
     private readonly PrereqService _prereqService;
     private readonly ReadinessService _readinessService;
     private readonly ILiveModelCatalogService _liveCatalogService;
+    private readonly IHuggingFaceCatalogService _hfCatalogService;
 
     // MAC27: lazily started on the first pull-model command and reused
     // across the batch, mirroring the Windows PrepViewModel pattern at
@@ -111,6 +112,7 @@ internal sealed class HostLifetime : IAsyncDisposable
         _prereqService = new PrereqService(dialogService);
         _readinessService = new ReadinessService(_modelService);
         _liveCatalogService = new LiveModelCatalogService();
+        _hfCatalogService = new HuggingFaceCatalogService();
         _stagingRootResolver = stagingRootResolver ?? OllamaModelStager.ResolveMacStagingRoot;
     }
 
@@ -167,6 +169,12 @@ internal sealed class HostLifetime : IAsyncDisposable
             case "discover-catalog":
                 DiscoverCatalog();
                 break;
+            case "discover-hf-catalog":
+                await DiscoverHuggingFaceCatalogAsync(ct);
+                break;
+            case "search-hf":
+                await SearchHuggingFaceAsync(payload, ct);
+                break;
             default:
                 await _stderr.WriteLineAsync($"Unknown command: {command}");
                 break;
@@ -196,6 +204,10 @@ internal sealed class HostLifetime : IAsyncDisposable
         if (_liveCatalogService is IDisposable disposable)
         {
             disposable.Dispose();
+        }
+        if (_hfCatalogService is IDisposable hfDisposable)
+        {
+            hfDisposable.Dispose();
         }
     }
 
@@ -470,17 +482,7 @@ internal sealed class HostLifetime : IAsyncDisposable
         {
             ok = true,
             warning = loadResult.Warning,
-            entries = loadResult.Catalog.Models.Select(m => new
-            {
-                tag = m.Tag,
-                @params = m.Params,
-                sizeTier = m.SizeTier,
-                description = m.Description,
-                useCases = m.UseCases.ToArray(),
-                pullCount = m.PullCount,
-                parametersBillion = m.ParametersBillion,
-                lastUpdated = m.LastUpdated,
-            }).ToArray(),
+            entries = BuildCatalogEntries(loadResult.Catalog.Models),
         });
     }
 
@@ -519,17 +521,7 @@ internal sealed class HostLifetime : IAsyncDisposable
                 ok = true,
                 fetchedAt = result.FetchedAt,
                 sourceUrl = result.SourceUrl,
-                entries = result.Catalog.Models.Select(m => new
-                {
-                    tag = m.Tag,
-                    @params = m.Params,
-                    sizeTier = m.SizeTier,
-                    description = m.Description,
-                    useCases = m.UseCases.ToArray(),
-                    pullCount = m.PullCount,
-                    parametersBillion = m.ParametersBillion,
-                    lastUpdated = m.LastUpdated,
-                }).ToArray(),
+                entries = BuildCatalogEntries(result.Catalog.Models),
             });
         }
         catch (LiveCatalogFetchException ex)
@@ -544,6 +536,175 @@ internal sealed class HostLifetime : IAsyncDisposable
             });
         }
     }
+
+    /// <summary>
+    /// C27 Stage 1: fetch the default "popular GGUF" page from the
+    /// Hugging Face Search API. Soft-failure mirrors
+    /// <see cref="RefreshCatalogAsync"/> so the Swift caller can fall
+    /// back without timing out on <c>awaitCommandResult</c>.
+    /// </summary>
+    private async Task DiscoverHuggingFaceCatalogAsync(CancellationToken ct)
+    {
+        if (_testMode)
+        {
+            EmitLog("test-mode: skipping HF discover-catalog fetch");
+            EmitResult("discover-hf-catalog", new
+            {
+                ok = true,
+                testMode = true,
+                fetchedAt = DateTimeOffset.UtcNow,
+                sourceUrl = "test-mode",
+                query = (string?)null,
+                entries = Array.Empty<object>(),
+            });
+            return;
+        }
+
+        try
+        {
+            EmitLog("Fetching Hugging Face popular GGUF…");
+            var result = await _hfCatalogService.SearchAsync(new HuggingFaceSearchQuery(), ct);
+            EmitLog($"Fetched {result.Catalog.Models.Count} GGUF repos from {result.SourceUrl}");
+            EmitResult("discover-hf-catalog", new
+            {
+                ok = true,
+                fetchedAt = result.FetchedAt,
+                sourceUrl = result.SourceUrl,
+                query = result.Query,
+                entries = BuildCatalogEntries(result.Catalog.Models),
+            });
+        }
+        catch (LiveCatalogFetchException ex)
+        {
+            EmitLog($"HF discover failed: {ex.Message}");
+            EmitResult("discover-hf-catalog", new
+            {
+                ok = false,
+                reason = ex.Reason.ToString(),
+                error = ex.Message,
+                statusCode = ex.StatusCode,
+            });
+        }
+    }
+
+    /// <summary>
+    /// C27 Stage 1: search the Hugging Face Search API for GGUF repos
+    /// matching a user-typed query. Payload is a single-line JSON
+    /// object: <c>{"search":"qwen","limit":50,"sort":"downloads"}</c>.
+    /// Limit and sort are optional; only <c>search</c> is required.
+    /// </summary>
+    private async Task SearchHuggingFaceAsync(string payload, CancellationToken ct)
+    {
+        if (_testMode)
+        {
+            EmitLog("test-mode: skipping HF search-hf fetch");
+            EmitResult("search-hf", new
+            {
+                ok = true,
+                testMode = true,
+                fetchedAt = DateTimeOffset.UtcNow,
+                sourceUrl = "test-mode",
+                query = (string?)null,
+                entries = Array.Empty<object>(),
+            });
+            return;
+        }
+
+        HuggingFaceSearchQuery query;
+        try
+        {
+            query = ParseHuggingFaceSearchPayload(payload);
+        }
+        catch (JsonException ex)
+        {
+            EmitLog($"search-hf payload parse failed: {ex.Message}");
+            EmitResult("search-hf", new
+            {
+                ok = false,
+                reason = "InvalidPayload",
+                error = ex.Message,
+            });
+            return;
+        }
+
+        try
+        {
+            EmitLog($"Searching Hugging Face for '{query.Search}'…");
+            var result = await _hfCatalogService.SearchAsync(query, ct);
+            EmitLog($"Fetched {result.Catalog.Models.Count} GGUF repos for query '{query.Search}'");
+            EmitResult("search-hf", new
+            {
+                ok = true,
+                fetchedAt = result.FetchedAt,
+                sourceUrl = result.SourceUrl,
+                query = result.Query,
+                entries = BuildCatalogEntries(result.Catalog.Models),
+            });
+        }
+        catch (LiveCatalogFetchException ex)
+        {
+            EmitLog($"HF search failed: {ex.Message}");
+            EmitResult("search-hf", new
+            {
+                ok = false,
+                reason = ex.Reason.ToString(),
+                error = ex.Message,
+                statusCode = ex.StatusCode,
+            });
+        }
+    }
+
+    /// <summary>
+    /// C27 Stage 1: parse a <c>search-hf</c> payload. Accepts the JSON
+    /// object shape <c>{"search":"...","limit":50,"sort":"downloads"}</c>;
+    /// missing fields fall back to the <see cref="HuggingFaceSearchQuery"/>
+    /// defaults (popular GGUF page). Bare empty payload returns the
+    /// default query, mirroring <c>discover-hf-catalog</c>.
+    /// Internal for direct unit testing.
+    /// </summary>
+    internal static HuggingFaceSearchQuery ParseHuggingFaceSearchPayload(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return new HuggingFaceSearchQuery();
+        }
+        using var doc = JsonDocument.Parse(payload);
+        var root = doc.RootElement;
+        var search = root.TryGetProperty("search", out var s) && s.ValueKind == JsonValueKind.String
+            ? s.GetString()
+            : null;
+        var limit = root.TryGetProperty("limit", out var l) && l.ValueKind == JsonValueKind.Number
+            ? l.GetInt32()
+            : HuggingFaceCatalogService.DefaultLimit;
+        var sort = root.TryGetProperty("sort", out var st) && st.ValueKind == JsonValueKind.String
+            ? st.GetString() ?? "downloads"
+            : "downloads";
+        return new HuggingFaceSearchQuery(search, limit, sort);
+    }
+
+    /// <summary>
+    /// C27 Stage 1 / C24 lesson cashed in: single projection helper
+    /// used by every catalog-emitting arm (<c>discover-catalog</c>,
+    /// <c>refresh-catalog</c>, <c>discover-hf-catalog</c>, <c>search-hf</c>).
+    /// Adding a wire field becomes a one-site change here instead of
+    /// drifting across four arm bodies — exactly the regression class
+    /// C24 named when refresh-catalog dropped <c>parametersBillion</c>
+    /// + <c>lastUpdated</c> after PR #259 added them only on the
+    /// discover-catalog arm.
+    /// </summary>
+    private static object[] BuildCatalogEntries(IEnumerable<StarterModelEntry> models)
+        => models.Select(m => new
+        {
+            tag = m.Tag,
+            @params = m.Params,
+            sizeTier = m.SizeTier,
+            description = m.Description,
+            useCases = m.UseCases.ToArray(),
+            pullCount = m.PullCount,
+            parametersBillion = m.ParametersBillion,
+            lastUpdated = m.LastUpdated,
+            source = m.Source.ToString(),
+        }).ToArray<object>();
 
     // --- Output helpers --------------------------------------------------
 

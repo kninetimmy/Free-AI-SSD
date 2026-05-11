@@ -16,7 +16,8 @@ public sealed class ModelGridRow(
     long? pullCount = null,
     IReadOnlyList<string>? capabilities = null,
     double? parametersBillion = null,
-    DateTimeOffset? lastUpdated = null)
+    DateTimeOffset? lastUpdated = null,
+    ModelSource sourceKind = ModelSource.Ollama)
     : BaseViewModel
 {
     private bool _isSelected;
@@ -60,6 +61,18 @@ public sealed class ModelGridRow(
     /// <summary>C5: approximate last-updated timestamp scraped from
     /// ollama.com. Null when not from the live catalog.</summary>
     public DateTimeOffset? LastUpdated { get; } = lastUpdated;
+    /// <summary>
+    /// C27: which catalog source produced this row. Defaults to
+    /// <see cref="ModelSource.Ollama"/> so configured / on-disk rows
+    /// and existing bundled-catalog projections behave unchanged.
+    /// Hugging Face rows surface as <see cref="ModelSource.HuggingFace"/>
+    /// — Stage 1 uses the discriminator only for source-scoped
+    /// affordances (download button disabled, source-aware tooltip);
+    /// Stage 4 will use it to drive per-quant row expansion.
+    /// Named <c>SourceKind</c> to avoid clashing with the existing
+    /// string <see cref="Source"/> column ("Recommended"/"Config"/"Disk").
+    /// </summary>
+    public ModelSource SourceKind { get; } = sourceKind;
 }
 
 /// <summary>
@@ -91,7 +104,25 @@ public sealed record StarterCatalogEntry(
     double? ParametersBillion = null,
     /// <summary>C5: approximate last-updated timestamp from
     /// ollama.com; null when unknown.</summary>
-    DateTimeOffset? LastUpdated = null);
+    DateTimeOffset? LastUpdated = null,
+    /// <summary>C27 Stage 1: which catalog source produced this entry.
+    /// Defaults to <see cref="ModelSource.Ollama"/> so bundled-catalog
+    /// JSON and the existing live ollama.com projection compile
+    /// unchanged. Hugging Face entries set <see cref="ModelSource.HuggingFace"/>
+    /// so the picker can gate source-scoped affordances.</summary>
+    ModelSource Source = ModelSource.Ollama);
+
+/// <summary>C27 Stage 1: model catalog source. <see cref="Ollama"/>
+/// covers the bundled <c>starter-models.json</c> and the live
+/// ollama.com scrape; <see cref="HuggingFace"/> covers the HF Search
+/// API path (anonymous read in Stage 1; token auth deferred to
+/// Stage 3). Stages 2/4 layer pull integration and per-quant row
+/// expansion on top of this discriminator.</summary>
+public enum ModelSource
+{
+    Ollama,
+    HuggingFace,
+}
 
 [Flags]
 public enum PrepTargets

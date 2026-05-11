@@ -254,6 +254,19 @@ struct EncryptionSetupStepView: View {
                 Text("Starter models")
                     .font(.headline)
                 Spacer(minLength: 12)
+                // C27 Stage 1: catalog source picker. Switching sources
+                // clears the catalog and refetches via handleSourceSwitch.
+                Picker("", selection: $vm.activeSource) {
+                    Text("Ollama").tag(ModelSourceKind.ollama)
+                    Text("Hugging Face").tag(ModelSourceKind.huggingFace)
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(width: 140)
+                .help("Pick where to browse models. Ollama (bundled + ollama.com) or Hugging Face (live GGUF Search API).")
+                .onChange(of: vm.activeSource) { _ in
+                    Task { await vm.handleSourceSwitch() }
+                }
                 // F2a: macOS 11.0 baseline rules out
                 // `.toggleStyle(.button)` (12+), so a plain Button
                 // flips the state. Active state is communicated by
@@ -283,8 +296,28 @@ struct EncryptionSetupStepView: View {
                 TextField("Search models…", text: $vm.modelSearchText)
                     .textFieldStyle(.roundedBorder)
                     .frame(minWidth: 180, maxWidth: 280)
+                    .help(vm.activeSource == .huggingFace
+                          ? "Search Hugging Face for GGUF repos. Fires a debounced server query."
+                          : "Filter the grid by tag, tier, or capability description (case-insensitive).")
+                    .onChange(of: vm.modelSearchText) { newValue in
+                        // C27 Stage 1: under HF the search box drives a
+                        // server query (HF has millions of repos vs.
+                        // Ollama's ~400, so client-side filter isn't an
+                        // option). Debounce so each keystroke doesn't
+                        // hit the API.
+                        if vm.activeSource == .huggingFace {
+                            vm.scheduleHuggingFaceSearch(for: newValue)
+                        }
+                    }
                 Button {
-                    Task { await vm.refreshCatalog() }
+                    Task {
+                        if vm.activeSource == .huggingFace {
+                            let needle = vm.modelSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+                            await vm.refreshHuggingFaceCatalog(search: needle.isEmpty ? nil : needle)
+                        } else {
+                            await vm.refreshCatalog()
+                        }
+                    }
                 } label: {
                     if vm.isRefreshingCatalog {
                         HStack(spacing: 6) {
@@ -292,10 +325,13 @@ struct EncryptionSetupStepView: View {
                             Text("Refreshing…")
                         }
                     } else {
-                        Text("Refresh from Ollama")
+                        Text("Refresh")
                     }
                 }
                 .disabled(vm.isRefreshingCatalog)
+                .help(vm.activeSource == .huggingFace
+                      ? "Fetch the latest GGUF repos from Hugging Face. The previous list stays in place if the fetch fails."
+                      : "Fetch the latest model list from ollama.com/library. The bundled list stays in place if the fetch fails.")
             }
             if !vm.catalogStatusText.isEmpty {
                 Text(vm.catalogStatusText)

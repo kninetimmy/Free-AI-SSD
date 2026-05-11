@@ -33,6 +33,36 @@ struct StarterModelEntry: Codable, Hashable {
     /// that would risk breaking the existing decode path. Nil for the
     /// bundled catalog and unparseable scrape values.
     let lastUpdated: String?
+    /// C27 Stage 1: which catalog source emitted this entry. The host
+    /// serializes `ModelSource` as its enum name ("Ollama" /
+    /// "HuggingFace") via `JsonStringEnumConverter`. Optional so
+    /// pre-C27 payloads (and the test-mode payloads that emit no
+    /// entries) decode without churn.
+    let source: String?
+}
+
+/// C27 Stage 1: catalog source enum mirroring the C# `ModelSource`.
+/// `.ollama` covers the bundled catalog and the live ollama.com
+/// scrape; `.huggingFace` covers the HF Search API path. The host
+/// serializes the C# enum as its name ("Ollama"/"HuggingFace") via
+/// the explicit `.ToString()` call in BuildCatalogEntries; Swift maps
+/// the string back through `ModelSourceKind.parse(_:)`. Default is
+/// `.ollama` so pre-C27 payloads decode unchanged.
+enum ModelSourceKind: Equatable, Hashable {
+    case ollama
+    case huggingFace
+
+    /// Parse the host's wire form. Unknown / nil falls back to `.ollama`
+    /// for back-compat with bundled-catalog payloads emitted before
+    /// C27 wired the `source` field.
+    static func parse(_ raw: String?) -> ModelSourceKind {
+        guard let raw = raw else { return .ollama }
+        switch raw {
+        case "HuggingFace": return .huggingFace
+        case "Ollama":      return .ollama
+        default:            return .ollama
+        }
+    }
 }
 
 /// Display projection for the picker. Mirrors the Windows
@@ -55,6 +85,10 @@ struct StarterModelDisplayEntry: Identifiable, Hashable {
     let parametersBillion: Double?
     /// C5: ISO 8601 string from the live catalog; nil when unknown.
     let lastUpdated: String?
+    /// C27 Stage 1: which catalog source produced this entry. Drives
+    /// source-scoped picker affordances (e.g., the Stage-2 "pulls
+    /// land later" gate).
+    let sourceKind: ModelSourceKind
     var id: String { tag }
 
     /// Custom init with defaults for the C3/C4/C5 fields so existing
@@ -68,7 +102,8 @@ struct StarterModelDisplayEntry: Identifiable, Hashable {
         pullCount: Int64?,
         capabilities: [String] = [],
         parametersBillion: Double? = nil,
-        lastUpdated: String? = nil
+        lastUpdated: String? = nil,
+        sourceKind: ModelSourceKind = .ollama
     ) {
         self.tag = tag
         self.sizeTier = sizeTier
@@ -77,6 +112,7 @@ struct StarterModelDisplayEntry: Identifiable, Hashable {
         self.capabilities = capabilities
         self.parametersBillion = parametersBillion
         self.lastUpdated = lastUpdated
+        self.sourceKind = sourceKind
     }
 
     /// "Best at" combines description + comma-joined use cases —
@@ -99,7 +135,8 @@ struct StarterModelDisplayEntry: Identifiable, Hashable {
             pullCount: entry.pullCount,
             capabilities: useCases,
             parametersBillion: entry.parametersBillion,
-            lastUpdated: entry.lastUpdated)
+            lastUpdated: entry.lastUpdated,
+            sourceKind: ModelSourceKind.parse(entry.source))
     }
 }
 

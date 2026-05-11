@@ -58,6 +58,7 @@
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
                                         <StackPanel Grid.Column="0">
                                             <TextBlock Text="Models"
@@ -66,14 +67,29 @@
                                             <TextBlock Text="Pick one or more models to download onto your SSD."
                                                        Style="{StaticResource CaptionText}"/>
                                         </StackPanel>
+                                        <!-- C27 Stage 1: source dropdown sits between the title and
+                                             the Refresh button. Ollama covers the bundled catalog
+                                             plus live ollama.com/library scrape; Hugging Face covers
+                                             the HF Search API. Switching sources clears the catalog
+                                             and refetches via ActiveSourceChanged. -->
+                                        <ComboBox x:Name="SourceCombo"
+                                                  Grid.Column="1"
+                                                  MinWidth="140"
+                                                  Margin="0,0,8,0"
+                                                  VerticalAlignment="Top"
+                                                  SelectionChanged="SourceCombo_SelectionChanged"
+                                                  ToolTip="Pick where to browse models. Ollama (bundled + ollama.com) or Hugging Face (live GGUF Search API).">
+                                            <ComboBoxItem Content="Ollama" Tag="Ollama" IsSelected="True"/>
+                                            <ComboBoxItem Content="Hugging Face" Tag="HuggingFace"/>
+                                        </ComboBox>
                                         <Button x:Name="RefreshCatalogButton"
-                                                Grid.Column="1"
-                                                Content="Refresh from Ollama"
+                                                Grid.Column="2"
+                                                Content="Refresh"
                                                 VerticalAlignment="Top"
                                                 Padding="10,4" MinHeight="0"
                                                 Style="{StaticResource GhostSecondaryButton}"
                                                 Click="RefreshCatalogButton_Click"
-                                                ToolTip="Fetch the latest model list from ollama.com/library. The bundled list stays in place if the fetch fails."/>
+                                                ToolTip="Fetch the latest model list from the selected source. The previous list stays in place if the fetch fails."/>
                                     </Grid>
                                     <TextBlock x:Name="StarterCatalogWarningText"
                                                Foreground="{StaticResource StatusWarningBrush}"
@@ -128,7 +144,7 @@
                                                  VerticalAlignment="Center"
                                                  Style="{StaticResource GlowFocusTextBox}"
                                                  Text="{Binding ModelSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                 ToolTip="Filter the grid by tag, tier, or capability description (case-insensitive)."/>
+                                                 ToolTip="Filter the grid by tag, tier, or capability description (case-insensitive). Under the Hugging Face source the box also drives a debounced server query."/>
                                     </Grid>
                                     <!-- M11: announce the visible row count + cap reason
                                          when a filter is active. ollama.com's natural
