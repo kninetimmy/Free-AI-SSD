@@ -3116,3 +3116,70 @@ the start.
 
 Established PR #270 (`42c4bdc`, fix in `e27f88f`).
 
+---
+
+## 2026-05-12 — Ollama requires an `HF_TOKEN` to pull ANY `hf.co/…` repo (anonymous rate-limit), not just gated/private; HF parent repos are non-pullable without a `:quant` suffix; sidecar `pull-model` MUST emit a `result:` line on every exception [C27 HF follow-up field test]
+
+Three contract assertions emerged from the v1.3.24 mac field run:
+
+1. **Ollama's HF integration is not anonymous-friendly.** PR #270
+   shipped on the assumption that `HF_TOKEN` was only needed for
+   gated / private GGUFs. Field tests on `mxbai-embed-large-v1`
+   and `unsloth/Qwen3.5-9B-GGUF:IQ2_M` (both **public**) showed
+   the pull errors immediately without a token — HF rate-limits
+   anonymous downloads from automated clients at a level Ollama's
+   `/api/pull` retries can't tolerate.
+
+   **Implication:** the picker must require a token whenever any
+   HF row is selected, regardless of repo visibility. There is no
+   "anonymous browse-only" mode that ships HF pulls without a
+   token — the catalog API allows anon, but the pull does not.
+
+   **Mitigation in PR #272:** `HuggingFaceSelectionNeedsToken`
+   getter on `PrepViewModel` + explainer modal at the Download
+   (WPF) / Continue (Mac) click that opens
+   `https://huggingface.co/settings/tokens` and walks the user
+   through obtaining a free read-only token.
+
+2. **HF parent repos (no `:quant`) are non-pullable.** Ollama's
+   `/api/pull` requires a `:quant` tag for `hf.co/owner/repo`
+   pulls; without one it errors instantly. The PR #272 fix
+   disables the parent-row checkbox (`IsRowSelectable=false`
+   when `IsExpandable=true`) — only quant children are pullable.
+   Field-test confirmed by the original Bug-3 repro (user
+   selected `hf.co/mixedbread-ai/mxbai-embed-large-v1` parent →
+   instant fail → Done with ≥1 model Fail).
+
+   **Implication:** never let a user submit a bare-repo HF tag
+   to `PullModelAsync`. Auto-routing parent-row clicks to
+   chevron-expand is the cleanest UX. Don't try to "smart-pick"
+   a default quant on parent submit — the user needs to see the
+   quant rows + sizes first because picking wrong wastes a 5–30
+   minute download.
+
+3. **`pull-model` MUST emit a `result: pull-model {ok,...}`
+   line on every exception path.** Pre-PR #272, an Ollama 400
+   from `/api/pull` (e.g. on `IQ2_M` manifest assembly failure)
+   threw an exception inside `PullModelAsync` that bubbled
+   to `Program.cs`'s outer catch — which wrote the failure to
+   **stderr** only. Swift's `PrepHostController.send()` waits on
+   a `result:` line on **stdout** and never reads stderr — UI
+   hung at 100% forever, no way to recover except force-quit.
+
+   **Implication:** the stdin/stdout protocol is symmetric.
+   Every command name that ever emits a `result:` on success
+   must also emit one on failure, even from generic catch
+   handlers. Two layers of defense: an inner `catch (Exception
+   ex)` in the command handler (e.g. `PullModelAsync`), plus a
+   fallback emitter in `Program.cs`'s pull-task wrapper that
+   handles exceptions thrown BEFORE the inner try.
+
+   **Future application:** the same pattern applies to any new
+   sidecar arm that Swift will `await send()` on. Don't ship
+   one without verifying its exception path emits a result.
+
+   **Helper landed in PR #272:** `HostRunner.ExtractPullModelTag`
+   pulls the model tag out of the command line for the fallback
+   path's result payload; internal for direct unit testing.
+
+Established PR #272 (`6b3ba7b`).
