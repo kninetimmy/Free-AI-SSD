@@ -3548,3 +3548,51 @@ The catch logs but doesn't track a `failedTags` list, and the loop tail at `1190
 
 **Watch for:** the auto-advance was likely designed when pull-failures were rare and non-fatal; preserving the "non-fatal" framing matters (user should still be able to ship the drive without that one model). The new step is "see the error, then choose."
 
+### M16 - Mac `remove-model` permanently blocked after first pull in sidecar session
+
+**Status:** filed 2026-05-11 from Codex review of last 11 PRs (GH issue #277, HIGH). Originally surfaced by `gemini-code-assist` on PR #274. Mac-only (`mac-prep-host/HostLifetime.cs` + Swift UI path back into Remove).
+**Scope:** Small. `mac-prep-host/HostLifetime.cs` + a new test pin.
+**Model:** Sonnet 4.6.
+
+**Driver:** the remove-model guard checks the wrong state. `mac-prep-host/HostLifetime.cs:608` refuses every `remove-model` whenever `_ollamaServer is not null`, but `_ollamaServer` is started lazily on the first pull at line 379 and reused for the rest of the sidecar lifetime (the MAC27 + MAC35 staging-pinned server design). The pull `finally` at line 450 clears `_activePullCts` but deliberately leaves `_ollamaServer` alive for batch reuse. Net effect: after a user adds any model from Manage Models, every subsequent Remove in the same sidecar session is refused with a message ("wait for the pull batch to complete") that is actively misleading — only closing Manage Models / restarting the sidecar unblocks remove.
+
+**Approach (sketch):**
+- Change the remove guard to inspect `_activePullCts` under `_pullCtsLock` rather than `_ollamaServer`.
+- If no pull is active and `_ollamaServer` exists, dispose it and set `_ollamaServer = null` before starting the SSD-pinned temp server for removal (otherwise port 11434 collides — the original D14 concern that motivated the guard in the first place).
+- Add a test that does `pull-model` → wait completion → `remove-model` in the same `HostLifetime` and expects success. Current `MacPrepHostRemoveModelTests` only pins refusal while a pull is in flight.
+
+**Affected files (expected):**
+- `mac-prep-host/HostLifetime.cs` — guard + idle-server-dispose path.
+- `tests/MacPrepHostRemoveModelTests.cs` — new post-pull remove pin.
+
+**Cross-OS audit:** Windows runner has no staging-pinned shared `_ollamaServer` instance (its remove flow uses `OllamaService` directly against the SSD models root with its own server lifetime per operation), so no sibling guard issue exists. No WPF mirror change required.
+
+**Exit criterion:** Mac PrepApp Manage Models → pull a model from the Add disclosure → wait for the pull to complete and the flow returns to `.manageModels` → click Remove on any installed model → row drops, sidecar log shows `Deleting <tag> from <ssd>/models via ollama rm…`, no `pull-in-flight` refusal. Pre-existing pin (Remove during in-flight pull still refuses with `reason=pull-in-flight`) keeps passing.
+
+**Watch for:** disposing `_ollamaServer` to free port 11434 must complete before `StartTemporaryServerAsync` is called for the remove — Ollama doesn't always release ports immediately on dispose, so a brief poll/retry may be needed if the test flakes.
+
+### M17 - Mac pull-exception fallback writes outside sidecar stdout lock
+
+**Status:** filed 2026-05-11 from Codex review of last 11 PRs (GH issue #278, MEDIUM). Originally surfaced by `gemini-code-assist` on PR #272. Mac-only.
+**Scope:** Small. `mac-prep-host/Program.cs` + `mac-prep-host/HostLifetime.cs` + a focused test.
+**Model:** Sonnet 4.6.
+
+**Driver:** PR #272 added a belt-and-suspenders fallback at `mac-prep-host/Program.cs:155` that emits `result: pull-model ok=false` if `HandleCommandAsync` throws BEFORE `PullModelAsync`'s inner try (e.g. ollamaExe missing, disk-full precheck). The fallback was critical — without it, Swift's `PrepHostController` waited forever on a stderr message it never reads, and the Mac UI hung at 100%. **But:** the fallback writes to `stdout` directly via `stdout.WriteLineAsync(...)`, bypassing the `_stdoutLock` that every other sidecar write goes through (`HostLifetime.WriteLineSafe` at line 1123). Since `pull-model` is detached via `Task.Run` at `Program.cs:128` (MAC31), the command loop can still process `cancel-pull` and emit `progress:` frames concurrently. A torn `result:` / `progress:` line breaks Swift's host protocol parser and reintroduces the exact hang #272 was meant to prevent.
+
+**Approach (sketch):**
+- Add `internal void EmitFailureResult(string command, object payload)` on `HostLifetime` that uses `WriteLineSafe` under `_stdoutLock` (mirrors the existing private `EmitResult` method, just exposed for `Program.cs` to call).
+- Replace the direct `stdout.WriteLineAsync(...)` block in `Program.cs:153-164` with `lifetime.EmitFailureResult("pull-model", new { ok = false, modelTag, reason = "pull-exception", message = ex.Message })`.
+- Keep the stderr write as-is — stderr has no protocol-parsing consumer.
+- Add a test that injects a throwing pre-pull dependency and writes a concurrent `progress:` frame; assert the captured stdout contains only whole, well-formed lines.
+
+**Affected files (expected):**
+- `mac-prep-host/HostLifetime.cs` — expose `EmitFailureResult` (or equivalent).
+- `mac-prep-host/Program.cs` — route the fallback through it.
+- `tests/MacPrepHostPullLifecycleTests.cs` (or `MacPrepHostConstructionTests.cs`) — interleaving pin.
+
+**Cross-OS audit:** Windows runner has no detached background command loop of this shape — `prep-app` WPF doesn't run a stdin-driven sidecar. No WPF mirror change required.
+
+**Exit criterion:** trigger a pre-pull exception path on Mac (e.g. delete the staging-side Ollama exe between `ensure-structure` and the user's Pull selected, or wedge the disk-full precheck) → the sidecar emits a clean single-line `result: pull-model {"ok":false,...}` even with concurrent `progress:` and `cancel-pull` activity on the same stdout. PR #272's hang-at-100% scenario still recovers cleanly.
+
+**Watch for:** the existing `try { } catch { /* parent likely gone */ }` swallow around the direct write must be preserved through the new locked path — otherwise a write to a closed stdout could re-throw inside the detached pull task and crash the sidecar.
+

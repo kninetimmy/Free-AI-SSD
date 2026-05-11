@@ -177,6 +177,66 @@ public sealed class MacPrepHostConstructionTests : IDisposable
     }
 
     [Fact]
+    public async Task EmitFailureResult_UnderConcurrentLoad_AlwaysWritesWholeWellFormedLines()
+    {
+        // M17 (GH #278): the pre-pull exception fallback in Program.cs
+        // used to call stdout.WriteLineAsync directly, bypassing
+        // HostLifetime._stdoutLock. Because pull-model runs on a
+        // detached Task.Run, the command loop can be writing
+        // `progress:` / `result:` frames for other commands at the same
+        // moment the fallback fires — and the direct write could
+        // interleave inside a single line. EmitFailureResult now routes
+        // through the same locked path. This pin spawns many concurrent
+        // callers and verifies every output line is a whole, parseable
+        // `result: pull-model {...}` frame.
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+        var lifetime = new HostLifetime(_tempRoot, "http://127.0.0.1:11434", stdout, stderr, testMode: true);
+        lifetime.Start();
+
+        const int writerCount = 32;
+        const int writesPerTask = 8;
+        var ready = new ManualResetEventSlim(initialState: false);
+        var tasks = new Task[writerCount];
+        for (var i = 0; i < writerCount; i++)
+        {
+            var writerId = i;
+            tasks[i] = Task.Run(() =>
+            {
+                ready.Wait();
+                for (var n = 0; n < writesPerTask; n++)
+                {
+                    lifetime.EmitFailureResult("pull-model", new
+                    {
+                        ok = false,
+                        modelTag = $"writer-{writerId}-line-{n}",
+                        reason = "pull-exception",
+                        message = $"synthetic interleave probe from writer {writerId} attempt {n}",
+                    });
+                }
+            });
+        }
+        ready.Set();
+        await Task.WhenAll(tasks);
+
+        // Every line that came out of the lifetime must be a whole,
+        // parseable frame. A torn line (e.g. two writers interleaving
+        // inside a single WriteLine) would produce a line that either
+        // doesn't start with `result:` or whose JSON tail fails to
+        // parse.
+        var lines = stdout.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var resultLines = lines.Where(l => l.StartsWith("result: pull-model ", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(writerCount * writesPerTask, resultLines.Length);
+        foreach (var line in resultLines)
+        {
+            var jsonPart = line.Substring("result: pull-model ".Length).TrimEnd('\r');
+            using var doc = System.Text.Json.JsonDocument.Parse(jsonPart);
+            Assert.Equal("pull-exception", doc.RootElement.GetProperty("reason").GetString());
+            Assert.False(doc.RootElement.GetProperty("ok").GetBoolean());
+        }
+    }
+
+    [Fact]
     public void NoOpDialogService_RefusesAllConfirmations()
     {
         // Defense-in-depth pin: the sidecar's IDialogService should never
