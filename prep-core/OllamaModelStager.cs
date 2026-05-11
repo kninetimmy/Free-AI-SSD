@@ -124,19 +124,24 @@ public static class OllamaModelStager
         Action<string> onLog,
         CancellationToken ct)
     {
-        if (!IsSafeModelTag(modelTag))
-            throw new InvalidOperationException($"Refusing to merge unsafe model tag '{modelTag}'.");
-        if (!TryParseModelReference(modelTag, out var modelName, out var manifestTag))
-            throw new InvalidOperationException($"Cannot parse model reference '{modelTag}'.");
+        // 2026-05-11 HF fix: delegate to ModelOperations' resolver so the
+        // hf.co/Owner/Repo subtree is handled consistently with
+        // FindModelBlobForModel / EstimatePartialProgress, AND so the
+        // local IsSafeModelTag (lowercase-only) doesn't refuse HF tags
+        // for having uppercase characters or slashes. The resolver's
+        // own allowlist still rejects path traversal and unsafe
+        // characters, so the hostile-tag refusal pin still passes.
+        if (!ModelOperations.TryResolveOllamaManifestPath(modelTag, out var manifestSubdir, out var manifestTag))
+            throw new InvalidOperationException($"Refusing to merge unsafe or malformed model tag '{modelTag}'.");
 
-        var stagingManifest = Path.Combine(stagingRoot, "manifests", "registry.ollama.ai", "library", modelName, manifestTag);
+        var stagingManifest = Path.Combine(stagingRoot, "manifests", manifestSubdir, manifestTag);
         if (!File.Exists(stagingManifest))
             throw new FileNotFoundException(
                 $"Staging manifest missing at {stagingManifest}. Pull may have failed silently.", stagingManifest);
 
         var stagingBlobs = Path.Combine(stagingRoot, "blobs");
         var ssdBlobs = Path.Combine(ssdModelsRoot, "blobs");
-        var ssdManifestDir = Path.Combine(ssdModelsRoot, "manifests", "registry.ollama.ai", "library", modelName);
+        var ssdManifestDir = Path.Combine(ssdModelsRoot, "manifests", manifestSubdir);
         Directory.CreateDirectory(ssdBlobs);
         Directory.CreateDirectory(ssdManifestDir);
 
@@ -281,34 +286,4 @@ public static class OllamaModelStager
         return hex;
     }
 
-    private static bool TryParseModelReference(string model, out string modelName, out string tag)
-    {
-        modelName = string.Empty;
-        tag = string.Empty;
-        if (string.IsNullOrWhiteSpace(model)) return false;
-        var separatorIndex = model.LastIndexOf(':');
-        if (separatorIndex <= 0 || separatorIndex >= model.Length - 1) return false;
-        modelName = model[..separatorIndex].Trim();
-        tag = model[(separatorIndex + 1)..].Trim();
-        return modelName.Length > 0 && tag.Length > 0;
-    }
-
-    /// <summary>
-    /// Same allowlist as <see cref="ModelOperations.EstimatePartialProgress"/>
-    /// uses — bounds the path construction inside <see cref="MergeToSsdAsync"/>
-    /// so a hostile tag can't coerce a path-traversal write under
-    /// <c>ssdModelsRoot</c>.
-    /// </summary>
-    private static bool IsSafeModelTag(string modelTag)
-    {
-        if (string.IsNullOrWhiteSpace(modelTag)) return false;
-        foreach (var c in modelTag)
-        {
-            var ok = (c >= 'a' && c <= 'z')
-                  || (c >= '0' && c <= '9')
-                  || c == '.' || c == '_' || c == '-' || c == ':';
-            if (!ok) return false;
-        }
-        return !modelTag.Contains("..", StringComparison.Ordinal);
-    }
 }
