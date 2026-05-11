@@ -167,14 +167,17 @@ public sealed class MacPrepHostRemoveModelTests : IDisposable
     }
 
     [Fact]
-    public async Task RemoveModel_AfterPullStartsServerInSameLifetime_RefusesWithPullInFlight()
+    public async Task RemoveModel_AfterPullCompletesInSameLifetime_DisposesIdleServerAndSucceeds()
     {
-        // C6 risk #3: a pull batch in this sidecar lifetime has already
-        // bound port 11434 to _ollamaServer (pinned to the staging root).
-        // Starting a second server on the same port would fail; reusing
-        // the pull-time server against the SSD models root would no-op.
-        // The remove arm refuses with pull-in-flight so the UI surfaces
-        // "wait until the pull finishes."
+        // M16 (GH #277): the pre-fix guard refused every remove whenever
+        // `_ollamaServer is not null`, but that server is started lazily
+        // on the first pull and reused for the rest of the sidecar
+        // lifetime (MAC27 + MAC35). So after any completed pull, every
+        // subsequent Remove was permanently refused for the session,
+        // with a misleading "wait for the pull batch to complete"
+        // message that waiting could never resolve. The fix checks
+        // `_activePullCts` (the real in-flight signal) and disposes the
+        // idle staging server before starting the SSD-pinned temp server.
         var ollamaPackage = new FakeOllamaPackageService(resolvedExe: "/fake/ollama", host: "127.0.0.1:54321");
         var modelService = new FakeModelService();
         using var stdout = new StringWriter();
@@ -189,18 +192,79 @@ public sealed class MacPrepHostRemoveModelTests : IDisposable
         // Run a pull first to start _ollamaServer against the staging root.
         await lifetime.HandleCommandAsync("pull-model llama3.2:1b");
         Assert.Equal(1, ollamaPackage.StartTemporaryServerCallCount);
+        var stagingServerHandle = ollamaPackage.LastHandle;
+        Assert.NotNull(stagingServerHandle);
 
         // Clear stdout snapshot of pull so we only inspect remove output.
         var pullOutput = stdout.ToString();
 
         await lifetime.HandleCommandAsync("remove-model qwen2.5:0.5b");
 
-        // Remove must NOT start a second server.
+        // The idle staging-pinned server must have been disposed to free
+        // port 11434 before the SSD-pinned server starts.
+        Assert.True(stagingServerHandle!.Disposed,
+            "Idle staging-pinned _ollamaServer must be disposed before the SSD-pinned temp server starts.");
+
+        // A second server must have started — pinned to the SSD models
+        // root, not the staging root.
+        Assert.Equal(2, ollamaPackage.StartTemporaryServerCallCount);
+        var ssdModelsRoot = Path.Combine(_tempRoot, SsdLayout.Models);
+        Assert.Equal(ssdModelsRoot, ollamaPackage.LastModelsRoot);
+
+        // DeleteModelAsync ran with the SSD models root.
+        Assert.Single(modelService.DeleteCalls);
+        Assert.Equal(ssdModelsRoot, modelService.DeleteCalls[0].ModelsRoot);
+        Assert.Equal("qwen2.5:0.5b", modelService.DeleteCalls[0].ModelTag);
+
+        // ok=true on the remove channel.
+        var removeOutput = stdout.ToString().Substring(pullOutput.Length);
+        Assert.Contains("\"ok\":true", removeOutput);
+        Assert.DoesNotContain("\"reason\":\"pull-in-flight\"", removeOutput);
+    }
+
+    [Fact]
+    public async Task RemoveModel_WhilePullIsActuallyInFlight_RefusesWithPullInFlight()
+    {
+        // M16 (GH #277): the in-flight refusal contract must survive the
+        // guard fix. Production's Program.cs detaches pull-model so the
+        // command loop CAN dispatch a remove while a pull is still
+        // running — that case must still refuse cleanly. The fake's
+        // pull task blocks on `releaseTcs` so the remove call lands
+        // while `_activePullCts` is set.
+        var ollamaPackage = new FakeOllamaPackageService(resolvedExe: "/fake/ollama", host: "127.0.0.1:54321");
+        var enteredTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var modelService = new FakeModelService(
+            pullEntered: enteredTcs,
+            pullRelease: releaseTcs.Task);
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        await using var lifetime = new HostLifetime(
+            _tempRoot, "http://127.0.0.1:11434", stdout, stderr,
+            ollamaPackage: ollamaPackage, modelService: modelService, testMode: false,
+            stagingRootResolver: () => _stagingRoot);
+        lifetime.Start();
+
+        // Fire-and-forget the pull; await the entry signal so the pull
+        // is parked inside PullModelAsync with _activePullCts already set.
+        var pullTask = lifetime.HandleCommandAsync("pull-model llama3.2:1b");
+        await enteredTcs.Task;
+
+        var pullStdoutPrefix = stdout.ToString();
+
+        await lifetime.HandleCommandAsync("remove-model qwen2.5:0.5b");
+
+        // Remove must refuse and must NOT start a second server.
         Assert.Equal(1, ollamaPackage.StartTemporaryServerCallCount);
         Assert.Empty(modelService.DeleteCalls);
-        var removeOutput = stdout.ToString().Substring(pullOutput.Length);
+        var removeOutput = stdout.ToString().Substring(pullStdoutPrefix.Length);
         Assert.Contains("\"ok\":false", removeOutput);
         Assert.Contains("\"reason\":\"pull-in-flight\"", removeOutput);
+
+        // Release the pull and drain so the lifetime can dispose cleanly.
+        releaseTcs.SetResult();
+        await pullTask;
     }
 
     // --- Fakes ----------------------------------------------------------
@@ -252,7 +316,16 @@ public sealed class MacPrepHostRemoveModelTests : IDisposable
 
     private sealed class FakeModelService : IModelService
     {
+        private readonly TaskCompletionSource? _pullEntered;
+        private readonly Task? _pullRelease;
+
         public List<DeleteCall> DeleteCalls { get; } = new();
+
+        public FakeModelService(TaskCompletionSource? pullEntered = null, Task? pullRelease = null)
+        {
+            _pullEntered = pullEntered;
+            _pullRelease = pullRelease;
+        }
 
         public Task DeleteModelAsync(string ollamaExe, string modelsRoot, string modelTag,
             Action<string> onLog, CancellationToken ct, string? ollamaHost = null)
@@ -262,16 +335,23 @@ public sealed class MacPrepHostRemoveModelTests : IDisposable
         }
 
         // The C6 remove path doesn't exercise pull — but a pull-then-remove
-        // test needs PullModelAsync to be a no-op rather than throw.
-        public Task<ModelPullResult> PullModelAsync(
+        // test needs PullModelAsync to be a no-op rather than throw. M16's
+        // in-flight test additionally needs the pull to park here so the
+        // remove call lands while `_activePullCts` is still set.
+        public async Task<ModelPullResult> PullModelAsync(
             string ollamaExe, string modelsRoot, string modelTag,
             Action<string> onLog, CancellationToken ct, string? ollamaHost = null,
             Action<OllamaPullProgress>? onProgress = null)
         {
+            _pullEntered?.TrySetResult();
+            if (_pullRelease is not null)
+            {
+                await _pullRelease.WaitAsync(ct);
+            }
             // Write a minimal staging artifact so MergeToSsdAsync's manifest
             // copy doesn't blow up the test setup.
             WriteSyntheticPullArtifacts(modelsRoot, modelTag);
-            return Task.FromResult(new ModelPullResult("0".PadRight(64, '0'), 1234));
+            return new ModelPullResult("0".PadRight(64, '0'), 1234);
         }
 
         private static void WriteSyntheticPullArtifacts(string modelsRoot, string modelTag)

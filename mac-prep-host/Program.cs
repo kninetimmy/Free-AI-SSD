@@ -149,18 +149,25 @@ namespace FreeAiSsd.MacPrepHost
                             // Swift's PrepHostController unblocks rather
                             // than waiting forever on a stderr message
                             // it never reads.
+                            //
+                            // M17 (GH #278): route through
+                            // HostLifetime.EmitFailureResult so the write
+                            // serializes through the same _stdoutLock the
+                            // rest of the sidecar uses. Writing directly
+                            // to stdout from this detached task could
+                            // interleave with concurrent progress: /
+                            // result: frames on the command loop and tear
+                            // a line that Swift's parser rejects.
                             var modelTag = ExtractPullModelTag(pullLine);
                             try
                             {
-                                await stdout.WriteLineAsync(
-                                    "result: pull-model " +
-                                    System.Text.Json.JsonSerializer.Serialize(new
-                                    {
-                                        ok = false,
-                                        modelTag,
-                                        reason = "pull-exception",
-                                        message = ex.Message,
-                                    }));
+                                lifetime.EmitFailureResult("pull-model", new
+                                {
+                                    ok = false,
+                                    modelTag,
+                                    reason = "pull-exception",
+                                    message = ex.Message,
+                                });
                             }
                             catch { /* parent likely gone */ }
                             try { await stderr.WriteLineAsync($"Command failed ('{pullLine}'): {ex.Message}"); }

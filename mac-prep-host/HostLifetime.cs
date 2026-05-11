@@ -599,22 +599,58 @@ internal sealed class HostLifetime : IAsyncDisposable
             return;
         }
 
-        // Port-collision guard: a pull batch in this sidecar lifetime has
-        // already bound port 11434 to _ollamaServer (pinned to staging).
-        // Starting a second server on the same port would fail; reusing
-        // the existing one against the SSD models root would no-op (its
-        // OLLAMA_MODELS is the staging tree). Refuse with a clean reason
-        // so the UI can surface "wait for the pull to finish."
+        // M16 (GH #277): the guard must check whether a pull is ACTUALLY
+        // in flight, not whether _ollamaServer exists. _ollamaServer is
+        // started lazily on the first pull (line 391) and reused across
+        // the batch — it stays alive for the rest of the sidecar lifetime
+        // by design (MAC27 + MAC35). The pre-fix guard checked
+        // `_ollamaServer is not null`, which permanently blocked Remove
+        // after any successful pull and surfaced a misleading "wait for
+        // the pull batch to complete" message that waiting could never
+        // fix. The real in-flight signal is `_activePullCts`, which the
+        // pull task sets at line 356 and clears in its finally at line
+        // 454. Read it under _pullCtsLock to stay race-free against a
+        // concurrent pull task — production's Program.cs detaches pulls
+        // so the remove arm CAN execute while a pull is still running,
+        // and that case must still refuse cleanly.
+        lock (_pullCtsLock)
+        {
+            if (_activePullCts is not null)
+            {
+                EmitResult("remove-model", new
+                {
+                    ok = false,
+                    modelTag,
+                    reason = "pull-in-flight",
+                    message = "Remove is unavailable while a model pull is running in this sidecar lifetime. Wait for the pull batch to complete and try again."
+                });
+                return;
+            }
+        }
+
+        // No pull is in flight, but a previous pull may have left
+        // _ollamaServer bound to port 11434 (pinned to the staging root).
+        // Dispose it now so the SSD-pinned temp server below can claim
+        // the port. Reusing the staging-pinned server against the SSD
+        // models root would no-op (its OLLAMA_MODELS env is the staging
+        // tree), causing a silent "removed" result while the blob stays
+        // on disk — the original D14 data-integrity concern.
         if (_ollamaServer is not null)
         {
-            EmitResult("remove-model", new
+            EmitLog("Disposing idle staging-pinned Ollama server before remove (frees port 11434).");
+            try
             {
-                ok = false,
-                modelTag,
-                reason = "pull-in-flight",
-                message = "Remove is unavailable while a model pull is running in this sidecar lifetime. Wait for the pull batch to complete and try again."
-            });
-            return;
+                _ollamaServer.Dispose();
+            }
+            catch (Exception ex)
+            {
+                // Dispose throwing should not block the remove — log and
+                // proceed. The subsequent StartTemporaryServerAsync will
+                // surface a clean port-bind failure if the port really
+                // is still held.
+                EmitLog($"Idle Ollama server dispose threw (continuing): {ex.Message}");
+            }
+            _ollamaServer = null;
         }
 
         var ssdModelsRoot = Path.Combine(_ssdRoot, SsdLayout.Models);
@@ -1119,6 +1155,21 @@ internal sealed class HostLifetime : IAsyncDisposable
         var json = JsonSerializer.Serialize(payload, ResultOptions);
         WriteLineSafe($"result: {command} {json}");
     }
+
+    /// <summary>
+    /// M17 (GH #278): Program.cs's pre-pull exception fallback used to
+    /// write its <c>result: pull-model …</c> line directly to stdout via
+    /// <c>WriteLineAsync</c>, bypassing <see cref="_stdoutLock"/>. Because
+    /// pull-model runs on a detached <see cref="Task.Run"/> while the
+    /// command loop keeps emitting <c>progress:</c> and result frames for
+    /// other commands, two threads could write stdout concurrently and
+    /// produce a torn line that Swift's <c>PrepHostController</c> parser
+    /// rejects — reintroducing the 100%-hang class PR #272 was meant to
+    /// prevent. This entrypoint routes the fallback through the same
+    /// lock every other sidecar write uses.
+    /// </summary>
+    internal void EmitFailureResult(string command, object payload)
+        => EmitResult(command, payload);
 
     private void WriteLineSafe(string line)
     {
