@@ -158,6 +158,9 @@ internal sealed class HostLifetime : IAsyncDisposable
                 CancelActivePull();
                 EmitResult("cancel-pull", new { ok = true });
                 break;
+            case "remove-model":
+                await RemoveModelAsync(payload, ct);
+                break;
             case "verify-model":
                 await VerifyModelAsync(payload, ct);
                 break;
@@ -565,6 +568,95 @@ internal sealed class HostLifetime : IAsyncDisposable
             // CTS may have been disposed between the read and the cancel
             // (the pull-model finally block races with us). Safe to
             // ignore — the pull is no longer in flight.
+        }
+    }
+
+    /// <summary>
+    /// C6 Stage 3: removes a model from the SSD via the shared
+    /// <see cref="IModelService.DeleteModelAsync"/> path (the same
+    /// implementation Windows PrepApp uses). Uses a *short-lived*
+    /// temp Ollama server pinned to <c><ssdRoot>/models</c> — the
+    /// long-lived <c>_ollamaServer</c> is pinned to the staging root
+    /// and would no-op against SSD blobs. To avoid port-11434 collisions
+    /// the arm refuses with <c>reason=pull-in-flight</c> when a pull
+    /// has already started a server in this sidecar lifetime; the user
+    /// is asked to wait until the pull batch completes.
+    /// </summary>
+    private async Task RemoveModelAsync(string payload, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            EmitResult("remove-model", new { ok = false, reason = "invalid-payload", message = "remove-model requires a model tag argument." });
+            return;
+        }
+
+        var modelTag = payload.Trim();
+
+        if (_testMode)
+        {
+            EmitLog($"test-mode: skipping RemoveModelAsync for {modelTag}");
+            EmitResult("remove-model", new { ok = true, testMode = true, modelTag });
+            return;
+        }
+
+        // Port-collision guard: a pull batch in this sidecar lifetime has
+        // already bound port 11434 to _ollamaServer (pinned to staging).
+        // Starting a second server on the same port would fail; reusing
+        // the existing one against the SSD models root would no-op (its
+        // OLLAMA_MODELS is the staging tree). Refuse with a clean reason
+        // so the UI can surface "wait for the pull to finish."
+        if (_ollamaServer is not null)
+        {
+            EmitResult("remove-model", new
+            {
+                ok = false,
+                modelTag,
+                reason = "pull-in-flight",
+                message = "Remove is unavailable while a model pull is running in this sidecar lifetime. Wait for the pull batch to complete and try again."
+            });
+            return;
+        }
+
+        var ssdModelsRoot = Path.Combine(_ssdRoot, SsdLayout.Models);
+        var ollamaDir = Path.Combine(_ssdRoot, SsdLayout.MacOllama);
+        var ollamaExe = _ollamaPackage.ResolveOllamaExe(ollamaDir);
+        if (ollamaExe is null)
+        {
+            EmitResult("remove-model", new
+            {
+                ok = false,
+                modelTag,
+                reason = "ollama-missing",
+                message = $"Mac Ollama binary missing at {ollamaDir}; cannot remove without a server."
+            });
+            return;
+        }
+
+        try
+        {
+            // Server scope is the lifetime of this method only — disposed
+            // before we return so a subsequent pull can claim port 11434.
+            using var serverHandle = await _ollamaPackage.StartTemporaryServerAsync(
+                ollamaExe, ssdModelsRoot, EmitLog, ct);
+
+            EmitLog($"Deleting {modelTag} from {ssdModelsRoot} via ollama rm…");
+            await _modelService.DeleteModelAsync(
+                ollamaExe, ssdModelsRoot, modelTag, EmitLog, ct, serverHandle.Host);
+            EmitResult("remove-model", new { ok = true, modelTag });
+        }
+        catch (OperationCanceledException)
+        {
+            EmitResult("remove-model", new { ok = false, modelTag, cancelled = true });
+        }
+        catch (Exception ex)
+        {
+            EmitResult("remove-model", new
+            {
+                ok = false,
+                modelTag,
+                reason = "remove-exception",
+                message = ex.Message
+            });
         }
     }
 
