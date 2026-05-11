@@ -3550,6 +3550,12 @@ The catch logs but doesn't track a `failedTags` list, and the loop tail at `1190
 
 ### M16 - Mac `remove-model` permanently blocked after first pull in sidecar session
 
+**Status:** **done** — PR #281 merged `38ff406` (2026-05-11). Fix matched the planned approach exactly: the remove guard now reads `_activePullCts` under `_pullCtsLock` (replacing the `_ollamaServer is not null` check around `mac-prep-host/HostLifetime.cs:608`), and an idle-server-dispose path runs before the SSD-pinned temp server starts so port 11434 is free. Two test pins: `RemoveModel_AfterPullCompletesInSameLifetime_DisposesIdleServerAndSucceeds` (flipped from the pre-fix refusal pin) and a new `RemoveModel_WhilePullIsActuallyInFlight_RefusesWithPullInFlight` using a TaskCompletionSource-gated fake to park the pull inside `PullModelAsync` so remove lands while `_activePullCts` is still set. **No surprises** — the bug shape was exactly what the GH issue described; the fix landed in one pass with CI green first run.
+
+---
+
+**(Original filing preserved below for archeology.)**
+
 **Status:** filed 2026-05-11 from Codex review of last 11 PRs (GH issue #277, HIGH). Originally surfaced by `gemini-code-assist` on PR #274. Mac-only (`mac-prep-host/HostLifetime.cs` + Swift UI path back into Remove).
 **Scope:** Small. `mac-prep-host/HostLifetime.cs` + a new test pin.
 **Model:** Sonnet 4.6.
@@ -3572,6 +3578,12 @@ The catch logs but doesn't track a `failedTags` list, and the loop tail at `1190
 **Watch for:** disposing `_ollamaServer` to free port 11434 must complete before `StartTemporaryServerAsync` is called for the remove — Ollama doesn't always release ports immediately on dispose, so a brief poll/retry may be needed if the test flakes.
 
 ### M17 - Mac pull-exception fallback writes outside sidecar stdout lock
+
+**Status:** **done** — PR #281 merged `38ff406` (2026-05-11). Fix matched the planned approach: new internal `HostLifetime.EmitFailureResult(string command, object payload)` routes through the same `EmitResult` → `WriteLineSafe` locked path the rest of the sidecar uses; `mac-prep-host/Program.cs`'s pre-pull exception fallback now calls it instead of writing `stdout.WriteLineAsync` directly. Concurrency pin (`EmitFailureResult_UnderConcurrentLoad_AlwaysWritesWholeWellFormedLines`) spawns 32 writers × 8 emits and asserts every output line is a whole, parseable `result: pull-model {...}` frame. **No surprises.**
+
+---
+
+**(Original filing preserved below for archeology.)**
 
 **Status:** filed 2026-05-11 from Codex review of last 11 PRs (GH issue #278, MEDIUM). Originally surfaced by `gemini-code-assist` on PR #272. Mac-only.
 **Scope:** Small. `mac-prep-host/Program.cs` + `mac-prep-host/HostLifetime.cs` + a focused test.

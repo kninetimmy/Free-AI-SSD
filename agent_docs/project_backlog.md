@@ -114,8 +114,8 @@ Three flat buckets, one counter per bucket:
 | ~~M13~~ | (new) | ~~"Expose API on LAN" toggle reverts itself on Mac~~ — **done** PR #249 (`e6b958e`) 2026-05-10 | mac_project_backlog.md |
 | ~~M14~~ | (new) | ~~Mac runner "Pull embedding model" UI button (parity with WPF; defense-in-depth for C2)~~ — **done** PR #257 (`31f1bbc`) 2026-05-10 | mac_project_backlog.md |
 | M15 | (new) | Mac PrepApp: don't auto-advance past pull failure (surface inline so user can read error) | mac_project_backlog.md |
-| M16 | (new) | Mac `remove-model` permanently blocked after first pull in sidecar session (GH #277) | mac_project_backlog.md |
-| M17 | (new) | Mac pull-exception fallback writes outside sidecar stdout lock (GH #278) | mac_project_backlog.md |
+| ~~M16~~ | (new) | ~~Mac `remove-model` permanently blocked after first pull in sidecar session~~ — **done** PR #281 (`38ff406`) 2026-05-11 (GH #277) | mac_project_backlog.md |
+| ~~M17~~ | (new) | ~~Mac pull-exception fallback writes outside sidecar stdout lock~~ — **done** PR #281 (`38ff406`) 2026-05-11 (GH #278) | mac_project_backlog.md |
 | M18 | (new) | Mac Manage Models: disabled Add disclosure hides the encrypted-drive C7 explanation (GH #279) | mac_project_backlog.md |
 | M19 | (new) | Mac sidecar HF commands hand-roll JSON instead of using `JSONSerialization` (GH #280) | mac_project_backlog.md |
 
