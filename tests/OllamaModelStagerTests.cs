@@ -190,6 +190,41 @@ public sealed class OllamaModelStagerTests : IDisposable
             OllamaModelStager.MergeToSsdAsync(_staging, _ssd, "llama3.2:1b", _ => { }, CancellationToken.None));
     }
 
+    /// <summary>
+    /// 2026-05-11 HF pull regression: Ollama's HF pull writes the
+    /// manifest under <c>manifests/hf.co/&lt;owner&gt;/&lt;repo&gt;/&lt;quant&gt;</c>,
+    /// so the merge must read from and write to the same subtree
+    /// (not <c>registry.ollama.ai/library/...</c>). Without this fix
+    /// the merge step threw <c>FileNotFoundException</c> for the
+    /// staging manifest on every HF pull, even though Ollama had
+    /// already written it — surfacing as "Pull failed" in the sidecar
+    /// log after a successful 100 % download.
+    /// </summary>
+    [Fact]
+    public async Task MergeToSsd_HuggingFaceTag_PublishesUnderHfSubtree()
+    {
+        var digests = WriteSyntheticHuggingFacePull(
+            _staging, "Andycurrent", "Gemma-3-1B-it_GGUF", "Q2_K",
+            layers: new[] { (size: 1024L, payload: (byte)0x77) });
+
+        await OllamaModelStager.MergeToSsdAsync(
+            _staging, _ssd,
+            "hf.co/Andycurrent/Gemma-3-1B-it_GGUF:Q2_K",
+            _ => { }, CancellationToken.None);
+
+        Assert.True(File.Exists(Path.Combine(_ssd, "blobs", "sha256-" + digests[0])));
+        var ssdManifest = Path.Combine(
+            _ssd, "manifests", "hf.co", "Andycurrent", "Gemma-3-1B-it_GGUF", "Q2_K");
+        Assert.True(File.Exists(ssdManifest));
+        // Sanity: the merge must NOT publish to the library subtree —
+        // mixing locations would let DiscoverModelsOnDisk surface the
+        // same model under two different ids.
+        var wrongPath = Path.Combine(
+            _ssd, "manifests", "registry.ollama.ai", "library",
+            "hf.co", "Andycurrent", "Gemma-3-1B-it_GGUF", "Q2_K");
+        Assert.False(File.Exists(wrongPath));
+    }
+
     [Fact]
     public void EnsureStagingFreeSpace_VolumeWithRoom_DoesNotThrow()
     {
@@ -254,6 +289,39 @@ public sealed class OllamaModelStagerTests : IDisposable
             File.WriteAllBytes(Path.Combine(blobsDir, "sha256-" + digests[i]), blob);
         }
         File.WriteAllText(Path.Combine(manifestDir, manifestTag), "{\"layers\":[" + layerJson + "]}");
+        return digests;
+    }
+
+    /// <summary>
+    /// 2026-05-11 HF fix companion to <see cref="WriteSyntheticPull"/>:
+    /// writes the manifest at the <c>manifests/hf.co/&lt;owner&gt;/&lt;repo&gt;/&lt;quant&gt;</c>
+    /// path Ollama actually uses for HF GGUF pulls, plus matching blobs.
+    /// Owner/repo casing is preserved (HF allows mixed case and the
+    /// previous lowercase-only allowlist refused it).
+    /// </summary>
+    private static string[] WriteSyntheticHuggingFacePull(
+        string root, string owner, string repo, string quant, (long size, byte payload)[] layers)
+    {
+        var manifestDir = Path.Combine(root, "manifests", "hf.co", owner, repo);
+        var blobsDir = Path.Combine(root, "blobs");
+        Directory.CreateDirectory(manifestDir);
+        Directory.CreateDirectory(blobsDir);
+
+        var digests = new string[layers.Length];
+        var layerJson = new System.Text.StringBuilder();
+        for (var i = 0; i < layers.Length; i++)
+        {
+            digests[i] = "fedcba9876543210".PadRight(64, (char)('a' + i));
+            if (i > 0) layerJson.Append(',');
+            layerJson.Append("{\"digest\":\"sha256:").Append(digests[i])
+                     .Append("\",\"size\":").Append(layers[i].size)
+                     .Append(",\"mediaType\":\"application/vnd.ollama.image.layer.model\"}");
+
+            var blob = new byte[layers[i].size];
+            Array.Fill(blob, layers[i].payload);
+            File.WriteAllBytes(Path.Combine(blobsDir, "sha256-" + digests[i]), blob);
+        }
+        File.WriteAllText(Path.Combine(manifestDir, quant), "{\"layers\":[" + layerJson + "]}");
         return digests;
     }
 }

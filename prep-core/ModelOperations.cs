@@ -146,8 +146,24 @@ public sealed class ModelOperations
                 continue;
             }
 
-            // Last two path segments are the model name and tag.
-            var modelId = $"{parts[^2]}:{parts[^1]}";
+            // 2026-05-11 HF fix: Ollama writes HF model manifests under
+            // `manifests/hf.co/<owner>/<repo>/<quant>` (4 segments), not
+            // the `registry.ollama.ai/library/<name>/<tag>` layout (4
+            // segments too, but the leading two are constant). The prior
+            // `parts[^2]:parts[^1]` heuristic dropped the `hf.co/<owner>/`
+            // prefix and reported HF models as just `<repo>:<quant>` —
+            // the picker then couldn't reconcile installed HF rows with
+            // the catalog entries that use the full `hf.co/...` tag, so
+            // freshly-pulled HF models always showed up as "not on disk".
+            string modelId;
+            if (parts.Length >= 4 && string.Equals(parts[0], "hf.co", StringComparison.OrdinalIgnoreCase))
+            {
+                modelId = $"hf.co/{parts[^3]}/{parts[^2]}:{parts[^1]}";
+            }
+            else
+            {
+                modelId = $"{parts[^2]}:{parts[^1]}";
+            }
             discovered.Add(modelId);
         }
 
@@ -164,12 +180,12 @@ public sealed class ModelOperations
     /// <returns>Full path to the model blob file, or null.</returns>
     public static string? FindModelBlobForModel(string modelRoot, string model)
     {
-        if (!TryParseModelReference(model, out var modelName, out var manifestTag))
+        if (!TryResolveOllamaManifestPath(model, out var manifestSubdir, out var manifestTag))
         {
             return null;
         }
 
-        var manifestsPath = Path.Combine(modelRoot, "manifests", "registry.ollama.ai", "library", modelName);
+        var manifestsPath = Path.Combine(modelRoot, "manifests", manifestSubdir);
         if (!Directory.Exists(manifestsPath))
         {
             return null;
@@ -231,6 +247,92 @@ public sealed class ModelOperations
         modelName = model[..separatorIndex].Trim();
         tag = model[(separatorIndex + 1)..].Trim();
         return modelName.Length > 0 && tag.Length > 0;
+    }
+
+    /// <summary>
+    /// 2026-05-11 HF fix: resolves the on-disk manifest subdirectory and
+    /// filename for a model tag, handling both ollama.com library tags
+    /// (e.g. <c>llama3.2:1b</c> → <c>registry.ollama.ai/library/llama3.2</c> + <c>1b</c>)
+    /// and Hugging Face tags (e.g. <c>hf.co/Owner/Repo:Q4_K_M</c> →
+    /// <c>hf.co/Owner/Repo</c> + <c>Q4_K_M</c>). Before this helper, the
+    /// hardcoded <c>registry.ollama.ai/library/{name}</c> path made every
+    /// HF pull fail in <see cref="FindModelBlobForModel"/> after Ollama
+    /// had already written the manifest under the <c>hf.co/</c> subtree —
+    /// the user saw "model downloaded fully then failed" because the
+    /// pull HTTP stream succeeded but the post-pull hash step couldn't
+    /// find the blob.
+    ///
+    /// Each component is validated against an allowlist that rejects
+    /// path-traversal (<c>..</c>), separators (<c>/</c>, <c>\</c>), and
+    /// any character outside <c>[A-Za-z0-9._-]</c>. HF tags must have
+    /// exactly two components after the <c>hf.co/</c> prefix (owner and
+    /// repo); deeper or shorter paths fail closed.
+    /// </summary>
+    /// <param name="modelTag">Full model tag (e.g. <c>llama3.2:1b</c> or
+    /// <c>hf.co/Owner/Repo:Q4_K_M</c>).</param>
+    /// <param name="manifestSubdir">On success, the directory path
+    /// relative to <c>&lt;modelRoot&gt;/manifests/</c> where the manifest
+    /// file lives.</param>
+    /// <param name="manifestTag">On success, the manifest filename (the
+    /// part after the last colon in the model tag).</param>
+    /// <returns><c>true</c> if the tag is well-formed and safe.</returns>
+    public static bool TryResolveOllamaManifestPath(
+        string modelTag,
+        out string manifestSubdir,
+        out string manifestTag)
+    {
+        manifestSubdir = string.Empty;
+        manifestTag = string.Empty;
+
+        if (!TryParseModelReference(modelTag, out var modelName, out var tag))
+        {
+            return false;
+        }
+        if (!IsSafeManifestPathSegment(tag))
+        {
+            return false;
+        }
+
+        const string HfPrefix = "hf.co/";
+        if (modelName.StartsWith(HfPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            var rest = modelName.Substring(HfPrefix.Length);
+            var parts = rest.Split('/');
+            if (parts.Length != 2)
+            {
+                return false;
+            }
+            if (!IsSafeManifestPathSegment(parts[0]) || !IsSafeManifestPathSegment(parts[1]))
+            {
+                return false;
+            }
+            manifestSubdir = Path.Combine("hf.co", parts[0], parts[1]);
+            manifestTag = tag;
+            return true;
+        }
+
+        if (!IsSafeManifestPathSegment(modelName))
+        {
+            return false;
+        }
+        manifestSubdir = Path.Combine("registry.ollama.ai", "library", modelName);
+        manifestTag = tag;
+        return true;
+    }
+
+    private static bool IsSafeManifestPathSegment(string segment)
+    {
+        if (string.IsNullOrWhiteSpace(segment)) return false;
+        if (segment.Contains("..", StringComparison.Ordinal)) return false;
+        foreach (var c in segment)
+        {
+            var ok = (c >= 'a' && c <= 'z')
+                  || (c >= 'A' && c <= 'Z')
+                  || (c >= '0' && c <= '9')
+                  || c == '.' || c == '_' || c == '-';
+            if (!ok) return false;
+        }
+        return true;
     }
 
     /// <summary>
@@ -482,17 +584,18 @@ public sealed class ModelOperations
             return 0.0;
         }
 
-        if (!IsSafeModelTag(modelTag))
+        // 2026-05-11 HF fix: the helper performs its own safety check
+        // (rejects `..`, path separators, characters outside `[A-Za-z0-9._-]`)
+        // AND understands the `hf.co/Owner/Repo` subtree, replacing the
+        // prior IsSafeModelTag + hardcoded-path combo that returned 0
+        // for every HF tag (uppercase + slashes failed the allowlist
+        // before the path was even built).
+        if (!TryResolveOllamaManifestPath(modelTag, out var manifestSubdir, out var manifestTag))
         {
             return 0.0;
         }
 
-        if (!TryParseModelReference(modelTag, out var modelName, out var manifestTag))
-        {
-            return 0.0;
-        }
-
-        var manifestPath = Path.Combine(modelsRoot, "manifests", "registry.ollama.ai", "library", modelName, manifestTag);
+        var manifestPath = Path.Combine(modelsRoot, "manifests", manifestSubdir, manifestTag);
         if (!File.Exists(manifestPath))
         {
             return 0.0;
@@ -569,26 +672,6 @@ public sealed class ModelOperations
         return Math.Clamp(fraction, 0.0, 1.0);
     }
 
-    /// <summary>
-    /// MAC31: bounds <see cref="EstimatePartialProgress"/>'s path
-    /// construction to the same character set Ollama tags use
-    /// (lowercase alphanumerics, dot, underscore, hyphen, optional
-    /// <c>:tag</c> suffix). Anything outside that — including <c>..</c>,
-    /// path separators, or whitespace — fails closed. Mirrors the
-    /// PathGuards posture for user-supplied path segments.
-    /// </summary>
-    private static bool IsSafeModelTag(string modelTag)
-    {
-        if (string.IsNullOrWhiteSpace(modelTag)) return false;
-        foreach (var c in modelTag)
-        {
-            var ok = (c >= 'a' && c <= 'z')
-                  || (c >= '0' && c <= '9')
-                  || c == '.' || c == '_' || c == '-' || c == ':';
-            if (!ok) return false;
-        }
-        return !modelTag.Contains("..", StringComparison.Ordinal);
-    }
 }
 
 /// <summary>

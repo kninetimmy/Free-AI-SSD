@@ -237,4 +237,154 @@ public sealed class ModelOperationsTests
         Assert.False(ok);
         Assert.Equal(string.Empty, digest);
     }
+
+    /// <summary>
+    /// 2026-05-11 HF pull regression: Ollama writes Hugging Face GGUF
+    /// manifests under <c>manifests/hf.co/&lt;owner&gt;/&lt;repo&gt;/&lt;quant&gt;</c>,
+    /// not the <c>registry.ollama.ai/library/</c> path used for stock
+    /// Ollama models. Before this pin, <see cref="ModelOperations.FindModelBlobForModel"/>
+    /// hardcoded the registry path and returned null for every HF tag,
+    /// which surfaced as "Pull failed: Unable to locate model blob" in
+    /// the sidecar log AFTER Ollama's NDJSON stream emitted
+    /// <c>progress: success</c> — the user perceived this as "model
+    /// downloaded fully then failed" because the HTTP pull succeeded
+    /// but the post-pull hash step couldn't find the blob.
+    /// </summary>
+    [Fact]
+    public void FindModelBlobForModel_ResolvesHuggingFaceManifestPath()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"freeaissd-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+        try
+        {
+            // Path layout matches the on-disk shape Ollama writes for
+            // HF tags. Owner casing and underscores in the repo name
+            // are deliberate — both rejected by the prior allowlist.
+            var manifestDir = Path.Combine(tempRoot, "manifests", "hf.co", "Andycurrent", "Gemma-3-1B-it_GGUF");
+            Directory.CreateDirectory(manifestDir);
+            File.WriteAllText(Path.Combine(manifestDir, "Q2_K"), """
+            {
+              "schemaVersion": 2,
+              "config": { "digest": "sha256:aaaaaaaa", "size": 1 },
+              "layers": [
+                { "mediaType": "application/vnd.ollama.image.layer.model", "digest": "sha256:cccccccc", "size": 20 }
+              ]
+            }
+            """);
+            var blobsDir = Path.Combine(tempRoot, "blobs");
+            Directory.CreateDirectory(blobsDir);
+            var modelBlob = Path.Combine(blobsDir, "sha256-cccccccc");
+            File.WriteAllText(modelBlob, "model");
+
+            var result = ModelOperations.FindModelBlobForModel(tempRoot, "hf.co/Andycurrent/Gemma-3-1B-it_GGUF:Q2_K");
+
+            Assert.Equal(modelBlob, result);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// 2026-05-11 HF pull regression: hostile HF tags that try to escape
+    /// the <c>hf.co/&lt;owner&gt;/&lt;repo&gt;</c> shape must fail closed.
+    /// The resolver enforces exactly two safe segments after the
+    /// <c>hf.co/</c> prefix; anything else returns null (and callers
+    /// surface "model blob not found" rather than reading from an
+    /// arbitrary path).
+    /// </summary>
+    [Theory]
+    [InlineData("hf.co/../../etc/passwd:Q4_K_M")]   // path traversal in owner slot
+    [InlineData("hf.co/owner/../escape:Q4_K_M")]    // path traversal in repo slot
+    [InlineData("hf.co/owner:Q4_K_M")]              // missing repo segment
+    [InlineData("hf.co/owner/repo/extra:Q4_K_M")]   // too many path segments
+    [InlineData("hf.co/owner/repo:bad/tag")]        // separator in tag
+    public void TryResolveOllamaManifestPath_RefusesHostileHfTags(string modelTag)
+    {
+        var ok = ModelOperations.TryResolveOllamaManifestPath(
+            modelTag, out var subdir, out var manifestTag);
+
+        Assert.False(ok);
+        Assert.Equal(string.Empty, subdir);
+        Assert.Equal(string.Empty, manifestTag);
+    }
+
+    /// <summary>
+    /// 2026-05-11 HF pull regression: standard ollama.com tags must
+    /// continue to resolve under <c>registry.ollama.ai/library/</c>
+    /// after the HF branch was added. Sanity pin so the helper's
+    /// dispatch logic doesn't accidentally route non-HF tags into the
+    /// HF subtree.
+    /// </summary>
+    [Fact]
+    public void TryResolveOllamaManifestPath_RoutesStandardTagsToRegistryLibrary()
+    {
+        var ok = ModelOperations.TryResolveOllamaManifestPath(
+            "llama3.2:1b", out var subdir, out var manifestTag);
+
+        Assert.True(ok);
+        Assert.Equal(Path.Combine("registry.ollama.ai", "library", "llama3.2"), subdir);
+        Assert.Equal("1b", manifestTag);
+    }
+
+    /// <summary>
+    /// 2026-05-11 HF pull regression: HF tags must route to the
+    /// <c>hf.co/&lt;owner&gt;/&lt;repo&gt;</c> subtree with the quant as
+    /// the manifest filename. This is the path that
+    /// <see cref="OllamaModelStager.MergeToSsdAsync"/> and
+    /// <see cref="ModelOperations.FindModelBlobForModel"/> both build
+    /// from — getting the dispatch wrong is the root cause of the
+    /// "model downloads then fails" symptom.
+    /// </summary>
+    [Fact]
+    public void TryResolveOllamaManifestPath_RoutesHfTagsToHfSubtree()
+    {
+        var ok = ModelOperations.TryResolveOllamaManifestPath(
+            "hf.co/Owner/Repo-GGUF:Q4_K_M", out var subdir, out var manifestTag);
+
+        Assert.True(ok);
+        Assert.Equal(Path.Combine("hf.co", "Owner", "Repo-GGUF"), subdir);
+        Assert.Equal("Q4_K_M", manifestTag);
+    }
+
+    /// <summary>
+    /// 2026-05-11 HF pull regression: <see cref="ModelOperations.DiscoverModelsOnDisk"/>
+    /// previously reconstructed tag strings from the last two path
+    /// segments, which dropped the <c>hf.co/&lt;owner&gt;/</c> prefix and
+    /// reported HF models under just <c>&lt;repo&gt;:&lt;quant&gt;</c>. The
+    /// picker then couldn't match installed HF rows against the
+    /// catalog entries (which carry the full <c>hf.co/...</c> tag), so
+    /// freshly-pulled HF models still showed as "not on disk". This
+    /// pin verifies the discovery reports the full HF tag and that
+    /// standard ollama.com tags continue to surface as <c>name:tag</c>.
+    /// </summary>
+    [Fact]
+    public void DiscoverModelsOnDisk_ReconstructsHuggingFaceTagWithFullPrefix()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"freeaissd-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+        try
+        {
+            var hfDir = Path.Combine(tempRoot, "manifests", "hf.co", "Owner", "Repo-GGUF");
+            Directory.CreateDirectory(hfDir);
+            File.WriteAllText(Path.Combine(hfDir, "Q4_K_M"), "{\"schemaVersion\":2,\"layers\":[]}");
+
+            var stdDir = Path.Combine(tempRoot, "manifests", "registry.ollama.ai", "library", "llama3.2");
+            Directory.CreateDirectory(stdDir);
+            File.WriteAllText(Path.Combine(stdDir, "1b"), "{\"schemaVersion\":2,\"layers\":[]}");
+
+            var discovered = ModelOperations.DiscoverModelsOnDisk(tempRoot);
+
+            Assert.Contains("hf.co/Owner/Repo-GGUF:Q4_K_M", discovered);
+            Assert.Contains("llama3.2:1b", discovered);
+            // Sanity: no entry under the stripped form that the prior
+            // heuristic would have emitted.
+            Assert.DoesNotContain("Repo-GGUF:Q4_K_M", discovered);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
 }
