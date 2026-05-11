@@ -1841,14 +1841,40 @@ public class PrepViewModelTests
     }
 
     [Fact]
-    public async Task DownloadCommand_RefusesBatchWithHuggingFaceRow()
+    public void StripHuggingFacePrefix_ReturnsBareRepoId_WhenPrefixPresent()
     {
-        // C27 Stage 1: Stage 1 is browse-only for HF; the picker
-        // refuses any batch that includes an HF-sourced row so the
-        // user can't accidentally get a half-fulfilled download.
+        // C27 Stage 2: helper recovers the bare repoId from a
+        // catalog tag for the sizing-warnings hook callers.
+        Assert.Equal("Qwen/Qwen3-8B-GGUF", PrepViewModel.StripHuggingFacePrefix("hf.co/Qwen/Qwen3-8B-GGUF"));
+        Assert.Equal("Qwen/Qwen3-8B-GGUF", PrepViewModel.StripHuggingFacePrefix("HF.CO/Qwen/Qwen3-8B-GGUF"));
+        // Non-HF tags pass through unchanged.
+        Assert.Equal("qwen3:8b", PrepViewModel.StripHuggingFacePrefix("qwen3:8b"));
+        // Empty/whitespace tags pass through (caller filters those).
+        Assert.Equal("", PrepViewModel.StripHuggingFacePrefix(""));
+    }
+
+    [Fact]
+    public async Task DownloadCommand_HuggingFaceRow_FlowsThroughToPull()
+    {
+        // C27 Stage 2: HF rows are downloadable. Ollama natively pulls
+        // hf.co/owner/repo, so the VM just forwards the tag to the
+        // existing PullModelAsync chain — no special-case dispatch.
         SetupDefaultMocks();
         _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
         _modelService.Setup(m => m.BuildPullSelectionWarnings(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int?>())).Returns(new List<string>());
+        _ollamaPackageService
+            .Setup(o => o.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<IProgress<DownloadProgress>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("ollama.exe");
+        var serverHandle = new Mock<IOllamaServerHandle>();
+        serverHandle.Setup(s => s.Host).Returns("http://127.0.0.1:11434");
+        _ollamaPackageService
+            .Setup(o => o.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(serverHandle.Object);
+        _modelService
+            .Setup(m => m.PullModelAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(), It.IsAny<string?>(),
+                It.IsAny<Action<OllamaPullProgress>?>()))
+            .ReturnsAsync(new ModelPullResult("deadbeef", 4_900_000_000L));
 
         var vm = CreateViewModel();
         vm.Initialize();
@@ -1870,13 +1896,173 @@ public class PrepViewModelTests
         vm.DownloadCommand.Execute(null);
         await WaitForCommandAsync(vm.DownloadCommand);
 
-        // No pull attempted — the HF-only batch was refused with a log
-        // line, not silently executed.
+        // Stage 2 fires the pull — no Stage 1-style refusal in StatusText.
+        _modelService.Verify(m => m.PullModelAsync(
+            It.IsAny<string>(), It.IsAny<string>(), "hf.co/bartowski/Qwen3-8B-GGUF",
+            It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
+            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()),
+            Times.Once);
+        Assert.DoesNotContain("Stage 2", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task DownloadCommand_HuggingFaceRow_InvokesSizingHookWithStrippedRepoId()
+    {
+        // C27 Stage 2: the view-host-supplied hook receives bare
+        // repoIds (no hf.co/ prefix). Hook returning warnings funnels
+        // them through ConfirmSizingWarnings; user declining cancels.
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        _modelService.Setup(m => m.BuildPullSelectionWarnings(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int?>())).Returns(new List<string>());
+        _dialogService.Setup(d => d.ConfirmSizingWarnings(It.IsAny<IReadOnlyList<string>>())).Returns(false);
+
+        IReadOnlyList<string>? hookInputs = null;
+        long hookFreeBytes = -1;
+        var vm = CreateViewModel();
+        vm.HuggingFaceSizingWarningsHook = (repoIds, freeBytes, ct) =>
+        {
+            hookInputs = repoIds;
+            hookFreeBytes = freeBytes;
+            return Task.FromResult<IReadOnlyList<string>>(new[]
+            {
+                "hf.co/Qwen/Qwen3-8B-GGUF: file ≈ 4.9 GB — leaves under 2× headroom.",
+            });
+        };
+        vm.Initialize();
+
+        await vm.SetStarterCatalogAsync(new[]
+        {
+            new StarterCatalogEntry(
+                Tag: "hf.co/Qwen/Qwen3-8B-GGUF",
+                SizeTier: "Custom",
+                BestAt: string.Empty,
+                PullCount: 100L,
+                Capabilities: Array.Empty<string>(),
+                ParametersBillion: 8.0,
+                LastUpdated: null,
+                Source: ModelSource.HuggingFace),
+        });
+        vm.ModelRows.Single(r => r.Name == "hf.co/Qwen/Qwen3-8B-GGUF").IsSelected = true;
+
+        vm.DownloadCommand.Execute(null);
+        await WaitForCommandAsync(vm.DownloadCommand);
+
+        Assert.NotNull(hookInputs);
+        Assert.Equal(new[] { "Qwen/Qwen3-8B-GGUF" }, hookInputs!);
+        // 100 GB free per SetupDefaultMocks → 100 * 1024^3 bytes.
+        Assert.Equal(100L * 1024 * 1024 * 1024, hookFreeBytes);
+        // User declined the dialog → no pull.
         _modelService.Verify(m => m.PullModelAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
             It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
             It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()),
             Times.Never);
-        Assert.Contains("Hugging Face pulls", vm.StatusText);
+        _dialogService.Verify(d => d.ConfirmSizingWarnings(
+            It.Is<IReadOnlyList<string>>(w => w.Any(s => s.Contains("under 2× headroom")))),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task DownloadCommand_HuggingFaceRow_HookThrowing_StillProceedsWithPull()
+    {
+        // C27 Stage 2 R2 (rate-limit posture): a hook failure (HF API
+        // 429/5xx, network) is non-fatal — the pull continues without
+        // a disk-budget warning.
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        _modelService.Setup(m => m.BuildPullSelectionWarnings(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int?>())).Returns(new List<string>());
+        _ollamaPackageService
+            .Setup(o => o.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<IProgress<DownloadProgress>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("ollama.exe");
+        var serverHandle = new Mock<IOllamaServerHandle>();
+        serverHandle.Setup(s => s.Host).Returns("http://127.0.0.1:11434");
+        _ollamaPackageService
+            .Setup(o => o.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(serverHandle.Object);
+        _modelService
+            .Setup(m => m.PullModelAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(), It.IsAny<string?>(),
+                It.IsAny<Action<OllamaPullProgress>?>()))
+            .ReturnsAsync(new ModelPullResult("deadbeef", 4_900_000_000L));
+
+        var vm = CreateViewModel();
+        vm.HuggingFaceSizingWarningsHook = (_, _, _) => throw new InvalidOperationException("rate-limited");
+        vm.Initialize();
+
+        await vm.SetStarterCatalogAsync(new[]
+        {
+            new StarterCatalogEntry(
+                Tag: "hf.co/Qwen/Qwen3-8B-GGUF",
+                SizeTier: "Custom",
+                BestAt: string.Empty,
+                PullCount: 100L,
+                Capabilities: Array.Empty<string>(),
+                ParametersBillion: 8.0,
+                LastUpdated: null,
+                Source: ModelSource.HuggingFace),
+        });
+        vm.ModelRows.Single(r => r.Name == "hf.co/Qwen/Qwen3-8B-GGUF").IsSelected = true;
+
+        vm.DownloadCommand.Execute(null);
+        await WaitForCommandAsync(vm.DownloadCommand);
+
+        _modelService.Verify(m => m.PullModelAsync(
+            It.IsAny<string>(), It.IsAny<string>(), "hf.co/Qwen/Qwen3-8B-GGUF",
+            It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
+            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()),
+            Times.Once);
+        Assert.Contains(vm.LogLines, l => l.Contains("Could not fetch Hugging Face"));
+    }
+
+    [Fact]
+    public async Task DownloadCommand_HuggingFaceRow_NoHookRegistered_ProceedsWithoutWarning()
+    {
+        // C27 Stage 2: tests + Stage-3-pending scenarios that don't
+        // register the hook still pull successfully. No warnings get
+        // surfaced, but no refusal either.
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        _modelService.Setup(m => m.BuildPullSelectionWarnings(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int?>())).Returns(new List<string>());
+        _ollamaPackageService
+            .Setup(o => o.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<IProgress<DownloadProgress>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("ollama.exe");
+        var serverHandle = new Mock<IOllamaServerHandle>();
+        serverHandle.Setup(s => s.Host).Returns("http://127.0.0.1:11434");
+        _ollamaPackageService
+            .Setup(o => o.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(serverHandle.Object);
+        _modelService
+            .Setup(m => m.PullModelAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(), It.IsAny<string?>(),
+                It.IsAny<Action<OllamaPullProgress>?>()))
+            .ReturnsAsync(new ModelPullResult("deadbeef", 4_900_000_000L));
+
+        var vm = CreateViewModel();
+        // No HuggingFaceSizingWarningsHook set — default null path.
+        vm.Initialize();
+
+        await vm.SetStarterCatalogAsync(new[]
+        {
+            new StarterCatalogEntry(
+                Tag: "hf.co/Qwen/Qwen3-8B-GGUF",
+                SizeTier: "Custom",
+                BestAt: string.Empty,
+                PullCount: 100L,
+                Capabilities: Array.Empty<string>(),
+                ParametersBillion: 8.0,
+                LastUpdated: null,
+                Source: ModelSource.HuggingFace),
+        });
+        vm.ModelRows.Single(r => r.Name == "hf.co/Qwen/Qwen3-8B-GGUF").IsSelected = true;
+
+        vm.DownloadCommand.Execute(null);
+        await WaitForCommandAsync(vm.DownloadCommand);
+
+        _modelService.Verify(m => m.PullModelAsync(
+            It.IsAny<string>(), It.IsAny<string>(), "hf.co/Qwen/Qwen3-8B-GGUF",
+            It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
+            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()),
+            Times.Once);
+        _dialogService.Verify(d => d.ConfirmSizingWarnings(It.IsAny<IReadOnlyList<string>>()), Times.Never);
     }
 }

@@ -22,6 +22,16 @@ namespace FreeAiSsd.PrepApp.Services;
 public interface IHuggingFaceCatalogService
 {
     Task<HuggingFaceCatalogResult> SearchAsync(HuggingFaceSearchQuery query, CancellationToken ct);
+
+    /// <summary>
+    /// C27 Stage 2: fetches a model's <c>siblings[]</c> manifest from
+    /// <c>/api/models/{repoId}</c> so the disk-budget precheck can size
+    /// the pull off real bytes (HF's LFS sizes) instead of the
+    /// <see cref="ModelSizingCatalog"/>'s parameter-count heuristic.
+    /// Anonymous read only — gated/private repos surface a typed error
+    /// pointing at Stage 3.
+    /// </summary>
+    Task<HuggingFaceModelDetails> FetchSiblingsAsync(string repoId, CancellationToken ct);
 }
 
 /// <summary>C27 Stage 1: shape of an HF Search API call. Defaults mirror
@@ -42,6 +52,32 @@ public sealed record HuggingFaceCatalogResult(
     DateTimeOffset FetchedAt,
     string SourceUrl,
     string? Query);
+
+/// <summary>C27 Stage 2: a single file in an HF repo's <c>siblings[]</c>
+/// array. <see cref="SizeBytes"/> is nullable because non-LFS files (small
+/// README/config blobs) often omit the size field; we only ever consume
+/// it for GGUF files where LFS is the norm.</summary>
+public sealed record HuggingFaceSiblingFile(string Filename, long? SizeBytes);
+
+/// <summary>C27 Stage 2: result of <see cref="IHuggingFaceCatalogService.FetchSiblingsAsync"/>.
+/// <see cref="Gated"/> and <see cref="Private"/> surface HF's auth-required
+/// flags so PrepViewModel can render a friendly "Stage 3" error instead
+/// of letting the pull fail with a raw 401 from Ollama later.</summary>
+public sealed record HuggingFaceModelDetails(
+    string RepoId,
+    IReadOnlyList<HuggingFaceSiblingFile> Siblings,
+    bool Gated,
+    bool Private);
+
+/// <summary>C27 Stage 2: result of <see cref="HuggingFaceCatalogService.PickSizingFile"/>.
+/// <see cref="PrimaryFilename"/> is the GGUF the warning should name;
+/// <see cref="TotalBytes"/> sums multi-part files in the same quant set
+/// (e.g. <c>...-00001-of-00003.gguf</c>) so a split Q4_K_M doesn't
+/// under-warn at one-third its real disk cost.</summary>
+public sealed record HuggingFaceSizingPick(
+    string PrimaryFilename,
+    long TotalBytes,
+    int PartCount);
 
 /// <summary>
 /// HTTPS-only, allowlisted-host implementation against
@@ -75,6 +111,18 @@ public sealed class HuggingFaceCatalogService : IHuggingFaceCatalogService, IDis
         "https://huggingface.co/api/models",
     };
 
+    /// <summary>
+    /// C27 Stage 2: HTTPS-only allowlist for the per-repo model-details
+    /// endpoint. The picker fetches <c>siblings[]</c> here on Download
+    /// click to size HF pulls off real bytes. Same trailing-slash form
+    /// as <see cref="AllowedSources"/>'s base path — the repoId gets
+    /// appended after this prefix.
+    /// </summary>
+    public static readonly IReadOnlyList<string> AllowedModelDetailsPrefixes = new[]
+    {
+        "https://huggingface.co/api/models/",
+    };
+
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(10);
 
     /// <summary>C27 Stage 1: default page size. Larger pages invite
@@ -92,6 +140,7 @@ public sealed class HuggingFaceCatalogService : IHuggingFaceCatalogService, IDis
     private readonly HttpClient _httpClient;
     private readonly bool _ownsClient;
     private readonly string _sourceUrl;
+    private readonly string _modelDetailsBaseUrl;
     private readonly TimeSpan _timeout;
     private readonly string _userAgent;
 
@@ -99,25 +148,36 @@ public sealed class HuggingFaceCatalogService : IHuggingFaceCatalogService, IDis
     private readonly Dictionary<string, HuggingFaceCatalogResult> _cache =
         new(StringComparer.Ordinal);
 
+    // C27 Stage 2: per-repo siblings cache, keyed by repoId. Separate
+    // from the search cache because the two endpoints return disjoint
+    // shapes. Same lifetime (service instance) and same posture (reset
+    // on app close).
+    private readonly object _siblingsCacheLock = new();
+    private readonly Dictionary<string, HuggingFaceModelDetails> _siblingsCache =
+        new(StringComparer.Ordinal);
+
     public HuggingFaceCatalogService()
-        : this(httpClient: null, sourceUrl: null, timeout: null, userAgent: null)
+        : this(httpClient: null, sourceUrl: null, modelDetailsBaseUrl: null, timeout: null, userAgent: null)
     {
     }
 
     public HuggingFaceCatalogService(
         HttpClient? httpClient,
         string? sourceUrl = null,
+        string? modelDetailsBaseUrl = null,
         TimeSpan? timeout = null,
         string? userAgent = null)
     {
         _httpClient = httpClient ?? new HttpClient();
         _ownsClient = httpClient is null;
         _sourceUrl = sourceUrl ?? AllowedSources[0];
+        _modelDetailsBaseUrl = modelDetailsBaseUrl ?? AllowedModelDetailsPrefixes[0];
         _timeout = timeout ?? DefaultTimeout;
         _userAgent = string.IsNullOrWhiteSpace(userAgent) ? "Free-AI-SSD/1.0" : userAgent!;
     }
 
     public string SourceUrl => _sourceUrl;
+    public string ModelDetailsBaseUrl => _modelDetailsBaseUrl;
 
     public async Task<HuggingFaceCatalogResult> SearchAsync(HuggingFaceSearchQuery query, CancellationToken ct)
     {
@@ -237,6 +297,132 @@ public sealed class HuggingFaceCatalogService : IHuggingFaceCatalogService, IDis
         }
 
         return result;
+    }
+
+    public async Task<HuggingFaceModelDetails> FetchSiblingsAsync(string repoId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repoId))
+            throw new ArgumentException("repoId must be non-empty", nameof(repoId));
+
+        var trimmed = repoId.Trim();
+        // Defensive: repoId must look like "owner/repo". Reject anything
+        // else before issuing the request — a bad repoId would produce a
+        // 404 from HF that's hard to distinguish from a deleted repo.
+        if (trimmed.Contains(' ') || trimmed.Count(c => c == '/') != 1)
+        {
+            throw new ArgumentException(
+                $"repoId must be in 'owner/repo' form (got '{repoId}')", nameof(repoId));
+        }
+
+        if (!_modelDetailsBaseUrl.StartsWith("https://", StringComparison.Ordinal))
+        {
+            throw new LiveCatalogFetchException(
+                LiveCatalogFetchReason.UrlNotAllowed,
+                $"Model details URL must be HTTPS: {_modelDetailsBaseUrl}");
+        }
+
+        if (!AllowedModelDetailsPrefixes.Contains(_modelDetailsBaseUrl, StringComparer.Ordinal))
+        {
+            throw new LiveCatalogFetchException(
+                LiveCatalogFetchReason.UrlNotAllowed,
+                $"Model details URL not in allowlist: {_modelDetailsBaseUrl}");
+        }
+
+        lock (_siblingsCacheLock)
+        {
+            if (_siblingsCache.TryGetValue(trimmed, out var cached))
+            {
+                return cached;
+            }
+        }
+
+        // RepoIds contain a slash — escape each segment so we don't
+        // double-encode the slash itself.
+        var slashIdx = trimmed.IndexOf('/');
+        var owner = Uri.EscapeDataString(trimmed[..slashIdx]);
+        var repo = Uri.EscapeDataString(trimmed[(slashIdx + 1)..]);
+        var requestUrl = _modelDetailsBaseUrl + owner + "/" + repo;
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(_timeout);
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUrl);
+        request.Headers.UserAgent.TryParseAdd(_userAgent);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await _httpClient.SendAsync(request, timeoutCts.Token);
+        }
+        catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            throw new LiveCatalogFetchException(
+                LiveCatalogFetchReason.Timeout,
+                $"Request timed out after {_timeout.TotalSeconds}s",
+                ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new LiveCatalogFetchException(
+                LiveCatalogFetchReason.NetworkError,
+                $"Network error: {ex.Message}",
+                ex);
+        }
+
+        string body;
+        try
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new LiveCatalogFetchException(
+                    LiveCatalogFetchReason.NonSuccessStatus,
+                    $"Server returned {(int)response.StatusCode} {response.ReasonPhrase}",
+                    statusCode: ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture));
+            }
+            try
+            {
+                body = await response.Content.ReadAsStringAsync(ct);
+            }
+            catch (HttpRequestException ex)
+            {
+                throw new LiveCatalogFetchException(
+                    LiveCatalogFetchReason.NetworkError,
+                    $"Failed to read response body: {ex.Message}",
+                    ex);
+            }
+        }
+        finally
+        {
+            response.Dispose();
+        }
+
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            throw new LiveCatalogFetchException(
+                LiveCatalogFetchReason.EmptyResponse,
+                "Server returned empty body");
+        }
+
+        HuggingFaceModelDetails details;
+        try
+        {
+            details = ParseModelDetailsResponse(trimmed, body);
+        }
+        catch (JsonException ex)
+        {
+            throw new LiveCatalogFetchException(
+                LiveCatalogFetchReason.SchemaDrift,
+                $"Failed to parse Hugging Face model-details response: {ex.Message}",
+                ex);
+        }
+
+        lock (_siblingsCacheLock)
+        {
+            _siblingsCache[trimmed] = details;
+        }
+
+        return details;
     }
 
     public void Dispose()
@@ -381,6 +567,145 @@ public sealed class HuggingFaceCatalogService : IHuggingFaceCatalogService, IDis
             Models = entries,
         };
     }
+
+    // ── Model details (siblings) DTO + parser ───────────────────────────
+
+    /// <summary>
+    /// DTO for HF's <c>/api/models/{repoId}</c> response. Only the fields
+    /// Stage 2's disk-budget warning consumes — the endpoint also returns
+    /// cardData, model-index, transformersInfo etc. that we ignore.
+    /// </summary>
+    private sealed class HuggingFaceApiModelDetails
+    {
+        [JsonPropertyName("id")] public string? Id { get; set; }
+        [JsonPropertyName("gated")] public JsonElement Gated { get; set; }
+        [JsonPropertyName("private")] public bool? Private { get; set; }
+        [JsonPropertyName("siblings")] public List<HuggingFaceApiSibling>? Siblings { get; set; }
+    }
+
+    /// <summary>
+    /// DTO for an entry in HF's <c>siblings[]</c>. <see cref="Lfs"/> holds
+    /// the authoritative byte count for GGUF files (which are LFS-tracked);
+    /// <see cref="Size"/> is occasionally populated for non-LFS files. We
+    /// prefer <see cref="HuggingFaceApiSiblingLfs.Size"/> when present,
+    /// fall back to the top-level <see cref="Size"/>, else null.
+    /// </summary>
+    private sealed class HuggingFaceApiSibling
+    {
+        [JsonPropertyName("rfilename")] public string? Rfilename { get; set; }
+        [JsonPropertyName("size")] public long? Size { get; set; }
+        [JsonPropertyName("lfs")] public HuggingFaceApiSiblingLfs? Lfs { get; set; }
+    }
+
+    private sealed class HuggingFaceApiSiblingLfs
+    {
+        [JsonPropertyName("size")] public long? Size { get; set; }
+    }
+
+    /// <summary>
+    /// Parses the HF model-details JSON response into a
+    /// <see cref="HuggingFaceModelDetails"/>. Internal for direct unit
+    /// testing against captured fixtures.
+    /// </summary>
+    internal static HuggingFaceModelDetails ParseModelDetailsResponse(string repoId, string json)
+    {
+        var api = JsonSerializer.Deserialize<HuggingFaceApiModelDetails>(json, JsonOptions)
+            ?? throw new JsonException("Top-level object was null");
+
+        var siblings = new List<HuggingFaceSiblingFile>();
+        foreach (var sib in api.Siblings ?? new List<HuggingFaceApiSibling>())
+        {
+            if (sib?.Rfilename is null) continue;
+            var size = sib.Lfs?.Size ?? sib.Size;
+            siblings.Add(new HuggingFaceSiblingFile(sib.Rfilename, size));
+        }
+
+        // HF's `gated` field is polymorphic: "auto", "manual", false, or
+        // true (older payloads). Anything truthy/non-"false" means gated.
+        var gated = api.Gated.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.String => !string.Equals(api.Gated.GetString(), "false", StringComparison.OrdinalIgnoreCase),
+            _ => false,
+        };
+
+        return new HuggingFaceModelDetails(
+            RepoId: repoId,
+            Siblings: siblings,
+            Gated: gated,
+            Private: api.Private ?? false);
+    }
+
+    /// <summary>
+    /// C27 Stage 2: picks the sibling file whose byte count the
+    /// disk-budget warning should report. Mirrors Ollama's HF GGUF
+    /// default-quant heuristic: Q4_K_M first (case-insensitive), then
+    /// the smallest GGUF by file size. Returns null when the repo has
+    /// no GGUF siblings (browse-only state — pull will fail later, but
+    /// not our warning to surface).
+    ///
+    /// Multi-part GGUFs (e.g. <c>...-00001-of-00003.gguf</c>) sum across
+    /// the same quant prefix so a split Q4_K_M doesn't under-warn at
+    /// one-third its real disk cost. <see cref="HuggingFaceSizingPick.PartCount"/>
+    /// surfaces this so the warning can say "3-part split".
+    /// </summary>
+    public static HuggingFaceSizingPick? PickSizingFile(IReadOnlyList<HuggingFaceSiblingFile> siblings)
+    {
+        if (siblings is null || siblings.Count == 0) return null;
+
+        var ggufs = siblings
+            .Where(s => s.Filename is not null && s.Filename.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (ggufs.Count == 0) return null;
+
+        // Prefer Q4_K_M. Match on a separator-bracketed token so we don't
+        // pick up "Q4_K_M" embedded inside a longer label by accident.
+        var q4Match = ggufs.FirstOrDefault(s =>
+            Q4KMRegex.IsMatch(s.Filename));
+
+        HuggingFaceSiblingFile primary;
+        if (q4Match is not null)
+        {
+            primary = q4Match;
+        }
+        else
+        {
+            // Fallback: smallest GGUF with a known size. Files with null
+            // sizes fall to the back of the sort.
+            primary = ggufs
+                .OrderBy(s => s.SizeBytes ?? long.MaxValue)
+                .First();
+        }
+
+        // Multi-part: if the primary filename matches "-NNNNN-of-MMMMM",
+        // sum all parts in the same series. Otherwise just use the
+        // primary's size.
+        var partMatch = MultiPartRegex.Match(primary.Filename);
+        if (partMatch.Success)
+        {
+            // Build the series prefix: everything before "-00001-of-..."
+            var seriesPrefix = primary.Filename[..partMatch.Index];
+            var total = ggufs
+                .Where(s => s.Filename.StartsWith(seriesPrefix, StringComparison.OrdinalIgnoreCase)
+                            && MultiPartRegex.IsMatch(s.Filename))
+                .Sum(s => s.SizeBytes ?? 0L);
+            var partCount = ggufs.Count(s =>
+                s.Filename.StartsWith(seriesPrefix, StringComparison.OrdinalIgnoreCase)
+                && MultiPartRegex.IsMatch(s.Filename));
+            return new HuggingFaceSizingPick(primary.Filename, total, partCount);
+        }
+
+        return new HuggingFaceSizingPick(primary.Filename, primary.SizeBytes ?? 0L, 1);
+    }
+
+    private static readonly Regex Q4KMRegex = new(
+        @"(?:^|[-_\.])Q4_K_M(?:[-_\.]|\.gguf$)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex MultiPartRegex = new(
+        @"-\d{5}-of-\d{5}\.gguf$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>
     /// Best-effort parameter-count extraction from HF repo IDs. Common
