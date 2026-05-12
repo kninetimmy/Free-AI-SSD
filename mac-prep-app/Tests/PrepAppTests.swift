@@ -1183,6 +1183,115 @@ struct PrepAppTestsMain {
             try expect(obj is [String: Any], "encoder must emit a JSON object, got: \(type(of: obj))")
         }
 
+        // MARK: - C7 encrypted-drive Manage Models unlock pins
+        //
+        // PrepViewModel itself is @MainActor + SwiftUI-bound and not part
+        // of the pure-Swift test binary. These pins exercise the
+        // round-trip primitives the VM stitches together (decrypt → cache
+        // material → mutate → re-encrypt with cached material → re-open).
+        // The Mac Runner already pins the underlying SsdEncryption
+        // contract; these pins are the C7-specific "cached material
+        // survives a HF token mutation" promise.
+
+        runner.test("C7: unlock then save-with-cached-material persists huggingFaceToken across re-open") {
+            let root = try makeC7TempRoot()
+            defer { cleanupC7TempRoot(root) }
+            let password = "c7-roundtrip-pw"
+            // Seed an encrypted blob WITHOUT a HF token (simulates an
+            // existing v1.3.x drive that finalized before the user added
+            // a token).
+            try seedC7Fixture(root: root, password: password,
+                              plaintext: ["version": "1.0", "isEncrypted": true])
+
+            guard case .success(let unlocked) = SsdEncryption.tryUnlockPortableConfig(
+                ssdRoot: root, password: password) else {
+                throw ExpectationFailure(message:"initial unlock failed")
+            }
+
+            // Simulate the VM: mutate the in-memory dict + save via cached material.
+            var mutated = unlocked.config
+            mutated["huggingFaceToken"] = "hf_abc123_persisted"
+            try SsdEncryption.saveEncryptedConfig(
+                ssdRoot: root, config: mutated, material: unlocked.material)
+
+            // Re-open with the same password. Token should be present.
+            guard case .success(let reopened) = SsdEncryption.tryUnlockPortableConfig(
+                ssdRoot: root, password: password) else {
+                throw ExpectationFailure(message:"re-open after save failed")
+            }
+            let token = reopened.config["huggingFaceToken"] as? String
+            try expect(token == "hf_abc123_persisted",
+                       "expected persisted token, got: \(token ?? "nil")")
+        }
+
+        runner.test("C7: save-with-cached-material preserves unknown fields the PrepApp doesn't model") {
+            let root = try makeC7TempRoot()
+            defer { cleanupC7TempRoot(root) }
+            let password = "c7-unknown-fields-pw"
+            // Seed with fields the Mac PrepApp doesn't model directly
+            // (networkApiBindAddress, embeddingModel) so we can prove
+            // the round-trip preserves them.
+            try seedC7Fixture(root: root, password: password,
+                              plaintext: [
+                                "version": "1.0",
+                                "networkApiBindAddress": "192.168.1.42",
+                                "embeddingModel": "nomic-embed-text:latest",
+                                "huggingFaceToken": "hf_initial"
+                              ])
+
+            guard case .success(let unlocked) = SsdEncryption.tryUnlockPortableConfig(
+                ssdRoot: root, password: password) else {
+                throw ExpectationFailure(message:"initial unlock failed")
+            }
+
+            var mutated = unlocked.config
+            mutated["huggingFaceToken"] = "hf_edited"
+            try SsdEncryption.saveEncryptedConfig(
+                ssdRoot: root, config: mutated, material: unlocked.material)
+
+            guard case .success(let reopened) = SsdEncryption.tryUnlockPortableConfig(
+                ssdRoot: root, password: password) else {
+                throw ExpectationFailure(message:"re-open after save failed")
+            }
+            try expect(reopened.config["networkApiBindAddress"] as? String == "192.168.1.42",
+                       "networkApiBindAddress dropped during round-trip")
+            try expect(reopened.config["embeddingModel"] as? String == "nomic-embed-text:latest",
+                       "embeddingModel dropped during round-trip")
+            try expect(reopened.config["huggingFaceToken"] as? String == "hf_edited",
+                       "HF token edit not persisted")
+        }
+
+        runner.test("C7: wrong-passphrase unlock returns incorrectPassword without producing material") {
+            let root = try makeC7TempRoot()
+            defer { cleanupC7TempRoot(root) }
+            try seedC7Fixture(root: root, password: "correct-pw",
+                              plaintext: ["version": "1.0", "huggingFaceToken": "hf_secret"])
+
+            let result = SsdEncryption.tryUnlockPortableConfig(
+                ssdRoot: root, password: "wrong-pw")
+            guard case .failure(let err) = result else {
+                throw ExpectationFailure(message:"expected failure for wrong password")
+            }
+            try expect(err == .incorrectPassword,
+                       "expected .incorrectPassword, got \(err)")
+        }
+
+        runner.test("C7: UnlockMaterial.zeroize wipes derivedKey buffer in place") {
+            // Mirrors SsdEncryptionTests' zeroize pin so the PrepApp test
+            // surface independently asserts the cached-key zeroization
+            // contract that C7's resetManageModelsUnlockState relies on.
+            let key = Data(repeating: 0xAB, count: SsdEncryptionConstants.keyBytes)
+            let m = UnlockMaterial(
+                derivedKey: key, salt: Data(repeating: 0x01, count: 16),
+                iterations: SsdEncryptionConstants.pbkdf2Iterations,
+                scheme: SsdEncryptionConstants.schemeName)
+            try expect(m.derivedKey.contains(0xAB),
+                       "pre-zero: expected key buffer to hold the seeded byte")
+            m.zeroize()
+            try expect(m.derivedKey.allSatisfy { $0 == 0 },
+                       "post-zero: every byte should be 0; got non-zero")
+        }
+
         await runner.run()
     }
 }
@@ -1555,4 +1664,47 @@ final class TestRunner {
         print("\n\(cases.count - failures)/\(cases.count) passed.")
         if failures > 0 { exit(1) }
     }
+}
+
+// MARK: - C7 encrypted-fixture helpers
+//
+// Same pattern as `seedEncryptedFixture` in mac-runner/Tests/
+// SsdEncryptionTests.swift, scoped here so PrepAppTests doesn't need a
+// dependency on that file. Each PBKDF2 derivation takes ~1s on M-series
+// silicon — tests using these helpers should pass small plaintexts and
+// not run them in tight loops.
+
+private func makeC7TempRoot() throws -> URL {
+    let root = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("free-ai-ssd-c7-tests")
+        .appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    return root
+}
+
+private func cleanupC7TempRoot(_ root: URL) {
+    try? FileManager.default.removeItem(at: root)
+}
+
+private func seedC7Fixture(root: URL, password: String, plaintext: [String: Any]) throws {
+    let configDir = SsdEncryption.configDirURL(ssdRoot: root)
+    try FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+
+    var saltBytes = [UInt8](repeating: 0, count: SsdEncryptionConstants.saltBytes)
+    let s = SecRandomCopyBytes(kSecRandomDefault, saltBytes.count, &saltBytes)
+    guard s == errSecSuccess else { throw ExpectationFailure(message: "SecRandomCopyBytes failed") }
+    let salt = Data(saltBytes)
+
+    let key = try SsdEncryption.pbkdf2Sha256(
+        password: password, salt: salt,
+        iterations: SsdEncryptionConstants.pbkdf2Iterations,
+        keyBytes: SsdEncryptionConstants.keyBytes)
+
+    let material = UnlockMaterial(
+        derivedKey: key, salt: salt,
+        iterations: SsdEncryptionConstants.pbkdf2Iterations,
+        scheme: SsdEncryptionConstants.schemeName)
+
+    try SsdEncryption.saveEncryptedConfig(ssdRoot: root, config: plaintext, material: material)
+    material.zeroize()
 }

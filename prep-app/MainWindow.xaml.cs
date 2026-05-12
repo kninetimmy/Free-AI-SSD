@@ -113,6 +113,12 @@ public partial class MainWindow : Window
         // reference to MainTabs, hence the event hook.
         _viewModel.ModelsTabRequested += (_, _) => MainTabs.SelectedIndex = 0;
 
+        // C7: banner's Unlock button raises this event; show the modal
+        // passphrase prompt and hand a successful unlock back to the VM
+        // via ApplyUnlockResult. Failure paths re-show the dialog with an
+        // inline error so the user can retry without re-clicking Unlock.
+        _viewModel.UnlockRequested += OnUnlockRequested;
+
         ShowModelDetailsToggle.Checked += OnShowModelDetailsChanged;
         ShowModelDetailsToggle.Unchecked += OnShowModelDetailsChanged;
 
@@ -310,6 +316,85 @@ public partial class MainWindow : Window
     private void OnHuggingFaceTokenChanged(object? sender, string? token)
     {
         _hfCatalogService.UpdateAuthToken(token);
+    }
+
+    /// <summary>
+    /// C7: zero any cached <see cref="FreeAiSsd.Shared.Services.UnlockMaterial"/>
+    /// when the main window closes. The VM holds the material; calling
+    /// <see cref="PrepViewModel.LockManageSession"/> runs
+    /// <see cref="System.Security.Cryptography.CryptographicOperations.ZeroMemory"/>
+    /// on the derived-key buffer. Safe to call when no session is unlocked.
+    /// </summary>
+    protected override void OnClosed(EventArgs e)
+    {
+        _viewModel.LockManageSession();
+        base.OnClosed(e);
+    }
+
+    /// <summary>
+    /// C7: handles the VM's <see cref="PrepViewModel.UnlockRequested"/>
+    /// event. Shows the modal passphrase dialog and, on submission, calls
+    /// <see cref="FreeAiSsd.Shared.SsdEncryption.TryUnlockPortableConfigWithMaterial"/>
+    /// directly. On success runs the plaintext-migration sweep (mirrors
+    /// Runner + Mac so encrypted drives never accumulate plaintext
+    /// secrets) and hands the result to <see cref="PrepViewModel.ApplyUnlockResult"/>.
+    /// Failure re-shows the dialog with an inline error so the user can
+    /// retry without re-clicking the banner button.
+    /// </summary>
+    private async void OnUnlockRequested(object? sender, EventArgs e)
+    {
+        var drive = _viewModel.SelectedDrive;
+        if (drive is null) return;
+
+        string? priorError = null;
+        while (true)
+        {
+            var dialog = new UnlockDialog { Owner = this };
+            if (priorError is not null) dialog.InitialError = priorError;
+            var result = dialog.ShowDialog();
+            if (result != true) return; // Cancel — banner stays yellow.
+
+            var password = dialog.Password;
+            if (FreeAiSsd.Shared.SsdEncryption.TryUnlockPortableConfigWithMaterial(
+                    drive.RootPath, password,
+                    out var config, out var material, out var error))
+            {
+                if (config is null || material is null)
+                {
+                    priorError = "Unlock returned an empty result. Try again.";
+                    continue;
+                }
+
+                // Mirror Runner + Mac: absorb / discard stale plaintext so
+                // an encrypted drive can never accumulate a plaintext
+                // config alongside the sealed blob.
+                try
+                {
+                    var migration = await FreeAiSsd.Shared.SsdEncryption.TryMigratePlaintextAsync(
+                        drive.RootPath, material).ConfigureAwait(true);
+                    // PlaintextMigrationResult is informational; nothing to
+                    // act on here beyond logging (the migration itself
+                    // already updated the blob if applicable).
+                    _ = migration;
+                }
+                catch (Exception migrationEx)
+                {
+                    // Migration failures are non-fatal — the unlock itself
+                    // succeeded, the plaintext just stays on disk. Log so
+                    // the user can see it in the log lines area.
+                    _viewModel.LogLines.Add(
+                        $"[Plaintext-migration] Failed: {migrationEx.Message} — plaintext preserved.");
+                }
+
+                _viewModel.ApplyUnlockResult(config, material);
+                return;
+            }
+
+            // Re-show with the error inline. Mirrors the Mac behavior:
+            // sheet stays open, password field is cleared (PasswordBox
+            // doesn't persist text across dialog instances anyway).
+            priorError = string.IsNullOrEmpty(error) ? "Unlock failed." : error;
+        }
     }
 
     /// <summary>C27 Stage 1: routes a source change to the right fetch.
