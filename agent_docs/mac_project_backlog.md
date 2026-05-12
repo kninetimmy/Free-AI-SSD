@@ -3608,3 +3608,61 @@ The catch logs but doesn't track a `failedTags` list, and the loop tail at `1190
 
 **Watch for:** the existing `try { } catch { /* parent likely gone */ }` swallow around the direct write must be preserved through the new locked path — otherwise a write to a closed stdout could re-throw inside the detached pull task and crash the sidecar.
 
+### M18 - Mac Manage Models: disabled Add disclosure hides the encrypted-drive C7 explanation
+
+**Status:** **done** — PR #283 merged `a9d5ac7` (2026-05-11). Fix matched the prescribed gemini-code-assist / Codex suggestion: removed `.disabled(!vm.canManageModelsAdd)` from the `DisclosureGroup` in `ManageModelsStepView.swift` so the chevron always expands; restructured the label to a `VStack` that shows "Add a model" plus an inline "Unlock required (C7) — disabled on encrypted drives." caption when read-only (so users see the explanation without needing to expand at all). The longer C7 explanation still lives inside the disclosure content for users who expand. **Judgment call vs. prescription:** the prescription said "Keep `Pull selected` and the starter picker disabled when encrypted/read-only." We instead kept the picker *hidden* in the disabled branch — the picker has its own VM-mutating side effects (Refresh button, source switch, HF token field) that have no business firing on a drive where pulls can't run, and showing a fully-built picker just to grey it out invites confusion. The C7 caption + inline explanation tell the user exactly why the section is dormant. **No surprises.**
+
+---
+
+**(Original filing preserved below for archeology.)**
+
+**Status:** filed 2026-05-11 from Codex review of last 11 PRs (GH issue #279, MEDIUM). Originally surfaced by `gemini-code-assist` on PR #274. Mac-only (`mac-prep-app/Sources/ManageModelsStepView.swift`).
+**Scope:** Tiny. One SwiftUI file.
+**Model:** Sonnet 4.6.
+
+**Driver:** on encrypted drives, the Mac PrepApp Manage Models "Add a model" disclosure is intentionally disabled until C7 ships (per D13 — Add/Remove gated on encrypted drives until encrypted-config persistence). There is a friendly explanation ("Unlock required (C7) — Add disabled on encrypted drives.") inside the disclosure content, but the user can never see it because the entire `DisclosureGroup` is `.disabled(!vm.canManageModelsAdd)` — so the chevron can't be expanded.
+
+**Approach (sketch):**
+- Remove `.disabled(!vm.canManageModelsAdd)` from the `DisclosureGroup` so it stays expandable.
+- Show the C7 message somewhere visible without expanding: either next to "Add a model" in the label area, or as a caption directly under the heading.
+- Keep `Pull selected` and the starter picker disabled (or hidden) when encrypted/read-only.
+
+**Affected files (expected):**
+- `mac-prep-app/Sources/ManageModelsStepView.swift` — restructure `addSection` body.
+
+**Cross-OS audit:** Windows path uses the same `canManageModelsAdd` gate but in a different surface (Models tab + per-row buttons) where the explainer text is already always visible. No WPF mirror change needed.
+
+**Exit criterion:** plug a previously-prepped + encrypted SSD → Manage models → "Add a model" disclosure shows the inline C7 caption next to the label (visible without expanding); chevron expands to show the longer explanation; picker stays hidden / disabled. Unencrypted drives unchanged.
+
+**Watch for:** if rendering the picker disabled rather than hiding it, the picker's own buttons (Refresh, source switch, HF token field) must inherit the disabled state — they have VM-mutating side effects that have no business firing on an encrypted drive.
+
+### M19 - Mac sidecar HF commands hand-roll JSON instead of using `JSONSerialization`
+
+**Status:** **done** — PR #283 merged `a9d5ac7` (2026-05-11). Fix matched the prescribed Codex suggestion: new `mac-prep-app/Sources/CommandPayloadEncoder.swift` exposes `static func encode(_ dict: [String: String]) -> String?` backed by `JSONSerialization.data(withJSONObject:)` (compact, single-line); both `pushHuggingFaceTokenToSidecar` and `refreshHuggingFaceCatalog`'s search path route through it. Kept as a free-standing utility (no SwiftUI deps) so the test runner can include it without dragging in `PrepViewModel`. Wired the new file into both `swiftc` invocations in `.github/workflows/build.yml` (test compile + app compile) and the test-file doc-comment "How to run" example. **6 new Swift test pins:** ASCII / embedded quotes / embedded backslashes / newline+tab+CR (the regression class — the hand-rolled path emitted these unescaped) / single-line invariant / round-trip JSON-object structural validity. Round-trip pins use a private `parseSinglePairJSON` helper so assertions don't depend on JSON key order. 83/83 Swift tests pass. **No surprises** — the encoder is trivial; the test pins are the durable part.
+
+---
+
+**(Original filing preserved below for archeology.)**
+
+**Status:** filed 2026-05-11 from Codex review of last 11 PRs (GH issue #280, MEDIUM). Originally surfaced by `gemini-code-assist` on PRs #266 and #270. Mac-only (`mac-prep-app/Sources/PrepViewModel.swift`).
+**Scope:** Tiny. Two call sites in PrepViewModel + a small new helper + a few test pins.
+**Model:** Sonnet 4.6.
+
+**Driver:** the Mac PrepApp builds `set-hf-token` and `search-hf` payloads as hand-concatenated JSON strings, escaping only `\` and `"`. Newlines, tabs, and other control characters in input pass through unescaped and produce malformed JSON that the sidecar's `JsonDocument.Parse` rejects — surfacing as a non-obvious sidecar command failure (`payload parse failed`) rather than a clean validation error. Normal HF tokens and single-line searches don't hit this in practice, but pasted multi-line input or unusual characters can.
+
+**Approach (sketch):**
+- Add a small `makeCommandPayload(_ dict: [String: String]) -> String?` helper implemented with `JSONSerialization.data(withJSONObject:)` (compact, no pretty-print so it stays single-line).
+- Use it for both `search-hf` and `set-hf-token`.
+- On serialization failure, log a generic message without echoing token values.
+
+**Affected files (expected):**
+- `mac-prep-app/Sources/PrepViewModel.swift` (`pushHuggingFaceTokenToSidecar` + `refreshHuggingFaceCatalog`'s search path)
+- a small new helper file (e.g. `CommandPayloadEncoder.swift`) so the encoder can be tested without dragging `PrepViewModel` into the test binary
+- `mac-prep-app/Tests/PrepAppTests.swift` — regression pins for the control-char class.
+
+**Cross-OS audit:** `mac-prep-host/HostLifetime.cs:996-1020` parses these payloads with `JsonDocument.Parse` — no change needed on the sidecar side; the fix is purely client-side encoder hardening.
+
+**Exit criterion:** paste a HF token containing a trailing newline → sidecar accepts without `payload parse failed` in `<SSD>/logs/macos-prep-host-YYYYMMDD.log`; HF search with embedded quotes / backslashes still works; sidecar log shows no parse-failed lines under any of the regression-class inputs.
+
+**Watch for:** defense-in-depth — the existing "never echo the token value into the log" rule must survive the refactor; on serialization failure, log "could not encode set-hf-token payload" without the value.
+

@@ -116,8 +116,8 @@ Three flat buckets, one counter per bucket:
 | M15 | (new) | Mac PrepApp: don't auto-advance past pull failure (surface inline so user can read error) | mac_project_backlog.md |
 | ~~M16~~ | (new) | ~~Mac `remove-model` permanently blocked after first pull in sidecar session~~ — **done** PR #281 (`38ff406`) 2026-05-11 (GH #277) | mac_project_backlog.md |
 | ~~M17~~ | (new) | ~~Mac pull-exception fallback writes outside sidecar stdout lock~~ — **done** PR #281 (`38ff406`) 2026-05-11 (GH #278) | mac_project_backlog.md |
-| M18 | (new) | Mac Manage Models: disabled Add disclosure hides the encrypted-drive C7 explanation (GH #279) | mac_project_backlog.md |
-| M19 | (new) | Mac sidecar HF commands hand-roll JSON instead of using `JSONSerialization` (GH #280) | mac_project_backlog.md |
+| ~~M18~~ | (new) | ~~Mac Manage Models: disabled Add disclosure hides the encrypted-drive C7 explanation~~ — **done** PR #283 (`a9d5ac7`) 2026-05-11 (GH #279) | mac_project_backlog.md |
+| ~~M19~~ | (new) | ~~Mac sidecar HF commands hand-roll JSON instead of using `JSONSerialization`~~ — **done** PR #283 (`a9d5ac7`) 2026-05-11 (GH #280) | mac_project_backlog.md |
 
 **Closed on this pass (no new ID):**
 
