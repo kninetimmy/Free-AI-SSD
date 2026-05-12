@@ -3450,3 +3450,76 @@ subtree and emits the full tag.
   uppercase characters (HF owner/repo names allow mixed case).
 
 Established PR #275 (`0a4a2e5`).
+
+---
+
+## 2026-05-12 — C7 PrepApp encrypted-drive Manage Models unlock: architectural decisions
+
+C7 lands the passphrase-unlock UX promised by decision D13. Three
+shape-decisions worth pinning so future work doesn't regress them.
+
+### Explicit Unlock button, not auto-prompt
+
+The encrypted-drive banner in Manage Models hosts an explicit
+`[ Unlock… ]` button (both Mac PrepApp and Windows PrepApp). The
+unlock sheet only appears after the user clicks it. We considered
+two alternatives:
+
+1. Auto-prompt on entering Manage Models (one decision point).
+2. Lazy prompt on first Add/Remove click (defer prompts for
+   read-only users).
+
+The button-in-banner option was picked because it matches the
+Runner's existing unlock pattern (`UnlockSheet` /
+`UnlockDriveDialog`) — users only have one mental model for
+"unlock an encrypted SSD." It also reduces surprise prompts on
+read-only browsing of installed models.
+
+- **Why:** Explicit gesture > implicit modal. The banner doubles
+  as a state indicator the user reads before deciding to commit.
+- **How to apply:** Future encrypted-drive UX surfaces (e.g. a
+  hypothetical "view library on encrypted drive" flow) should
+  follow the same banner-with-button pattern.
+
+### Lock-on-Done / drive-change, not lock-on-background
+
+The cached `UnlockMaterial` is zeroed when the user exits Manage
+Models (Done click on Mac, MainWindow close on Windows), when the
+selected drive changes, and at app termination (via
+`UnlockMaterial.deinit` on Mac, `OnClosed` on Windows). Lock-on-
+background was rejected — Runner's MAC36a decision removed
+`willResignActiveNotification` from the lock path precisely
+because alt-tab teardown is high-friction with no real security
+delta.
+
+- **Why:** A user opening their browser to grab an HF token from
+  Hugging Face should not have to re-enter the passphrase when
+  they tab back. The drive-change zeroize is the real safety
+  invariant (you can never accidentally write to a wrong drive
+  with the previous drive's key).
+- **How to apply:** Don't add `willResignActiveNotification` or
+  WPF window-deactivated hooks to the lock path. Drive-change +
+  explicit-exit + terminate covers the actual threat model.
+
+### HF token persistence: commit on natural boundaries, not per-keystroke
+
+The Mac PrepApp re-encrypts `huggingFaceToken` on two boundaries:
+after a successful HF pull (`pullPendingTags` tail), and when the
+user clicks Done in Manage Models (`exitManageModels`). Per-
+keystroke `didSet` would thrash exFAT over USB — every typed
+character would trigger AES-GCM seal + two-file atomic commit.
+Windows PrepApp lifts the token on unlock but defers the write-
+back to a follow-up (W5) because the existing Windows save path
+goes through `IModelService.SaveConfigAsync` and would need to
+route through `IConfigStore` for the encrypted-save shape; that
+refactor was out of scope for C7.
+
+- **Why:** exFAT-over-USB write amplification + the on-disk
+  format's two-file atomic commit make per-keystroke persistence
+  user-visible as input lag.
+- **How to apply:** Any new "edit on encrypted drive" UX should
+  use the same intent-boundary pattern: post-operation + on-exit.
+  Avoid `didSet` / `TextChanged` hooks that fire per character.
+
+Established C7 PR (Mac PrepApp + Windows PrepApp parts; Windows
+HF-token-writeback follow-up filed as W5).

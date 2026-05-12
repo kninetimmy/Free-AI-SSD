@@ -1,0 +1,39 @@
+<Window x:Class="FreeAiSsd.PrepApp.UnlockDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Unlock Encrypted SSD"
+        Height="220"
+        Width="420"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="Enter the passphrase set during PrepApp finalization. Add and Remove will be enabled for this session."
+                   TextWrapping="Wrap"
+                   Margin="0,0,0,10"/>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8">
+            <TextBlock Text="Passphrase:" Width="95" VerticalAlignment="Center"/>
+            <PasswordBox x:Name="PasswordBox" Width="270"/>
+        </StackPanel>
+
+        <TextBlock x:Name="ErrorText"
+                   Grid.Row="2"
+                   Foreground="Red"
+                   Margin="95,0,0,8"
+                   Width="270"
+                   TextWrapping="Wrap"
+                   Visibility="Collapsed"/>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Cancel" Width="90" Margin="0,0,8,0" Click="Cancel_Click"/>
+            <Button Content="Unlock" Width="90" IsDefault="True" Click="Unlock_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

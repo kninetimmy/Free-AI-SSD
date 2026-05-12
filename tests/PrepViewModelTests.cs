@@ -2720,4 +2720,192 @@ public class PrepViewModelTests
         }
         finally { cleanup(); }
     }
+
+    // C7 — encrypted-drive Manage Models unlock pins.
+
+    [Fact]
+    public void EncryptedDriveAtInit_IsManageSessionUnlockedIsFalse_ShowUnlockButtonIsTrue()
+    {
+        // Defense-in-depth: a fresh selection of an encrypted drive must
+        // start in the locked state. Pairs with the existing C6 pin at
+        // SelectingEncryptedFullyConfiguredDrive_DetectorReportsEncrypted_StartOverDisabled.
+        var (root, cleanup) = MakeTempDriveRoot(hasEncryptedConfig: true, manifestCount: 2);
+        try
+        {
+            SetupDefaultMocks(new List<DriveTarget> { MakeDrive(root) }, encrypted: true);
+
+            var vm = CreateViewModel();
+            vm.Initialize();
+
+            Assert.True(vm.IsSelectedDriveEncrypted);
+            Assert.False(vm.IsManageSessionUnlocked);
+            Assert.False(vm.CanMutateDrive);
+            Assert.True(vm.ShowUnlockButton);
+            Assert.False(vm.ShowSessionUnlockedBanner);
+            Assert.True(vm.UnlockCommand.CanExecute(null));
+        }
+        finally { cleanup(); }
+    }
+
+    [Fact]
+    public void ApplyUnlockResult_FlipsIsManageSessionUnlocked_AndCanMutateDriveBecomesTrue()
+    {
+        var (root, cleanup) = MakeTempDriveRoot(hasEncryptedConfig: true, manifestCount: 1);
+        try
+        {
+            SetupDefaultMocks(new List<DriveTarget> { MakeDrive(root) }, encrypted: true);
+
+            var vm = CreateViewModel();
+            vm.Initialize();
+            Assert.False(vm.CanMutateDrive);
+
+            // Synthesize an unlock result without actually invoking PBKDF2.
+            // The VM doesn't care how the material was derived; it just
+            // takes ownership and flips the gate. The real path (via
+            // SsdEncryption.TryUnlockPortableConfigWithMaterial) is
+            // covered end-to-end by SsdEncryption's own tests.
+            var config = new PortableConfig { HuggingFaceToken = "hf_lifted_token" };
+            var material = new UnlockMaterial(
+                new byte[32], new byte[16], 210_000, "aes-256-gcm+pbkdf2-sha256-v1");
+
+            vm.ApplyUnlockResult(config, material);
+
+            Assert.True(vm.IsManageSessionUnlocked);
+            Assert.True(vm.CanMutateDrive);
+            Assert.False(vm.ShowUnlockButton);
+            Assert.True(vm.ShowSessionUnlockedBanner);
+            // HF token lifted into the picker's inline field — closes the
+            // post-finalize re-entry gap.
+            Assert.Equal("hf_lifted_token", vm.HuggingFaceTokenInput);
+        }
+        finally { cleanup(); }
+    }
+
+    [Fact]
+    public void ApplyUnlockResult_WithEmptyHuggingFaceToken_LeavesTokenInputUntouched()
+    {
+        var (root, cleanup) = MakeTempDriveRoot(hasEncryptedConfig: true, manifestCount: 1);
+        try
+        {
+            SetupDefaultMocks(new List<DriveTarget> { MakeDrive(root) }, encrypted: true);
+
+            var vm = CreateViewModel();
+            vm.Initialize();
+            vm.HuggingFaceTokenInput = "hf_prior_user_input"; // user typed before unlocking
+
+            var config = new PortableConfig { HuggingFaceToken = null };
+            var material = new UnlockMaterial(
+                new byte[32], new byte[16], 210_000, "aes-256-gcm+pbkdf2-sha256-v1");
+            vm.ApplyUnlockResult(config, material);
+
+            // Lift path is gated on non-empty config token; pre-existing
+            // user input survives.
+            Assert.Equal("hf_prior_user_input", vm.HuggingFaceTokenInput);
+        }
+        finally { cleanup(); }
+    }
+
+    [Fact]
+    public void LockManageSession_ZeroizesDerivedKeyBuffer_AndFlipsGateClosed()
+    {
+        var (root, cleanup) = MakeTempDriveRoot(hasEncryptedConfig: true, manifestCount: 1);
+        try
+        {
+            SetupDefaultMocks(new List<DriveTarget> { MakeDrive(root) }, encrypted: true);
+
+            var vm = CreateViewModel();
+            vm.Initialize();
+
+            var key = new byte[32];
+            new Random(42).NextBytes(key); // non-zero so zeroize is observable
+            var keyRef = key; // separate ref so the test can inspect after VM releases
+            var config = new PortableConfig();
+            var material = new UnlockMaterial(
+                key, new byte[16], 210_000, "aes-256-gcm+pbkdf2-sha256-v1");
+            vm.ApplyUnlockResult(config, material);
+            Assert.True(vm.IsManageSessionUnlocked);
+
+            vm.LockManageSession();
+
+            Assert.False(vm.IsManageSessionUnlocked);
+            Assert.False(vm.CanMutateDrive);
+            // CryptographicOperations.ZeroMemory wipes in-place; the
+            // record holds a reference to the same buffer.
+            Assert.All(keyRef, b => Assert.Equal((byte)0, b));
+        }
+        finally { cleanup(); }
+    }
+
+    [Fact]
+    public void SelectingDifferentDrive_LocksManageSession()
+    {
+        // C7 lifecycle: switching drives mid-unlocked-session zeroizes the
+        // cached material and resets the banner so the green "Unlocked"
+        // state can never render against a different drive's identity.
+        var (rootA, cleanupA) = MakeTempDriveRoot(hasEncryptedConfig: true, manifestCount: 1);
+        var (rootB, cleanupB) = MakeTempDriveRoot(hasEncryptedConfig: true, manifestCount: 1);
+        try
+        {
+            var driveA = MakeDrive(rootA);
+            var driveB = MakeDrive(rootB);
+            SetupDefaultMocks(new List<DriveTarget> { driveA, driveB }, encrypted: true);
+
+            var vm = CreateViewModel();
+            vm.Initialize();
+            vm.SelectedDrive = driveA;
+            vm.ApplyUnlockResult(
+                new PortableConfig(),
+                new UnlockMaterial(new byte[32], new byte[16], 210_000, "aes-256-gcm+pbkdf2-sha256-v1"));
+            Assert.True(vm.IsManageSessionUnlocked);
+
+            vm.SelectedDrive = driveB;
+
+            Assert.False(vm.IsManageSessionUnlocked);
+            Assert.True(vm.ShowUnlockButton);
+            Assert.False(vm.ShowSessionUnlockedBanner);
+        }
+        finally { cleanupA(); cleanupB(); }
+    }
+
+    [Fact]
+    public void UnlockCommand_OnUnencryptedDrive_IsNotExecutable()
+    {
+        // Sanity: the UnlockCommand should never light up on an
+        // unencrypted drive. The banner XAML hides the button too, but
+        // the CanExecute guard is the second line of defense.
+        var (root, cleanup) = MakeTempDriveRoot(hasPlaintextConfig: true, manifestCount: 1);
+        try
+        {
+            SetupDefaultMocks(new List<DriveTarget> { MakeDrive(root) });
+
+            var vm = CreateViewModel();
+            vm.Initialize();
+
+            Assert.False(vm.IsSelectedDriveEncrypted);
+            Assert.False(vm.UnlockCommand.CanExecute(null));
+            Assert.False(vm.ShowUnlockButton);
+        }
+        finally { cleanup(); }
+    }
+
+    [Fact]
+    public void UnlockCommand_RaisesUnlockRequestedEvent()
+    {
+        var (root, cleanup) = MakeTempDriveRoot(hasEncryptedConfig: true, manifestCount: 1);
+        try
+        {
+            SetupDefaultMocks(new List<DriveTarget> { MakeDrive(root) }, encrypted: true);
+
+            var vm = CreateViewModel();
+            vm.Initialize();
+            var raised = 0;
+            vm.UnlockRequested += (_, _) => raised++;
+
+            Assert.True(vm.UnlockCommand.CanExecute(null));
+            vm.UnlockCommand.Execute(null);
+
+            Assert.Equal(1, raised);
+        }
+        finally { cleanup(); }
+    }
 }

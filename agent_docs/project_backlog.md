@@ -156,7 +156,7 @@ Three flat buckets, one counter per bucket:
 
 **P3 — Existing critical / high items (deferred behind P1–P2):**
 
-2. **C7** (was X9) — encrypted config persistence lifecycle *(Critical, Opus planning)*
+2. ~~**C7**~~ (was X9) — encrypted config persistence lifecycle — **done** C7 PR 2026-05-12 (Mac PrepApp + Windows PrepApp unlock UX + gate flip + HF token lift). Windows HF-token write-back deferred to **W5**.
 3. **C8** (was X10) — document replacement consistency *(plan locked 2026-04-19)*
 4. **W1** (was X11) — companion keyboard PTT
 5. **C9** (was X12) — download verify-before-move
@@ -165,6 +165,7 @@ Three flat buckets, one counter per bucket:
 8. **C11** (was B2) — LAN discovery
 9. **C12** (was R1 Stage 2) — runner-cli slash-commands
 10. **M7** (was MAC20) — cross-platform release ZIP layout rework
+11. **W5** (new, 2026-05-12) — Windows PrepApp HF-token write-back on encrypted drives. C7 lifts the token on unlock but the existing Windows save path (`IModelService.SaveConfigAsync` + `PortableConfig.SaveAsync`) doesn't route through `IConfigStore`. W5 threads `IConfigStore` through `prep-app/Services/ModelService.cs` so encrypted-drive token edits round-trip to the sealed blob (matches Mac PrepApp's behavior post-C7).
 
 **P4 — RAG audit batch (slot when v1.3.x feature work resumes):**
 

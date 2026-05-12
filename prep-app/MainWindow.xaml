@@ -752,6 +752,13 @@
                                                     Command="{Binding ManageModelsCommand}"
                                                     Visibility="{Binding ShowManageModelsButton, Converter={StaticResource BoolToVisibilityConverter}}"
                                                     ToolTip="Switch to the Models tab to add or remove models on this SSD."/>
+                                            <!-- C7: Unlock visible only on encrypted + not-yet-unlocked drives. Once unlocked, the green banner below replaces this button. -->
+                                            <Button Content="Unlock…" Margin="8,0,0,0"
+                                                    Padding="14,4" MinHeight="0"
+                                                    Style="{StaticResource GhostSecondaryButton}"
+                                                    Command="{Binding UnlockCommand}"
+                                                    Visibility="{Binding ShowUnlockButton, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                    ToolTip="Prompt for the SSD passphrase so Add and Remove become enabled for this session."/>
                                             <Button Content="Start over (formats drive)" Margin="8,0,0,0"
                                                     Padding="14,4" MinHeight="0"
                                                     Style="{StaticResource GhostSecondaryButton}"
@@ -759,6 +766,20 @@
                                                     Visibility="{Binding ShowStartOverButton, Converter={StaticResource BoolToVisibilityConverter}}"
                                                     ToolTip="Erase this SSD and run the full prep flow again. All models, configuration, and documents will be lost."/>
                                         </StackPanel>
+                                        <!-- C7: green confirmation that the SSD is unlocked for the current session. Mirrors the Mac PrepApp's banner. -->
+                                        <Border Margin="0,8,0,0" Padding="10,6"
+                                                Background="{StaticResource BgRaisedBrush}"
+                                                BorderBrush="{StaticResource StatusOkBrush}"
+                                                BorderThickness="1" CornerRadius="6"
+                                                Visibility="{Binding ShowSessionUnlockedBanner, Converter={StaticResource BoolToVisibilityConverter}}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <theme:LedStatusIndicator State="Ok" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                                <TextBlock Text="Unlocked for this session. Add and Remove enabled."
+                                                           Foreground="{StaticResource StatusOkBrush}"
+                                                           VerticalAlignment="Center"
+                                                           TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                        </Border>
                                     </StackPanel>
                                 </Border>
 

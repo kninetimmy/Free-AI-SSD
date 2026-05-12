@@ -26,6 +26,11 @@ final class PrepViewModel: ObservableObject {
     @Published var candidates: [DiskCandidate] = []
     @Published var selectedCandidate: DiskCandidate? {
         didSet {
+            // C7: zero any cached unlock material BEFORE re-running
+            // detection so a green "Unlocked" banner can never render
+            // against a different drive's identity. Resetting the dialog
+            // state too keeps a half-typed sheet from carrying over.
+            resetManageModelsUnlockState()
             // C6 Stage 3: detection runs on every selection change so the
             // already-configured banner stays in sync. Detection is pure
             // file-presence (no decrypt) — safe even on encrypted drives.
@@ -52,6 +57,27 @@ final class PrepViewModel: ObservableObject {
     // user returns to .manageModels (refreshing installedModels)
     // instead of falling through to .readiness.
     @Published var isAddingModelInManagement: Bool = false
+
+    // C7: passphrase-unlock state for Manage Models on an encrypted drive.
+    // `isManageModelsUnlocked` is the gate signal SwiftUI observes; it
+    // flips true only after `attemptUnlock` succeeds and is cleared on
+    // drive change, Done, or app termination (UnlockMaterial.deinit
+    // zeroes the key automatically when the @StateObject is dropped).
+    // `unlockMaterial` is the cached PBKDF2 output used by re-encrypts;
+    // intentionally not @Published so it never leaks through SwiftUI
+    // diagnostic reflection.
+    @Published var isManageModelsUnlocked: Bool = false
+    @Published var unlockDialogPresented: Bool = false
+    @Published var unlockDialogPassword: String = ""
+    @Published var unlockDialogError: String? = nil
+    @Published var isUnlocking: Bool = false
+    private var unlockMaterial: UnlockMaterial?
+    // C7: in-memory decrypted config kept alive while a session is
+    // unlocked so re-encrypts (`commitHuggingFaceTokenIfNeeded`) preserve
+    // unknown fields the Mac PrepApp doesn't model. Cleared via
+    // `resetManageModelsUnlockState`. Never @Published — the dict shape
+    // changes opaquely as the user types.
+    private var unlockedConfig: [String: Any]?
 
     // Status / progress / log
     @Published var statusMessage: String = ""
@@ -332,10 +358,16 @@ final class PrepViewModel: ObservableObject {
     /// in that state, not in the inline fresh-format controls.
     var canInitiateFreshFormat: Bool { !showAlreadyConfiguredBanner }
 
-    /// C6: Add/Remove on the new step are disabled on encrypted drives.
-    /// Punted to C7 — see decision D13 in the C6 plan.
-    var canManageModelsAdd: Bool { !driveConfiguration.isConfigEncrypted }
-    var canManageModelsRemove: Bool { !driveConfiguration.isConfigEncrypted }
+    /// C6: Add/Remove on the new step are disabled on encrypted drives
+    /// until C7's passphrase-unlock lands. C7 update: unlocked sessions
+    /// flip both gates true. Unencrypted drives bypass the unlock check
+    /// entirely (no banner, no sheet).
+    var canManageModelsAdd: Bool {
+        !driveConfiguration.isConfigEncrypted || isManageModelsUnlocked
+    }
+    var canManageModelsRemove: Bool {
+        !driveConfiguration.isConfigEncrypted || isManageModelsUnlocked
+    }
 
     /// C6: contextual banner text. FullyConfigured includes a model
     /// count; ConfiguredEmpty calls out the half-prepped state.
@@ -468,7 +500,7 @@ final class PrepViewModel: ObservableObject {
     /// `canManageModelsRemove` (false on encrypted drives, per D13).
     func removeModel(tag: String) async {
         guard canManageModelsRemove else {
-            appendLog("Remove blocked: drive is encrypted (C7 will land unlock).")
+            appendLog("Remove blocked: drive is encrypted and not yet unlocked.")
             return
         }
 #if canImport(AppKit)
@@ -504,7 +536,7 @@ final class PrepViewModel: ObservableObject {
     /// through the existing `.modelPull` view for in-place progress.
     func pullSelectedFromManagement() async {
         guard canManageModelsAdd else {
-            appendLog("Add blocked: drive is encrypted (C7 will land unlock).")
+            appendLog("Add blocked: drive is encrypted and not yet unlocked.")
             return
         }
         guard !selectedStarterModels.isEmpty else { return }
@@ -519,11 +551,151 @@ final class PrepViewModel: ObservableObject {
     /// `runManageModelsStartup()`. Returns to `.driveSelection` with
     /// the banner still visible.
     func exitManageModels() async {
+        // C7: commit any pending HF-token edits BEFORE zeroizing — Done
+        // is the user's intent-to-save boundary. No-op if the drive is
+        // unencrypted or the token didn't change. Persisting per-keystroke
+        // would thrash exFAT over USB; per-pull (in pullPendingTags tail)
+        // plus per-Done is enough to make the token re-entry experience
+        // good without write amplification.
+        await commitHuggingFaceTokenIfNeeded()
+        // Now zero the cached unlock material. UnlockMaterial.deinit also
+        // zeroes on @StateObject drop (app exit), but exiting the step is
+        // the normal "I'm done" boundary.
+        resetManageModelsUnlockState()
         await hostController.shutdown()
         installedModels = []
         selectedStarterModels = []
         isAddingModelInManagement = false
         currentStep = .driveSelection
+    }
+
+    // MARK: - C7 — encrypted-drive Manage Models unlock
+
+    /// C7: banner "Unlock" button action. Resets any prior sheet state
+    /// (typed-but-not-submitted password from a previous open) and shows
+    /// the modal SecureField sheet.
+    func presentUnlockSheet() {
+        unlockDialogPassword = ""
+        unlockDialogError = nil
+        unlockDialogPresented = true
+    }
+
+    /// C7: sheet's Cancel button action. Mirrors the Runner pattern of
+    /// clearing transient state but never touching the cached material —
+    /// cancelling an unlock attempt on a re-lock-already path must NOT
+    /// invalidate a prior successful unlock.
+    func cancelUnlock() {
+        unlockDialogPresented = false
+        unlockDialogPassword = ""
+        unlockDialogError = nil
+    }
+
+    /// C7: sheet's "Unlock" button action. Synchronous mirror of
+    /// `RunnerViewModel.attemptUnlock` (main.swift:267-310). On success:
+    /// caches `UnlockMaterial`, lifts `huggingFaceToken` from the
+    /// decrypted config, flips the gate, dismisses the sheet, and runs
+    /// `tryMigratePlaintext` so a stale plaintext config can never
+    /// accumulate alongside the encrypted blob.
+    func attemptUnlock(password: String) {
+        guard let mount = selectedCandidate?.mountPoint else {
+            unlockDialogError = "No drive selected."
+            return
+        }
+        isUnlocking = true
+        defer { isUnlocking = false }
+
+        let result = SsdEncryption.tryUnlockPortableConfig(ssdRoot: mount, password: password)
+        switch result {
+        case .failure(let err):
+            unlockDialogError = err.errorDescription ?? "Unlock failed."
+            appendLog("Unlock failed: \(err.errorDescription ?? "unknown")")
+        case .success(let unlocked):
+            // Zero any prior material before swapping in the new one so a
+            // re-unlock on the same drive doesn't leak the previous key.
+            unlockMaterial?.zeroize()
+            unlockMaterial = unlocked.material
+            unlockedConfig = unlocked.config
+
+            // Lift huggingFaceToken from the decrypted config — closes the
+            // post-finalize re-entry gap noted in the C7 plan. Finalize
+            // already writes the token; this is the read path back.
+            if let token = unlocked.config["huggingFaceToken"] as? String,
+               !token.isEmpty {
+                huggingFaceToken = token
+            }
+
+            isManageModelsUnlocked = true
+            unlockDialogPresented = false
+            unlockDialogPassword = ""
+            unlockDialogError = nil
+            appendLog("SSD unlocked for this session.")
+
+            // Mirror Runner (main.swift:293-299): absorb-or-discard any
+            // stale plaintext config so the drive never accumulates
+            // plaintext secrets. Branch A (plaintext newer) re-sets the
+            // HF token AND the cached config from the merged dict in case
+            // the user edited it pre-encryption-fix.
+            let migration = SsdEncryption.tryMigratePlaintext(
+                ssdRoot: mount, material: unlocked.material,
+                log: { [weak self] line in self?.appendLog(line) })
+            if case .mergedFromPlaintext(let merged) = migration {
+                unlockedConfig = merged
+                if let token = merged["huggingFaceToken"] as? String,
+                   !token.isEmpty {
+                    huggingFaceToken = token
+                }
+            }
+        }
+    }
+
+    /// C7: zero the cached UnlockMaterial and clear every unlock UI flag.
+    /// Called from `selectedCandidate.didSet` (drive change) and
+    /// `exitManageModels` (Done click). The UnlockMaterial.deinit also
+    /// zeroes on object deallocation; this is the explicit-boundary path.
+    func resetManageModelsUnlockState() {
+        unlockMaterial?.zeroize()
+        unlockMaterial = nil
+        unlockedConfig = nil
+        isManageModelsUnlocked = false
+        unlockDialogPresented = false
+        unlockDialogPassword = ""
+        unlockDialogError = nil
+        isUnlocking = false
+    }
+
+    /// C7: persist the current `huggingFaceToken` value back to the
+    /// encrypted config using the cached `UnlockMaterial`. No-op when the
+    /// drive is unencrypted or no session is unlocked. Triggered from the
+    /// SecureField's `.onSubmit` / focus-loss and from
+    /// `pullPendingTags`'s tail after a successful HF pull — NOT on every
+    /// keystroke (per the plan's commit-not-keystroke decision; exFAT
+    /// over USB can't sustain per-character AES-GCM + two-file commits).
+    func commitHuggingFaceTokenIfNeeded() async {
+        guard let mount = selectedCandidate?.mountPoint else { return }
+        guard let material = unlockMaterial else { return }
+        guard driveConfiguration.isConfigEncrypted else { return }
+        // No-op fast path: token unchanged.
+        if let prior = unlockedConfig?["huggingFaceToken"] as? String,
+           prior == huggingFaceToken {
+            return
+        }
+
+        // Use the in-memory decrypted config as the round-trip base so
+        // unknown fields the Mac PrepApp doesn't model (e.g.
+        // networkApiBindAddress) survive the re-seal. Fall back to a
+        // single-key dict only if no unlock-time snapshot exists (should
+        // not happen — `attemptUnlock` always populates it on success).
+        var current = unlockedConfig ?? [:]
+        current["huggingFaceToken"] = huggingFaceToken
+
+        do {
+            try SsdEncryption.saveEncryptedConfig(
+                ssdRoot: mount, config: current, material: material)
+            unlockedConfig = current
+            appendLog("Hugging Face token re-encrypted to portable config.")
+        } catch {
+            appendLog("Failed to persist Hugging Face token: \(error.localizedDescription)")
+        }
     }
 
     /// Show a native NSAlert with destructive styling. If the user
@@ -1196,6 +1368,10 @@ final class PrepViewModel: ObservableObject {
             isAddingModelInManagement = false
             currentStep = .manageModels
             await refreshInstalledModels()
+            // C7: a successful HF pull is a natural commit point for the
+            // token (the user just proved it works). No-ops when the
+            // drive is unencrypted or the token didn't change.
+            await commitHuggingFaceTokenIfNeeded()
             return
         }
 

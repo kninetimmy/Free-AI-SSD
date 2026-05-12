@@ -57,6 +57,17 @@ public class PrepViewModel : BaseViewModel
     private bool _showFixedDrives;
     private bool _isSelectedDriveEncrypted;
 
+    // C7: Manage-Models session unlock state. Flips true after the view
+    // hands a successful unlock back via ApplyUnlockResult; gates Add /
+    // Remove on encrypted drives via CanMutateDrive. The UnlockMaterial
+    // is cached so future re-encrypt paths can avoid re-deriving the
+    // key (currently used only by the unit tests — the production HF-
+    // token write-back path on Windows lands in a follow-up; see C7 PR
+    // body for the Mac-vs-Windows scope split).
+    private bool _isManageSessionUnlocked;
+    private UnlockMaterial? _unlockMaterial;
+    private PortableConfig? _unlockedConfig;
+
     // C6: file-presence snapshot of the selected drive. Refreshed on every
     // SelectedDrive change, alongside RefreshEncryptionState. The detector
     // never reads config contents — encryption status is a filename-only
@@ -236,6 +247,14 @@ public class PrepViewModel : BaseViewModel
             () => ShowManageModelsButton);
         StartOverCommand = new AsyncRelayCommand(StartOverAsync,
             () => ShowStartOverButton && CanMutateDrive);
+        // C7: only enabled on an encrypted drive that hasn't been
+        // unlocked yet. The button lives in the configured-drive banner
+        // and only renders when the drive is encrypted (XAML
+        // ShowUnlockButton binding) — the CanExecute guard is the second
+        // gate against double-fire.
+        UnlockCommand = new RelayCommand(
+            () => UnlockRequested?.Invoke(this, EventArgs.Empty),
+            () => _isSelectedDriveEncrypted && !_isManageSessionUnlocked);
     }
 
     public IReadOnlyList<DriveTarget> Drives
@@ -272,6 +291,25 @@ public class PrepViewModel : BaseViewModel
     {
         get => _isSelectedDriveEncrypted;
         private set => SetProperty(ref _isSelectedDriveEncrypted, value);
+    }
+
+    /// <summary>
+    /// C7: true between a successful passphrase unlock on the Manage-Models
+    /// banner and the next drive selection / app close. Drives
+    /// <see cref="CanMutateDrive"/> for encrypted drives.
+    /// </summary>
+    public bool IsManageSessionUnlocked
+    {
+        get => _isManageSessionUnlocked;
+        private set
+        {
+            if (SetProperty(ref _isManageSessionUnlocked, value))
+            {
+                OnPropertyChanged(nameof(CanMutateDrive));
+                OnPropertyChanged(nameof(SelectedDriveWarning));
+                RaiseAllCommandsCanExecuteChanged();
+            }
+        }
     }
 
     public string StatusText
@@ -815,6 +853,7 @@ public class PrepViewModel : BaseViewModel
     public AsyncRelayCommand CheckReadinessCommand { get; }
     public RelayCommand ManageModelsCommand { get; }
     public AsyncRelayCommand StartOverCommand { get; }
+    public RelayCommand UnlockCommand { get; }
 
     /// <summary>
     /// C6: raised when the user clicks "Manage models" on an already-
@@ -824,7 +863,18 @@ public class PrepViewModel : BaseViewModel
     /// </summary>
     public event EventHandler? ModelsTabRequested;
 
-    public bool CanMutateDrive => !_isModelOperationRunning && !_isSelectedDriveEncrypted;
+    /// <summary>
+    /// C7: raised when the user clicks Unlock in the encrypted-drive
+    /// banner. View layer handles the modal passphrase dialog and on
+    /// success calls <see cref="ApplyUnlockResult"/>. Same delegate-hook
+    /// posture as <see cref="ModelsTabRequested"/> so the VM stays free
+    /// of a direct WPF reference.
+    /// </summary>
+    public event EventHandler? UnlockRequested;
+
+    public bool CanMutateDrive =>
+        !_isModelOperationRunning &&
+        (!_isSelectedDriveEncrypted || _isManageSessionUnlocked);
     public bool HasDriveSelected => _selectedDrive is not null;
 
     /// <summary>
@@ -854,6 +904,24 @@ public class PrepViewModel : BaseViewModel
 
     /// <summary>C6: Manage-models button is shown whenever the banner is.</summary>
     public bool ShowManageModelsButton => ShowAlreadyConfiguredBanner;
+
+    /// <summary>
+    /// C7: Unlock button is visible on the configured-drive banner only
+    /// when the drive is encrypted AND the session hasn't been unlocked
+    /// yet. Once unlocked, this flips false and the banner switches to
+    /// the green "Unlocked for this session" indicator (driven by
+    /// <see cref="IsManageSessionUnlocked"/>).
+    /// </summary>
+    public bool ShowUnlockButton =>
+        _isSelectedDriveEncrypted && !_isManageSessionUnlocked && ShowAlreadyConfiguredBanner;
+
+    /// <summary>
+    /// C7: green-banner indicator showing the user successfully unlocked
+    /// the drive. Inverse of <see cref="ShowUnlockButton"/> on encrypted
+    /// drives; always false for unencrypted drives.
+    /// </summary>
+    public bool ShowSessionUnlockedBanner =>
+        _isSelectedDriveEncrypted && _isManageSessionUnlocked && ShowAlreadyConfiguredBanner;
 
     /// <summary>
     /// C6: Start-over button is shown whenever the banner is. Both
@@ -991,6 +1059,11 @@ public class PrepViewModel : BaseViewModel
 
     private void OnSelectedDriveChanged()
     {
+        // C7: zero any cached unlock material BEFORE re-running encryption-
+        // state detection so the green "Unlocked for this session" banner
+        // can never render against a different drive's identity. The flag
+        // setter raises CanMutateDrive + command can-execute.
+        LockManageSession();
         RefreshEncryptionState();
         // C6: detection runs on every drive-select change. Order matters —
         // RefreshEncryptionState first so existing invariants hold, then
@@ -1000,9 +1073,76 @@ public class PrepViewModel : BaseViewModel
         OnPropertyChanged(nameof(SelectedDriveWarning));
         OnPropertyChanged(nameof(CanMutateDrive));
         OnPropertyChanged(nameof(HasDriveSelected));
+        OnPropertyChanged(nameof(ShowUnlockButton));
+        OnPropertyChanged(nameof(ShowSessionUnlockedBanner));
         RaiseAllCommandsCanExecuteChanged();
         _ = RefreshModelStatusesAsync();
         _ = CheckAndPromptLibraryReindexAsync();
+    }
+
+    /// <summary>
+    /// C7: called by the view layer after a successful passphrase unlock.
+    /// The view owns the modal dialog and the call to
+    /// <see cref="SsdEncryption.TryUnlockPortableConfigWithMaterial"/>; it
+    /// hands the result back through this method so the VM can take
+    /// ownership of the cached <see cref="UnlockMaterial"/> + decrypted
+    /// config and flip the gate. Also lifts the HF token into
+    /// <see cref="HuggingFaceTokenInput"/> so the picker's inline field
+    /// pre-populates on re-entry.
+    /// </summary>
+    public void ApplyUnlockResult(PortableConfig config, UnlockMaterial material)
+    {
+        // Defensive: zero any prior material before swapping in the new
+        // one. Should not happen — UnlockCommand is disabled when already
+        // unlocked — but the guard is cheap and matches Mac's pattern.
+        if (_unlockMaterial is not null)
+        {
+            CryptographicOperations.ZeroMemory(_unlockMaterial.DerivedKey);
+        }
+        _unlockMaterial = material;
+        _unlockedConfig = config;
+
+        // Lift HF token from the decrypted config — closes the post-
+        // finalize re-entry gap. The setter will fire
+        // HuggingFaceTokenChanged so the catalog service picks up the
+        // Bearer token immediately.
+        if (!string.IsNullOrEmpty(config.HuggingFaceToken))
+        {
+            HuggingFaceTokenInput = config.HuggingFaceToken;
+        }
+
+        // Set the flag last so SwiftUI-equivalent observers see a
+        // consistent state (config lifted, material cached, then gate
+        // flips). IsManageSessionUnlocked's setter raises
+        // CanMutateDrive + command can-execute.
+        IsManageSessionUnlocked = true;
+        OnPropertyChanged(nameof(ShowUnlockButton));
+        OnPropertyChanged(nameof(ShowSessionUnlockedBanner));
+        AppendLog("SSD unlocked for this session.");
+    }
+
+    /// <summary>
+    /// C7: zero the cached <see cref="UnlockMaterial"/> and drop the
+    /// decrypted config. Called from <see cref="OnSelectedDriveChanged"/>
+    /// and from <see cref="App"/>'s Exit handler. Safe to call when no
+    /// session is unlocked.
+    /// </summary>
+    public void LockManageSession()
+    {
+        if (_unlockMaterial is not null)
+        {
+            CryptographicOperations.ZeroMemory(_unlockMaterial.DerivedKey);
+            _unlockMaterial = null;
+        }
+        _unlockedConfig = null;
+        // Use IsManageSessionUnlocked setter so observers refresh; only
+        // fire change notifications when actually flipping.
+        if (_isManageSessionUnlocked)
+        {
+            IsManageSessionUnlocked = false;
+            OnPropertyChanged(nameof(ShowUnlockButton));
+            OnPropertyChanged(nameof(ShowSessionUnlockedBanner));
+        }
     }
 
     private void RefreshDriveConfigurationState()
@@ -1017,6 +1157,11 @@ public class PrepViewModel : BaseViewModel
         OnPropertyChanged(nameof(ShowAlreadyConfiguredBanner));
         OnPropertyChanged(nameof(ShowManageModelsButton));
         OnPropertyChanged(nameof(ShowStartOverButton));
+        // C7: ShowUnlockButton / ShowSessionUnlockedBanner depend on
+        // ShowAlreadyConfiguredBanner, so any banner-visibility change
+        // must fan out to them.
+        OnPropertyChanged(nameof(ShowUnlockButton));
+        OnPropertyChanged(nameof(ShowSessionUnlockedBanner));
         OnPropertyChanged(nameof(CanInitiateFreshFormat));
         OnPropertyChanged(nameof(AlreadyConfiguredBannerText));
     }
