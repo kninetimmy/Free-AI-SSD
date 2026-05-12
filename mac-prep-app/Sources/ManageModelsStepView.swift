@@ -83,6 +83,14 @@ struct ManageModelsStepView: View {
         }
     }
 
+    // M18: the DisclosureGroup is intentionally NOT `.disabled` on encrypted
+    // drives. Previously the whole group was disabled when `canManageModelsAdd`
+    // is false, which hid the inner C7 explanation behind a chevron the user
+    // could never expand. Now the chevron always works; the C7 hint surfaces
+    // on the label itself (so the user sees it without expanding) and the
+    // longer message is inside the content for users who do expand. The
+    // picker is hidden — not just disabled — to avoid running its Refresh /
+    // source-switch / HF-token side effects on a drive where pulls can't run.
     private var addSection: some View {
         DisclosureGroup(isExpanded: $isAddExpanded) {
             if vm.canManageModelsAdd {
@@ -99,15 +107,21 @@ struct ManageModelsStepView: View {
                 }
                 .padding(.top, 8)
             } else {
-                Text("Unlock required (C7) — Add disabled on encrypted drives.")
+                Text("Unlock required (C7) — Add disabled on encrypted drives. Adding new models will work once encrypted-config persistence ships.")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .padding(.vertical, 8)
             }
         } label: {
-            Text("Add a model").font(.headline)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Add a model").font(.headline)
+                if !vm.canManageModelsAdd {
+                    Text("Unlock required (C7) — disabled on encrypted drives.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
         }
-        .disabled(!vm.canManageModelsAdd)
     }
 
     private var footer: some View {

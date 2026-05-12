@@ -7,6 +7,7 @@ import Foundation
 //     swiftc \
 //         mac-prep-app/Sources/PrepFlowStep.swift \
 //         mac-prep-app/Sources/DiskutilFormatCommand.swift \
+//         mac-prep-app/Sources/CommandPayloadEncoder.swift \
 //         mac-prep-app/Tests/PrepAppTests.swift \
 //         -parse-as-library -target "arm64-apple-macos11.0" \
 //         -o /tmp/mac-prep-tests && /tmp/mac-prep-tests
@@ -1115,8 +1116,89 @@ struct PrepAppTestsMain {
                 "manifest count must be capped at \(DriveConfigurationDetector.manifestEnumerationCap)")
         }
 
+        // MARK: M19 — CommandPayloadEncoder JSON parity pins
+
+        runner.test("M19: encode wraps simple string in valid JSON") {
+            let payload = CommandPayloadEncoder.encode(["token": "hf_abc123"])
+            try expect(payload != nil, "encoder must succeed on a plain ASCII string")
+            // Round-trip via JSONSerialization to assert structural validity
+            // (avoids brittle key-order assertions).
+            let parsed = try parseSinglePairJSON(payload!)
+            try expect(parsed.0 == "token" && parsed.1 == "hf_abc123",
+                       "round-trip key/value drift: \(parsed)")
+        }
+
+        runner.test("M19: encode escapes embedded double quotes") {
+            // Hand-rolled escape path got this right, but the test pins
+            // continued correctness now that we delegate to
+            // JSONSerialization.
+            let payload = CommandPayloadEncoder.encode(["search": #"foo "bar" baz"#])
+            try expect(payload != nil, "encoder must accept embedded quotes")
+            let parsed = try parseSinglePairJSON(payload!)
+            try expect(parsed.1 == #"foo "bar" baz"#,
+                       "round-trip lost embedded quotes: \(parsed.1)")
+        }
+
+        runner.test("M19: encode escapes embedded backslashes") {
+            let payload = CommandPayloadEncoder.encode(["search": #"C:\path\to\file"#])
+            try expect(payload != nil, "encoder must accept backslashes")
+            let parsed = try parseSinglePairJSON(payload!)
+            try expect(parsed.1 == #"C:\path\to\file"#,
+                       "round-trip lost backslashes: \(parsed.1)")
+        }
+
+        runner.test("M19: encode escapes newline + tab + CR (the regression class)") {
+            // These are the inputs the hand-rolled escape path mangled:
+            // raw 0x0A / 0x09 / 0x0D pass through unescaped, which is
+            // invalid JSON and trips JsonDocument.Parse on the C# side.
+            let raw = "line1\nline2\tcol2\r\nline3"
+            let payload = CommandPayloadEncoder.encode(["search": raw])
+            try expect(payload != nil, "encoder must accept control chars")
+            try expect(!payload!.contains("\n") && !payload!.contains("\t") && !payload!.contains("\r"),
+                       "encoded string must not contain raw control characters: \(payload!)")
+            let parsed = try parseSinglePairJSON(payload!)
+            try expect(parsed.1 == raw,
+                       "round-trip lost control characters: \(parsed.1)")
+        }
+
+        runner.test("M19: encode emits a single line (no pretty-print)") {
+            // The sidecar command parser splits on the first space, so
+            // payloads must stay on one line. JSONSerialization without
+            // `.prettyPrinted` already does this; this test pins it.
+            let payload = CommandPayloadEncoder.encode([
+                "token": "tok",
+                "extra": "value"
+            ])
+            try expect(payload != nil, "encoder must succeed")
+            try expect(!payload!.contains("\n"),
+                       "payload must be single-line: \(payload!)")
+        }
+
+        runner.test("M19: encode produces valid JSON object that JSONSerialization round-trips") {
+            // Catches future regressions if the encoder ever wraps the
+            // dict in an unexpected shape (e.g. an array).
+            let payload = CommandPayloadEncoder.encode(["token": "hf_xyz"])!
+            let data = payload.data(using: .utf8)!
+            let obj = try JSONSerialization.jsonObject(with: data, options: [])
+            try expect(obj is [String: Any], "encoder must emit a JSON object, got: \(type(of: obj))")
+        }
+
         await runner.run()
     }
+}
+
+// M19 helper — parse a `{"key":"value"}` payload back into a (String, String)
+// pair so the round-trip pins don't depend on JSON key order. Fails fast on
+// any shape drift (multiple keys, non-string values, etc).
+private func parseSinglePairJSON(_ text: String) throws -> (String, String) {
+    let data = text.data(using: .utf8) ?? Data()
+    let raw = try JSONSerialization.jsonObject(with: data, options: [])
+    guard let dict = raw as? [String: String], dict.count == 1,
+          let pair = dict.first else {
+        struct ParseFailure: Error { let detail: String }
+        throw ParseFailure(detail: "expected single-pair JSON object, got: \(raw)")
+    }
+    return (pair.key, pair.value)
 }
 
 // MARK: - C6 Swift detector test fixtures

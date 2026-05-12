@@ -878,13 +878,21 @@ final class PrepViewModel: ObservableObject {
     /// underlying 401/403 naturally.
     func pushHuggingFaceTokenToSidecar(_ token: String) async {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Defense-in-depth: never echo the token into the log.
-        let escaped = trimmed
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        let command = trimmed.isEmpty
-            ? "set-hf-token {}"
-            : "set-hf-token {\"token\":\"\(escaped)\"}"
+        // M19: route through CommandPayloadEncoder so control characters
+        // (newlines, tabs, …) in pasted tokens emit a valid JSON escape
+        // sequence rather than passing through and tripping the sidecar's
+        // JsonDocument.Parse. Defense-in-depth: we still never echo the
+        // token value into the log.
+        let command: String
+        if trimmed.isEmpty {
+            command = "set-hf-token {}"
+        } else {
+            guard let payload = CommandPayloadEncoder.encode(["token": trimmed]) else {
+                appendLog("Could not encode set-hf-token payload.")
+                return
+            }
+            command = "set-hf-token \(payload)"
+        }
         do {
             _ = try await hostController.send(command, timeout: 5)
         } catch {
@@ -904,12 +912,16 @@ final class PrepViewModel: ObservableObject {
         do {
             let command: String
             if let needle = search, !needle.isEmpty {
-                // search-hf payload: single-line JSON object so we
-                // don't collide with the host's space-split parser.
-                let escaped = needle
-                    .replacingOccurrences(of: "\\", with: "\\\\")
-                    .replacingOccurrences(of: "\"", with: "\\\"")
-                command = "search-hf {\"search\":\"\(escaped)\"}"
+                // M19: route through CommandPayloadEncoder so control
+                // characters in user-typed searches emit valid JSON
+                // escape sequences. Single-line output keeps the
+                // host's space-split parser happy.
+                guard let payload = CommandPayloadEncoder.encode(["search": needle]) else {
+                    catalogStatusText = "Hugging Face fetch failed: could not encode search payload."
+                    appendLog("Could not encode search-hf payload.")
+                    return
+                }
+                command = "search-hf \(payload)"
             } else {
                 command = "discover-hf-catalog"
             }
