@@ -1,7 +1,7 @@
 <!-- memhub:rendered -->
 <!-- DO NOT EDIT. Generated from .memhub/project.sqlite. -->
 <!-- To change content, use memhub CLI; then re-run `memhub render`. -->
-<!-- Generated at: 2026-05-13T17:09:04Z by memhub 0.1.0 -->
+<!-- Generated at: 2026-05-13T17:24:52Z by memhub 0.1.0 -->
 
 # Free-AI-SSD
 
@@ -49,15 +49,26 @@ UX shipped both OSes. 3 decisions pinned: explicit-button UX (not
 auto-prompt), lock-on-Done (not lock-on-background), commit-on-boundary
 HF-token persistence (not per-keystroke). CI green first run.
 
-**This session (2026-05-13):** Initialized `.memhub/project.sqlite`
-from K9 markdown — 82 decisions + 27 tasks bootstrapped via
-`k9:bootstrap` actor. K9 files stay on disk as informational; memhub
-DB is now source of truth. `agent_docs/PROJECT.md` +
-`agent_docs/PROJECT_LEDGER.md` are render outputs (not hand-edited).
-CLAUDE.md + AGENTS.md gained memhub:managed footer blocks; `.gitignore`
-adds `.memhub/`.
+**This session (2026-05-13):** Two memhub-related events.
+**Morning** — initialized `.memhub/project.sqlite` from K9 markdown
+(82 decisions + 27 tasks bootstrapped via `k9:bootstrap`);
+CLAUDE.md + AGENTS.md gained memhub:managed footer blocks;
+`.gitignore` adds `.memhub/`; PROJECT.md + PROJECT_LEDGER.md
+rendered fresh as outputs.
+**Afternoon** — archived the four K9 canonical markdowns
+(project_state/arch/backlog/decisions) + `.init-version` into
+`agent_docs/_archive_k9/` (commit `7f03d3a`) so the repo is no
+longer K9-shaped; CLAUDE.md session-continuity guidance now
+points at `agent_docs/PROJECT.md`; `.memhub/config.toml`
+`[integrations.k9]` section removed locally (file gitignored);
+decision #83 pinned; ledger re-rendered (commit `153aa34`). Both
+commits pushed to `origin/main`. This is Phase 1 of removing the
+user-level `K9-Claude-Framework` directory — other repos
+(`~/memhub`, `~/src/memhub`) and skill stubs still need the same
+treatment before the framework dir itself is safe to delete; user
+will handle those manually.
 
-_Last updated 2026-05-13 16:15:38 by claude:wrap-up._
+_Last updated 2026-05-13 17:24:42 by claude:wrap-up._
 
 ## Architecture
 
@@ -281,4 +292,5 @@ _Last updated 2026-05-13 16:00:21 by cli:user._
 
 ## Recent session notes
 
+- **2026-05-13 17:24:47** (claude:wrap-up) — 2026-05-13 afternoon. Archived the four K9 canonical markdowns + .init-version into agent_docs/_archive_k9/ (commit 7f03d3a) so Free-AI-SSD is no longer K9-shaped; CLAUDE.md session-continuity guidance now points at PROJECT.md. Decision #83 recorded the rationale; PROJECT_LEDGER re-rendered (commit 153aa34). Both pushed to origin/main. No code work this session — project-docs framework cleanup only; user will handle the other repos (memhub, src/memhub, skill stubs) manually before deleting ~/K9-Claude-Framework.
 - **2026-05-13 16:15:55** (claude:wrap-up) — 2026-05-13 memhub-native bootstrap of Free-AI-SSD. K9 markdown (82 decisions, 27 tasks) imported into .memhub/project.sqlite via k9:bootstrap; CLAUDE.md + AGENTS.md gained memhub:managed footer blocks; .gitignore excludes .memhub/; PROJECT.md + PROJECT_LEDGER.md rendered fresh as outputs. No code work this session — bootstrap only.

@@ -1,7 +1,7 @@
 <!-- memhub:rendered -->
 <!-- DO NOT EDIT. Generated from .memhub/project.sqlite. -->
 <!-- To change content, use memhub CLI; then re-run `memhub render`. -->
-<!-- Generated at: 2026-05-13T17:09:04Z by memhub 0.1.0 -->
+<!-- Generated at: 2026-05-13T17:24:52Z by memhub 0.1.0 -->
 
 # Free-AI-SSD — Ledger
 
@@ -4914,6 +4914,9 @@ _3 fact(s), 0 stale._
 
 | When | Actor | Table | Action | Reason |
 |------|-------|-------|--------|--------|
+| 2026-05-13 17:24:47 | claude:wrap-up | session_notes | insert | mcp log_session_note |
+| 2026-05-13 17:24:42 | claude:wrap-up | project_state | insert | state set |
+| 2026-05-13 17:09:04 | cli:user | render | render | memhub render |
 | 2026-05-13 17:08:55 | cli:user | decisions | insert | decision add |
 | 2026-05-13 16:16:19 | cli:user | render | render | memhub render |
 | 2026-05-13 16:15:55 | claude:wrap-up | session_notes | insert | mcp log_session_note |
@@ -4952,9 +4955,6 @@ _3 fact(s), 0 stale._
 | 2026-05-12 22:26:46 | k9:bootstrap | tasks | insert | task add |
 | 2026-05-12 22:26:46 | k9:bootstrap | tasks | insert | task add |
 | 2026-05-12 22:26:46 | k9:bootstrap | tasks | insert | task add |
-| 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
-| 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
-| 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
 | 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
 | 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
 | 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
