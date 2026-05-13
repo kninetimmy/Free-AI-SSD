@@ -826,7 +826,7 @@ notarization) since both touch Info.plist + bundle layout.
 - `tests/MacPlatformBoundaryTests.cs` extended to guard `prep-core/`.
 
 **Adapters that stay platform-specific:**
-- `IDriveService` â€” drive enumeration + format. Windows already uses WMI /
+- `IDriveService` — drive enumeration + format. Windows already uses WMI /
   PowerShell `Format-Volume`; macOS will use `diskutil` (added in MAC17).
 - UI hosts: WPF on Windows, SwiftUI on Mac.
 
@@ -1038,7 +1038,7 @@ direction. CI green on first run.
 | Windows | Mac-only | exFAT | yes (APFS not available from Windows) |
 | Mac | Mac-only | exFAT | yes (APFS dropped from supported targets) |
 | Mac | Cross-platform | exFAT | yes |
-| Mac | Windows-only | NTFS | not supported â€” use Windows PrepApp |
+| Mac | Windows-only | NTFS | not supported — use Windows PrepApp |
 
 **Likely files:**
 - `README.md`

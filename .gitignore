@@ -35,3 +35,4 @@ secrets.json
 appsettings.*.json
 *.private.json
 portable-config.json
+.memhub/
