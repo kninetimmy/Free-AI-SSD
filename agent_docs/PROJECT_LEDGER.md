@@ -1,13 +1,21 @@
 <!-- memhub:rendered -->
 <!-- DO NOT EDIT. Generated from .memhub/project.sqlite. -->
 <!-- To change content, use memhub CLI; then re-run `memhub render`. -->
-<!-- Generated at: 2026-05-13T16:16:19Z by memhub 0.1.0 -->
+<!-- Generated at: 2026-05-13T17:09:04Z by memhub 0.1.0 -->
 
 # Free-AI-SSD — Ledger
 
 ## Decisions
 
-_82 decision(s). Most recent first._
+_83 decision(s). Most recent first._
+
+### D83 — Archive K9 four-file framework into agent_docs/_archive_k9/
+
+**Status:** active • **Decided:** 2026-05-13 17:08:55
+
+memhub-native became source of truth in PR #287 (2026-05-13). The four K9 canonical markdowns (project_state/arch/backlog/decisions) plus .init-version were moved into agent_docs/_archive_k9/ in commit 7f03d3a so the repo is no longer K9-shaped — they remain as frozen pre-memhub snapshots for historical lookup only. CLAUDE.md session-continuity guidance now points at agent_docs/PROJECT.md. .memhub/config.toml [integrations.k9] section was also removed locally (file is gitignored). This is Phase 1 of removing the user-level K9-Claude-Framework directory; other repos (memhub, src/memhub) and skill stubs still need the same treatment before the framework dir itself is safe to delete.
+
+---
 
 ### D82 — C7 PrepApp encrypted-drive Manage Models unlock: architectural decisions
 
@@ -4906,6 +4914,8 @@ _3 fact(s), 0 stale._
 
 | When | Actor | Table | Action | Reason |
 |------|-------|-------|--------|--------|
+| 2026-05-13 17:08:55 | cli:user | decisions | insert | decision add |
+| 2026-05-13 16:16:19 | cli:user | render | render | memhub render |
 | 2026-05-13 16:15:55 | claude:wrap-up | session_notes | insert | mcp log_session_note |
 | 2026-05-13 16:15:52 | claude:wrap-up | facts | insert | fact add |
 | 2026-05-13 16:15:48 | claude:wrap-up | facts | insert | fact add |
@@ -4942,8 +4952,6 @@ _3 fact(s), 0 stale._
 | 2026-05-12 22:26:46 | k9:bootstrap | tasks | insert | task add |
 | 2026-05-12 22:26:46 | k9:bootstrap | tasks | insert | task add |
 | 2026-05-12 22:26:46 | k9:bootstrap | tasks | insert | task add |
-| 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
-| 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
 | 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
 | 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
 | 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
