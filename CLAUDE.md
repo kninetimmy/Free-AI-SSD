@@ -8,13 +8,17 @@ lightweight companion app on a second PC.
 
 ## Session continuity
 
-At session start, read `agent_docs/project_state.md` — it's the
-dashboard. Load on demand when the task calls for it:
-- `agent_docs/project_arch.md` — architecture, stack, layout. The
-  source of truth for how the project is built.
-- `agent_docs/project_decisions.md` — locked-in decisions,
-  append-only.
-- `agent_docs/project_backlog.md` — planned work.
+`.memhub/project.sqlite` is the source of truth. Read
+`agent_docs/PROJECT.md` at session start — it's the rendered
+dashboard. `agent_docs/PROJECT_LEDGER.md` is the rendered
+append-only log. Both are generated from the sqlite store; never
+hand-edit them. To change content, use the `memhub` CLI and re-run
+`memhub render`.
+
+Pre-memhub history lives in `agent_docs/_archive_k9/` (frozen
+snapshots of the old K9 project_state / project_arch /
+project_backlog / project_decisions files). Read on demand for
+context; do not append to them.
 
 ## Build / test / run
 
@@ -39,12 +43,12 @@ SDK version is pinned in `global.json`.
 
 ## Project-specific Claude instructions
 
-**Security controls are non-negotiable** — don't weaken them. See
-`project_arch.md` → "Security invariants" for the full list. In
-short: AES-256-GCM for config, SHA-256 + URL allowlist for
-downloaded binaries, `PathGuards` for path handling, and
-`ProcessRunner.ArgumentList` for all process launches (never string
-concat).
+**Security controls are non-negotiable** — don't weaken them. AES-256-GCM
+for config, SHA-256 + URL allowlist for downloaded binaries,
+`PathGuards` for path handling, and `ProcessRunner.ArgumentList`
+for all process launches (never string concat). Full list in the
+archived architecture notes at
+`agent_docs/_archive_k9/project_arch.md` → "Security invariants".
 
 **GitHub workflow:** never push directly to `main`. Create a PR,
 watch CI, report results, and wait for explicit confirmation before
