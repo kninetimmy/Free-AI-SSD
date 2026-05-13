@@ -1,7 +1,7 @@
 <!-- memhub:rendered -->
 <!-- DO NOT EDIT. Generated from .memhub/project.sqlite. -->
 <!-- To change content, use memhub CLI; then re-run `memhub render`. -->
-<!-- Generated at: 2026-05-13T17:24:52Z by memhub 0.1.0 -->
+<!-- Generated at: 2026-05-13T23:22:49Z by memhub 0.1.0 -->
 
 # Free-AI-SSD — Ledger
 
@@ -11,7 +11,7 @@ _83 decision(s). Most recent first._
 
 ### D83 — Archive K9 four-file framework into agent_docs/_archive_k9/
 
-**Status:** active • **Decided:** 2026-05-13 17:08:55
+**Status:** active • **Decided:** 2026-05-13 17:08:55 • **Source:** user
 
 memhub-native became source of truth in PR #287 (2026-05-13). The four K9 canonical markdowns (project_state/arch/backlog/decisions) plus .init-version were moved into agent_docs/_archive_k9/ in commit 7f03d3a so the repo is no longer K9-shaped — they remain as frozen pre-memhub snapshots for historical lookup only. CLAUDE.md session-continuity guidance now points at agent_docs/PROJECT.md. .memhub/config.toml [integrations.k9] section was also removed locally (file is gitignored). This is Phase 1 of removing the user-level K9-Claude-Framework directory; other repos (memhub, src/memhub) and skill stubs still need the same treatment before the framework dir itself is safe to delete.
 
@@ -19,7 +19,7 @@ memhub-native became source of truth in PR #287 (2026-05-13). The four K9 canoni
 
 ### D82 — C7 PrepApp encrypted-drive Manage Models unlock: architectural decisions
 
-**Status:** active • **Decided:** 2026-05-12 00:00:00
+**Status:** active • **Decided:** 2026-05-12 00:00:00 • **Source:** user
 
 C7 lands the passphrase-unlock UX promised by decision D13. Three
 shape-decisions worth pinning so future work doesn't regress them.
@@ -94,7 +94,7 @@ HF-token-writeback follow-up filed as W5).
 
 ### D80 — C6 PrepApp detect-configured-drive flow: architectural decisions
 
-**Status:** active • **Decided:** 2026-05-12 00:00:00
+**Status:** active • **Decided:** 2026-05-12 00:00:00 • **Source:** user
 
 PR #274 (`93a677d`) shipped the skip-format flow on both Windows
 and Mac in one bundle. The following decisions are locked and
@@ -295,7 +295,7 @@ Established PR #274 (`93a677d`).
 
 ### D79 — Ollama requires an `HF_TOKEN` to pull ANY `hf.co/…` repo (anonymous rate-limit), not just gated/private; HF parent repos are non-pullable without a `:quant` suffix; sidecar `pull-model` MUST emit a `result:` line on every exception [C27 HF follow-up field test]
 
-**Status:** active • **Decided:** 2026-05-12 00:00:00
+**Status:** active • **Decided:** 2026-05-12 00:00:00 • **Source:** user
 
 Three contract assertions emerged from the v1.3.24 mac field run:
 
@@ -367,7 +367,7 @@ Established PR #272 (`6b3ba7b`).
 
 ### D78 — Swift `Task.detached` captures must be `let`, not `var`; closure-init is the workaround [C27 Stage 3 mac CI surprise]
 
-**Status:** active • **Decided:** 2026-05-12 00:00:00
+**Status:** active • **Decided:** 2026-05-12 00:00:00 • **Source:** user
 
 Swift's strict-concurrency check on `Task.detached { ... }`
 refuses to capture a local `var` that's mutated after
@@ -422,7 +422,7 @@ Established PR #270 (`42c4bdc`, fix in `e27f88f`).
 
 ### D77 — One shared per-quant projector in `prep-core`; never let the WPF + Mac sidecar copies drift [C24 lesson, cashed in a second time]
 
-**Status:** active • **Decided:** 2026-05-12 00:00:00
+**Status:** active • **Decided:** 2026-05-12 00:00:00 • **Source:** user
 
 C27 Stage 4 needed the same "collapse `siblings[]` into one
 row per distinct GGUF quant label, sum multi-part series" logic
@@ -467,7 +467,7 @@ PR #262 (C24).
 
 ### D76 — Per-quant rows are lazy: chevron-click triggers a single `FetchSiblingsAsync` call, not bulk fetch on Refresh [C27 Stage 4]
 
-**Status:** active • **Decided:** 2026-05-12 00:00:00
+**Status:** active • **Decided:** 2026-05-12 00:00:00 • **Source:** user
 
 C27 Stage 4 had three options for when per-quant child rows
 materialize: (a) lazy — chevron click fetches siblings for that
@@ -524,7 +524,7 @@ Established PR #270 (`42c4bdc`).
 
 ### D75 — Ollama server inherits `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` from the user's PrepApp token entry, not env-at-launch [C27 Stage 3]
 
-**Status:** active • **Decided:** 2026-05-12 00:00:00
+**Status:** active • **Decided:** 2026-05-12 00:00:00 • **Source:** user
 
 Ollama's `/api/pull` endpoint authenticates `hf.co/...` GGUF
 pulls via the `HF_TOKEN` (modern) or `HUGGING_FACE_HUB_TOKEN`
@@ -566,7 +566,7 @@ Established PR #270 (`42c4bdc`).
 
 ### D74 — Hugging Face token: inline field next to Source dropdown, sealed alongside the rest of the portable-config [C27 Stage 3]
 
-**Status:** active • **Decided:** 2026-05-12 00:00:00
+**Status:** active • **Decided:** 2026-05-12 00:00:00 • **Source:** user
 
 C27 Stage 3 had three live options for where the HF token UI
 lives: (a) inline next to the Source dropdown when HF is
@@ -622,7 +622,7 @@ Established PR #270 (`42c4bdc`).
 
 ### D73 — Model-pull disk-budget formula: warn when free disk < 2× expected payload [C27 Stage 2]
 
-**Status:** active • **Decided:** 2026-05-12 00:00:00
+**Status:** active • **Decided:** 2026-05-12 00:00:00 • **Source:** user
 
 `OllamaModelStager.EnsureStagingFreeSpace` has enforced a 2×
 free-disk requirement since MAC35 (staging copy + SSD copy
@@ -671,7 +671,7 @@ Established PR #268 (`e807e04`).
 
 ### D72 — Shared VM stays free of prep-core service dependencies; view-host wires behavior via delegate hooks [C27 Stage 2]
 
-**Status:** active • **Decided:** 2026-05-12 00:00:00
+**Status:** active • **Decided:** 2026-05-12 00:00:00 • **Source:** user
 
 When wiring HF disk-budget warnings into `PrepViewModel.DownloadAsync`,
 the natural reach was to inject `IHuggingFaceCatalogService` as a
@@ -721,7 +721,7 @@ Established PR #268 (`e807e04`).
 
 ### D81 — Ollama writes HF GGUF manifests under hf.co/, not registry.ollama.ai/library/
 
-**Status:** active • **Decided:** 2026-05-11 00:00:00
+**Status:** active • **Decided:** 2026-05-11 00:00:00 • **Source:** user
 
 Locked architectural fact discovered via the v1.3.25 field run:
 Ollama's `/api/pull` for an `hf.co/<owner>/<repo>:<quant>` tag
@@ -795,7 +795,7 @@ Established PR #275 (`0a4a2e5`).
 
 ### D71 — Multi-source catalogs use a single discriminator field on the shared entry, not parallel types [C27 Stage 1]
 
-**Status:** active • **Decided:** 2026-05-11 00:00:00
+**Status:** active • **Decided:** 2026-05-11 00:00:00 • **Source:** user
 
 When adding Hugging Face as a second catalog source alongside the
 existing ollama.com scrape, the choice was between (a) extending the
@@ -838,7 +838,7 @@ Established PR #266 (`58f79a1`).
 
 ### D70 — Picker filter visual-cue gating: VM exposes a `HasActiveXFilter` derived signal so per-row markers only render when the filter is engaged [C25 lesson]
 
-**Status:** active • **Decided:** 2026-05-11 00:00:00
+**Status:** active • **Decided:** 2026-05-11 00:00:00 • **Source:** user
 
 PR #264 (`3f299fe`) added the C25 capability pass-through marker. The
 design tension: C4's capability AND filter intentionally passes through
@@ -916,7 +916,7 @@ Mechanism: `shared/ViewModels/PrepViewModel.cs:HasActiveCapabilityFilter`,
 
 ### D69 — Host wire-shape duplication across paired arms must be unified or pinned on both arms [C24 lesson]
 
-**Status:** active • **Decided:** 2026-05-11 00:00:00
+**Status:** active • **Decided:** 2026-05-11 00:00:00 • **Source:** user
 
 PR #262 (`34a66b8`) fixed a P0 regression where `mac-prep-host/HostLifetime.cs`
 discover-catalog and refresh-catalog projections drifted: PR #259 added
@@ -958,7 +958,7 @@ regression cover until the C# seam exists).
 
 ### D68 — Picker filter posture: null-data pass-through, MoE largest-billion-wins, ISO-8601-as-string for newest sort [C3+C4+C5]
 
-**Status:** active • **Decided:** 2026-05-10 00:00:00
+**Status:** active • **Decided:** 2026-05-10 00:00:00 • **Source:** user
 
 PR #259 (`9f81bd5`) added three picker filters (parameter cap,
 capability AND, sort by newest) and locked three postures that
@@ -1003,7 +1003,7 @@ Mechanism: see `prep-core/Services/LiveModelCatalogService.cs`
 
 ### D67 — Mac runner reaches the embedding-pull surface via a new HTTP route, not the stdin IPC [M14]
 
-**Status:** active • **Decided:** 2026-05-10 00:00:00
+**Status:** active • **Decided:** 2026-05-10 00:00:00 • **Source:** user
 
 `PullEmbeddingModelAsync` is exposed to the Mac runner UI through a new
 `POST /api/models/embedding/pull` route on `RunnerLocalApiService`,
@@ -1064,7 +1064,7 @@ level.
 
 ### D66 — Most-popular toggle effect is announced via a row-count caption (cross-OS pure-helper-mirror) [M11]
 
-**Status:** active • **Decided:** 2026-05-10 00:00:00
+**Status:** active • **Decided:** 2026-05-10 00:00:00 • **Source:** user
 
 The v1.3.22 mac field-test reported that PrepApp's "Most popular"
 toggle "doesn't do anything." Phase-1 instrumentation patched into
@@ -1162,7 +1162,7 @@ Established PR #255 (`cf5713e`).
 
 ### D65 — Chat-stream cold-load liveness is a server-side heartbeat carried by an `IChatService` event AND an NDJSON `loading` frame [C1]
 
-**Status:** active • **Decided:** 2026-05-10 00:00:00
+**Status:** active • **Decided:** 2026-05-10 00:00:00 • **Source:** user
 
 The Mac runner's chat stream had a silent-stall class of bugs: any
 time Ollama took longer to load a model than Mac URLSession's
@@ -1265,7 +1265,7 @@ Established PR #253 (`6cfae14`).
 
 ### D64 — Mac chat failure decoding lives in a pure helper; library callers reuse it without a "Chat failed:" prefix [M12]
 
-**Status:** active • **Decided:** 2026-05-10 00:00:00
+**Status:** active • **Decided:** 2026-05-10 00:00:00 • **Source:** user
 
 The Mac runner's previous private `apiErrorMessage(data:statusCode:)`
 method bundled two responsibilities that don't belong together:
@@ -1314,7 +1314,7 @@ Established PR #251 (`a52572c`).
 
 ### D63 — Mac LAN-exposure toggle is user intent; only `.crashed` clears it [M13]
 
-**Status:** active • **Decided:** 2026-05-10 00:00:00
+**Status:** active • **Decided:** 2026-05-10 00:00:00 • **Source:** user
 
 Under MAC34's reshape, the "Expose API on LAN" toggle controls the
 sidecar's bind address (loopback vs. configured) — it does NOT control
@@ -1364,7 +1364,7 @@ Established PR #249 (`e6b958e`).
 
 ### D62 — PrepApp is the sole party for embedding-model provisioning; runner UI is fallback only [C2]
 
-**Status:** active • **Decided:** 2026-05-10 00:00:00
+**Status:** active • **Decided:** 2026-05-10 00:00:00 • **Source:** user
 
 PrepApp's `PrepViewModel.EnsureEmbeddingModelInstalledAsync` runs at
 the tail of `DownloadAsync` (reusing the temp Ollama server already
@@ -1417,7 +1417,7 @@ Established PR #247 (`1df4431`).
 
 ### D61 — Unified C/W/M task-label scheme; parity rule strengthened
 
-**Status:** active • **Decided:** 2026-05-10 00:00:00
+**Status:** active • **Decided:** 2026-05-10 00:00:00 • **Source:** user
 
 The backlog moves from a mixed `X*` / `F*` / `B*` / `H*` / `R*` / `MAC*` numbering scheme to three flat per-OS-scope buckets:
 
@@ -1457,7 +1457,7 @@ Established 2026-05-10 in PR for `refactor/unified-task-labels`.
 
 ### D60 — F2a: "Most popular" cap applies only to Recommended-source rows
 
-**Status:** active • **Decided:** 2026-05-10 00:00:00
+**Status:** active • **Decided:** 2026-05-10 00:00:00 • **Source:** user
 
 On the WPF merged Models grid (`prep-app/MainWindow.xaml`), the
 "Most popular" toggle restricts visibility to the top-15 entries
@@ -1488,7 +1488,7 @@ Established PR #243 (`859ac08`), shipped v1.3.22.
 
 ### D59 — Model-pull progress source-of-truth is the Ollama HTTP API, not CLI stdout text [MAC40]
 
-**Status:** active • **Decided:** 2026-05-10 00:00:00
+**Status:** active • **Decided:** 2026-05-10 00:00:00 • **Source:** user
 
 `ModelOperations.PullModelAsync` consumes Ollama's `POST /api/pull`
 streaming NDJSON response and surfaces it as structured
@@ -1524,7 +1524,7 @@ Established PR #241 (`b5ac727`), shipped v1.3.21.
 
 ### D58 — Mac chat-stream URLSession timeout bumped to 180s for cold model loads [MAC39]
 
-**Status:** active • **Decided:** 2026-05-10 00:00:00
+**Status:** active • **Decided:** 2026-05-10 00:00:00 • **Source:** user
 
 `URLSessionConfiguration.default.timeoutIntervalForRequest` is 60s
 on macOS. The chat-stream contract from
@@ -1560,7 +1560,7 @@ Established PR #239 (`8eaa922`), shipped v1.3.20.
 
 ### D57 — Lock button is encryption-conditional; plaintext SSDs see Stop/Start [MAC39]
 
-**Status:** active • **Decided:** 2026-05-10 00:00:00
+**Status:** active • **Decided:** 2026-05-10 00:00:00 • **Source:** user
 
 After MAC30 (2026-05-09) made encryption opt-in, the default
 plaintext SSD had no unlock material to zeroize. The Mac runner's
@@ -1613,7 +1613,7 @@ Established PR #239 (`8eaa922`), shipped v1.3.20.
 
 ### D56 — Long-running listener ports get a two-layer recovery path: lsof+kill on stale processes and port-shift on TIME_WAIT [MAC39]
 
-**Status:** active • **Decided:** 2026-05-10 00:00:00
+**Status:** active • **Decided:** 2026-05-10 00:00:00 • **Source:** user
 
 Mac runner field test (v1.3.19) wedged after Lock + re-select-SSD:
 the new `mac-runner-host` sidecar tried to bind the same port the
@@ -1682,7 +1682,7 @@ Established PR #239 (`8eaa922`), shipped v1.3.20.
 
 ### D55 — Bundled Ollama version is no longer pinned; resolved per-build from upstream `sha256sum.txt` [MAC38]
 
-**Status:** active • **Decided:** 2026-05-09 00:00:00
+**Status:** active • **Decided:** 2026-05-09 00:00:00 • **Source:** user
 
 MAC4 (2026-05-05) pinned the bundled Ollama to `v0.5.7` because the
 previous "resolve `releases/latest`" path drifted from the static
@@ -1775,7 +1775,7 @@ Established PR #237 (`edc99d3`), shipped v1.3.19.
 
 ### D54 — Mac streaming consumers use URLSessionDataDelegate, not bytes(for:) [MAC36]
 
-**Status:** active • **Decided:** 2026-05-09 00:00:00
+**Status:** active • **Decided:** 2026-05-09 00:00:00 • **Source:** user
 
 The `mac-runner/` and `mac-prep-app/` deployment target is
 `arm64-apple-macos11.0` (pinned in `.github/workflows/build.yml` —
@@ -1815,7 +1815,7 @@ Established PR #235 (`567f49a`), shipped v1.3.18.
 
 ### D53 — Mac Runner: lock-on-blur removed as default [MAC36]
 
-**Status:** active • **Decided:** 2026-05-09 00:00:00
+**Status:** active • **Decided:** 2026-05-09 00:00:00 • **Source:** user
 
 The MAC5-era `NSApplication.willResignActiveNotification` →
 `lockSession(reason: "App backgrounded")` observer is no longer
@@ -1860,7 +1860,7 @@ Established PR #235 (`567f49a`), shipped v1.3.18.
 
 ### D52 — Plaintext invariant narrows from "no plaintext config containing secrets" to "API key never written in plaintext" [MAC30]
 
-**Status:** active • **Decided:** 2026-05-09 00:00:00
+**Status:** active • **Decided:** 2026-05-09 00:00:00 • **Source:** user
 
 Pre-MAC30 (MAC5/MAC17a era): the rule was no plaintext config of
 any kind. MAC30 introduced an opt-out path; with the toggle OFF
@@ -1906,7 +1906,7 @@ Established PR #233 (`0685cfd`), shipped v1.3.17.
 
 ### D51 — Code that enumerates Ollama manifest/blob files on macOS-prepped SSDs must filter AppleDouble companion files (`._*`) [MAC35a]
 
-**Status:** active • **Decided:** 2026-05-09 00:00:00
+**Status:** active • **Decided:** 2026-05-09 00:00:00 • **Source:** user
 
 macOS auto-creates AppleDouble companion files (`._<name>`) next to
 any file with extended attributes when the destination filesystem
@@ -1958,7 +1958,7 @@ Established PR #231 (`8f3b54e`), shipped v1.3.16.
 
 ### D50 — Mac model pulls stage to host APFS, then merge sequentially to the SSD; Windows stays direct-to-SSD [MAC35]
 
-**Status:** active • **Decided:** 2026-05-09 00:00:00
+**Status:** active • **Decided:** 2026-05-09 00:00:00 • **Source:** user
 
 Field test of v1.3.14 pulling `qwen2.5:7b` (4.7 GB on a 1 Gb line)
 collapsed to ~5 MB/s on exFAT — 290 stall events over 19 minutes,
@@ -2033,7 +2033,7 @@ Established PR #229 (`0eecceb`), shipped v1.3.15.
 
 ### D49 — Mac runner reclaims port 11434 by killing PIDs holding it, not by name-matching ollama processes [MAC34b]
 
-**Status:** active • **Decided:** 2026-05-09 00:00:00
+**Status:** active • **Decided:** 2026-05-09 00:00:00 • **Source:** user
 
 Field test of v1.3.13 surfaced silent `Ollama exited with code 1`
 followed by chat-host crashes when Ollama.app + a stray CLI ollama
@@ -2068,7 +2068,7 @@ Established PR #227 (merge hash pending v1.3.14 dispatch).
 
 ### D48 — Mac sidecar handshake hardcodes `networkModeEnabled = true`; LAN exposure is governed purely by `networkBindAddress` [MAC34a]
 
-**Status:** active • **Decided:** 2026-05-09 00:00:00
+**Status:** active • **Decided:** 2026-05-09 00:00:00 • **Source:** user
 
 After MAC34 the Swift comment said "the toggle now controls bind
 address only," but `restartHostSidecar` still passed the toggle's
@@ -2104,7 +2104,7 @@ Established PR #226 (`95b62b5`).
 
 ### D47 — Cross-OS parity rule applies to user-visible behavior, not implementation shape [MAC32]
 
-**Status:** active • **Decided:** 2026-05-09 00:00:00
+**Status:** active • **Decided:** 2026-05-09 00:00:00 • **Source:** user
 
 The 2026-05-07 cross-OS parity rule (every single-OS task gets a
 dual-OS audit pass) does NOT mandate identical implementation
@@ -2139,7 +2139,7 @@ Established PR #225 (`179dfc0`).
 
 ### D46 — Runtime API-key backfill in Mac Runner over loopback bypass in runner-core [MAC34]
 
-**Status:** active • **Decided:** 2026-05-08 00:00:00
+**Status:** active • **Decided:** 2026-05-08 00:00:00 • **Source:** user
 
 While fixing the v1.3.12 field-test 503 ("API key is required by
 configuration but not set on host"), considered two paths to make local
@@ -2183,7 +2183,7 @@ Won't be revisited unless we move auth to a transport-level mechanism
 
 ### D45 — Mac Runner sidecar auto-spawns at unlock; "Network Mode" toggle is LAN-exposure only [MAC34]
 
-**Status:** active • **Decided:** 2026-05-08 00:00:00
+**Status:** active • **Decided:** 2026-05-08 00:00:00 • **Source:** user
 
 Pre-MAC34, the `mac-runner-host` sidecar started/stopped in lockstep with
 the user-facing "Network Mode (LAN API)" toggle. Because Mac chat
@@ -2222,7 +2222,7 @@ remove the architectural reason for a sidecar at all).
 
 ### D44 — Disk-truth is the canonical source for installed-model state on the SSD
 
-**Status:** active • **Decided:** 2026-05-08 00:00:00
+**Status:** active • **Decided:** 2026-05-08 00:00:00 • **Source:** user
 
 **Decision.** `<ssdRoot>/models/manifests/registry.ollama.ai/library/<model>/<tag>`
 is the source of truth for "what models are installed". Both runner-core C#
@@ -2274,7 +2274,7 @@ PR #218 (MAC33, runner-core + Swift). Helper:
 
 ### D43 — Encryption is opt-in (default OFF) on both PrepApps
 
-**Status:** active • **Decided:** 2026-05-08 00:00:00
+**Status:** active • **Decided:** 2026-05-08 00:00:00 • **Source:** user
 
 **Decision.** SSD config encryption becomes opt-in across Windows
 and Mac PrepApp. The toggle is visible on the encryption setup
@@ -2347,7 +2347,7 @@ prep is out of scope"). MAC5's plaintext invariant narrows from
 
 ### D42 — MAC26: Mac Ollama runtime spawns inner `Ollama.app/Contents/Resources/ollama` directly; bypass LaunchServices
 
-**Status:** active • **Decided:** 2026-05-08 00:00:00
+**Status:** active • **Decided:** 2026-05-08 00:00:00 • **Source:** user
 
 **Driver.** v1.3.6 mac field test (post-MAC25 ship) failed first
 model pull. Direct SSD inspection: zero blobs anywhere on the
@@ -2422,7 +2422,7 @@ Ollama runtime architecture.
 
 ### D41 — F2: live catalog source = Ollama HTML scrape with bundled fallback
 
-**Status:** active • **Decided:** 2026-05-07 00:00:00
+**Status:** active • **Decided:** 2026-05-07 00:00:00 • **Source:** user
 
 PrepApp's Refresh button (F2) fetches the live starter-model catalog
 by HTML-scraping `https://ollama.com/library`. HuggingFace's
@@ -2477,7 +2477,7 @@ the network surface. Mirrors `OllamaPackageTrustPolicy` posture.
 
 ### D40 — Cross-OS parity audit is mandatory after every single-OS task
 
-**Status:** active • **Decided:** 2026-05-07 00:00:00
+**Status:** active • **Decided:** 2026-05-07 00:00:00 • **Source:** user
 
 Free-AI-SSD ships on Windows + Mac with shared cores (`runner-core/`,
 `prep-core/`, `shared/`) consumed by per-OS host adapters (WPF on
@@ -2580,7 +2580,7 @@ actively supported, the rule stands.
 
 ### D39 — MAC18: cross-platform prep compatibility matrix published
 
-**Status:** active • **Decided:** 2026-05-07 00:00:00
+**Status:** active • **Decided:** 2026-05-07 00:00:00 • **Source:** user
 
 With MAC17 / MAC17a / MAC17b shipped, both Windows and Mac PrepApp
 hosts produce drives that are byte-identical at the encrypted-config
@@ -2659,7 +2659,7 @@ update accordingly.
 
 ### D38 — Mac UI design language: brand-tinted native (Option C), MAC17 leans pure-native (Option A)
 
-**Status:** active • **Decided:** 2026-05-06 00:00:00
+**Status:** active • **Decided:** 2026-05-06 00:00:00 • **Source:** user
 
 The MAC9 decision locked in Swift/SwiftUI as the long-term Mac UI
 architecture but did not settle the *visual* direction. Today's Mac
@@ -2769,7 +2769,7 @@ MAC17 is the place to cash in the brand tinting in earnest.
 
 ### D37 — MAC16: prep-core RootNamespace pinned to FreeAiSsd.PrepApp for namespace stability
 
-**Status:** active • **Decided:** 2026-05-06 00:00:00
+**Status:** active • **Decided:** 2026-05-06 00:00:00 • **Source:** user
 
 MAC16 extracted platform-neutral PrepApp business logic out of the
 WPF `prep-app/` host into a new `prep-core/FreeAiSsd.PrepCore.csproj`
@@ -2841,7 +2841,7 @@ makes the boundary review tractable in one pass.
 
 ### D36 — MAC10b: single shared app icon across Mac Runner and all WPF hosts
 
-**Status:** active • **Decided:** 2026-05-06 00:00:00
+**Status:** active • **Decided:** 2026-05-06 00:00:00 • **Source:** user
 
 MAC10b set out to replace the default macOS placeholder icon on
 `Runner.app`. The user asked that the same icon also apply to the
@@ -2890,7 +2890,7 @@ property is per-csproj, so divergence is a one-line change per host.
 
 ### D35 — MAC10a: filesystem derived from existing PrepTargets, not a new selector
 
-**Status:** active • **Decided:** 2026-05-06 00:00:00
+**Status:** active • **Decided:** 2026-05-06 00:00:00 • **Source:** user
 
 The MAC10a backlog entry reads as "add a Windows / Windows+macOS /
 macOS-only compatibility selector before format." When the work was
@@ -2933,7 +2933,7 @@ honest.
 
 ### D34 — MAC9: Swift thin-UI over .NET sidecar locked in as long-term Mac UI
 
-**Status:** active • **Decided:** 2026-05-06 00:00:00
+**Status:** active • **Decided:** 2026-05-06 00:00:00 • **Source:** user
 
 After MAC4-MAC8 shipped the full Mac Runner-parity track (encrypted
 config, Ollama lifecycle, RAG, library management, network API host,
@@ -2991,7 +2991,7 @@ supported Mac UI architecture going forward.
 
 ### D33 — MAC8: ASP.NET catch-all routing preserves `%2F` — decode explicitly
 
-**Status:** active • **Decided:** 2026-05-06 00:00:00
+**Status:** active • **Decided:** 2026-05-06 00:00:00 • **Source:** user
 
 When a route uses catch-all (`{*relPath}` syntax), ASP.NET decodes most
 percent-encoded characters but deliberately leaves `%2F` encoded; decoding
@@ -3014,7 +3014,7 @@ re-decodes via `Uri.UnescapeDataString` before passing to `PathGuards`.
 
 ### D32 — MAC8: `WriteNdjsonAsync` uses explicit camelCase JsonNamingPolicy
 
-**Status:** active • **Decided:** 2026-05-06 00:00:00
+**Status:** active • **Decided:** 2026-05-06 00:00:00 • **Source:** user
 
 `RunnerLocalApiService.WriteNdjsonAsync` serializes payloads with a static
 `JsonSerializerOptions { PropertyNamingPolicy = CamelCase }`, matching what
@@ -3037,7 +3037,7 @@ fields and record fields agree.
 
 ### D31 — MAC8: NDJSON progress pump uses sync queue + drain, not Channel + Task.Run
 
-**Status:** active • **Decided:** 2026-05-06 00:00:00
+**Status:** active • **Decided:** 2026-05-06 00:00:00 • **Source:** user
 
 `RunnerLocalApiService.PumpProgressAsync` (used by `/api/library/{id}/files`,
 `/sweep`, `/rebuild`) buffers `IndexingProgress` events into a thread-safe
@@ -3065,7 +3065,7 @@ which case the cross-thread risk has to be re-investigated).
 
 ### D30 — MAC8: Mac sidecar uses `NoOpConfigStore` to preserve plaintext-config invariant
 
-**Status:** active • **Decided:** 2026-05-06 00:00:00
+**Status:** active • **Decided:** 2026-05-06 00:00:00 • **Source:** user
 
 The MAC8 endpoint group introduces call paths through
 `DocumentOperationsService.SaveConfigAsync`, which on Windows persists via
@@ -3099,7 +3099,7 @@ in the Windows hot path.
 
 ### D29 — MAC8: broader `/api/library/*` API supersedes R1 Stage 2
 
-**Status:** active • **Decided:** 2026-05-06 00:00:00
+**Status:** active • **Decided:** 2026-05-06 00:00:00 • **Source:** user
 
 PR #185 ships the full library-management surface as eight endpoints —
 list / create / set-active / upload (multipart + NDJSON progress) / delete /
@@ -3118,7 +3118,7 @@ endpoints, no new server surface needed.
 
 ### D28 — Review follow-up fixes use a separate PR
 
-**Status:** active • **Decided:** 2026-05-06 00:00:00
+**Status:** active • **Decided:** 2026-05-06 00:00:00 • **Source:** user
 
 When a merged PR review turns up follow-up bugs or cleanup, implement those
 fixes on a separate branch/PR rather than continuing on the merged feature
@@ -3134,7 +3134,7 @@ future reviews after that.
 
 ### D27 — MAC6 Mac net8.0 sidecar host: approved exit ramp from MAC5
 
-**Status:** active • **Decided:** 2026-05-06 00:00:00
+**Status:** active • **Decided:** 2026-05-06 00:00:00 • **Source:** user
 
 The macOS Runner now hosts the LAN API surface (`/api/health`, `/api/models`,
 `/api/chat`, `/api/chat/stream`, gated `/tts/*`, `/stt/transcribe`,
@@ -3196,7 +3196,7 @@ populated library (RAG-off path) until MAC7 lands.
 
 ### D26 — MAC5 native Swift encryption: deliberate format duplication
 
-**Status:** active • **Decided:** 2026-05-05 00:00:00
+**Status:** active • **Decided:** 2026-05-05 00:00:00 • **Source:** user
 
 The macOS Runner now unlocks and re-saves encrypted SSDs natively via
 `mac-runner/Sources/SsdEncryption.swift`, a Swift port of
@@ -3264,7 +3264,7 @@ MAC5 only handles unlock and re-save of existing blobs).
 
 ### D25 — Mac Ollama trust gate (MAC4)
 
-**Status:** active • **Decided:** 2026-05-05 00:00:00
+**Status:** active • **Decided:** 2026-05-05 00:00:00 • **Source:** user
 
 PR #177, merge commit `648fcd9`. The macOS Ollama runtime now passes the same
 supply-chain gates as Windows, plus an Apple Silicon (arm64) Mach-O slice check
@@ -3318,7 +3318,7 @@ on Mac (MAC5), Mac LAN API host (MAC6), the staging-time selection between
 
 ### D24 — Cross-platform PrepApp parity (amends MAC1)
 
-**Status:** active • **Decided:** 2026-05-05 00:00:00
+**Status:** active • **Decided:** 2026-05-05 00:00:00 • **Source:** user
 
 This entry amends the 2026-05-05 MAC1 baseline, which deferred a Windows-equivalent
 Prep UI beyond the first supported Mac release. Mac-native PrepApp is now in scope
@@ -3378,7 +3378,7 @@ calls, encrypted-config format unchanged so drives roundtrip Mac <-> Windows.
 
 ### D23 — MAC3 Runner core boundary: shared business logic moves out of WPF host
 
-**Status:** active • **Decided:** 2026-05-05 00:00:00
+**Status:** active • **Decided:** 2026-05-05 00:00:00 • **Source:** user
 
 MAC3 introduces `runner-core/FreeAiSsd.RunnerCore.csproj` as a plain `net8.0`
 home for platform-neutral Runner logic. Chat, RAG orchestration, document
@@ -3403,7 +3403,7 @@ a project reference back to the WPF Runner.
 
 ### D22 — MAC1 supported Mac baseline: Apple Silicon, macOS 11+, arm64-only
 
-**Status:** active • **Decided:** 2026-05-05 00:00:00
+**Status:** active • **Decided:** 2026-05-05 00:00:00 • **Source:** user
 
 The first supported Mac release targets Apple Silicon Macs only. Intel Macs are
 explicitly unsupported, not best-effort beta, unless a later decision
@@ -3449,7 +3449,7 @@ Swift host blocks parity or creates meaningful duplicated business logic.
 
 ### D21 — MAC2 platform boundary: shared stays mixed only as known debt until adapters exist
 
-**Status:** active • **Decided:** 2026-05-05 00:00:00
+**Status:** active • **Decided:** 2026-05-05 00:00:00 • **Source:** user
 
 MAC2 audits the current macOS portability blockers without moving runtime code.
 `shared/FreeAiSsd.Shared.csproj` remains a plain `net8.0` project, but its
@@ -3474,7 +3474,7 @@ client rather than an in-process Runner host.
 
 ### D20 — F4 Stage 1: PrepApp owns first-run profile selection; Runner no longer blocks on null ActiveProfile
 
-**Status:** active • **Decided:** 2026-04-21 00:00:00
+**Status:** active • **Decided:** 2026-04-21 00:00:00 • **Source:** user
 
 This entry supersedes the 2026-04-17 Profiles decision that required a first-run
 Runner profile dialog before the app could proceed.
@@ -3497,7 +3497,7 @@ and does not resurrect the old required modal.
 
 ### D19 — Plan / prompt / execute handoffs include an explicit GPT-5.4 vs GPT-5.3 Codex recommendation
 
-**Status:** active • **Decided:** 2026-04-21 00:00:00
+**Status:** active • **Decided:** 2026-04-21 00:00:00 • **Source:** user
 
 When a backlog item is handled via a plan -> prompt -> execute loop, the prompt
 draft must explicitly call out which execution model is recommended (`gpt-5.4`
@@ -3513,7 +3513,7 @@ saved execution prompt self-contained.
 
 ### D18 — F3 merged-grid actions use explicit bulk selection only
 
-**Status:** active • **Decided:** 2026-04-21 00:00:00
+**Status:** active • **Decided:** 2026-04-21 00:00:00 • **Source:** user
 
 PrepApp's merged Models grid does **not** auto-select configured/downloaded rows.
 All model actions now operate only on rows the user explicitly checked in the grid.
@@ -3536,7 +3536,7 @@ non-technical users.
 
 ### D17 — ChatResult / TranscriptionResult discriminated unions; RagRetrievalFailed as first-class variant
 
-**Status:** active • **Decided:** 2026-04-20 00:00:00
+**Status:** active • **Decided:** 2026-04-20 00:00:00 • **Source:** user
 
 `IChatService` and `ISpeechToTextService` return sealed abstract record unions
 (`ChatResult` and `TranscriptionResult`) instead of raw payloads. All callers
@@ -3560,7 +3560,7 @@ letting callers observe cancellation naturally. Established X13 (PR forthcoming)
 
 ### D16 — wrap-up runs on feature branch before merging
 
-**Status:** active • **Decided:** 2026-04-20 00:00:00
+**Status:** active • **Decided:** 2026-04-20 00:00:00 • **Source:** user
 
 Run /wrap-up on the feature branch before merging the PR so doc updates
 land in the same commit and no separate solo doc push is needed after merge.
@@ -3573,7 +3573,7 @@ sufficient for git traceability. First applied on PR #161 (X12).
 
 ### D13 — shared/Io/ as home for shared IO utilities
 
-**Status:** active • **Decided:** 2026-04-20 00:00:00
+**Status:** active • **Decided:** 2026-04-20 00:00:00 • **Source:** user
 
 `shared/Io/FileOps.cs` (`FreeAiSsd.Shared.Io`) established as the location for
 shared filesystem helpers. All `File.Replace` calls in the shared library must route
@@ -3587,7 +3587,7 @@ through `FileOps.ReplaceWithRetry` (5 attempts, 25 ms base backoff doubling,
 
 ### D15 — X21 embedding provenance: Option B migration (backfill from blob, no forced reindex)
 
-**Status:** active • **Decided:** 2026-04-19 00:00:00
+**Status:** active • **Decided:** 2026-04-19 00:00:00 • **Source:** user
 
 When migrating existing v1.2.9 libraries to schema M2, existing rows receive
 `embedding_model = 'unknown'` and `embedding_dimension` backfilled from
@@ -3607,7 +3607,7 @@ changing the schema. Established PR #157 (`449ec2e`).
 
 ### D14 — X21b: reindex prompt triggers on drive selection, not config change
 
-**Status:** active • **Decided:** 2026-04-19 00:00:00
+**Status:** active • **Decided:** 2026-04-19 00:00:00 • **Source:** user
 
 PrepApp's embedding-mismatch reindex prompt fires on drive selection
 (`OnSelectedDriveChanged`), not on config edit. A per-session
@@ -3625,7 +3625,7 @@ with a user-visible log message. Established PR #158 (`92625a9`).
 
 ### D12 — X10 ships path-capture first; stable document GUID spins out as X10-Redux
 
-**Status:** active • **Decided:** 2026-04-19 00:00:00
+**Status:** active • **Decided:** 2026-04-19 00:00:00 • **Source:** user
 
 RAG audit argued the root cause of orphaned vectors on re-ingest is path-based chunk
 keying, and proposed a stable `document_id GUID` on chunks + manifest entries as the
@@ -3647,7 +3647,7 @@ Established 2026-04-19 RAG audit triage plan session.
 
 ### D11 — RAG audit fallout: 7 separate X-items, not a single umbrella
 
-**Status:** active • **Decided:** 2026-04-19 00:00:00
+**Status:** active • **Decided:** 2026-04-19 00:00:00 • **Source:** user
 
 RAG audit produced 9 findings. Three absorbed as scope expansions on existing backlog
 items (X10 + X13 + X15). Remaining six map to seven new X-items (X17 textless
@@ -3667,7 +3667,7 @@ Established 2026-04-19 RAG audit triage plan session.
 
 ### D10 — X21 embedding provenance slots before F3, reordering the queue
 
-**Status:** active • **Decided:** 2026-04-19 00:00:00
+**Status:** active • **Decided:** 2026-04-19 00:00:00 • **Source:** user
 
 Pre-audit, `project_state.md` queued F3 (PrepApp 3-tab restructure) as the first item
 after the H2 hardening batch. Post-audit, X21 (embedding provenance + compat gating,
@@ -3690,7 +3690,7 @@ session.
 
 ### D9 — RAG audit: X17 multimodal scoped to Stage 1 diagnostic only
 
-**Status:** active • **Decided:** 2026-04-19 00:00:00
+**Status:** active • **Decided:** 2026-04-19 00:00:00 • **Source:** user
 
 Third-party RAG audit flagged "multimodal PDF ingest" (OCR for scanned pages, table
 extraction, image handling) as its #1 Critical finding. Stated product workload is
@@ -3712,7 +3712,7 @@ Established 2026-04-19 RAG audit triage plan session.
 
 ### D8 — OnClosing drain uses GetAwaiter().GetResult(), not cancel-and-retry
 
-**Status:** active • **Decided:** 2026-04-19 00:00:00
+**Status:** active • **Decided:** 2026-04-19 00:00:00 • **Source:** user
 
 `MainWindow.OnClosing` blocks the UI thread with
 `ConfigStore.FlushAsync(5s).GetAwaiter().GetResult()` before `LockSession()`.
@@ -3728,7 +3728,7 @@ no deadlock risk on the block. Established PR #146 (`542559b`).
 
 ### D7 — Migration must use LoadWithValidationAsync, not LoadAsync
 
-**Status:** active • **Decided:** 2026-04-19 00:00:00
+**Status:** active • **Decided:** 2026-04-19 00:00:00 • **Source:** user
 
 `TryMigratePlaintextAsync` uses `PortableConfig.LoadWithValidationAsync` (not the
 convenience `LoadAsync`) before absorbing a newer plaintext into the encrypted blob.
@@ -3744,7 +3744,7 @@ PR #147 (`b75e42a`).
 
 ### D6 — PrepApp ModelService / ReadinessService bypass IConfigStore intentionally
 
-**Status:** active • **Decided:** 2026-04-19 00:00:00
+**Status:** active • **Decided:** 2026-04-19 00:00:00 • **Source:** user
 
 `ModelService` and `ReadinessService` in PrepViewModel write directly to
 `portable-config.json` via `PortableConfig.SaveAsync` / `config.SaveAsync`
@@ -3763,7 +3763,7 @@ gains a "re-open encrypted drive" workflow, these call sites must be revisited.
 
 ### D5 — v1.2.x: ship each fix as its own PR + release, not bundled
 
-**Status:** active • **Decided:** 2026-04-18 00:00:00
+**Status:** active • **Decided:** 2026-04-18 00:00:00 • **Source:** user
 
 Triage originally grouped X1+X2+X3 as "the v1.2.2 bundle". Stephen
 revised 2026-04-18: each bug-fix section gets its own PR and its own
@@ -3779,7 +3779,7 @@ etc.).
 
 ### D4 — CLI config precedence: flag > env var > default
 
-**Status:** active • **Decided:** 2026-04-17 00:00:00
+**Status:** active • **Decided:** 2026-04-17 00:00:00 • **Source:** user
 
 For `runner-cli/`, configuration follows the industry-standard
 precedence `--flag` > env var > hardcoded default (matches kubectl,
@@ -3795,7 +3795,7 @@ persisted. Established PR #130 (`bb59a6c`).
 
 ### D3 — Headless CLI is a thin HTTP client, not an in-process host
 
-**Status:** active • **Decided:** 2026-04-17 00:00:00
+**Status:** active • **Decided:** 2026-04-17 00:00:00 • **Source:** user
 
 `runner-cli/` is a standalone `net8.0` project that speaks to a running
 Runner over its existing LAN HTTP API (`RunnerLocalApiService`). It is
@@ -3811,7 +3811,7 @@ PR #130 (`bb59a6c`).
 
 ### D2 — Historical stable decisions (migrated from prior project_state.md)
 
-**Status:** active • **Decided:** 2026-04-17 00:00:00
+**Status:** active • **Decided:** 2026-04-17 00:00:00 • **Source:** user
 
 These decisions were accumulated in the prior single-file
 `project_state.md` under "Stable decisions (don't revisit)" and
@@ -3853,7 +3853,7 @@ decisions should be added as their own dated entries below.
 
 ### D1 — Initialized project_docs framework
 
-**Status:** active • **Decided:** 2026-04-17 00:00:00
+**Status:** active • **Decided:** 2026-04-17 00:00:00 • **Source:** user
 
 - Re-bootstrapped (nuke path): backed up prior `agent_docs/` as
   `agent_docs.pre-init-backup/` and prior `CLAUDE.md` as
@@ -4914,6 +4914,9 @@ _3 fact(s), 0 stale._
 
 | When | Actor | Table | Action | Reason |
 |------|-------|-------|--------|--------|
+| 2026-05-13 22:53:31 | claude-code:smoke | facts | insert | fact add |
+| 2026-05-13 22:52:36 | claude-code:reindex | embeddings | rebuild | index rebuild: model=bge-small-en-v1.5 facts=3 decisions=83 tasks=27 |
+| 2026-05-13 17:24:52 | cli:user | render | render | memhub render |
 | 2026-05-13 17:24:47 | claude:wrap-up | session_notes | insert | mcp log_session_note |
 | 2026-05-13 17:24:42 | claude:wrap-up | project_state | insert | state set |
 | 2026-05-13 17:09:04 | cli:user | render | render | memhub render |
@@ -4955,9 +4958,6 @@ _3 fact(s), 0 stale._
 | 2026-05-12 22:26:46 | k9:bootstrap | tasks | insert | task add |
 | 2026-05-12 22:26:46 | k9:bootstrap | tasks | insert | task add |
 | 2026-05-12 22:26:46 | k9:bootstrap | tasks | insert | task add |
-| 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
-| 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
-| 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
 | 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
 | 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
 | 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
