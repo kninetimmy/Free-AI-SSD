@@ -1,74 +1,55 @@
 <!-- memhub:rendered -->
 <!-- DO NOT EDIT. Generated from .memhub/project.sqlite. -->
 <!-- To change content, use memhub CLI; then re-run `memhub render`. -->
-<!-- Generated at: 2026-05-13T23:22:49Z by memhub 0.1.0 -->
+<!-- Generated at: 2026-05-14T02:27:46Z by memhub 0.1.0 -->
 
 # Free-AI-SSD
 
 ## Currently building
 
-**Currently building:** Between tasks. Most recent merge PR #285 (C7,
-encrypted-drive Manage Models unlock UX, both OSes — `3b51011`,
-2026-05-12). D13's "lands in C7" promise satisfied on Mac PrepApp +
-Windows PrepApp.
+**Currently building:** Between tasks. Most recent merge PR #289 (M15,
+Mac PrepApp pull-failure acknowledgement/log surface — `a97e823`,
+2026-05-14). CI green: windows-build, mac-runner-build, mac-prep-build.
 
 **Last released:** v1.3.24 (2026-05-11). v1.3.25 dispatch in flight;
-bundles PRs #272 + #274 + #275 + #281 + #283 + #285.
+bundles PRs #272 + #274 + #275 + #281 + #283 + #285, with M15 now
+queued after that baseline unless release packaging says otherwise.
 
 **Natural next pick:**
-- **M15** — Mac PrepApp: don't auto-advance past pull failure
-  (lighter-weight observability bugfix, same M18+M19 spirit).
-- **W5** — Windows HF-token write-back on encrypted drives (deferred
-  from C7; existing Windows save path doesn't route through
+- **W5** — Windows PrepApp HF-token write-back on encrypted drives
+  (deferred from C7; existing Windows save path does not route through
   `IConfigStore`).
 
-**Open priority queue** (from `project_backlog.md` 2026-05-10 P0–P5):
-- P3 critical pre-existing: W5, C8 (X10), W1 (X11), C9 (X12), C10
-  (F4 Stage 2), W2 (F4 Stages 3–4), C11 (B2 LAN discovery), C12 (R1
-  Stage 2), M7 (MAC20 release ZIP layout).
-- P4 RAG audit: C13–C19 (X18, X15, X19, X20, X22, X23, X17).
-- Back-burnered: M2 (Apple Dev cert renewal), M10 (Mac finalize
-  observability).
+**Next queue after W5:** C8 (document replacement consistency), W1
+(Companion keyboard PTT), C9 (DownloadManager verify-before-move), C10
+(F4 Stage 2 post-setup launch flow).
 
-**Cleanup overdue:** Fold `MacArtifactAvailability.EnumerateContentRoots`,
-`ArtifactStagingService.EnumerateBundledContentRoots`, and
-`PrereqService.EnumerateBundleRoots` into one shared
-`prep-core/BundleContentRoots` helper. All three are byte-identical
-ancestor-walk enumerators.
+**Open priority queue:** W5, C8, W1, C9, C10, W2, C11, C12, M7. P4 RAG
+audit remains C13-C19. Back-burnered: M2, M10.
 
-**Dormant:** X1-Redux voice/TTS hang (could not reproduce; diag branch
-`diag/x1-redux-send-hang` on remote, unmerged).
+**Cleanup overdue:** Fold the three byte-identical bundled-content-root
+ancestor walkers into one shared `prep-core/BundleContentRoots` helper.
 
-**Open questions:** Field-test pins outstanding for C7 (Mac + Windows),
-M18+M19, M16+M17, PR #275 HF manifest fix, PR #274 C6, PR #272 HF
-follow-up, v1.3.24 picker cluster, M11, C1, M12, M13, C2 — all await
-the next v1.3.25 dispatch.
+**Dormant:** X1-Redux voice/TTS hang remains unmerged and unreproduced.
 
-**Last session:** 2026-05-12 — C7 encrypted-drive Manage Models unlock
-UX shipped both OSes. 3 decisions pinned: explicit-button UX (not
-auto-prompt), lock-on-Done (not lock-on-background), commit-on-boundary
-HF-token persistence (not per-keystroke). CI green first run.
+**Open questions:** Field-test pins outstanding for C7, M18+M19, M16+M17,
+PR #275, PR #274, PR #272, v1.3.24 picker cluster, M11, C1, M12, M13,
+C2; all await the next v1.3.25 dispatch.
 
-**This session (2026-05-13):** Two memhub-related events.
-**Morning** — initialized `.memhub/project.sqlite` from K9 markdown
-(82 decisions + 27 tasks bootstrapped via `k9:bootstrap`);
-CLAUDE.md + AGENTS.md gained memhub:managed footer blocks;
-`.gitignore` adds `.memhub/`; PROJECT.md + PROJECT_LEDGER.md
-rendered fresh as outputs.
-**Afternoon** — archived the four K9 canonical markdowns
-(project_state/arch/backlog/decisions) + `.init-version` into
-`agent_docs/_archive_k9/` (commit `7f03d3a`) so the repo is no
-longer K9-shaped; CLAUDE.md session-continuity guidance now
-points at `agent_docs/PROJECT.md`; `.memhub/config.toml`
-`[integrations.k9]` section removed locally (file gitignored);
-decision #83 pinned; ledger re-rendered (commit `153aa34`). Both
-commits pushed to `origin/main`. This is Phase 1 of removing the
-user-level `K9-Claude-Framework` directory — other repos
-(`~/memhub`, `~/src/memhub`) and skill stubs still need the same
-treatment before the framework dir itself is safe to delete; user
-will handle those manually.
+**This session (2026-05-14):** `check-init` reported memhub Green. M15 was
+planned, implemented, committed (`6dbe5d3`), opened as draft PR #289,
+CI passed, then merged to `main` as `a97e823`. PR #288 also landed since
+the prior state row, re-rendering agent docs after embeddings reindex.
 
-_Last updated 2026-05-13 17:24:42 by claude:wrap-up._
+**This session (2026-05-14, later):** Tightened the memhub task-vs-decision
+convention. Prior wrap-ups recorded shipped features as decisions (e.g. #84
+M15). New rule: tasks for shippable work, decisions only for durable rules a
+future agent must not silently violate. Convention added to project CLAUDE.md
+(`d2ea646`) and mirrored into AGENTS.md (`1bf6032`); AGENTS.md session
+continuity also refreshed off the archived K9 pointers. Past entries not
+retroactively migrated.
+
+_Last updated 2026-05-14 02:27:26 by claude:wrap-up._
 
 ## Architecture
 
@@ -292,5 +273,7 @@ _Last updated 2026-05-13 16:00:21 by cli:user._
 
 ## Recent session notes
 
+- **2026-05-14 02:27:42** (claude:wrap-up) — 2026-05-14 (later). Tightened the memhub task-vs-decision recording convention after noticing M15 was logged as a decision rather than a done task. Added a 'Recording work in memhub' block to project CLAUDE.md (d2ea646) and mirrored it in AGENTS.md (1bf6032); the AGENTS.md session-continuity section was also refreshed off archived K9 pointers onto memhub/PROJECT.md. No code changes; convention only. Recorded as decision #85.
+- **2026-05-14 01:38:35** (codex:wrap-up) — 2026-05-14. M15 shipped: Mac PrepApp now keeps pull failures visible instead of auto-advancing to readiness, with retry/continue actions and a Manage Models retry banner. Implemented on branch codex/m15-mac-pull-failure-surface, committed as 6dbe5d3, and merged via PR #289 as a97e823 after green windows-build, mac-runner-build, and mac-prep-build. check-init was Green; no architecture update needed.
 - **2026-05-13 17:24:47** (claude:wrap-up) — 2026-05-13 afternoon. Archived the four K9 canonical markdowns + .init-version into agent_docs/_archive_k9/ (commit 7f03d3a) so Free-AI-SSD is no longer K9-shaped; CLAUDE.md session-continuity guidance now points at PROJECT.md. Decision #83 recorded the rationale; PROJECT_LEDGER re-rendered (commit 153aa34). Both pushed to origin/main. No code work this session — project-docs framework cleanup only; user will handle the other repos (memhub, src/memhub, skill stubs) manually before deleting ~/K9-Claude-Framework.
 - **2026-05-13 16:15:55** (claude:wrap-up) — 2026-05-13 memhub-native bootstrap of Free-AI-SSD. K9 markdown (82 decisions, 27 tasks) imported into .memhub/project.sqlite via k9:bootstrap; CLAUDE.md + AGENTS.md gained memhub:managed footer blocks; .gitignore excludes .memhub/; PROJECT.md + PROJECT_LEDGER.md rendered fresh as outputs. No code work this session — bootstrap only.

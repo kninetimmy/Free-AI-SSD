@@ -1,13 +1,33 @@
 <!-- memhub:rendered -->
 <!-- DO NOT EDIT. Generated from .memhub/project.sqlite. -->
 <!-- To change content, use memhub CLI; then re-run `memhub render`. -->
-<!-- Generated at: 2026-05-13T23:22:49Z by memhub 0.1.0 -->
+<!-- Generated at: 2026-05-14T02:27:46Z by memhub 0.1.0 -->
 
 # Free-AI-SSD — Ledger
 
 ## Decisions
 
-_83 decision(s). Most recent first._
+_85 decision(s). Most recent first._
+
+### D85 — memhub task vs decision recording convention (project-level)
+
+**Status:** active • **Decided:** 2026-05-14 02:27:37 • **Source:** user+agent:claude-code
+
+Both agents (Claude, Codex) record shipped work as a task transitioned to done; decision is reserved for durable rules a future agent must not silently violate. Convention lives in project CLAUDE.md and AGENTS.md. Past entries (including decision #84 M15) are not retroactively migrated.
+
+**Why:** Decision list was drifting into a changelog, diluting its value as a queryable rulebook. Embeddings make recall forgiving but don't fix structured queries (`task list --status done`) or ledger noise.
+
+**How to apply:** At wrap-up, ask 'would a future agent silently violate this if it weren't pinned?' If yes -> decision. If no -> done task with summary in notes. A shipped feature can produce both. Established commits d2ea646 (CLAUDE.md) and 1bf6032 (AGENTS.md), 2026-05-14.
+
+---
+
+### D84 — M15 Mac PrepApp pull failures require acknowledgement before readiness
+
+**Status:** active • **Decided:** 2026-05-14 01:38:30 • **Source:** user+agent:codex
+
+Mac PrepApp now collects failed pull tags and transitions to a dedicated failure/log surface instead of auto-advancing to readiness. Pull failures remain non-fatal: the user can retry failed tags or continue to readiness after seeing the error. Manage Models uses an inline retry banner. Windows PrepApp needs no mirror change because it already stays on the Models tab with LogLines visible.
+
+---
 
 ### D83 — Archive K9 four-file framework into agent_docs/_archive_k9/
 
@@ -4914,6 +4934,14 @@ _3 fact(s), 0 stale._
 
 | When | Actor | Table | Action | Reason |
 |------|-------|-------|--------|--------|
+| 2026-05-14 02:27:42 | claude:wrap-up | session_notes | insert | mcp log_session_note |
+| 2026-05-14 02:27:37 | claude:wrap-up | decisions | insert | decision add |
+| 2026-05-14 02:27:26 | claude:wrap-up | project_state | insert | state set |
+| 2026-05-14 01:38:41 | cli:user | render | render | memhub render |
+| 2026-05-14 01:38:35 | codex:wrap-up | session_notes | insert | mcp log_session_note |
+| 2026-05-14 01:38:30 | codex:wrap-up | decisions | insert | decision add |
+| 2026-05-14 01:38:23 | codex:wrap-up | project_state | insert | state set |
+| 2026-05-13 23:22:49 | cli:user | render | render | memhub render |
 | 2026-05-13 22:53:31 | claude-code:smoke | facts | insert | fact add |
 | 2026-05-13 22:52:36 | claude-code:reindex | embeddings | rebuild | index rebuild: model=bge-small-en-v1.5 facts=3 decisions=83 tasks=27 |
 | 2026-05-13 17:24:52 | cli:user | render | render | memhub render |
@@ -4956,11 +4984,3 @@ _3 fact(s), 0 stale._
 | 2026-05-12 22:26:46 | k9:bootstrap | tasks | insert | task add |
 | 2026-05-12 22:26:46 | k9:bootstrap | tasks | insert | task add |
 | 2026-05-12 22:26:46 | k9:bootstrap | tasks | insert | task add |
-| 2026-05-12 22:26:46 | k9:bootstrap | tasks | insert | task add |
-| 2026-05-12 22:26:46 | k9:bootstrap | tasks | insert | task add |
-| 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
-| 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
-| 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
-| 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
-| 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
-| 2026-05-12 22:26:46 | k9:bootstrap | decisions | insert | decision add |
