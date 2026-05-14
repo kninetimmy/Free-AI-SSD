@@ -42,6 +42,8 @@ struct ContentView: View {
                 case .modelPull:         ModelPullStepView(vm: vm)
                 case .modelPullPaused(let tag, let snapshot):
                     ModelPullPausedStepView(vm: vm, tag: tag, snapshot: snapshot)
+                case .modelPullFailed(let tags):
+                    ModelPullFailedStepView(vm: vm, tags: tags)
                 case .manageModels:      ManageModelsStepView(vm: vm)
                 case .readiness:         ProgressLogStepView(vm: vm, title: "Running readiness checks…")
                 case .done:              DoneStepView(vm: vm)
@@ -77,6 +79,7 @@ struct ContentView: View {
         case .encryptionSetup:   return "4 / 6 — Encryption"
         case .modelPull:         return "5 / 6 — Models"
         case .modelPullPaused:   return "5 / 6 — Pull paused"
+        case .modelPullFailed:   return "5 / 6 — Pull failed"
         case .manageModels:      return "Manage models"
         case .readiness:         return "6 / 6 — Readiness"
         case .done:              return "Done"
@@ -450,6 +453,77 @@ struct ModelPullPausedStepView: View {
                     .controlSize(.large)
             }
         }
+    }
+}
+
+// MARK: - Model pull failed (M15)
+
+struct ModelPullFailedStepView: View {
+    @ObservedObject var vm: PrepViewModel
+    let tags: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Model pull needs attention").font(.headline)
+
+            Text(failureSummary)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !tags.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(tags, id: \.self) { tag in
+                        Text(tag)
+                            .font(.system(.caption, design: .monospaced))
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+
+            Text("Recent log").font(.headline)
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        ForEach(Array(vm.logLines.enumerated()), id: \.offset) { idx, line in
+                            Text(line)
+                                .font(.system(.caption, design: .monospaced))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .id(idx)
+                        }
+                    }
+                    .padding(8)
+                }
+                .background(Color(NSColor.textBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .onAppear {
+                    if let last = vm.logLines.indices.last {
+                        proxy.scrollTo(last, anchor: .bottom)
+                    }
+                }
+            }
+            .frame(maxHeight: .infinity)
+
+            HStack {
+                Spacer()
+                Button("Continue to readiness") {
+                    Task { await vm.continueAfterPullFailures() }
+                }
+                .controlSize(.regular)
+                Button("Retry failed pulls") {
+                    Task { await vm.retryFailedPulls() }
+                }
+                .keyboardShortcut(.defaultAction)
+                .controlSize(.large)
+                .disabled(tags.isEmpty || vm.isBusy)
+            }
+        }
+    }
+
+    private var failureSummary: String {
+        let count = tags.count
+        let modelWord = count == 1 ? "model" : "models"
+        return "\(count) \(modelWord) failed to pull. This is non-fatal; you can retry now or continue and pull the \(modelWord) later from Mac Runner."
     }
 }
 

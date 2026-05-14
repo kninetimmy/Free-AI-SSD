@@ -308,6 +308,26 @@ struct PrepAppTestsMain {
             try expect(paused != .readiness)
         }
 
+        // MARK: M15 — .modelPullFailed state pins
+
+        runner.test("M15: .modelPullFailed equality matches failed tags") {
+            let a = PrepFlowStep.modelPullFailed(tags: ["llama3.2:1b", "qwen2.5:0.5b"])
+            let b = PrepFlowStep.modelPullFailed(tags: ["llama3.2:1b", "qwen2.5:0.5b"])
+            try expect(a == b)
+        }
+
+        runner.test("M15: .modelPullFailed inequality on tag drift") {
+            let a = PrepFlowStep.modelPullFailed(tags: ["llama3.2:1b"])
+            let b = PrepFlowStep.modelPullFailed(tags: ["llama3.2:3b"])
+            try expect(a != b)
+        }
+
+        runner.test("M15: .modelPullFailed not equal to paused or readiness") {
+            let failed = PrepFlowStep.modelPullFailed(tags: ["x"])
+            try expect(failed != .modelPullPaused(tag: "x", progressSnapshot: nil))
+            try expect(failed != .readiness)
+        }
+
         // MARK: MAC34 — InitialPortableConfigPayload generates a non-empty
         // 64-hex network API key by default. Pre-MAC34 this defaulted to
         // `""` which fail-closed every chat request through the LAN API
