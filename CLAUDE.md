@@ -20,6 +20,27 @@ snapshots of the old K9 project_state / project_arch /
 project_backlog / project_decisions files). Read on demand for
 context; do not append to them.
 
+### Recording work in memhub
+
+Both agents (Claude, Codex) follow the same type convention so
+the ledger stays clean:
+
+- **task** — every shippable piece of work. Create with status
+  `open` when starting; transition to `done` at wrap-up with the
+  implementation summary in notes. This is the changelog.
+- **decision** — durable rules that constrain future work
+  ("don't add X to the lock path", "always use Y for Z"). A
+  decision is something a future agent must not silently
+  violate. Created only when the work produces such a rule.
+- **fact** — current state observations (build/test status,
+  active drive, etc.).
+
+A shipped feature often produces both: a done task documenting
+what landed, plus zero or more decisions documenting durable
+rules that emerged. If you can't name a rule a future agent
+would violate without it, it's not a decision — it's a done
+task. Past entries are not retroactively migrated.
+
 ## Build / test / run
 
 ```powershell
