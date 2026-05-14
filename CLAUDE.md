@@ -9,8 +9,8 @@ lightweight companion app on a second PC.
 ## Session continuity
 
 `.memhub/project.sqlite` is the source of truth. Read
-`agent_docs/PROJECT.md` at session start — it's the rendered
-dashboard. `agent_docs/PROJECT_LEDGER.md` is the rendered
+`.memhub/rendered/PROJECT.md` at session start — it's the rendered
+dashboard. `.memhub/rendered/PROJECT_LEDGER.md` is the rendered
 append-only log. Both are generated from the sqlite store; never
 hand-edit them. To change content, use the `memhub` CLI and re-run
 `memhub render`.
