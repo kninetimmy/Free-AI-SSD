@@ -50,8 +50,11 @@ public partial class MainWindow : Window
 
     public MainWindow()
     {
-        InitializeComponent();
-
+        // The VM must exist before InitializeComponent() runs: XAML
+        // ComboBoxes with IsSelected="True" defaults fire their
+        // SelectionChanged handlers during parse, and those handlers
+        // dereference _viewModel. Keeping construction here also means
+        // any future XAML-fired event sees a real VM.
         var logLines = new ObservableCollection<string>();
         var logService = new LogService(logLines, Dispatcher);
         var dialogService = new DialogService(() => this);
@@ -75,6 +78,8 @@ public partial class MainWindow : Window
             dialogService,
             logService,
             elevationService);
+
+        InitializeComponent();
 
         _viewModel.SystemRamGb = SystemResources.GetTotalSystemRamGb();
         _viewModel.GpuVramGb = SystemResources.GetGpuVramGb();
