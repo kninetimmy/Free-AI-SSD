@@ -56,6 +56,11 @@ enum PrepFlowStep: Equatable {
     /// have no surface to resume the partially-downloaded model.
     case modelPullPaused(tag: String, progressSnapshot: String?)
 
+    /// M15: one or more pull commands failed but the overall prep flow
+    /// remains recoverable. Keep the log visible and let the user retry
+    /// only the failed tags or continue to readiness.
+    case modelPullFailed(tags: [String])
+
     /// Sidecar's readiness command runs and we render the result list.
     case readiness
 

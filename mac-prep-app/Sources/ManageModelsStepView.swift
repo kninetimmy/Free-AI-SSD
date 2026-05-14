@@ -21,6 +21,9 @@ struct ManageModelsStepView: View {
             if vm.driveConfiguration.isConfigEncrypted {
                 encryptedDriveBanner
             }
+            if !vm.manageModelsPullFailureTags.isEmpty {
+                pullFailureBanner
+            }
             installedSection
             Divider()
             addSection
@@ -43,6 +46,38 @@ struct ManageModelsStepView: View {
                     .foregroundColor(.secondary)
             }
         }
+    }
+
+    private var pullFailureBanner: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(managePullFailureSummary)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(vm.manageModelsPullFailureTags.joined(separator: ", "))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+            }
+            Spacer()
+            Button("Retry failed pulls") {
+                Task { await vm.retryFailedPullsFromManagement() }
+            }
+            .disabled(vm.isBusy)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.yellow.opacity(0.15))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.yellow.opacity(0.6), lineWidth: 1))
+    }
+
+    private var managePullFailureSummary: String {
+        let count = vm.manageModelsPullFailureTags.count
+        let modelWord = count == 1 ? "model" : "models"
+        return "\(count) \(modelWord) failed to pull. Retry failed pulls or choose Done; this is non-fatal."
     }
 
     /// C7: banner switches between locked (yellow + Unlock button) and

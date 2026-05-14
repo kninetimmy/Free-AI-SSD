@@ -31,6 +31,7 @@ final class PrepViewModel: ObservableObject {
             // against a different drive's identity. Resetting the dialog
             // state too keeps a half-typed sheet from carrying over.
             resetManageModelsUnlockState()
+            manageModelsPullFailureTags = []
             // C6 Stage 3: detection runs on every selection change so the
             // already-configured banner stays in sync. Detection is pure
             // file-presence (no decrypt) — safe even on encrypted drives.
@@ -57,6 +58,7 @@ final class PrepViewModel: ObservableObject {
     // user returns to .manageModels (refreshing installedModels)
     // instead of falling through to .readiness.
     @Published var isAddingModelInManagement: Bool = false
+    @Published var manageModelsPullFailureTags: [String] = []
 
     // C7: passphrase-unlock state for Manage Models on an encrypted drive.
     // `isManageModelsUnlocked` is the gate signal SwiftUI observes; it
@@ -540,6 +542,8 @@ final class PrepViewModel: ObservableObject {
             return
         }
         guard !selectedStarterModels.isEmpty else { return }
+        manageModelsPullFailureTags = []
+        pendingPullTags = []
         isAddingModelInManagement = true
         currentStep = .modelPull
         await pullStarterModels()
@@ -566,6 +570,7 @@ final class PrepViewModel: ObservableObject {
         installedModels = []
         selectedStarterModels = []
         isAddingModelInManagement = false
+        manageModelsPullFailureTags = []
         currentStep = .driveSelection
     }
 
@@ -1316,6 +1321,7 @@ final class PrepViewModel: ObservableObject {
         let queue = pendingPullTags
         var cancelledTag: String?
         var cancelledIndex: Int?
+        var failedTags: [String] = []
 
         let task = Task { @MainActor in
             for (index, tag) in queue.enumerated() {
@@ -1337,6 +1343,7 @@ final class PrepViewModel: ObservableObject {
                 } catch {
                     self.appendLog("Pull failed for \(tag): \(error.localizedDescription)")
                     self.appendLog("(This is non-fatal — you can pull models later from Mac Runner.)")
+                    failedTags.append(tag)
                 }
             }
         }
@@ -1357,8 +1364,25 @@ final class PrepViewModel: ObservableObject {
             return
         }
 
-        pendingPullTags = []
         pullProgressLine = ""
+
+        if !failedTags.isEmpty {
+            pendingPullTags = failedTags
+
+            if isAddingModelInManagement {
+                isAddingModelInManagement = false
+                manageModelsPullFailureTags = failedTags
+                currentStep = .manageModels
+                await refreshInstalledModels()
+                return
+            }
+
+            currentStep = .modelPullFailed(tags: failedTags)
+            return
+        }
+
+        pendingPullTags = []
+        manageModelsPullFailureTags = []
 
         // C6 Stage 3: when the pull was initiated from inside
         // .manageModels, return there (refreshing installedModels so the
@@ -1392,6 +1416,40 @@ final class PrepViewModel: ObservableObject {
         }
         currentStep = .modelPull
         await pullPendingTags()
+    }
+
+    /// M15: retry only the tags that failed in the last pull batch.
+    /// Used from the initial prep failure step.
+    func retryFailedPulls() async {
+        guard !pendingPullTags.isEmpty else {
+            currentStep = .readiness
+            await runReadiness()
+            return
+        }
+        currentStep = .modelPull
+        await pullPendingTags()
+    }
+
+    /// M15: retry failed tags from Manage Models, then return to
+    /// `.manageModels` on success rather than advancing to readiness.
+    func retryFailedPullsFromManagement() async {
+        guard !pendingPullTags.isEmpty else { return }
+        manageModelsPullFailureTags = []
+        isAddingModelInManagement = true
+        currentStep = .modelPull
+        await pullPendingTags()
+    }
+
+    /// M15: keep pull failures non-fatal. The user has seen the inline
+    /// error and can choose to finish prep with whatever did land.
+    func continueAfterPullFailures() async {
+        if !pendingPullTags.isEmpty {
+            appendLog("Continuing to readiness with \(pendingPullTags.count) failed model pull(s).")
+        }
+        pendingPullTags = []
+        pullProgressLine = ""
+        currentStep = .readiness
+        await runReadiness()
     }
 
     /// MAC31a: skip the remaining pulls and advance to readiness. The
@@ -1483,6 +1541,7 @@ final class PrepViewModel: ObservableObject {
         passphraseConfirm = ""
         pendingPullTags = []
         pullProgressLine = ""
+        manageModelsPullFailureTags = []
         currentStep = .welcome
     }
 
