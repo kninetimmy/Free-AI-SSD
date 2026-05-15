@@ -15,11 +15,6 @@ append-only log. Both are generated from the sqlite store; never
 hand-edit them. To change content, use the `memhub` CLI and re-run
 `memhub render`.
 
-Pre-memhub history lives in `agent_docs/_archive_k9/` (frozen
-snapshots of the old K9 project_state / project_arch /
-project_backlog / project_decisions files). Read on demand for
-context; do not append to them.
-
 ### Recording work in memhub
 
 Both agents (Claude, Codex) follow the same type convention so
@@ -67,9 +62,8 @@ SDK version is pinned in `global.json`.
 **Security controls are non-negotiable** — don't weaken them. AES-256-GCM
 for config, SHA-256 + URL allowlist for downloaded binaries,
 `PathGuards` for path handling, and `ProcessRunner.ArgumentList`
-for all process launches (never string concat). Full list in the
-archived architecture notes at
-`agent_docs/_archive_k9/project_arch.md` → "Security invariants".
+for all process launches (never string concat). Full list in
+`.memhub/rendered/PROJECT.md` → Architecture → "Security invariants".
 
 **GitHub workflow:** never push directly to `main`. Create a PR,
 watch CI, report results, and wait for explicit confirmation before
