@@ -5,9 +5,9 @@ import Darwin
 
 // MARK: - Mac sidecar host controller (MAC6)
 //
-// Spawns the net8.0 sidecar at <ssdRoot>/mac/runner-host/FreeAiSsd.MacRunnerHost
-// (or, in dev builds, the repo's published output) and pipes the unlocked
-// PortableConfig + the resolved Ollama host URL on stdin.
+// Spawns the net8.0 sidecar bundled inside Runner.app/Contents/Resources/
+// runner-host/ (or, in dev builds, the repo's published output) and pipes
+// the unlocked PortableConfig + the resolved Ollama host URL on stdin.
 //
 // Plaintext-config invariant from MAC5: the Swift app must never write the
 // in-memory PortableConfig dictionary to disk to hand it to the sidecar. It
@@ -246,22 +246,24 @@ final class MacRunnerHostController {
 
     // MARK: - Path resolution
 
-    /// Resolves the host binary path. Production: looks alongside the staged
-    /// SSD payload under <ssdRoot>/mac/runner-host/FreeAiSsd.MacRunnerHost.
-    /// Falls back to the app bundle's Resources/runner-host/ directory when
-    /// running from a packaged Runner.app, and finally to the dev build
-    /// output when running directly from the repo. Throws if no candidate
-    /// resolves.
+    /// Resolves the host binary path. Production (post-restructure): the
+    /// sidecar ships INSIDE Runner.app/Contents/Resources/runner-host/, and
+    /// Runner.app sits at the SSD root — so the bundle Resources path is the
+    /// production source. A legacy <ssdRoot>/mac/runner-host/ probe is kept
+    /// first as a harmless fast-path for any drive that still has a
+    /// separately-staged host. Finally falls back to the dev build output
+    /// when running directly from the repo. Throws if no candidate resolves.
     static func resolveHostBinary(ssdRoot: URL) throws -> URL {
         let fm = FileManager.default
         var candidates: [URL] = []
 
-        // 1. Staged on the SSD (the production layout).
+        // 1. Legacy: separately staged on the SSD (pre-restructure layout).
+        //    Not produced anymore; harmless if absent.
         candidates.append(
             ssdRoot.appendingPathComponent("mac/runner-host/FreeAiSsd.MacRunnerHost")
         )
 
-        // 2. Bundled inside Runner.app/Contents/Resources/runner-host/.
+        // 2. Production: bundled inside Runner.app/Contents/Resources/runner-host/.
         if let resourceURL = Bundle.main.resourceURL {
             candidates.append(
                 resourceURL.appendingPathComponent("runner-host/FreeAiSsd.MacRunnerHost")

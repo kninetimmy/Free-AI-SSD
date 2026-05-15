@@ -12,9 +12,13 @@
    target filesystem.
 2) On a Windows OR Mac machine with internet, download the latest ZIP
    from GitHub Releases and extract it:
-     - Stable:       Free-AI-SSD-win.zip                  (Windows target only)
-     - Beta (xplat): Free-AI-SSD-beta-crossplatform.zip   (Windows + macOS,
-                                                           includes Mac PrepApp)
+     - Stable:       Free-AI-SSD-win.zip               (Windows target only)
+     - Beta (xplat): Free-AI-SSD-crossplatform.zip     (Windows + macOS,
+                                                        includes Mac PrepApp)
+   The extracted root is minimal: the prep tool(s), LICENSE, QUICKSTART,
+   and one dependencies/ folder (runner / companion / prereqs / mac).
+   Cross-platform: prep the macOS side from a Mac (PrepApp.app) — Windows
+   archivers strip the symlinks inside macOS .app bundles.
 3) Run the prep tool for your host OS:
      - Windows host: FreeAiSsd.PrepApp.exe
      - Mac host:     PrepApp.app  (from the cross-platform bundle)
@@ -31,8 +35,8 @@
    model (e.g. phi3 or llama3.1:8b). Run readiness checks, then finalize.
 4) Unplug. Plug into the machine you actually want to use it on.
      - Windows: <SSD>\windows\runner\FreeAiSsd.Runner.exe
-     - macOS:   <SSD>/mac/Runner.app    (beta bundle only; unsigned,
-                limited Runner API sidecar)
+     - macOS:   <SSD>/Runner.app    (at the drive root; beta bundle only;
+                unsigned, limited Runner API sidecar)
 5) Start the AI engine in Runner and chat. On Windows, the full Runner
    supports RAG, citations, voice, HOTAS/PTT, DCS import, and Network
    Mode. The macOS beta supports RAG-backed chat against an already
@@ -123,7 +127,7 @@ Everything below is optional and layered on top of that baseline.
  - Runner auto-installs any missing Windows prerequisites (VC++ redist,
    .NET 8 Desktop Runtime) from the staged offline bundle on first run.
 
- - macOS beta scope: <SSD>/mac/Runner.app can select/infer the SSD, unlock
+ - macOS beta scope: <SSD>/Runner.app can select/infer the SSD, unlock
    encrypted Windows-prepped SSDs (MAC5 native CryptoKit port), read installed
    models, start <SSD>/mac/tools/ollama/ollama, host the Runner API sidecar,
    and send RAG-backed chat with citations against an already prepared active

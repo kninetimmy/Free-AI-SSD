@@ -12,9 +12,11 @@ namespace FreeAiSsd.Shared;
 ///   │   │   └── prereqs/      → Bundled prerequisite installers (VC++, .NET)
 ///   │   └── runner/           → Published Windows Runner WPF application
 ///   ├── mac/
-///   │   ├── tools/
-///   │   │   └── ollama/       → macOS Ollama universal binary
-///   │   └── Runner.app/       → macOS Runner application bundle
+///   │   └── tools/
+///   │       └── ollama/       → macOS Ollama universal binary
+///   ├── Runner.app/           → macOS Runner application bundle (root-level,
+///   │                           launchable directly; the mac-runner-host
+///   │                           sidecar ships inside Contents/Resources/)
 ///   ├── models/
 ///   │   └── blobs/            → Ollama model blob storage
 ///   ├── config/               → portable-config.json (or encrypted variant)
@@ -33,7 +35,18 @@ public static class SsdLayout
 
     public const string MacTools = "mac/tools";
     public const string MacOllama = "mac/tools/ollama";
-    public const string MacRunner = "mac/Runner.app";
+
+    /// <summary>
+    /// macOS Runner bundle, staged at the SSD <b>root</b> (not under mac/)
+    /// so the user double-clicks it without digging, mirroring how the
+    /// Windows runner is the obvious thing under windows/runner/. The
+    /// mac-runner-host sidecar travels inside Runner.app/Contents/
+    /// Resources/runner-host/, so there is no separate on-SSD host dir.
+    /// Changed from "mac/Runner.app" — a drive prepped by an older release
+    /// must be re-prepped to match; the Swift inferSsdRoot() + staging code
+    /// move in lockstep with this constant.
+    /// </summary>
+    public const string MacRunner = "Runner.app";
 
     public const string Models = "models";
     public const string Blobs = "models/blobs";

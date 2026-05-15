@@ -198,9 +198,16 @@ final class RunnerViewModel: ObservableObject {
     }
 
     func inferSsdRoot() -> URL? {
-        let bundleURL = Bundle.main.bundleURL
-        if bundleURL.path.contains("/mac/Runner.app") {
-            return bundleURL.deletingLastPathComponent().deletingLastPathComponent()
+        // Post-restructure, Runner.app sits at the SSD ROOT (no longer under
+        // mac/), so the SSD root is the bundle's immediate parent. Validate
+        // with the same config/ + models/ sibling check pickSsdRoot() uses:
+        // it's stricter than the old path-substring test and prevents a dev
+        // build run from out/Runner.app from false-positiving.
+        let candidate = Bundle.main.bundleURL.deletingLastPathComponent()
+        let fm = FileManager.default
+        if fm.fileExists(atPath: candidate.appendingPathComponent("config").path),
+           fm.fileExists(atPath: candidate.appendingPathComponent("models").path) {
+            return candidate
         }
         return nil
     }

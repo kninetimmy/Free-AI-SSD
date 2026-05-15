@@ -202,17 +202,27 @@ public sealed class PrereqService : IPrereqService
         // diagnostic error message as before.
         foreach (var contentRoot in EnumerateBundleRoots(baseDirectory))
         {
-            var candidate = Path.Combine(contentRoot, SsdLayout.Prereqs);
-            if (Directory.Exists(candidate))
-                return candidate;
+            // "prereqs" is the clean name directly under the new
+            // dependencies/ tree; SsdLayout.Prereqs ("windows/tools/prereqs")
+            // is the legacy bundled layout (pre-restructure ZIP + build.ps1
+            // local dev) which is also the on-SSD destination path.
+            foreach (var rel in new[] { "prereqs", SsdLayout.Prereqs })
+            {
+                var candidate = Path.Combine(contentRoot, rel);
+                if (Directory.Exists(candidate))
+                    return candidate;
+            }
         }
 
-        return Path.Combine(baseDirectory, "payload", SsdLayout.Prereqs);
+        return Path.Combine(baseDirectory, "dependencies", "prereqs");
     }
 
     private static IEnumerable<string> EnumerateBundleRoots(string baseDirectory)
     {
         yield return baseDirectory;
+        // "dependencies" = post-restructure staged-artifact root;
+        // "payload" = legacy name (kept for pre-restructure bundles).
+        yield return Path.Combine(baseDirectory, "dependencies");
         yield return Path.Combine(baseDirectory, "payload");
 
         DirectoryInfo? cursor;
@@ -223,6 +233,7 @@ public sealed class PrereqService : IPrereqService
         {
             cursor = cursor.Parent;
             yield return cursor.FullName;
+            yield return Path.Combine(cursor.FullName, "dependencies");
             yield return Path.Combine(cursor.FullName, "payload");
         }
     }
