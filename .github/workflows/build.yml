@@ -32,7 +32,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version number (example: 0.2.0)"
+        description: "Version (e.g. 0.2.0 stable, 0.2.0-alpha.1, 0.2.0-beta.1, 0.2.0-rc.1)"
         required: true
         type: string
       include_macos:
@@ -49,8 +49,29 @@ env:
   MAC_SIGNING_ENABLED: "false"
 
 jobs:
+  validate-version:
+    # Fast-fail gate: a malformed `version` input must fail in seconds, before
+    # any ~20-minute build job starts. This job has NO job-level `if:` so on
+    # PR/push it runs as a near-instant no-op (the validate step is gated to
+    # workflow_dispatch and skips), and the job still reports `success` — which
+    # satisfies the build jobs' `needs: [validate-version]` without triggering
+    # GitHub Actions' cascade-skip. On a workflow_dispatch run with a bad
+    # version the step throws, this job fails, and every build job is skipped.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate version format
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $v = '${{ inputs.version }}'
+          if ($v -notmatch '^\d+\.\d+\.\d+(-(alpha|beta|rc)\.\d+)?$') {
+            throw "Version '$v' does not match the expected format. Examples: 0.2.0, 0.2.0-alpha.1, 0.2.0-beta.1, 0.2.0-rc.1"
+          }
+          Write-Host "Version '$v' is valid."
+
   windows-build:
     runs-on: windows-latest
+    needs: [validate-version]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
@@ -150,6 +171,7 @@ jobs:
             LICENSE
 
   mac-runner-build:
+    needs: [validate-version]
     if: github.event_name != 'workflow_dispatch' || fromJSON(github.event.inputs.include_macos || 'false')
     runs-on: macos-14
     steps:
@@ -379,6 +401,7 @@ jobs:
           path: out/Runner.app.zip
 
   mac-prep-build:
+    needs: [validate-version]
     if: github.event_name != 'workflow_dispatch' || fromJSON(github.event.inputs.include_macos || 'false')
     runs-on: macos-14
     steps:
@@ -744,6 +767,7 @@ jobs:
         with:
           tag_name: v${{ inputs.version }}
           name: v${{ inputs.version }}
+          prerelease: ${{ contains(inputs.version, '-alpha') || contains(inputs.version, '-beta') || contains(inputs.version, '-rc') }}
           files: dist/Free-AI-SSD-win.zip
           overwrite_files: true
           fail_on_unmatched_files: true
@@ -753,6 +777,7 @@ jobs:
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: v${{ inputs.version }}
+          prerelease: ${{ contains(inputs.version, '-alpha') || contains(inputs.version, '-beta') || contains(inputs.version, '-rc') }}
           files: dist/Free-AI-SSD-beta-crossplatform.zip
           overwrite_files: true
           fail_on_unmatched_files: true

@@ -78,3 +78,44 @@ branch.
 
 **Known-supported formats:** PDF, TXT, Markdown only. DOCX is out
 of scope. DCS bindings only — no IL-2 / War Thunder parsers.
+
+## Releasing
+
+This project uses semver with `-alpha.N` / `-beta.N` / `-rc.N` pre-release suffixes. See `RELEASING.md` for the full convention.
+
+When the user asks to "cut a release", "ship an alpha/beta/rc/stable", "release version X", or similar:
+
+1. **Determine the version.** If the user didn't specify, ask which stage they want:
+   - alpha (early test build)
+   - beta (feature-complete test build)
+   - rc (release candidate)
+   - stable (no suffix)
+
+2. **Determine the version number.** Check the latest tag with `git tag --sort=-v:refname | head -10` to see what came before. Suggest the next logical version:
+   - Bumping iteration within the same stage: `0.2.0-beta.1` → `0.2.0-beta.2`
+   - Promoting stage: `0.2.0-beta.3` → `0.2.0-rc.1` or `0.2.0`
+   - New version cycle: `0.2.0` → `0.3.0-alpha.1` (next minor) or `0.2.1` (patch)
+
+3. **Confirm the version with the user** before doing anything destructive. Show them: "I'll cut `v0.3.0-beta.1` from the current main (`<short-sha>`). Confirm?"
+
+4. **Cut the release.** Do NOT push tags directly. The release workflow creates the tag itself. Instead, trigger the workflow:
+
+   ```
+   gh workflow run build.yml -f version=<VERSION_WITHOUT_V_PREFIX> -f include_macos=<true|false>
+   ```
+
+   Default `include_macos` to `true` unless the user said Windows-only.
+
+5. **Watch the run.** Use `gh run watch` or `gh run list --workflow=build.yml --limit 1` to confirm it started cleanly. Report the run URL back to the user.
+
+6. **Do not** edit `RELEASING.md` or this section without explicit user request — it's the source of truth for the convention.
+
+### Pre-flight checks before cutting a release
+
+Before triggering the workflow, verify:
+- Working tree is clean: `git status --porcelain` returns nothing.
+- On `main`: `git rev-parse --abbrev-ref HEAD` returns `main`.
+- Local main is up to date with origin: `git fetch && git status` shows no divergence.
+- All PRs intended for this release are merged: ask the user to confirm if uncertain.
+
+If any check fails, stop and report to the user. Do not auto-fix; let them decide.
