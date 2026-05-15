@@ -27,7 +27,7 @@ public sealed class ReadinessService : IReadinessService
         var macRunnerDir = Path.Combine(root, SsdLayout.MacRunner);
         checks.Add(Directory.Exists(macRunnerDir)
             ? ReadinessItem.Pass("macOS Runner.app present")
-            : ReadinessItem.Warn("macOS Runner.app present", "Runner.app not found in SSD/mac (ok if Windows-only prep)."));
+            : ReadinessItem.Warn("macOS Runner.app present", "Runner.app not found at SSD root (ok if Windows-only prep)."));
 
         // MAC29: accept encrypted-or-plaintext config. Mac PrepApp ships only the
         // encrypted blob (MAC5 invariant); pre-MAC30 Windows PrepApp ships plaintext.

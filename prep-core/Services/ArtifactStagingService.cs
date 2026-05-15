@@ -69,20 +69,145 @@ public sealed class ArtifactStagingService : IArtifactStagingService
             throw new InvalidOperationException(message);
         }
 
-        var sourceRunnerZip = ResolveBundledFile(Path.Combine("mac", "Runner.app.zip"))
-            ?? throw new FileNotFoundException("Bundled macOS Runner.app archive was not found.");
-        var macRoot = Path.Combine(ssdRoot, SsdLayout.Mac);
-        Directory.CreateDirectory(macRoot);
-        var targetZip = Path.Combine(macRoot, "Runner.app.zip");
-        File.Copy(sourceRunnerZip, targetZip, overwrite: true);
+        // Runner.app is staged at the SSD ROOT (SsdLayout.MacRunner), not
+        // under mac/, so the user double-clicks it without digging. The
+        // mac-runner-host sidecar travels inside the bundle's Resources/, so
+        // there is no separate on-SSD host directory anymore.
+        var targetRunner = Path.Combine(ssdRoot, SsdLayout.MacRunner);
 
-        var extractedRunner = Path.Combine(macRoot, "Runner.app");
-        if (Directory.Exists(extractedRunner))
-            Directory.Delete(extractedRunner, recursive: true);
+        if (Directory.Exists(targetRunner))
+            Directory.Delete(targetRunner, recursive: true);
 
-        ZipFile.ExtractToDirectory(targetZip, macRoot, overwriteFiles: true);
-        onLog("Staged macOS Runner.app and archive.");
+        // Re-prepping a drive staged by an older release: scrub the legacy
+        // <root>/mac/Runner.app, the leftover <root>/mac/Runner.app.zip, and
+        // the now-defunct <root>/mac/runner-host so nothing is doubled.
+        CleanupLegacyMacRunnerArtifacts(ssdRoot, onLog);
+
+        // The download now ships Runner.app UNZIPPED under <bundle>/mac/.
+        // A legacy Runner.app.zip is still accepted for older/mixed bundles.
+        var sourceRunnerDir = ResolveBundledDirectory(Path.Combine("mac", "Runner.app"));
+        if (sourceRunnerDir is not null)
+        {
+            onLog($"Using macOS Runner.app from: {sourceRunnerDir}");
+            await CopyAppBundleAsync(sourceRunnerDir, targetRunner, onLog, ct);
+        }
+        else
+        {
+            var sourceRunnerZip = ResolveBundledFile(Path.Combine("mac", "Runner.app.zip"))
+                ?? throw new FileNotFoundException(
+                    "Bundled macOS Runner.app not found — looked for an unzipped mac/Runner.app directory or a legacy mac/Runner.app.zip.");
+            onLog($"Using macOS Runner.app archive from: {sourceRunnerZip}");
+            await ExtractAppBundleAsync(sourceRunnerZip, ssdRoot, onLog, ct);
+        }
+
+        if (!Directory.Exists(targetRunner))
+            throw new DirectoryNotFoundException($"Runner.app was not present at {targetRunner} after staging.");
+
+        onLog("Staged macOS Runner.app at SSD root.");
+    }
+
+    /// <summary>
+    /// Best-effort removal of pre-restructure macOS artifacts so a re-prep of
+    /// an old-layout drive does not leave a doubled/zipped Runner.app or the
+    /// orphaned mac/runner-host directory behind.
+    /// </summary>
+    private static void CleanupLegacyMacRunnerArtifacts(string ssdRoot, Action<string> onLog)
+    {
+        var macDir = Path.Combine(ssdRoot, SsdLayout.Mac);
+        foreach (var stale in new[]
+                 {
+                     Path.Combine(macDir, "Runner.app"),
+                     Path.Combine(macDir, "Runner.app.zip"),
+                     Path.Combine(macDir, "runner-host"),
+                 })
+        {
+            try
+            {
+                if (Directory.Exists(stale))
+                {
+                    Directory.Delete(stale, recursive: true);
+                    onLog($"Removed legacy artifact: {stale}");
+                }
+                else if (File.Exists(stale))
+                {
+                    File.Delete(stale);
+                    onLog($"Removed legacy artifact: {stale}");
+                }
+            }
+            catch (Exception ex)
+            {
+                onLog($"Could not remove legacy artifact {stale}: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Copies an .app bundle preserving symlinks, the executable bit, and
+    /// extended attributes. macOS bundles contain framework symlinks and a
+    /// Mach-O that must stay +x; .NET's recursive file copy flattens both, so
+    /// on macOS we delegate to <c>ditto</c>. Off macOS (Windows staging a
+    /// cross-platform drive) symlinks/perms cannot be preserved anyway — fall
+    /// back to a recursive copy; the Mac side of a Windows-prepped drive is
+    /// best-effort and documented as such.
+    /// </summary>
+    private static async Task CopyAppBundleAsync(string sourceDir, string targetDir, Action<string> onLog, CancellationToken ct)
+    {
+        if (OperatingSystem.IsMacOS())
+        {
+            // Paths are absolute, so the working directory is irrelevant; use
+            // the bundle's parent (the SSD root) for tidy log context.
+            var workDir = Path.GetDirectoryName(targetDir) ?? Directory.GetCurrentDirectory();
+            var exit = await ProcessRunner.RunAsync(
+                "/usr/bin/ditto",
+                new[] { sourceDir, targetDir },
+                workDir,
+                onOutput: onLog,
+                ct: ct);
+            if (exit != 0)
+                throw new InvalidOperationException($"ditto exited {exit} copying {sourceDir} -> {targetDir}.");
+            return;
+        }
+
+        RecursiveCopy(sourceDir, targetDir);
         await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Extracts a ditto/zip archive of an .app bundle into
+    /// <paramref name="destParentDir"/> preserving symlinks + perms on macOS
+    /// (<c>ditto -x -k</c>). Off macOS falls back to <see cref="ZipFile"/>
+    /// (best-effort; same caveat as <see cref="CopyAppBundleAsync"/>).
+    /// </summary>
+    private static async Task ExtractAppBundleAsync(string archivePath, string destParentDir, Action<string> onLog, CancellationToken ct)
+    {
+        Directory.CreateDirectory(destParentDir);
+        if (OperatingSystem.IsMacOS())
+        {
+            var exit = await ProcessRunner.RunAsync(
+                "/usr/bin/ditto",
+                new[] { "-x", "-k", archivePath, destParentDir },
+                destParentDir,
+                onOutput: onLog,
+                ct: ct);
+            if (exit != 0)
+                throw new InvalidOperationException($"ditto -x -k exited {exit} extracting {archivePath}.");
+            return;
+        }
+
+        ZipFile.ExtractToDirectory(archivePath, destParentDir, overwriteFiles: true);
+        await Task.CompletedTask;
+    }
+
+    private static void RecursiveCopy(string sourceDir, string targetDir)
+    {
+        Directory.CreateDirectory(targetDir);
+        foreach (var file in Directory.EnumerateFiles(sourceDir, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceDir, file);
+            var destination = Path.Combine(targetDir, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(file, destination, overwrite: true);
+        }
     }
 
     public async Task StageMacOllamaAsync(string ssdRoot, Action<string> onLog, CancellationToken ct)
@@ -207,9 +332,15 @@ public sealed class ArtifactStagingService : IArtifactStagingService
     {
         foreach (var contentRoot in EnumerateBundledContentRoots())
         {
-            var candidate = Path.Combine(contentRoot, "runner-publish");
-            if (DirectoryContainsRunner(candidate))
-                return candidate;
+            // "runner" is the clean name under the new dependencies/ tree;
+            // "runner-publish" is the legacy name (build.ps1 local dev + any
+            // pre-restructure bundle).
+            foreach (var folder in new[] { "runner", "runner-publish" })
+            {
+                var candidate = Path.Combine(contentRoot, folder);
+                if (DirectoryContainsRunner(candidate))
+                    return candidate;
+            }
         }
 
         var repoRoot = FindRepoRoot(AppContext.BaseDirectory);
@@ -288,20 +419,38 @@ public sealed class ArtifactStagingService : IArtifactStagingService
         return null;
     }
 
+    internal static string? ResolveBundledDirectory(string relativePath)
+        => ResolveBundledDirectory(AppContext.BaseDirectory, relativePath);
+
+    internal static string? ResolveBundledDirectory(string baseDirectory, string relativePath)
+    {
+        foreach (var contentRoot in EnumerateBundledContentRoots(baseDirectory))
+        {
+            var candidate = Path.Combine(contentRoot, relativePath);
+            if (Directory.Exists(candidate))
+                return candidate;
+        }
+
+        return null;
+    }
+
     private static IEnumerable<string> EnumerateBundledContentRoots()
         => EnumerateBundledContentRoots(AppContext.BaseDirectory);
 
     private static IEnumerable<string> EnumerateBundledContentRoots(string baseDirectory)
     {
         yield return baseDirectory;
+        // "dependencies" is the post-restructure staged-artifact root; "payload"
+        // is the legacy name (kept so a pre-restructure bundle still resolves).
+        yield return Path.Combine(baseDirectory, "dependencies");
         yield return Path.Combine(baseDirectory, "payload");
 
         // MAC23: mirror MAC22 — Mac PrepApp's mac-prep-host sidecar runs from
         // PrepApp.app/Contents/Resources/prep-host/, so AppContext.BaseDirectory
         // is *not* the bundle root and the bundled artifacts under
-        // <bundle>/payload/mac/ live several levels up. Walk a bounded number
-        // of ancestors. Backward-compatible: Windows finds bundles on the
-        // first or second candidate above and never enters this loop.
+        // <bundle>/dependencies/mac/ live several levels up. Walk a bounded
+        // number of ancestors. Backward-compatible: Windows finds bundles on
+        // the first/second candidate above and never enters this loop.
         DirectoryInfo? cursor;
         try { cursor = new DirectoryInfo(baseDirectory); }
         catch { yield break; }
@@ -310,6 +459,7 @@ public sealed class ArtifactStagingService : IArtifactStagingService
         {
             cursor = cursor.Parent;
             yield return cursor.FullName;
+            yield return Path.Combine(cursor.FullName, "dependencies");
             yield return Path.Combine(cursor.FullName, "payload");
         }
     }

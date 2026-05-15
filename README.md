@@ -42,7 +42,7 @@ This started as a way to take AI into the field with no cell signal — ham radi
 - ✅ **Headless CLI (`FreeAiSsd.RunnerCli`)** — terminal REPL for SSH / Tailscale access to a running Windows Runner API; streams chat, shows RAG sources, zero GUI deps
 - ✅ **Offline Windows prereq bundle** — .NET 8 Desktop Runtime + VC++ redist staged and SHA-verified so Runner installs cleanly on fresh targets
 - ✅ **Cross-platform PrepApp** — Windows WPF (`FreeAiSsd.PrepApp.exe`) and native macOS SwiftUI (`PrepApp.app`); both produce drives with byte-identical encrypted-config and SSD layout. A Mac-only user can prep and run without owning a Windows machine
-- 🧪 **macOS Swift Runner beta** — staged at `<SSD>/mac/Runner.app`; can select/infer the SSD, unlock encrypted Windows-prepped SSDs (native CryptoKit + CommonCrypto port of `SsdEncryption`), read installed models, start `mac/tools/ollama/ollama`, host the Runner API sidecar, and send RAG-backed chat with citations against an already-prepped active library
+- 🧪 **macOS Swift Runner beta** — staged at `<SSD>/Runner.app` (the drive root, double-click directly); can select/infer the SSD, unlock encrypted Windows-prepped SSDs (native CryptoKit + CommonCrypto port of `SsdEncryption`), read installed models, start `mac/tools/ollama/ollama`, host the Runner API sidecar, and send RAG-backed chat with citations against an already-prepped active library
 
 Known gaps:
 - The macOS beta does **not** currently support document library management, Mac-side ingestion/rebuild/sweep, voice/TTS, HOTAS/PTT, or DCS import UI. Encrypted config unlock/save, Runner API hosting, and RAG-backed chat landed in the Mac support track; document management is still on the backlog.
@@ -152,7 +152,22 @@ Notes on the unsupported cells:
 
 **Stable (recommended):** Download `Free-AI-SSD-win.zip` from [Releases](../../releases). Extract anywhere on Windows. Run `FreeAiSsd.PrepApp.exe`.
 
-**Beta cross-platform bundle:** `Free-AI-SSD-beta-crossplatform.zip` includes the Mac PrepApp (`PrepApp.app`) and Mac Runner beta (`Runner.app`) alongside the Windows artifacts. The macOS builds are currently unsigned/not notarized — see [macOS first launch](#macos-first-launch-gatekeeper-unblock) below before opening either app.
+**Beta cross-platform bundle:** `Free-AI-SSD-crossplatform.zip` includes the Mac PrepApp (`PrepApp.app`) and Mac Runner beta (`Runner.app`) alongside the Windows artifacts. The macOS builds are currently unsigned/not notarized — see [macOS first launch](#macos-first-launch-gatekeeper-unblock) below before opening either app.
+
+The download root is intentionally minimal — the prep tool(s), `LICENSE`, `QUICKSTART.txt`, and one `dependencies/` folder for everything the prep tool consumes (no duplicated/nested copies):
+
+```
+Free-AI-SSD-win.zip                  Free-AI-SSD-crossplatform.zip
+├── FreeAiSsd.PrepApp.exe            ├── FreeAiSsd.PrepApp.exe   (Windows prep)
+├── LICENSE                          ├── PrepApp.app             (macOS prep)
+├── QUICKSTART.txt                   ├── LICENSE
+└── dependencies/                    ├── QUICKSTART.txt
+    ├── runner/                      └── dependencies/
+    ├── companion/                       ├── runner/  companion/  prereqs/
+    └── prereqs/                         └── mac/  (Runner.app, ollama, manifest)
+```
+
+> **Cross-platform note:** because macOS `.app` bundles carry symlinks Windows archivers strip, prep a cross-platform drive's **macOS** side *from a Mac* (`PrepApp.app`). The Windows side works from either host. The Mac Runner is staged to the SSD **root** as `<SSD>/Runner.app` (unzipped, launchable — no zip to expand each run).
 
 #### macOS first launch (Gatekeeper unblock)
 
@@ -197,7 +212,7 @@ The resulting drive is byte-for-byte interchangeable with a Windows-prepped driv
 1. Plug the SSD into the target machine
 2. Run Runner directly from the SSD:
    - Windows: `<SSD>\windows\runner\FreeAiSsd.Runner.exe`
-   - macOS beta: `<SSD>/mac/Runner.app`
+   - macOS beta: `<SSD>/Runner.app` (at the drive root)
 3. Windows: load your documents and start chatting with RAG, citations, voice, HOTAS/PTT, and the LAN API. macOS beta: unlock the SSD if it was encrypted on Windows, start Ollama and Network Mode, then use RAG-backed chat with citations against a library already prepared on Windows; Mac document management, voice, HOTAS/PTT, and DCS import are not implemented there yet.
 
 ### What Needs Internet vs. What Doesn't
@@ -563,7 +578,7 @@ Free-AI-SSD ships several components backed by a shared cross-platform library:
 - **PrepApp** (Windows, WPF — `prep-app/`) — runs on an online Windows machine to configure the SSD: picks drive, downloads and stages Ollama, pulls models, bundles prerequisites, finalizes layout
 - **Mac PrepApp** (`mac-prep-app/`, SwiftUI) — native macOS PrepApp for the cross-platform bundle; shipped at `<SSD>/mac/PrepApp.app` and as a separate `PrepApp.app.zip` payload. Drives `diskutil` directly to format target SSDs as exFAT, stages the runner / Ollama / prereq payloads via the shared `mac-prep-host` net8.0 sidecar (which consumes `prep-core/`), and writes the encrypted config in a format byte-identical to the Windows PrepApp. Apple Silicon (arm64), macOS 11+
 - **Runner** (Windows, WPF — `runner/`) — runs from the SSD on the target machine; starts Ollama, provides the chat interface, manages document libraries, voice pipeline, HOTAS PTT, and the LAN API host
-- **macOS Runner beta** (`mac-runner/`, Swift) — thin macOS app for the cross-platform beta bundle; shipped at `<SSD>/mac/Runner.app`. It selects/infers the SSD, unlocks encrypted config, reads installed models, starts macOS Ollama, spawns the local Runner API sidecar, and sends chat through the shared RAG pipeline when an active indexed library exists. It is not a full Windows Runner equivalent yet.
+- **macOS Runner beta** (`mac-runner/`, Swift) — thin macOS app for the cross-platform beta bundle; shipped at `<SSD>/Runner.app` (drive root). It selects/infers the SSD, unlocks encrypted config, reads installed models, starts macOS Ollama, spawns the local Runner API sidecar, and sends chat through the shared RAG pipeline when an active indexed library exists. It is not a full Windows Runner equivalent yet.
 - **Voice Pipeline** (lives inside Runner's service layer) — `AudioCaptureService` → `WhisperSpeechToTextService` → `ChatService` → `SystemTextToSpeechService` / `PiperTextToSpeechService`, orchestrated by `PttVoicePipelineService` when HOTAS PTT is enabled
 - **Bindings Parser** (inside the shared library at `shared/Documents/`) — `DcsSavedGamesLocator` finds DCS installs, `DcsAircraftScanner` enumerates aircraft, `DcsBindingParser` parses `diff.lua`, `DcsBatchProcessor` merges devices and writes RAG documents
 - **Companion** (`companion/`, WPF tray app) — optional lightweight client for a second LAN machine; no SSD required; talks to the Runner LAN API for chat / STT upload / voice-query / host-side TTS. Supports its own HOTAS PTT loop, an activation beep, a status overlay window, and a mic-preflight check in Settings. When `returnAudio=true` is negotiated on `/api/voice/query`, Companion plays the synthesized TTS locally instead of on the Runner host.

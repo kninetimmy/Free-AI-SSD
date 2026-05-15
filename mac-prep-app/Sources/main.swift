@@ -537,7 +537,7 @@ struct DoneStepView: View {
             Text("Drive ready")
                 .font(.title)
                 .bold()
-            Text("Your SSD is ready. Open `mac/Runner.app` on the SSD to start chatting. Quit when ready.")
+            Text("Your SSD is ready. Open `Runner.app` at the top level of the SSD to start chatting. Quit when ready.")
                 .foregroundColor(.secondary)
 
             if !vm.readinessItems.isEmpty {

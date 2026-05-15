@@ -115,6 +115,39 @@ public class MacArtifactAvailabilityTests : IDisposable
         Assert.False(result.MacArtifactsAvailable);
     }
 
+    [Fact]
+    public void Evaluate_DependenciesLayout_DirectoryArtifact_IsAvailable()
+    {
+        // Post-restructure: manifest under dependencies/mac/, and Runner.app
+        // is an UNZIPPED directory artifact (not a .zip file). The sidecar
+        // runs 5 levels deep inside PrepApp.app.
+        var bundleRoot = Path.Combine(_tempRoot, "Free-AI-SSD-crossplatform");
+        var macDir = Path.Combine(bundleRoot, "dependencies", "mac");
+        Directory.CreateDirectory(macDir);
+
+        // Directory artifact: dependencies/mac/Runner.app/Contents/MacOS/Runner
+        var runnerMacOs = Path.Combine(macDir, "Runner.app", "Contents", "MacOS");
+        Directory.CreateDirectory(runnerMacOs);
+        File.WriteAllText(Path.Combine(runnerMacOs, "Runner"), "#!/bin/sh\n");
+
+        var manifestJson = JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1,
+            artifacts = new[]
+            {
+                new { id = "mac_runner", relativePath = "mac/Runner.app" }
+            }
+        });
+        File.WriteAllText(Path.Combine(macDir, "mac-artifacts.manifest.json"), manifestJson);
+
+        var sidecarBaseDir = Path.Combine(
+            macDir, "PrepApp.app", "Contents", "Resources", "prep-host");
+        Directory.CreateDirectory(sidecarBaseDir);
+
+        var result = MacArtifactAvailability.Evaluate(sidecarBaseDir);
+        Assert.True(result.MacArtifactsAvailable, result.MacArtifactsProblem);
+    }
+
     private static void WriteManifest(string macDir, bool includeArtifact)
     {
         var artifactPath = Path.Combine(macDir, "Runner.app.zip");

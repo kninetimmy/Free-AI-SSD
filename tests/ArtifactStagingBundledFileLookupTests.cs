@@ -72,6 +72,50 @@ public class ArtifactStagingBundledFileLookupTests : IDisposable
     }
 
     [Fact]
+    public void ResolveBundledFile_DependenciesLayout_FindsArtifactUnderDependencies()
+    {
+        // Post-restructure: the bundle uses dependencies/ instead of payload/.
+        var bundleRoot = Path.Combine(_tempRoot, "Free-AI-SSD-crossplatform");
+        var macDir = Path.Combine(bundleRoot, "dependencies", "mac");
+        Directory.CreateDirectory(macDir);
+        var artifact = Path.Combine(macDir, "tools", "ollama", "ollama-darwin.zip");
+        Directory.CreateDirectory(Path.GetDirectoryName(artifact)!);
+        File.WriteAllBytes(artifact, new byte[] { 0x50, 0x4B, 0x05, 0x06 });
+
+        var sidecarBaseDir = Path.Combine(macDir, "PrepApp.app", "Contents", "Resources", "prep-host");
+        Directory.CreateDirectory(sidecarBaseDir);
+
+        var resolved = ArtifactStagingService.ResolveBundledFile(
+            sidecarBaseDir, Path.Combine("mac", "tools", "ollama", "ollama-darwin.zip"));
+
+        Assert.NotNull(resolved);
+        Assert.Equal(Path.GetFullPath(artifact), Path.GetFullPath(resolved!));
+    }
+
+    [Fact]
+    public void ResolveBundledDirectory_DependenciesLayout_FindsUnzippedRunnerApp()
+    {
+        // The Mac Runner now ships UNZIPPED — staging resolves it as a
+        // directory (dependencies/mac/Runner.app), not a .zip file.
+        var bundleRoot = Path.Combine(_tempRoot, "xplat");
+        var runnerApp = Path.Combine(bundleRoot, "dependencies", "mac", "Runner.app", "Contents", "MacOS");
+        Directory.CreateDirectory(runnerApp);
+        File.WriteAllText(Path.Combine(runnerApp, "Runner"), "#!/bin/sh\n");
+
+        var sidecarBaseDir = Path.Combine(
+            bundleRoot, "PrepApp.app", "Contents", "Resources", "prep-host");
+        Directory.CreateDirectory(sidecarBaseDir);
+
+        var resolved = ArtifactStagingService.ResolveBundledDirectory(
+            sidecarBaseDir, Path.Combine("mac", "Runner.app"));
+
+        Assert.NotNull(resolved);
+        Assert.Equal(
+            Path.GetFullPath(Path.Combine(bundleRoot, "dependencies", "mac", "Runner.app")),
+            Path.GetFullPath(resolved!));
+    }
+
+    [Fact]
     public void ResolveBundledFile_NoArtifactAnywhere_ReturnsNull()
     {
         // Pristine empty tree — no Runner.app.zip anywhere up the chain.

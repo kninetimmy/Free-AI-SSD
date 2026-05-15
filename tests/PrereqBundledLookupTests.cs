@@ -74,11 +74,31 @@ public class PrereqBundledLookupTests : IDisposable
     }
 
     [Fact]
+    public void ResolveBundledPrereqDirectory_DependenciesLayout_FindsCleanPrereqsFolder()
+    {
+        // Post-restructure: prereqs ship at the clean dependencies/prereqs
+        // path (not windows/tools/prereqs). Sidecar runs 5 levels deep.
+        var bundleRoot = Path.Combine(_tempRoot, "Free-AI-SSD-crossplatform");
+        var prereqDir = Path.Combine(bundleRoot, "dependencies", "prereqs");
+        Directory.CreateDirectory(prereqDir);
+
+        var sidecarBaseDir = Path.Combine(
+            bundleRoot, "PrepApp.app", "Contents", "Resources", "prep-host");
+        Directory.CreateDirectory(sidecarBaseDir);
+
+        var resolved = PrereqService.ResolveBundledPrereqDirectory(sidecarBaseDir);
+
+        Assert.Equal(Path.GetFullPath(prereqDir), Path.GetFullPath(resolved));
+        Assert.True(Directory.Exists(resolved));
+    }
+
+    [Fact]
     public void ResolveBundledPrereqDirectory_NoFolderAnywhere_ReturnsConventionalPathForDiagnostic()
     {
-        // When no candidate exists, the resolver returns "<base>/payload/<prereqs>"
-        // so the caller's Directory.Exists(...) -> DirectoryNotFoundException
-        // surfaces the conventional path users recognize from prior versions.
+        // When no candidate exists, the resolver returns the conventional
+        // post-restructure path "<base>/dependencies/prereqs" so the
+        // caller's Directory.Exists(...) -> DirectoryNotFoundException
+        // surfaces a path that matches the shipped bundle layout.
         var sidecarBaseDir = Path.Combine(_tempRoot, "lonely", "tree");
         Directory.CreateDirectory(sidecarBaseDir);
 
@@ -86,7 +106,7 @@ public class PrereqBundledLookupTests : IDisposable
 
         Assert.False(Directory.Exists(resolved));
         Assert.Equal(
-            Path.GetFullPath(Path.Combine(sidecarBaseDir, "payload", SsdLayout.Prereqs)),
+            Path.GetFullPath(Path.Combine(sidecarBaseDir, "dependencies", "prereqs")),
             Path.GetFullPath(resolved));
     }
 

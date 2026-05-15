@@ -76,7 +76,10 @@ public static class MacArtifactAvailability
                     return MacArtifactAvailabilityResult.Unavailable(IncompleteManifestMessage);
                 }
 
-                if (!File.Exists(fullPath))
+                // Post-restructure the Mac apps ship UNZIPPED, so an
+                // artifact entry can be a directory (Runner.app / PrepApp.app)
+                // as well as a file (Ollama archive, manifest).
+                if (!File.Exists(fullPath) && !Directory.Exists(fullPath))
                 {
                     return MacArtifactAvailabilityResult.Unavailable(IncompleteManifestMessage);
                 }
@@ -124,15 +127,18 @@ public static class MacArtifactAvailability
     private static IEnumerable<string> EnumerateContentRoots(string appDirectory)
     {
         yield return appDirectory;
+        // "dependencies" = post-restructure staged-artifact root;
+        // "payload" = legacy name (kept for pre-restructure bundles).
+        yield return Path.Combine(appDirectory, "dependencies");
         yield return Path.Combine(appDirectory, "payload");
 
         // MAC22: Mac PrepApp's mac-prep-host sidecar runs from inside
         // PrepApp.app/Contents/Resources/prep-host/, so AppContext.BaseDirectory
         // is *not* the bundle root — the bundle root containing
-        // payload/mac/mac-artifacts.manifest.json lives several levels up.
-        // Walk a bounded number of ancestors so the lookup finds the
+        // dependencies/mac/mac-artifacts.manifest.json lives several levels
+        // up. Walk a bounded number of ancestors so the lookup finds the
         // manifest from inside the .app bundle. Backward-compatible: the
-        // Windows PrepApp finds the manifest on the second candidate above
+        // Windows PrepApp finds the manifest on an early candidate above
         // and never enters this loop.
         DirectoryInfo? cursor;
         try
@@ -148,6 +154,7 @@ public static class MacArtifactAvailability
         {
             cursor = cursor.Parent;
             yield return cursor.FullName;
+            yield return Path.Combine(cursor.FullName, "dependencies");
             yield return Path.Combine(cursor.FullName, "payload");
         }
     }
