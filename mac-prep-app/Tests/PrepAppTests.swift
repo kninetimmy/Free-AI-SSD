@@ -332,7 +332,7 @@ struct PrepAppTestsMain {
         // 64-hex network API key by default. Pre-MAC34 this defaulted to
         // `""` which fail-closed every chat request through the LAN API
         // path with `503 API key is required by configuration but not set
-        // on host.` See agent_docs/mac_project_backlog.md MAC34.
+        // on host.` See .memhub/rendered/PROJECT_LEDGER.md (MAC34).
 
         runner.test("MAC34: InitialPortableConfigPayload generates 64-hex networkApiKey by default") {
             let a = InitialPortableConfigPayload()

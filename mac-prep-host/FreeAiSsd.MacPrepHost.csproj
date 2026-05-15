@@ -5,7 +5,7 @@
     consumption in place of runner-core/RunnerLocalApiService. The sidecar
     exists so platform-neutral PrepApp business logic (artifact staging,
     Ollama package, model pull/verify, prereqs, readiness) runs on Apple
-    Silicon without a Swift port. See agent_docs/project_decisions.md
+    Silicon without a Swift port. See .memhub/rendered/PROJECT_LEDGER.md
     (2026-05-06 Mac UI design language entry) for the architectural split:
     Swift owns destructive disk ops + encrypted-config write; the sidecar
     owns prep-core consumption.

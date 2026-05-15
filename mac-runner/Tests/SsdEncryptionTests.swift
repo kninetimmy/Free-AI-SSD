@@ -447,7 +447,7 @@ func writeCrossLanguageFixture(outDir: URL) throws {
             tests/Fixtures/MacEncryptedConfig/csharp-encrypted
 
     Refreshing must come with a dated decision in
-    `agent_docs/project_decisions.md` — the encrypted-config format is a
+    `.memhub/rendered/PROJECT_LEDGER.md` — the encrypted-config format is a
     locked invariant.
     """
     try readme.data(using: .utf8)!
