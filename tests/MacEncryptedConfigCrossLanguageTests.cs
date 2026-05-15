@@ -23,7 +23,7 @@ namespace FreeAiSsd.Tests;
 ///      Swift's JSONDecoder will accept.
 ///
 /// If a deliberate format change ships, the fixture must be regenerated AND a
-/// dated decision recorded in agent_docs/project_decisions.md. The fixture
+/// dated decision recorded in .memhub/rendered/PROJECT_LEDGER.md. The fixture
 /// password and expected plaintext are documented in the README.md inside
 /// the fixture directory.
 /// </summary>

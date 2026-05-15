@@ -38,7 +38,7 @@ decoded empty and PortableConfig defaults filled in 11434."
 ## Regenerating
 
 If a deliberate format change ships, the fixture must be regenerated AND
-a dated decision recorded in `agent_docs/project_decisions.md`. From the
+a dated decision recorded in `.memhub/rendered/PROJECT_LEDGER.md`. From the
 repo root:
 
 ```bash

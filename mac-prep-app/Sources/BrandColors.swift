@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Brand color tokens
 //
-// Per the 2026-05-06 Mac UI design language decision (project_decisions.md):
+// Per the 2026-05-06 Mac UI design language decision (.memhub/rendered/PROJECT_LEDGER.md):
 // brand-tinted native styling — accent colors and status colors pulled from
 // the WPF Colors.xaml palette, applied sparingly. MAC17 PrepApp leans even
 // closer to pure native (Option A) because it owns destructive disk ops, so

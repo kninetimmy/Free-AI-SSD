@@ -5,7 +5,7 @@
     not fork that service in this project. The sidecar exists so the LAN API
     surface (chat, models, /api/chat/stream, X4 static files when shipped)
     works on Apple Silicon without a Swift port of the API + RAG glue. See
-    agent_docs/project_decisions.md (MAC6 sidecar exit ramp) for rationale.
+    .memhub/rendered/PROJECT_LEDGER.md (MAC6 sidecar exit ramp) for rationale.
 
     Trimming is intentionally OFF — RunnerCore's minimal-API endpoint
     registration relies on reflection that PublishTrimmed silently breaks.
