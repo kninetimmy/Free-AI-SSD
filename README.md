@@ -1,24 +1,51 @@
 <p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue?style=flat-square" alt="Apache 2.0"></a>
+  <img src="https://img.shields.io/badge/.NET-8.0-512BD4?style=flat-square&logo=dotnet&logoColor=white" alt=".NET 8">
+  <img src="https://img.shields.io/badge/C%23-WPF-239120?style=flat-square&logo=csharp&logoColor=white" alt="C# WPF">
+  <img src="https://img.shields.io/badge/Swift-SwiftUI-F05138?style=flat-square&logo=swift&logoColor=white" alt="Swift SwiftUI">
+  <img src="https://img.shields.io/badge/SQLite-RAG%20index-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite RAG">
+  <img src="https://img.shields.io/badge/Windows-10%20%2F%2011-0078D4?style=flat-square&logo=windows&logoColor=white" alt="Windows 10/11">
+  <img src="https://img.shields.io/badge/macOS-arm64-000000?style=flat-square&logo=apple&logoColor=white" alt="macOS arm64">
+  <br>
+  <img src="https://img.shields.io/badge/Ollama-local%20models-black?style=flat-square" alt="Ollama">
+  <img src="https://img.shields.io/badge/Hugging%20Face-model%20pulls-FF9A00?style=flat-square&logo=huggingface&logoColor=white" alt="Hugging Face">
+  <img src="https://img.shields.io/badge/offline-no%20cloud%20required-2D9A27?style=flat-square" alt="Offline">
+</p>
+
+<p align="center">
+  <img src="assets/icon/AppIcon.png" alt="Free AI SSD" width="120">
+</p>
+
+# Free-AI-SSD
+
+**Plug in a drive. Ask your AI anything. No internet required.**
+
+Prepare the drive once on a Windows or Mac machine with internet access — download the models, load your documents, and finalize the SSD. PrepApp ships for both hosts: a WPF app on Windows and a native SwiftUI app on Mac, so a Mac-only user can prep without owning a Windows machine. On Windows, the Runner provides the full offline assistant: document-grounded chat, voice I/O, HOTAS PTT, DCS binding import, and the LAN API. The macOS beta Runner provides a subset: RAG-backed chat against an already-indexed library, encrypted config unlock, and the API sidecar. See [Platform Availability](#platform-availability) below for a full feature comparison.
+
+**Quick start:** download from [Releases](../../releases), run `FreeAiSsd.PrepApp.exe` (Windows) or `PrepApp.app` (macOS), then follow [Setup & Installation](#setup) below. A condensed version is at [`docs/QUICKSTART.txt`](docs/QUICKSTART.txt).
+
+---
+
+<details>
+<summary>📸 Screenshots — Windows (PrepApp)</summary>
+
+<p align="center">
   <img src="docs/images/prep-app-model-manager.png" alt="Free AI SSD Prep App — Model Manager tab" width="960">
 </p>
 <p align="center">
   <img src="docs/images/prep-app-drive-setup.png" alt="Free AI SSD Prep App — Drive Setup tab" width="960">
 </p>
 
-*Prep App — Model Manager (top) and Drive Setup (bottom). Runner screenshots coming once live-drive testing is complete.*
+*Windows PrepApp — Model Manager (top) and Drive Setup (bottom).*
 
-# Free-AI-SSD
+</details>
 
-**Plug in a drive. Ask your AI anything. No internet required.**
+<details>
+<summary>📸 Screenshots — macOS (PrepApp + Runner beta)</summary>
 
-Prepare the drive once on a Windows or Mac machine with internet access — download the models, load in your documents, and finalize the SSD. PrepApp ships for both hosts: a WPF app on Windows and a native SwiftUI app on Mac, so a Mac-only user can prep and run Free-AI-SSD without owning a Windows machine. On Windows, the Runner provides the full offline assistant: document-grounded chat, voice, HOTAS PTT, DCS binding import, and the LAN API. macOS support is currently a beta Swift runner with a local API sidecar for RAG-backed chat from the same SSD; it is not yet feature-equivalent with the Windows Runner. See [Source/Target compatibility](#sourcetarget-compatibility) below for which prep host can produce which target filesystem.
+*macOS screenshots coming soon.*
 
-- **Portable** — Windows Runner runs from the SSD; the macOS beta runner also launches from the staged SSD payload
-- **Document-grounded on Windows** — load your PDFs, manuals, and notes; the AI cites them when answering
-- **HOTAS-aware on Windows** — import your DCS bindings; get answers using your actual stick and throttle layout
-- **Offline voice on Windows** — speak your questions, hear the answers; speech-to-text and TTS run fully locally
-
-**Quick start:** download from [Releases](../../releases), run `FreeAiSsd.PrepApp.exe`, then follow [Setup & Installation](#setup) below. There's also a quickstart text file at [`docs/QUICKSTART.txt`](docs/QUICKSTART.txt) for a condensed version.
+</details>
 
 ---
 
@@ -28,32 +55,92 @@ This started as a way to take AI into the field with no cell signal — ham radi
 
 ---
 
+<a name="platform-availability"></a>
+
+## Platform Availability
+
+A clear picture of what works where today. Mac support is actively expanding but not yet at feature parity with Windows.
+
+### PrepApp (drive staging — one-time, online)
+
+| Feature | Windows PrepApp | macOS PrepApp |
+|---|---|---|
+| Format drive | ✅ NTFS or exFAT | ✅ exFAT only |
+| Stage Ollama + pull models | ✅ Full | ✅ Full |
+| Pull models from Hugging Face | ✅ Full (with token auth) | ✅ Full (with token auth) |
+| Manage models on encrypted drives | ✅ Full | ✅ Full |
+| Detect pre-configured drive | ✅ Full | ✅ Full |
+| Target: Windows-only (NTFS) | ✅ Yes | ❌ macOS cannot format NTFS |
+| Target: exFAT (cross-platform or Mac-only) | ✅ Yes | ✅ Yes |
+| Encrypted config roundtrip | ✅ Full | ✅ Full (CryptoKit port) |
+
+### Runner (offline assistant — no internet required)
+
+| Feature | Windows Runner | macOS Runner (beta) |
+|---|---|---|
+| Chat (non-RAG) | ✅ Full | ✅ Full |
+| RAG chat with inline citations | ✅ Full | ⚠️ Query-only — reads a library indexed on Windows |
+| Add / sweep / rebuild document library | ✅ Full | ❌ Not supported yet |
+| Voice input (Whisper STT) | ✅ Fully local | ❌ Not supported yet |
+| Voice output (TTS) | ✅ SAPI + Piper | ❌ Not supported yet |
+| HOTAS Push-to-Talk | ✅ DirectInput | ❌ Not supported yet |
+| DCS Bindings Import | ✅ Full | ❌ Not supported yet |
+| Network Mode (LAN API) | ✅ Full (v2) | ✅ Sidecar-hosted |
+| Companion tray app (second PC) | ✅ Full | — |
+| Headless CLI (RunnerCli) | ✅ Full | — |
+| Unlock Windows-prepped encrypted SSD | ✅ Full | ✅ Full (CryptoKit) |
+
+> **RAG on macOS:** The Mac Runner can answer questions using a document library that was ingested and indexed on Windows. It cannot add new documents, watch folders, sweep, or rebuild the index — those operations require the Windows Runner. If you only have a Mac, you can still get RAG-backed answers by preparing the drive on Windows first (or on a second Windows machine).
+
+---
+
 ## Features (current state)
 
-- ✅ **Portable offline AI on Windows** — Ollama staged on the SSD, bound to loopback only
-- ✅ **Windows Runner** — WPF app for Windows 10/11 with the full current runtime surface
-- ✅ **RAG document library on Windows** — PDF / TXT / MD / JSON / CSV, with inline source citations
-- ✅ **DCS World bindings parser on Windows** — auto-detects Saved Games, scans aircraft, merges stick/throttle/pedals into per-aircraft reference docs
-- ✅ **Voice input on Windows (Whisper.cpp)** — fully local STT; Tiny / Base / Small / Medium models
-- ✅ **Voice output on Windows (TTS)** — Windows SAPI or Piper neural TTS; per-device audio routing
-- ✅ **HOTAS Push-to-Talk on Windows** — DirectInput joystick button triggers record → transcribe → send → TTS, hands-free
-- ✅ **Network Mode on Windows** — authenticated LAN HTTP API for chat, streaming chat, STT upload, host-side TTS, and voice-query orchestration
-- ✅ **Companion tray app for Windows** — lightweight Windows client for a second PC on the LAN (no SSD required on the client)
-- ✅ **Headless CLI (`FreeAiSsd.RunnerCli`)** — terminal REPL for SSH / Tailscale access to a running Windows Runner API; streams chat, shows RAG sources, zero GUI deps
-- ✅ **Offline Windows prereq bundle** — .NET 8 Desktop Runtime + VC++ redist staged and SHA-verified so Runner installs cleanly on fresh targets
-- ✅ **Cross-platform PrepApp** — Windows WPF (`FreeAiSsd.PrepApp.exe`) and native macOS SwiftUI (`PrepApp.app`); both produce drives with byte-identical encrypted-config and SSD layout. A Mac-only user can prep and run without owning a Windows machine
-- 🧪 **macOS Swift Runner beta** — staged at `<SSD>/Runner.app` (the drive root, double-click directly); can select/infer the SSD, unlock encrypted Windows-prepped SSDs (native CryptoKit + CommonCrypto port of `SsdEncryption`), read installed models, start `mac/tools/ollama/ollama`, host the Runner API sidecar, and send RAG-backed chat with citations against an already-prepped active library
+### Windows Runner
 
-Known gaps:
-- The macOS beta does **not** currently support document library management, Mac-side ingestion/rebuild/sweep, voice/TTS, HOTAS/PTT, or DCS import UI. Encrypted config unlock/save, Runner API hosting, and RAG-backed chat landed in the Mac support track; document management is still on the backlog.
-- Network voice upload currently supports WAV (PCM 16-bit mono 16kHz) and raw `pcm16le`; other codecs not implemented.
-- Direct Ollama LAN exposure is intentionally not supported — Runner API is the only network surface.
+- ✅ **Portable offline AI** — Ollama staged on the SSD, bound to loopback only; no cloud, no account, no subscription
+- ✅ **RAG document library** — PDF / TXT / MD / JSON / CSV with inline source citations and SIMD-optimized vector search; retrieved chunks cited as `[filename p.N]`
+- ✅ **DCS World bindings import** — auto-detects Saved Games, scans aircraft, merges stick/throttle/pedals into per-aircraft reference docs for RAG
+- ✅ **Voice input (Whisper.cpp)** — fully local STT; Tiny / Base / Small / Medium models
+- ✅ **Voice output (TTS)** — Windows SAPI or Piper neural TTS; per-device audio routing
+- ✅ **HOTAS Push-to-Talk** — DirectInput joystick button triggers record → transcribe → send → TTS, hands-free; VR-friendly overlay
+- ✅ **Network Mode (LAN API v2)** — authenticated HTTP API for chat, streaming chat, STT upload, TTS, and voice-query orchestration
+- ✅ **Companion tray app** — lightweight Windows client for a second LAN PC; no SSD required; supports its own HOTAS PTT loop
+- ✅ **Headless CLI (`FreeAiSsd.RunnerCli`)** — terminal REPL for SSH/Tailscale access; streams chat, shows RAG sources, zero GUI deps
 
-Note: Remote HOTAS/PTT is supported via the Companion tray app — HOTAS PTT can run on the client machine and drive the full voice loop against Runner over LAN. TTS playback defaults to the host machine running Runner; Companion clients can opt in to local playback by passing `returnAudio=true` on `/api/voice/query`.
+### Model Management (PrepApp — Windows and macOS)
+
+- ✅ **Hugging Face model pulls** — pull any GGUF model from Hugging Face directly in the Model Manager; token auth, disk-budget warnings, lazy per-quantization row expansion
+- ✅ **Ollama model pulls** — standard Ollama registry pull
+- ✅ **Model picker** — capability filters, parameter-count cap, Most-popular toggle, sort options
+- ✅ **Manage models on encrypted drives** — unlock the drive, add/remove models, re-lock without re-entering setup
+
+### Cross-platform PrepApp
+
+- ✅ **Windows WPF PrepApp** — stages the full Windows payload and optional macOS payloads; NTFS or exFAT; one-time online prep
+- ✅ **macOS SwiftUI PrepApp** — native arm64; exFAT only; produces a byte-identical encrypted config and SSD layout to the Windows PrepApp; Apple Silicon (arm64), macOS 11+
+- ✅ **Detect pre-configured drive** — both PrepApps recognize an already-staged SSD and offer to continue or reconfigure it
+- ✅ **Encrypted config roundtrip** — AES-256-GCM + PBKDF2-SHA256 (210,000 iterations); Mac and Windows use the same on-disk format, pinned by cross-language tests
+
+### macOS Runner (beta)
+
+- 🧪 **Beta** — staged at `<SSD>/Runner.app` (drive root, double-click to launch; no zip to expand)
+- ✅ RAG-backed chat with inline citations against a Windows-prepped active library
+- ✅ Encrypted SSD unlock / save (native CryptoKit + CommonCrypto port, byte-compatible with Windows)
+- ✅ Network Mode API sidecar
+- ⚠️ No document management, voice, HOTAS, or DCS import yet
+
+**Known limitations across all platforms:**
+- RAG ingestion and index management on macOS: not supported (Windows Runner required)
+- Voice upload accepts WAV (PCM 16-bit mono 16kHz) and raw `pcm16le` only; other codecs not implemented
+- PDF extraction requires an embedded text layer; scanned/image-only PDFs need prior OCR
+- DOCX is not supported (PDF / TXT / MD / JSON / CSV only)
+- Direct Ollama LAN exposure is intentionally not supported — Runner API is the only network surface
+- IL-2 Sturmovik and War Thunder binding parsers: planned, not yet implemented
 
 ### SSH / Tailscale access (CLI)
 
-For headless access from a terminal (including an iPad over Tailscale), the `FreeAiSsd.RunnerCli` binary ships alongside the Windows Runner. It's a thin HTTP client against Runner's LAN API — same RAG pipeline, same source citations, but no GUI. The macOS beta can host the same chat API via its sidecar when Network Mode is running; Mac voice/TTS routes remain unavailable.
+For headless access from a terminal (including an iPad over Tailscale), `FreeAiSsd.RunnerCli` ships alongside the Windows Runner. It's a thin HTTP client against Runner's LAN API — same RAG pipeline, same source citations, no GUI.
 
 ```
 $ FreeAiSsd.RunnerCli --help
@@ -66,7 +153,7 @@ phi3> what aircraft can I fly in DCS Open Beta?
 phi3> /quit
 ```
 
-Precedence for configuration: `--url` / `--api-key` flag > `FREEAI_URL` / `FREEAI_API_KEY` env var > default (`http://127.0.0.1:41555`, no key). No TUI libraries — plain `Console.ReadLine`, so it's robust over spotty SSH connections. Use `--no-stream` on very flaky links to fall back to a single-response round-trip.
+Precedence for configuration: `--url` / `--api-key` flag > `FREEAI_URL` / `FREEAI_API_KEY` env var > default (`http://127.0.0.1:41555`, no key). Use `--no-stream` on very flaky links to fall back to a single-response round-trip.
 
 ---
 
@@ -121,9 +208,9 @@ Load first aid guides, plant identification references, equipment specs, surviva
 
 ### What You Need
 
-- A portable SSD (most models need 4–8 GB for the AI models alone; plan accordingly)
+- A portable SSD (most models need 4–8 GB for AI models alone; plan accordingly)
 - A Windows **or** Mac machine with internet access for the one-time preparation step. PrepApp ships for both: WPF on Windows, native SwiftUI on Mac. See [Source/Target compatibility](#sourcetarget-compatibility) for which prep host can produce which target filesystem.
-- Windows target machines need no pre-installed software — Windows Runner handles staged prerequisites offline. The macOS beta bundle stages its own macOS Ollama payload and API sidecar, but Mac document management and voice/HOTAS features remain limited.
+- Windows target machines need no pre-installed software — Windows Runner handles staged prerequisites offline.
 - Mac host requirements (for PrepApp or Runner): Apple Silicon (arm64) only; macOS 11 Big Sur or newer. Intel Macs are not supported.
 
 <a name="sourcetarget-compatibility"></a>
@@ -144,8 +231,8 @@ Which prep host (source OS) can produce which target drive:
 **Encrypted-config roundtrip is bidirectional.** A drive prepped on Windows unlocks cleanly on Mac, and a drive prepped on Mac unlocks cleanly on Windows. The on-disk encrypted format (AES-256-GCM + PBKDF2-SHA256) is identical on both platforms and is pinned by cross-language tests.
 
 Notes on the unsupported cells:
-- **APFS** is a Mac-native filesystem and Windows cannot reliably create or write to it. APFS targets are deferred from the supported set; exFAT covers all current Mac use.
-- **Mac → Windows-only NTFS** is an OS limitation, not a project gap — macOS does not natively format NTFS. If you need an NTFS-only drive, run Windows PrepApp.
+- **APFS** is a Mac-native filesystem and Windows cannot reliably create or write to it. APFS targets are deferred; exFAT covers all current Mac use.
+- **Mac → Windows-only NTFS** is an OS limitation — macOS does not natively format NTFS. If you need an NTFS-only drive, use Windows PrepApp.
 - **exFAT** is the only filesystem Windows and macOS both read and write natively, so cross-platform drives always land on exFAT.
 
 ### Download
@@ -167,7 +254,7 @@ Free-AI-SSD-win.zip                  Free-AI-SSD-crossplatform.zip
     └── prereqs/                         └── mac/  (Runner.app, ollama, manifest)
 ```
 
-> **Cross-platform note:** because macOS `.app` bundles carry symlinks Windows archivers strip, prep a cross-platform drive's **macOS** side *from a Mac* (`PrepApp.app`). The Windows side works from either host. The Mac Runner is staged to the SSD **root** as `<SSD>/Runner.app` (unzipped, launchable — no zip to expand each run).
+> **Cross-platform note:** because macOS `.app` bundles carry symlinks Windows archivers strip, prep a cross-platform drive's **macOS** side *from a Mac* (`PrepApp.app`). The Windows side works from either host. The Mac Runner is staged to the SSD **root** as `<SSD>/Runner.app` — unzipped, launchable directly, no zip to expand each run.
 
 #### macOS first launch (Gatekeeper unblock)
 
@@ -193,7 +280,7 @@ On **Windows**:
 1. Open `FreeAiSsd.PrepApp.exe`
 2. On **Drive Setup**, select your target external SSD, choose target compatibility (Windows-only / Mac-only / cross-platform), and enter a volume label
 3. Click **Format & Prepare Drive** (optional — skip if the drive is already formatted the way you want). PrepApp picks the filesystem from your target choice (NTFS for Windows-only, exFAT for anything including Mac), prompts for admin elevation, re-confirms, then formats the volume and lays out the canonical directory structure. If Windows asks to relaunch as admin, accept — the elevated window auto-resumes with your label pre-filled and asks you to confirm once more before formatting.
-4. On **Model Manager**, add or select models and pull them
+4. On **Model Manager**, add or select models and pull them (Ollama registry or Hugging Face)
 5. Run **Check SSD Readiness** until checks pass
 6. Click **Finalize SSD**
 
@@ -202,18 +289,18 @@ On **Mac**:
 1. Open `PrepApp.app` from the cross-platform bundle. First launch only: run the [Gatekeeper unblock](#macos-first-launch-gatekeeper-unblock) `xattr` command above — the build is unsigned/not notarized, so Safari quarantine makes Gatekeeper claim the app is "damaged" until that bit is cleared
 2. Pick your target external SSD and choose target compatibility (Mac-only or cross-platform — Windows-only NTFS is not available from a Mac host)
 3. Confirm the destructive erase in the native confirmation dialog. PrepApp drives `diskutil` directly to format the drive as exFAT and lay out the canonical SSD directory structure
-4. Stage the runner, Ollama, and prereq payloads; pull a starter model
+4. Stage the runner, Ollama, and prereq payloads; pull a starter model (Ollama registry or Hugging Face)
 5. Optionally enable encryption (off by default — recommended only if you plan to expose the Runner API on your LAN), then run readiness checks and finalize
 
-The resulting drive is byte-for-byte interchangeable with a Windows-prepped drive of the same target compatibility. If you enabled encryption the on-disk encrypted config blob is interchangeable too.
+The resulting drive is byte-for-byte interchangeable with a Windows-prepped drive of the same target compatibility.
 
 **Phase 2 — Run (offline, anywhere):**
 
 1. Plug the SSD into the target machine
 2. Run Runner directly from the SSD:
    - Windows: `<SSD>\windows\runner\FreeAiSsd.Runner.exe`
-   - macOS beta: `<SSD>/Runner.app` (at the drive root)
-3. Windows: load your documents and start chatting with RAG, citations, voice, HOTAS/PTT, and the LAN API. macOS beta: unlock the SSD if it was encrypted on Windows, start Ollama and Network Mode, then use RAG-backed chat with citations against a library already prepared on Windows; Mac document management, voice, HOTAS/PTT, and DCS import are not implemented there yet.
+   - macOS beta: `<SSD>/Runner.app` (at the drive root — double-click)
+3. Windows: load your documents and start chatting with RAG, citations, voice, HOTAS/PTT, and the LAN API. macOS beta: unlock the SSD if encrypted, start Ollama and Network Mode, then use RAG-backed chat with citations against a library already prepared on Windows. Mac document management, voice, HOTAS/PTT, and DCS import are not implemented yet.
 
 ### What Needs Internet vs. What Doesn't
 
@@ -248,10 +335,9 @@ The resulting drive is byte-for-byte interchangeable with a Windows-prepped driv
 - If install is blocked, refresh prerequisites from PrepApp while online and retry
 
 **macOS beta limitations**
-- The beta app is a Swift runner plus a local .NET API sidecar, not the full Windows Runner.
-- It supports selecting/inferring the SSD, reading installed models, starting `mac/tools/ollama/ollama`, Network Mode API hosting, and RAG-backed chat with citations against an already indexed active library.
-- It unlocks encrypted SSDs prepped on Windows and saves changes back to the encrypted blob (MAC5). Mac-prepped encrypted drives roundtrip cleanly to Windows. The on-disk format is identical on both platforms; the Mac unlock path is a native CryptoKit + CommonCrypto reimplementation pinned to the C# format by cross-language tests.
-- It does not provide document library management, Mac-side ingestion/rebuild/sweep, voice/TTS, HOTAS/PTT, or DCS import UI yet.
+- The beta app is a Swift runner plus a local .NET API sidecar. It supports selecting/inferring the SSD, reading installed models, starting macOS Ollama, Network Mode API hosting, and RAG-backed chat with citations against an already-indexed active library.
+- It unlocks encrypted SSDs prepped on Windows and saves changes back to the encrypted blob. The on-disk format is identical on both platforms; the Mac unlock path is a native CryptoKit + CommonCrypto reimplementation pinned to the C# format by cross-language tests.
+- It does not provide document library management, Mac-side ingestion/rebuild/sweep, voice/TTS, HOTAS/PTT, or DCS import yet.
 
 ### Prereq trust model
 
@@ -291,6 +377,8 @@ The Windows Runner includes a **Reference Documents** panel. Add your own files 
 5. Ask a question — the library is active
 
 **How citations work:** Retrieved chunks are injected into the prompt with inline citations like `[manual.pdf p.12]` or `[notes.txt]`. The **Sources** list shows what was used. If nothing meets the similarity threshold, the model is told "No relevant documents found" and responds without pretending it has context it doesn't.
+
+**macOS:** RAG queries work against a library indexed on Windows. Adding documents, folder sweeps, and index rebuilds require the Windows Runner.
 
 **Limitations:**
 - PDF extraction depends on the embedded text layer. Scanned/image-only PDFs may extract poorly without prior OCR.
@@ -370,6 +458,8 @@ In the Windows Runner, bind a button on your HOTAS to start and stop voice recor
 
 **Full VR voice loop:** HOTAS button → mic opens → speak → button release → Whisper transcribes → prompt sent → AI responds → TTS speaks into headset. Hands never leave the controls.
 
+**Companion tray app:** Remote HOTAS/PTT is supported — the Companion app can run on a second PC and drive the full voice loop against Runner over LAN, including its own PTT activation beep and overlay.
+
 </details>
 
 <details>
@@ -377,17 +467,16 @@ In the Windows Runner, bind a button on your HOTAS to start and stop voice recor
 
 Network Mode lets one Windows machine run Runner + Ollama locally, while other devices on your LAN call Runner's HTTP API.
 
-**Important architecture (v1 + v2):**
-- Ollama still binds to loopback only (`127.0.0.1`) on the host machine
+**Architecture:**
+- Ollama binds to loopback only (`127.0.0.1`) on the host machine
 - LAN clients talk to **Runner API**, not Ollama directly
 - Runner API proxies requests to host-local services (chat, Whisper STT, TTS)
 - TTS actions run on the host (the machine running Runner), not on the remote client
 
 **Security model (home LAN baseline):**
-- Runner API binds to `127.0.0.1` (loopback) by default. Binding to `0.0.0.0` (all interfaces) is an explicit opt-in that you must set in `portable-config.json`; Runner logs a WARNING on startup whenever the effective bind address is not loopback.
-- Non-health endpoints can require an API key (`Authorization: Bearer <key>` or `X-API-Key`)
-- API key is a shared secret in `portable-config.json`
-- No TLS/mTLS in v1 (assume trusted LAN segment)
+- Runner API binds to `127.0.0.1` (loopback) by default. Binding to `0.0.0.0` (all interfaces) is an explicit opt-in set in `portable-config.json`; Runner logs a WARNING on startup whenever the effective bind address is not loopback.
+- Non-health endpoints require an API key (`Authorization: Bearer <key>` or `X-API-Key`)
+- No TLS/mTLS (assume trusted LAN segment)
 - Do not expose this API to the public internet
 
 **Endpoints:**
@@ -452,14 +541,11 @@ curl -X POST http://RUNNER_HOST:41555/api/voice/query \
   -F "returnAudio=true"
 ```
 
-**Remote voice upload formats and limits (v2):**
-- Supported upload formats:
-  - WAV: PCM, 16-bit, mono, 16kHz
-  - Raw PCM16LE (`format=pcm16le`)
-- Upload size limit is controlled by `networkMaxAudioUploadMB`
+**Remote voice upload formats and limits:**
+- Supported: WAV (PCM 16-bit mono 16kHz), raw PCM16LE (`format=pcm16le`)
+- Upload size limit controlled by `networkMaxAudioUploadMB`
 - Invalid type / empty payload / oversize uploads return clear 4xx errors
-- `speakResponse=true` only triggers TTS when host allows network TTS; playback occurs on the host machine
-- `returnAudio=true` returns the synthesized TTS in the response as WAV PCM 16-bit mono 16kHz (`AudioMime: "audio/wav"`, `AudioBase64`). The returned payload is bounded by the same `networkMaxAudioUploadMB` cap; oversized syntheses are omitted rather than truncated.
+- `returnAudio=true` returns synthesized TTS as WAV PCM 16-bit mono 16kHz (`AudioMime: "audio/wav"`, `AudioBase64`), bounded by `networkMaxAudioUploadMB`
 
 </details>
 
@@ -522,14 +608,14 @@ All settings live in `config/portable-config.json` on the SSD.
 | `pttOverlayEnabled` | `true` | Show the always-on-top PTT status overlay |
 | `pttOverlayX` / `pttOverlayY` | `20` / `20` | Overlay window position in pixels from top-left |
 
-The Companion tray app exposes the same two cues under identical key names (`pttActivationSoundEnabled`, `pttOverlayEnabled`) in `companion-config.json`, toggleable from Companion's Settings window. These control the Companion client's own local beep and overlay, independent of the host's Runner settings.
+The Companion tray app exposes the same two cues under identical key names (`pttActivationSoundEnabled`, `pttOverlayEnabled`) in `companion-config.json`, toggleable from Companion's Settings window.
 
 ### Network Mode (Runner LAN API)
 
 | Property | Default | Description |
 |---|---|---|
 | `networkModeEnabled` | `false` | Enable Runner-hosted LAN API |
-| `networkBindAddress` | `"127.0.0.1"` | Bind address for Runner API host. Defaults to loopback; binding to `0.0.0.0` (all interfaces) is an explicit opt-in. |
+| `networkBindAddress` | `"127.0.0.1"` | Bind address for Runner API. Defaults to loopback; binding to `0.0.0.0` is an explicit opt-in. |
 | `networkPort` | `41555` | TCP port for Runner API |
 | `networkApiKey` | `""` | Shared secret for API auth |
 | `networkRequireApiKey` | `true` | Require API key on all non-health endpoints |
@@ -544,25 +630,47 @@ The Companion tray app exposes the same two cues under identical key names (`ptt
 ---
 
 <details>
-<summary>🗺️ Roadmap & Phase Status</summary>
+<summary>🗺️ Roadmap</summary>
 
-| Phase | Scope | Status |
-|---|---|---|
-| Phase 1 | DCS Bindings Parser (diff.lua → per-aircraft RAG docs) | ✅ Complete |
-| Phase 2 | RAG Document Library — PDF, TXT, and Markdown ingestion; vector search; inline citations | ✅ Complete |
-| Phase 3 | Voice Pipeline — Whisper.cpp STT + TTS (SAPI + Piper) | ✅ Complete |
-| Phase 4 | HOTAS Push-to-Talk (DirectInput, VR-friendly) | ✅ Complete |
-| Phase 5 | Network Mode — two-PC setup (LAN API + Companion tray) | ✅ Complete (v2) |
-| Phase 6 | Example bindings files shipped in-repo for tests / demos | 🗓️ Planned |
-| Phase 7 | Setup Profiles / Copilot Personas (general vs. flight sim) | 🗓️ Planned |
+### Shipped
 
-### IL-2 Sturmovik and War Thunder Bindings Parsers
+**Core infrastructure:**
+- ✅ Portable offline AI (Ollama on SSD, Windows + macOS)
+- ✅ Encrypted config (AES-256-GCM + PBKDF2-SHA256), bidirectional roundtrip Mac ↔ Windows
+- ✅ Offline Windows prerequisite bundle (.NET 8 + VC++ redist, SHA-verified, no hardcoded pins)
+- ✅ Detect pre-configured drive (both PrepApps recognize an already-staged SSD)
+- ✅ Manage models on encrypted drives (Windows + Mac PrepApp)
 
-Bindings import currently supports DCS World only. IL-2 and War Thunder parsers are planned, pending example binding files.
+**Windows Runner (full feature set):**
+- ✅ RAG document library (PDF / TXT / MD / JSON / CSV, inline citations, SIMD vector search)
+- ✅ DCS World bindings import (auto-detect, multi-device merge)
+- ✅ Voice pipeline (Whisper.cpp STT + Windows SAPI / Piper TTS)
+- ✅ HOTAS Push-to-Talk (DirectInput, VR-friendly overlay)
+- ✅ Network Mode v2 (LAN API, streaming, STT/TTS endpoints)
+- ✅ Companion tray app (second-PC client, HOTAS PTT, `returnAudio` local TTS)
+- ✅ Headless CLI (RunnerCli — SSH/Tailscale terminal access)
 
-### Setup Profiles / Copilot Personas (Phase 7)
+**Model management (Windows + Mac):**
+- ✅ Hugging Face model pulls (token auth, disk-budget warnings, per-quant expansion)
+- ✅ Ollama registry model pulls
+- ✅ Model picker (capability filters, parameter cap, Most-popular toggle, sort)
 
-Mode selection at install time: **general use** or **flight sim mode**. Flight sim mode pulls Whisper, TTS, and the bindings importer. Base install stays lightweight for users who don't need sim tooling. Personas will ship with curated system prompts (e.g. "DCS copilot", "ham radio reference") and default model/embedding choices.
+**macOS:**
+- ✅ Native SwiftUI PrepApp (arm64, exFAT, byte-identical SSD layout to Windows PrepApp)
+- 🧪 macOS Runner beta (RAG-backed chat, encrypted unlock, Network Mode sidecar)
+
+### In Progress
+
+- 🔄 **Windows HF token persistence on encrypted drives** — HF credentials currently don't write back through the encrypted config path on Windows; fix in progress
+- 🔄 **Companion keyboard PTT** — bind a keyboard key as an alternative to a HOTAS button for PTT activation
+- 🔄 **Document replacement edge cases** — hardening replace + rebuild for unusual file rename/hash scenarios
+
+### Planned
+
+- 📋 **Mac document library management** — add/sweep/rebuild from the Mac Runner (currently read-only against a Windows-prepped library)
+- 📋 **Mac voice / TTS / HOTAS / DCS import** — bring Mac Runner to feature parity with Windows
+- 📋 **IL-2 Sturmovik and War Thunder binding parsers** — pending example binding files
+- 📋 **Setup profiles / Copilot personas** — mode selection at prep time: general use vs. flight sim (light vs. full Whisper + bindings tools) with curated system prompts
 
 </details>
 
@@ -575,14 +683,14 @@ Mode selection at install time: **general use** or **flight sim mode**. Flight s
 
 Free-AI-SSD ships several components backed by a shared cross-platform library:
 
-- **PrepApp** (Windows, WPF — `prep-app/`) — runs on an online Windows machine to configure the SSD: picks drive, downloads and stages Ollama, pulls models, bundles prerequisites, finalizes layout
-- **Mac PrepApp** (`mac-prep-app/`, SwiftUI) — native macOS PrepApp for the cross-platform bundle; shipped at `<SSD>/mac/PrepApp.app` and as a separate `PrepApp.app.zip` payload. Drives `diskutil` directly to format target SSDs as exFAT, stages the runner / Ollama / prereq payloads via the shared `mac-prep-host` net8.0 sidecar (which consumes `prep-core/`), and writes the encrypted config in a format byte-identical to the Windows PrepApp. Apple Silicon (arm64), macOS 11+
+- **PrepApp** (Windows, WPF — `prep-app/`) — runs on an online Windows machine to configure the SSD: picks drive, downloads and stages Ollama, pulls models (Ollama or Hugging Face), bundles prerequisites, finalizes layout
+- **Mac PrepApp** (`mac-prep-app/`, SwiftUI) — native macOS PrepApp for the cross-platform bundle. Drives `diskutil` directly to format target SSDs as exFAT, stages the runner / Ollama / prereq payloads via the `mac-prep-host` net8.0 sidecar (which consumes `prep-core/`), and writes encrypted config in a format byte-identical to the Windows PrepApp. Apple Silicon (arm64), macOS 11+
 - **Runner** (Windows, WPF — `runner/`) — runs from the SSD on the target machine; starts Ollama, provides the chat interface, manages document libraries, voice pipeline, HOTAS PTT, and the LAN API host
-- **macOS Runner beta** (`mac-runner/`, Swift) — thin macOS app for the cross-platform beta bundle; shipped at `<SSD>/Runner.app` (drive root). It selects/infers the SSD, unlocks encrypted config, reads installed models, starts macOS Ollama, spawns the local Runner API sidecar, and sends chat through the shared RAG pipeline when an active indexed library exists. It is not a full Windows Runner equivalent yet.
-- **Voice Pipeline** (lives inside Runner's service layer) — `AudioCaptureService` → `WhisperSpeechToTextService` → `ChatService` → `SystemTextToSpeechService` / `PiperTextToSpeechService`, orchestrated by `PttVoicePipelineService` when HOTAS PTT is enabled
+- **macOS Runner beta** (`mac-runner/`, Swift) — thin macOS app shipped at `<SSD>/Runner.app` (drive root). It selects/infers the SSD, unlocks encrypted config, reads installed models, starts macOS Ollama, spawns the local Runner API sidecar, and sends chat through the shared RAG pipeline when an active indexed library exists
+- **Voice Pipeline** (inside Runner's service layer) — `AudioCaptureService` → `WhisperSpeechToTextService` → `ChatService` → `SystemTextToSpeechService` / `PiperTextToSpeechService`, orchestrated by `PttVoicePipelineService` when HOTAS PTT is enabled
 - **Bindings Parser** (inside the shared library at `shared/Documents/`) — `DcsSavedGamesLocator` finds DCS installs, `DcsAircraftScanner` enumerates aircraft, `DcsBindingParser` parses `diff.lua`, `DcsBatchProcessor` merges devices and writes RAG documents
-- **Companion** (`companion/`, WPF tray app) — optional lightweight client for a second LAN machine; no SSD required; talks to the Runner LAN API for chat / STT upload / voice-query / host-side TTS. Supports its own HOTAS PTT loop, an activation beep, a status overlay window, and a mic-preflight check in Settings. When `returnAudio=true` is negotiated on `/api/voice/query`, Companion plays the synthesized TTS locally instead of on the Runner host.
-- **Shared library** (`FreeAiSsd.Shared`, `net8.0`) — common core logic for encryption, trust policy, path guards, config, dependency checking, download management, MVVM infrastructure, DCS binding models, document library, and RAG pipeline. Some current shared components still depend on Windows-oriented packages such as WMI, NAudio, and DirectInput; macOS support work tracks the split into platform-neutral core plus platform adapters in `.memhub/rendered/PROJECT.md`.
+- **Companion** (`companion/`, WPF tray app) — optional lightweight client for a second LAN machine; no SSD required; talks to the Runner LAN API for chat / STT upload / voice-query / host-side TTS. Supports its own HOTAS PTT loop, activation beep, status overlay, and mic-preflight check
+- **Shared library** (`FreeAiSsd.Shared`, `net8.0`) — common core logic for encryption, trust policy, path guards, config, dependency checking, download management, MVVM infrastructure, DCS binding models, document library, and RAG pipeline
 
 ### Service Layer (Runner)
 
@@ -614,30 +722,32 @@ Runner's business logic lives in injectable services with no UI dependencies, en
 | Control | Detail |
 |---|---|
 | Encrypted config | AES-256-GCM with PBKDF2-SHA256 (210,000 iterations) |
-| Package trust | Ollama downloads validated against URL allowlist + SHA-256 digest before execution |
+| Config write guard | `ConfigStore` is the only path for config writes; a plaintext write to an encrypted drive throws `InvalidOperationException` (fail-closed) |
+| Package trust | Ollama downloads validated against URL allowlist + SHA-256 digest before execution; macOS payloads additionally verified as arm64 Mach-O |
 | Fail-closed write guard | `PrepDriveWriteGuard` blocks all writes to encrypted drives if encryption state is ambiguous |
 | Path traversal prevention | `PathGuards` enforces sibling boundary checks with platform-aware case sensitivity |
 | Shell injection prevention | `ProcessRunner` uses `ArgumentList`, not string concatenation |
 
 No critical vulnerabilities identified in security review (2026-02-19).
 
-Known non-security quality issue: silent exception swallowing in `SystemResources.cs`, `PrereqManifest.Load()`, and `RunnerFirstRunState.Load()` masks failures — exceptions should be logged before returning defaults.
-
 ### SSD Directory Layout
 
 ```
-config/                  — portable config + runtime state
-models/                  — Ollama model store
-models/whisper/          — Whisper STT model files (ggml-*.bin)
-logs/                    — app logs
-docs/libraries/          — Reference Documents library files, manifests, index DB
-windows/runner/          — Runner app
-windows/tools/ollama/    — staged Ollama runtime
-windows/tools/piper/     — optional Piper TTS binary and voice models (user-installed)
-windows/tools/prereqs/   — offline prerequisite installers + manifest
-mac/                     — beta macOS payloads (when included)
-cache/                   — prep-time download cache
+config/                   — portable-config.json (plaintext) or portable-config.encrypted.json (opt-in)
+models/                   — Ollama model store
+models/whisper/           — Whisper STT model files (ggml-*.bin)
+logs/                     — app logs
+docs/libraries/           — Reference Documents library files, manifests, index DB
+windows/runner/           — Runner app
+windows/tools/ollama/     — staged Ollama runtime + trust attestation
+windows/tools/piper/      — optional Piper TTS binary and voice models (user-installed)
+windows/tools/prereqs/    — offline prerequisite installers + manifest
+Runner.app/               — macOS Runner bundle (root-level, launchable directly)
+mac/tools/ollama/         — staged macOS Ollama runtime + trust attestation
+cache/                    — prep-time download cache
 ```
+
+`SsdLayout` in the shared library is the single source of truth for these paths — always use it rather than constructing paths manually.
 
 ### Project Structure
 
@@ -645,13 +755,14 @@ cache/                   — prep-time download cache
 |---|---|---|
 | `shared/` | `net8.0` | Cross-platform shared library (`FreeAiSsd.Shared`) |
 | `runner-core/` | `net8.0` | Platform-neutral Runner business logic (chat, RAG, library, local API) shared by Windows Runner and the Mac runner-host sidecar |
-| `prep-core/` | `net8.0` | Platform-neutral PrepApp business logic (manifest, staging, prereq, encrypted config) shared by Windows PrepApp and the Mac prep-host sidecar |
+| `prep-core/` | `net8.0` | Platform-neutral PrepApp business logic (manifest, staging, prereq, encrypted config, HF/Ollama model pulls) shared by Windows PrepApp and the Mac prep-host sidecar |
 | `prep-app/` | `net8.0-windows` | WPF PrepApp (Windows) |
 | `mac-prep-app/` | macOS (Swift) | Native SwiftUI PrepApp (Mac); produces drives byte-identical to Windows PrepApp |
 | `mac-prep-host/` | `net8.0` | osx-arm64 sidecar that runs `prep-core/` business logic for the Mac PrepApp over a stdin command protocol |
 | `runner/` | `net8.0-windows` | WPF Runner (Windows) |
 | `mac-runner/` | macOS (Swift) | Swift macOS beta Runner over the local Runner API sidecar |
 | `mac-runner-host/` | `net8.0` | osx-arm64 sidecar that hosts `RunnerLocalApiService` for the Mac Runner |
+| `runner-cli/` | `net8.0` | Headless CLI client (`FreeAiSsd.RunnerCli`) — SSH/Tailscale terminal access to Runner API |
 | `companion/` | `net8.0-windows` | WPF Companion tray client (LAN second-PC use) |
 | `tools/FreeAiSsd.PrereqFetch/` | `net8.0` | CI helper that pre-builds the offline prereq bundle via the shared `PrereqResolver` |
 | `tests/` | `net10.0` | xUnit test project (`FreeAiSsd.Tests`) |
@@ -671,7 +782,7 @@ cache/                   — prep-time download cache
 | `PortableConfig.cs` | JSON config serialization with atomic writes |
 | `PrepDriveWriteGuard.cs` | Blocks writes to encrypted drives (fail-closed) |
 | `PrereqInstallValidator.cs` | Validates installer integrity (SHA-256) before execution |
-| `Prereqs/PrereqResolver.cs` | Runtime discovery of the latest stable upstream prereq versions + vendor-hash verification. Shared by PrepApp and CI (see "Prereq trust model"). |
+| `Prereqs/PrereqResolver.cs` | Runtime discovery of the latest stable upstream prereq versions + vendor-hash verification. Shared by PrepApp and CI. |
 | `ProcessRunner.cs` | Safe process spawning via `ArgumentList`, not string concatenation |
 | `SsdEncryption.cs` | AES-256-GCM config encryption |
 | `SsdLayout.cs` | Canonical directory structure constants and creation |
@@ -687,7 +798,7 @@ cache/                   — prep-time download cache
 - `PrepViewModel` lives in `shared/` (`net8.0`) so it can be unit tested on Linux without WPF
 - `IDialogService` abstracts all `MessageBox`/dialog interactions
 - Service interfaces in `shared/`, implementations in `prep-app/Services/` (`net8.0-windows`)
-- `MainWindow.xaml.cs` reduced from ~1,800 lines to ~95 lines; all logic moved to `PrepViewModel` and services
+- `MainWindow.xaml.cs` reduced from ~1,800 lines to ~95 lines; all logic in `PrepViewModel` and services
 - Moq 4.20.72 used for mocking in tests
 
 ### Build
@@ -713,11 +824,11 @@ dotnet test FreeAiSsd.sln -c Release
 ./build.ps1 -Configuration Release -Runtime win-x64
 ```
 
-**Key dependencies:** xUnit 2.9.2, System.Management 8.0.0, Moq 4.20.72
+**Key dependencies:** xUnit, System.Management, Moq, PdfPig, SharpDX (DirectInput), ASP.NET Core (in-process LAN host), Microsoft.Extensions.DependencyInjection, SQLite
 
 ### Test Coverage
 
-449 tests across the test project. 1 Windows-specific path test expected to fail on Linux. Per-component counts below are directional — they lag the latest test additions but indicate which subsystems carry coverage.
+900+ test cases across the test project. 1 Windows-specific path test expected to fail on Linux. Per-component counts below are directional.
 
 | Area | Tests | Status |
 |---|---|---|
@@ -744,49 +855,12 @@ dotnet test FreeAiSsd.sln -c Release
 | `SystemCompatibility` | 0 | Not covered |
 | `PortableConfig` | 0 | Not covered |
 
-High-risk workflows (downloads, dependency installation, Runner start/stop) not yet covered — the service layer refactoring makes these testable without a WPF host.
-
 ### macOS Signing and Notarization
 
 Signing is disabled by default in CI (`MAC_SIGNING_ENABLED=false`). Supported via repository secrets: `MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD`, `APPLE_TEAM_ID`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `MACOS_SIGN_IDENTITY`.
 
-### Recent Changes
+### Changelog
 
-- **2026-04-19**: Rename a document in the library — citations immediately reflect the new filename with no re-index needed; the vector index updates in-place on the rename path (v1.2.9, X24).
-- **2026-04-19**: Document replace + rebuild reliability hardened across three stages (v1.2.7/v1.2.8, X10): SQLite WAL mode and busy-timeout on all vector-index connections eliminate file-lock failures under concurrent use; replace now detects renames by SHA-256 and deletes the old entry rather than leaving orphan chunks; rebuild can restart from stored embeddings instead of re-generating from scratch, so a large library survives an interrupted reindex.
-- **2026-04-18**: Encrypted config saves serialized through a `ConfigStore` chokepoint — concurrent saves can no longer race or corrupt the config file; session key is zeroed on lock (v1.2.6, X9).
-- **2026-04-18**: Voice pipeline lifecycle hardened — PTT loop, Whisper init/dispose, and window close are now guarded by a single `_lifecycleGate`; shutdown drains any in-flight transcription and cancels gracefully (v1.2.5, X8).
-- **2026-04-18**: Runner Ollama Start/Stop buttons swap styles by state — Start shows the magenta CTA when Ollama is stopped; Stop shows it while Ollama is running. Styles also update if `ollama.exe` dies out-of-band, so the visible CTA always matches the actual process state (released as v1.2.3).
-- **2026-04-18**: Runner window wrapped in a vertical `ScrollViewer` so the DCS bindings card is reachable on shorter displays; the response text box keeps its own bounded scrollbar for long replies (released as v1.2.2).
-- **2026-04-18**: PrepApp **Format & Prepare Drive** now survives UAC — clicking Format in the non-elevated window relaunches elevated with an auto-resume banner, re-selects the same drive, pre-fills the volume label, and requires one explicit confirm dialog before formatting. The format step itself runs through `Format-Volume` under `ProcessRunner.ArgumentList` (no string concat). A real-ProcessRunner VHD integration test covers the format path so mock-only regressions can't recur.
-- **2026-04-18**: "Format & Prepare Drive" now actually formats the drive — the button used to only ensure the folder structure. PrepApp now invokes `Format-Volume` (NTFS) with the user-supplied volume label before laying out the SSD directory structure.
-- **2026-04-17**: All PrepApp dialogs now match the neumorphic dark theme — error, warning, info, and confirmation prompts use a shared `ThemedMessageDialog` primitive instead of raw system `MessageBox` popups. The drive-erase confirmation replaced the "type ERASE" text box with a checkbox-gated Proceed button, and the fixed-drive warning collapsed from two sequential popups into one. Long dialog messages now scroll rather than pushing buttons off-screen.
-- **2026-04-17**: Fix WMI `ManagementObjectCollection` and `ManagementObject` disposal leaks in drive inspection and GPU/RAM detection — COM handles now properly released on all WMI query paths
-- **2026-04-17**: Fix drive selection missing USB SSDs — Windows classifies some external SSDs as `DriveType.Fixed`; prep-app now uses WMI `Win32_DiskDrive.InterfaceType` to detect USB connection regardless of OS drive type
-- **2026-04-17**: Prep-app UI polish — neumorphic dark theme applied throughout; implicit styles for DataGrid, TabControl, GroupBox, CheckBox; Model Manager layout restructured; drive warning strip made collapsible
-- **2026-04-14**: Split-PC TTS return path — `/api/voice/query` accepts `returnAudio=true` and returns the synthesized WAV inline as `AudioBase64` + `AudioMime`, so the Companion client can play TTS locally instead of on the Runner host; returned audio is WAV PCM 16-bit mono 16kHz and bounded by `networkMaxAudioUploadMB`. Companion tray app gained a VR-usable PTT UX: activation beep, always-on-top `PttOverlayWindow`, and a mic preflight in the Settings window, wired to new `pttActivationSoundEnabled` / `pttOverlayEnabled` keys in `companion-config.json`.
-- **2026-04-14**: Network Mode v2 — added LAN audio upload endpoints for host-side Whisper transcription (`/api/stt/transcribe`) and voice-query orchestration (`/api/voice/query`) with optional host-side TTS trigger
-- **2026-02-21**: DCS Bindings Import — reads DCS `diff.lua` files, auto-detects saved games folder, merges multi-device HOTAS inputs, writes per-aircraft reference documents into the library for RAG
-- **2026-02-21**: Voice pipeline — offline STT via Whisper.cpp (Tiny/Base/Small/Medium); TTS via Windows SAPI or Piper neural TTS; configurable mic, voice, rate, volume, and output device
-- **2026-02-19**: Comprehensive code review completed (architecture, security, code quality)
-- **2026-02-19**: XML documentation added to all source files (shared, prep-app, runner, tests)
-- **2026-02-19**: MVVM refactoring Phase 1 complete — base classes, 9 service interfaces, shared DTOs, `PrepViewModel`, 20 unit tests
-- **2026-02-19**: MVVM refactoring Phase 2 complete — 9 service implementations, `MainWindow.xaml` data binding, `MainWindow.xaml.cs` simplified to ~95 lines
-
-### Code Review Findings (2026-02-19)
-
-**Architecture**
-- Resolved: `MainWindow.xaml.cs` was a ~1,800-line monolith mixing UI, I/O, downloads, encryption, and business logic — now ~95 lines; all logic in `PrepViewModel` and injectable services
-- Good: Clean separation of shared library from GUI concerns; individual components are focused and well-bounded
-
-**Code Quality**
-- Open: Silent exception swallowing in `SystemResources.cs`, `PrereqManifest.Load()`, and `RunnerFirstRunState.Load()` masks failures — recommend logging caught exceptions before returning defaults
-- Good: Consistent use of records and immutable data structures throughout the shared library
-- Good: Async/await used correctly with proper `CancellationToken` propagation throughout
-
-**Improvement priorities:**
-1. Error handling: Replace silent catch blocks with logged exceptions
-2. Test expansion: Add integration tests for download, encryption, and model workflows
-3. Configuration validation: Add schema validation for `portable-config.json`
+See [GitHub Releases](../../releases) for the full version history and release notes.
 
 </details>
