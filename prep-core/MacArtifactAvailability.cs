@@ -39,7 +39,7 @@ public static class MacArtifactAvailability
     {
         string? contentRoot = null;
         string? manifestPath = null;
-        foreach (var candidateRoot in EnumerateContentRoots(appDirectory))
+        foreach (var candidateRoot in BundleContentRoots.Enumerate(appDirectory))
         {
             var candidateManifest = Path.Combine(candidateRoot, ManifestRelativePath);
             if (File.Exists(candidateManifest))
@@ -122,41 +122,6 @@ public static class MacArtifactAvailability
 
         fullPath = normalizedArtifactPath;
         return true;
-    }
-
-    private static IEnumerable<string> EnumerateContentRoots(string appDirectory)
-    {
-        yield return appDirectory;
-        // "dependencies" = post-restructure staged-artifact root;
-        // "payload" = legacy name (kept for pre-restructure bundles).
-        yield return Path.Combine(appDirectory, "dependencies");
-        yield return Path.Combine(appDirectory, "payload");
-
-        // MAC22: Mac PrepApp's mac-prep-host sidecar runs from inside
-        // PrepApp.app/Contents/Resources/prep-host/, so AppContext.BaseDirectory
-        // is *not* the bundle root — the bundle root containing
-        // dependencies/mac/mac-artifacts.manifest.json lives several levels
-        // up. Walk a bounded number of ancestors so the lookup finds the
-        // manifest from inside the .app bundle. Backward-compatible: the
-        // Windows PrepApp finds the manifest on an early candidate above
-        // and never enters this loop.
-        DirectoryInfo? cursor;
-        try
-        {
-            cursor = new DirectoryInfo(appDirectory);
-        }
-        catch
-        {
-            yield break;
-        }
-
-        for (var i = 0; i < 6 && cursor?.Parent is not null; i++)
-        {
-            cursor = cursor.Parent;
-            yield return cursor.FullName;
-            yield return Path.Combine(cursor.FullName, "dependencies");
-            yield return Path.Combine(cursor.FullName, "payload");
-        }
     }
 
     /// <summary>JSON schema for the macOS artifacts manifest file.</summary>
