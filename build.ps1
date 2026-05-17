@@ -22,14 +22,14 @@ Write-Host "[1/5] Building solution ($Configuration)..."
 dotnet build $solutionPath -c $Configuration /p:EnableWindowsTargeting=true
 
 Write-Host "[2/5] Publishing runner (self-contained single-file $Runtime)..."
-dotnet publish $runnerProject -c $Configuration -r $Runtime --self-contained true /p:PublishSingleFile=true /p:EnableWindowsTargeting=true
+dotnet publish $runnerProject -c $Configuration -r $Runtime --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true /p:EnableWindowsTargeting=true
 
 if (!(Test-Path $publishDir)) {
     throw "Publish output not found at $publishDir"
 }
 
 Write-Host "[3/5] Publishing runner-cli (self-contained single-file $Runtime)..."
-dotnet publish $runnerCliProject -c $Configuration -r $Runtime --self-contained true /p:PublishSingleFile=true
+dotnet publish $runnerCliProject -c $Configuration -r $Runtime --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true
 
 if (!(Test-Path $cliPublishDir)) {
     throw "CLI publish output not found at $cliPublishDir"
