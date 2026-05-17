@@ -330,7 +330,7 @@ public sealed class ArtifactStagingService : IArtifactStagingService
 
     private static string? ResolveRunnerPublishDirectory()
     {
-        foreach (var contentRoot in EnumerateBundledContentRoots())
+        foreach (var contentRoot in BundleContentRoots.Enumerate(AppContext.BaseDirectory))
         {
             // "runner" is the clean name under the new dependencies/ tree;
             // "runner-publish" is the legacy name (build.ps1 local dev + any
@@ -361,7 +361,7 @@ public sealed class ArtifactStagingService : IArtifactStagingService
 
     private static string? ResolveCompanionPublishDirectory()
     {
-        foreach (var contentRoot in EnumerateBundledContentRoots())
+        foreach (var contentRoot in BundleContentRoots.Enumerate(AppContext.BaseDirectory))
         {
             foreach (var folder in new[] { "companion-publish", "companion" })
             {
@@ -409,7 +409,7 @@ public sealed class ArtifactStagingService : IArtifactStagingService
 
     internal static string? ResolveBundledFile(string baseDirectory, string relativePath)
     {
-        foreach (var contentRoot in EnumerateBundledContentRoots(baseDirectory))
+        foreach (var contentRoot in BundleContentRoots.Enumerate(baseDirectory))
         {
             var candidate = Path.Combine(contentRoot, relativePath);
             if (File.Exists(candidate))
@@ -424,7 +424,7 @@ public sealed class ArtifactStagingService : IArtifactStagingService
 
     internal static string? ResolveBundledDirectory(string baseDirectory, string relativePath)
     {
-        foreach (var contentRoot in EnumerateBundledContentRoots(baseDirectory))
+        foreach (var contentRoot in BundleContentRoots.Enumerate(baseDirectory))
         {
             var candidate = Path.Combine(contentRoot, relativePath);
             if (Directory.Exists(candidate))
@@ -434,33 +434,4 @@ public sealed class ArtifactStagingService : IArtifactStagingService
         return null;
     }
 
-    private static IEnumerable<string> EnumerateBundledContentRoots()
-        => EnumerateBundledContentRoots(AppContext.BaseDirectory);
-
-    private static IEnumerable<string> EnumerateBundledContentRoots(string baseDirectory)
-    {
-        yield return baseDirectory;
-        // "dependencies" is the post-restructure staged-artifact root; "payload"
-        // is the legacy name (kept so a pre-restructure bundle still resolves).
-        yield return Path.Combine(baseDirectory, "dependencies");
-        yield return Path.Combine(baseDirectory, "payload");
-
-        // MAC23: mirror MAC22 — Mac PrepApp's mac-prep-host sidecar runs from
-        // PrepApp.app/Contents/Resources/prep-host/, so AppContext.BaseDirectory
-        // is *not* the bundle root and the bundled artifacts under
-        // <bundle>/dependencies/mac/ live several levels up. Walk a bounded
-        // number of ancestors. Backward-compatible: Windows finds bundles on
-        // the first/second candidate above and never enters this loop.
-        DirectoryInfo? cursor;
-        try { cursor = new DirectoryInfo(baseDirectory); }
-        catch { yield break; }
-
-        for (var i = 0; i < 6 && cursor?.Parent is not null; i++)
-        {
-            cursor = cursor.Parent;
-            yield return cursor.FullName;
-            yield return Path.Combine(cursor.FullName, "dependencies");
-            yield return Path.Combine(cursor.FullName, "payload");
-        }
-    }
 }
