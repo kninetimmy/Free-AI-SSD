@@ -769,13 +769,13 @@
                                         <!-- C7: green confirmation that the SSD is unlocked for the current session. Mirrors the Mac PrepApp's banner. -->
                                         <Border Margin="0,8,0,0" Padding="10,6"
                                                 Background="{StaticResource BgRaisedBrush}"
-                                                BorderBrush="{StaticResource StatusOkBrush}"
+                                                BorderBrush="{StaticResource StatusSuccessBrush}"
                                                 BorderThickness="1" CornerRadius="6"
                                                 Visibility="{Binding ShowSessionUnlockedBanner, Converter={StaticResource BoolToVisibilityConverter}}">
                                             <StackPanel Orientation="Horizontal">
                                                 <theme:LedStatusIndicator State="Ok" VerticalAlignment="Center" Margin="0,0,8,0"/>
                                                 <TextBlock Text="Unlocked for this session. Add and Remove enabled."
-                                                           Foreground="{StaticResource StatusOkBrush}"
+                                                           Foreground="{StaticResource StatusSuccessBrush}"
                                                            VerticalAlignment="Center"
                                                            TextWrapping="Wrap"/>
                                             </StackPanel>
