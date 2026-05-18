@@ -49,6 +49,32 @@ Prepare the drive once on a Windows or Mac machine with internet access — down
 
 ---
 
+<details>
+<summary>🐛 Bug Tracker — known issues &amp; recent fixes</summary>
+
+&nbsp;
+
+### Open bugs
+
+| Bug | Platform | Steps to reproduce | Introduced |
+|---|---|---|---|
+| PrepApp — HF source picker broken when managing an existing drive | macOS PrepApp (Windows unverified) | Open a previously-configured drive → choose "Manage models (don't erase)" → expand "Add a model" → switch source dropdown from Ollama to Hugging Face → picker shows a raw scrollable list of `hf.co/…` paths (all tagged Custom) instead of the organized HF catalog browser; no search or filters available | [v1.3.28](../../releases/tag/v1.3.28) |
+
+---
+
+### Recent fixes
+
+| Fix | Platform | Symptom | Fixed in |
+|---|---|---|---|
+| Mac Runner — HF models show wrong name in picker (`<repo>:<tag>` instead of `hf.co/<owner>/<repo>:<tag>`) | macOS Runner | Selecting an HF model sent a short tag to Ollama, which returned 404; chat failed immediately | [v1.3.28](../../releases/tag/v1.3.28) |
+| Windows PrepApp — crash on launch (NullReferenceException) | Windows PrepApp | `TargetInvocationException → NullReferenceException` at startup; WPF fired `SourceCombo_SelectionChanged` before the ViewModel was initialized | [v1.3.27](../../releases/tag/v1.3.27) |
+| HF model pull completes then fails | Windows + macOS PrepApp | Download reached 100 % then threw "Unable to locate model blob" — manifest resolver used the Ollama built-in registry path instead of `hf.co/` | [v1.3.26](../../releases/tag/v1.3.26) |
+| Mac Runner — port leak after Lock + re-unlock | macOS Runner | After locking the drive and re-selecting the SSD, Kestrel failed to bind its port (already in use); runner was unusable until the app was quit and restarted | [v1.3.20](../../releases/tag/v1.3.20) |
+
+</details>
+
+---
+
 ## Origin story
 
 This started as a way to take AI into the field with no cell signal — ham radio manuals, band plans, and reference docs loaded onto a pocket SSD so an LLM could answer questions about them miles from civilization. Then it turned out the same setup works really well as a voice-activated copilot in DCS: load aircraft manuals, import your HOTAS bindings, and hit a button on the throttle to ask questions mid-sortie without taking the VR headset off. Same drive. Same AI. Same offline-first idea.
@@ -671,6 +697,7 @@ The Companion tray app exposes the same two cues under identical key names (`ptt
 - 📋 **Mac voice / TTS / HOTAS / DCS import** — bring Mac Runner to feature parity with Windows
 - 📋 **IL-2 Sturmovik and War Thunder binding parsers** — pending example binding files
 - 📋 **Setup profiles / Copilot personas** — mode selection at prep time: general use vs. flight sim (light vs. full Whisper + bindings tools) with curated system prompts
+- 📋 **Thinking model parameter controls** — models with built-in chain-of-thought (e.g. Gemma Flash Thinking) can get stuck in infinite reasoning loops; need a way to cap or tune the thinking budget (token limit, timeout, or Ollama `num_predict` / `stop` parameter exposure) before a response is returned
 
 </details>
 
