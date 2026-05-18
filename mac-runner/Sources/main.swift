@@ -649,10 +649,12 @@ final class RunnerViewModel: ObservableObject {
         selectedModel = installed.first ?? ""
     }
 
-    /// MAC33: Walks `<ssdRoot>/models/manifests/registry.ollama.ai/library/<model>/<tag>`
-    /// and reconstructs `"name:tag"` entries. Mirrors prep-core's
-    /// `ModelOperations.DiscoverModelsOnDisk` so disk-truth reads agree
-    /// across the two language surfaces.
+    /// MAC33: Walks `<ssdRoot>/models/manifests/` and reconstructs model tags.
+    /// Mirrors prep-core's `ModelOperations.DiscoverModelsOnDisk`, including
+    /// the 2026-05-11 HF fix: HF models live under `hf.co/<owner>/<repo>/<tag>`
+    /// and must be referenced as `hf.co/<owner>/<repo>:<tag>` when calling
+    /// Ollama's API. Without the full prefix Ollama returns 404 because it looks
+    /// in `registry.ollama.ai/library/` instead of the `hf.co/` subtree.
     private func discoverInstalledModelsOnDisk() -> [String] {
         guard let root = ssdRoot else { return [] }
         let manifestsRoot = root.appendingPathComponent("models/manifests")
@@ -665,17 +667,25 @@ final class RunnerViewModel: ObservableObject {
             return []
         }
 
+        let manifestsComponents = manifestsRoot.pathComponents
         var discovered = Set<String>()
         for case let url as URL in enumerator {
             let values = try? url.resourceValues(forKeys: [.isRegularFileKey])
             guard values?.isRegularFile == true else { continue }
-            // Last two path components are <model>/<tag>; tag is a regular file.
             let parts = url.pathComponents
-            guard parts.count >= 2 else { continue }
-            let tag = parts[parts.count - 1]
-            let model = parts[parts.count - 2]
-            guard !model.isEmpty, !tag.isEmpty else { continue }
-            discovered.insert("\(model):\(tag)")
+            guard parts.count > manifestsComponents.count else { continue }
+            let rel = Array(parts[manifestsComponents.count...])
+            guard rel.count >= 2 else { continue }
+
+            let modelId: String
+            if rel.count >= 4 && rel[0].caseInsensitiveCompare("hf.co") == .orderedSame {
+                // hf.co/<owner>/<repo>/<tag>  →  hf.co/<owner>/<repo>:<tag>
+                modelId = "hf.co/\(rel[rel.count - 3])/\(rel[rel.count - 2]):\(rel[rel.count - 1])"
+            } else {
+                // registry.ollama.ai/library/<model>/<tag>  →  <model>:<tag>
+                modelId = "\(rel[rel.count - 2]):\(rel[rel.count - 1])"
+            }
+            discovered.insert(modelId)
         }
 
         return discovered.sorted { $0.lowercased() < $1.lowercased() }
