@@ -597,6 +597,57 @@
     </Style>
 
     <!--  ────────────────────────────────────────────────────────────
+          6a. Banners — Info / Warning / Danger / Success
+          Border styles for the Mac-app banner pattern documented in
+          docs/mac-ui-reference/RECONSTRUCTION.md sec. 3-A2 and sec. 1:
+          "12 % tinted background + 1 px solid stroke matching the
+          tint colour".
+
+          Usage:
+              <Border Style="{StaticResource InfoBanner}">
+                  <TextBlock Text="..."/>
+              </Border>
+
+          These primitives exist for the initiative 44 redesign to lean
+          on directly. They are not used by any current screen.
+          ────────────────────────────────────────────────────────────  -->
+    <Style x:Key="InfoBanner" TargetType="{x:Type Border}">
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Background"   Value="{StaticResource AccentCyanSoftBrush}"/>
+        <Setter Property="BorderBrush"  Value="{StaticResource AccentCyanBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="12,10"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+    </Style>
+
+    <Style x:Key="WarningBanner" TargetType="{x:Type Border}">
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Background"   Value="{StaticResource StatusWarningSoftBrush}"/>
+        <Setter Property="BorderBrush"  Value="{StaticResource StatusWarningBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="12,10"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+    </Style>
+
+    <Style x:Key="DangerBanner" TargetType="{x:Type Border}">
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Background"   Value="{StaticResource StatusDangerSoftBrush}"/>
+        <Setter Property="BorderBrush"  Value="{StaticResource StatusDangerBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="12,10"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+    </Style>
+
+    <Style x:Key="SuccessBanner" TargetType="{x:Type Border}">
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Background"   Value="{StaticResource StatusSuccessSoftBrush}"/>
+        <Setter Property="BorderBrush"  Value="{StaticResource StatusSuccessBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="12,10"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+    </Style>
+
+    <!--  ────────────────────────────────────────────────────────────
           6b. NeumorphicToolTip
           Tooltip styled as a tiny NeumorphicCard with caption
           typography. Hover delay is applied per-control via
