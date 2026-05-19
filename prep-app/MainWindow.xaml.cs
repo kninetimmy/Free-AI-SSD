@@ -38,14 +38,18 @@ public partial class MainWindow : Window
     private DispatcherTimer? _hfSearchDebounceTimer;
     private static readonly TimeSpan HfSearchDebounce = TimeSpan.FromMilliseconds(350);
 
-    // FTUE state
-    private int _ftueStepIndex;
-    private FrameworkElement[] _ftueTargets = Array.Empty<FrameworkElement>();
-    private int[] _ftueTargetTabIndex = Array.Empty<int>();
-    private (string label, string title, string body)[] _ftueSteps = Array.Empty<(string, string, string)>();
+    // View-layer step machine (PrepFlowStep). The shared PrepViewModel
+    // has no step concept; this controller only toggles which step panel
+    // is visible and configures the persistent header/footer. "Manage
+    // models" is the Models step entered with _isManageMode set (reached
+    // off the linear path from the already-configured-drive banner).
+    private PrepFlowStep _currentStep = PrepFlowStep.Welcome;
+    private bool _isManageMode;
 
-    // Cached once at load time so the per-keystroke save path doesn't
-    // have to re-read the settings file on every PropertyChanged tick.
+    // Loaded from preferences and written back unchanged. The FTUE
+    // spotlight tour was removed in favour of the step flow itself; this
+    // field is kept only so the on-disk PrepPreferenceSnapshot schema is
+    // unchanged (no settings migration).
     private bool _ftueCompleted;
 
     public MainWindow()
@@ -113,10 +117,10 @@ public partial class MainWindow : Window
 
         _viewModel.LogLines.CollectionChanged += LogLines_CollectionChanged;
 
-        // C6: banner's Manage-models button raises this event; switch the
-        // main TabControl to the Models tab (index 0). VM has no direct
-        // reference to MainTabs, hence the event hook.
-        _viewModel.ModelsTabRequested += (_, _) => MainTabs.SelectedIndex = 0;
+        // C6: banner's Manage-models button raises this event; enter the
+        // Models step in manage mode (off the linear path). VM has no
+        // reference to the view's step machine, hence the event hook.
+        _viewModel.ModelsTabRequested += (_, _) => EnterManageModels();
 
         // C7: banner's Unlock button raises this event; show the modal
         // passphrase prompt and hand a successful unlock back to the VM
@@ -128,7 +132,6 @@ public partial class MainWindow : Window
         ShowModelDetailsToggle.Unchecked += OnShowModelDetailsChanged;
 
         Loaded += OnWindowLoaded;
-        SizeChanged += OnWindowSizeChanged;
     }
 
     private async void OnWindowLoaded(object sender, RoutedEventArgs e)
@@ -151,20 +154,18 @@ public partial class MainWindow : Window
 
         _viewModel.OnPreferenceStateChanged = SaveCurrentPreferences;
 
-        // C6: suppress FTUE when the auto-selected drive is already prepared.
-        // The Drive-tab spotlight steps point at controls that are now disabled
-        // by the banner, so the tour would be misleading. We don't mark FTUE
-        // complete — a first-time user who later plugs in a fresh SSD still
-        // gets the tour on their next launch.
-        if (!_ftueCompleted &&
-            _viewModel.DriveConfiguration.State == DriveConfigurationState.Unconfigured)
-        {
-            StartFtue();
-        }
+        // Re-evaluate footer gating (Continue enable/disable) whenever the
+        // VM signals a change to a step's precondition.
+        _viewModel.PropertyChanged += OnStepGatingPropertyChanged;
+
+        // A relaunch mid-format (elevated auto-resume) should land on the
+        // step whose log surfaces the operation, not the welcome screen.
+        GoToStep(_viewModel.HasAutoResumeIntent
+            ? PrepFlowStep.FormatSetup
+            : PrepFlowStep.Welcome);
 
         // Fire auto-resume after Initialize() has loaded drives and after
-        // the FTUE decision, so the confirm-erase dialog isn't competing
-        // with the spotlight. If no intent was passed this is a no-op.
+        // the initial step is set. If no intent was passed this is a no-op.
         _ = _viewModel.TryAutoResumeFormatAsync();
     }
 
@@ -809,138 +810,198 @@ public partial class MainWindow : Window
     }
 
     // ─────────────────────────────────────────────────────────────
-    // FTUE (First-Time User Experience): 4-step spotlight tour.
+    // View-layer step machine (PrepFlowStep). Toggles the visible step
+    // panel and configures the persistent header counter + footer nav.
+    // The shared PrepViewModel is unchanged. See
+    // docs/mac-ui-reference/RECONSTRUCTION.md §1, §3.
     // ─────────────────────────────────────────────────────────────
-    private void StartFtue()
-    {
-        _ftueSteps = new (string, string, string)[]
-        {
-            ("Step 1 of 4", "How the SSD fits your setup",
-                "PrepApp stages one SSD for either a single-PC install or a split AI-host plus VR-companion setup."),
-            ("Step 2 of 4", "Choose your default Runner profile",
-                "Pick Flight Sim for DCS bindings and HOTAS/PTT defaults, or General Assistant for the chat-first layout."),
-            ("Step 3 of 4", "Pick your target drive",
-                "Choose the SSD where the Runner payload, Ollama runtime, and models will be staged."),
-            ("Step 4 of 4", "Choose and download models",
-                "Pick one or more models, then click Download so the drive is ready before finalization.")
-        };
-        _ftueTargets = new FrameworkElement[]
-        {
-            TwoMachineExplainerCard,
-            ProfileSelectionCard,
-            TargetDriveRow,
-            StarterModelsCard
-        };
-        // Which tab each spotlight target lives in.
-        // Steps 1-3 live inside the Drive tab (index 1). Step 4 lives
-        // inside the Models tab (index 0).
-        _ftueTargetTabIndex = new[] { 1, 1, 1, 0 };
 
-        _ftueStepIndex = 0;
-        FtueOverlay.Visibility = Visibility.Visible;
-        ApplyFtueStep();
+    /// <summary>Enter the Models step in manage mode (off the linear
+    /// path — raised by the configured-drive banner's Manage button).</summary>
+    private void EnterManageModels()
+    {
+        _isManageMode = true;
+        GoToStep(PrepFlowStep.Models);
     }
 
-    private void ApplyFtueStep()
+    /// <summary>Show one step panel, hide the rest, and reconfigure the
+    /// header counter, footer buttons, and log-panel visibility.</summary>
+    private void GoToStep(PrepFlowStep step)
     {
-        if (_ftueStepIndex < 0 || _ftueStepIndex >= _ftueSteps.Length)
+        // Leaving the Models step in either direction drops manage mode
+        // so a later linear visit behaves normally.
+        if (step != PrepFlowStep.Models)
         {
-            FinishFtue();
+            _isManageMode = false;
+        }
+
+        _currentStep = step;
+
+        StepWelcome.Visibility = Visibility.Collapsed;
+        StepProfile.Visibility = Visibility.Collapsed;
+        StepDrive.Visibility = Visibility.Collapsed;
+        StepFormatSetup.Visibility = Visibility.Collapsed;
+        StepModels.Visibility = Visibility.Collapsed;
+        StepFinalize.Visibility = Visibility.Collapsed;
+        StepDone.Visibility = Visibility.Collapsed;
+        CurrentStepPanel(step).Visibility = Visibility.Visible;
+
+        var counter = StepCounterLabel(step);
+        StepCounterText.Text = counter;
+        StepCounterText.Visibility = string.IsNullOrEmpty(counter)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        // The log surfaces the long-running operations (format / pull /
+        // finalize); the calm steps hide it entirely.
+        LogPanel.Visibility = step is PrepFlowStep.FormatSetup
+            or PrepFlowStep.Models or PrepFlowStep.Finalize
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        BackButton.Visibility = HasBack(step) ? Visibility.Visible : Visibility.Collapsed;
+        PrimaryButton.Content = PrimaryLabel(step);
+        UpdateFooterState();
+    }
+
+    private UIElement CurrentStepPanel(PrepFlowStep step) => step switch
+    {
+        PrepFlowStep.Welcome => StepWelcome,
+        PrepFlowStep.Profile => StepProfile,
+        PrepFlowStep.Drive => StepDrive,
+        PrepFlowStep.FormatSetup => StepFormatSetup,
+        PrepFlowStep.Models => StepModels,
+        PrepFlowStep.Finalize => StepFinalize,
+        PrepFlowStep.Done => StepDone,
+        _ => StepWelcome,
+    };
+
+    private string StepCounterLabel(PrepFlowStep step) => step switch
+    {
+        PrepFlowStep.Profile => "1 / 6 — Profile",
+        PrepFlowStep.Drive => "2 / 6 — Choose drive",
+        PrepFlowStep.FormatSetup => "3 / 6 — Set up drive",
+        PrepFlowStep.Models => _isManageMode ? "Manage models" : "4 / 6 — Models",
+        PrepFlowStep.Finalize => "5 / 6 — Finalize",
+        PrepFlowStep.Done => "6 / 6 — Done",
+        _ => string.Empty, // Welcome is unnumbered (mirrors the Mac labels).
+    };
+
+    private bool HasBack(PrepFlowStep step) =>
+        step is not (PrepFlowStep.Welcome or PrepFlowStep.Done);
+
+    private string PrimaryLabel(PrepFlowStep step) => step switch
+    {
+        PrepFlowStep.Welcome => "Get started",
+        PrepFlowStep.Models => _isManageMode ? "Done" : "Continue",
+        PrepFlowStep.Done => "Quit",
+        _ => "Continue",
+    };
+
+    /// <summary>Continue is gated on the step's precondition: a profile
+    /// must be chosen before leaving Profile, a drive before leaving Drive
+    /// (and not while the configured-drive banner owns the path).</summary>
+    private void UpdateFooterState()
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.BeginInvoke(new Action(UpdateFooterState));
             return;
         }
 
-        var (label, title, body) = _ftueSteps[_ftueStepIndex];
-        FtueStepLabel.Text = label;
-        FtueTitleText.Text = title;
-        FtueBodyText.Text = body;
-        FtueNextButton.Content = _ftueStepIndex == _ftueSteps.Length - 1 ? "Finish" : "Next";
-
-        // Switch to the tab that hosts this step's spotlight target so
-        // the element is actually realized and measurable. Without this,
-        // steps 2/3 silently skip the spotlight if the user is on the
-        // Drive Setup tab when the FTUE advances.
-        if (_ftueStepIndex < _ftueTargetTabIndex.Length)
+        switch (_currentStep)
         {
-            var tabIndex = _ftueTargetTabIndex[_ftueStepIndex];
-            if (tabIndex >= 0 && tabIndex < MainTabs.Items.Count)
-            {
-                MainTabs.SelectedIndex = tabIndex;
-            }
-        }
-
-        // Defer spotlight positioning until the target has a real layout
-        // (first-render pass won't have resolved TabItem sizes yet).
-        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(PositionSpotlight));
-    }
-
-    private void PositionSpotlight()
-    {
-        if (_ftueStepIndex < 0 || _ftueStepIndex >= _ftueTargets.Length)
-        {
-            FtueSpotlight.Visibility = Visibility.Collapsed;
-            return;
-        }
-
-        var target = _ftueTargets[_ftueStepIndex];
-        if (target is null || !target.IsVisible || target.ActualWidth <= 0 || target.ActualHeight <= 0)
-        {
-            FtueSpotlight.Visibility = Visibility.Collapsed;
-            return;
-        }
-
-        try
-        {
-            // Canvas and target aren't in an ancestor/descendant relationship
-            // (the overlay is a sibling of the main content), so go through
-            // TransformToVisual which just needs a common ancestor — the
-            // root Grid of the window.
-            var transform = target.TransformToVisual(FtueSpotlightCanvas);
-            var topLeft = transform.Transform(new Point(0, 0));
-            const double pad = 8;
-            Canvas.SetLeft(FtueSpotlight, topLeft.X - pad);
-            Canvas.SetTop(FtueSpotlight, topLeft.Y - pad);
-            FtueSpotlight.Width = target.ActualWidth + pad * 2;
-            FtueSpotlight.Height = target.ActualHeight + pad * 2;
-            FtueSpotlight.Visibility = Visibility.Visible;
-        }
-        catch (InvalidOperationException)
-        {
-            // Target not yet parented into the visual tree (e.g. a tab
-            // that hasn't been rendered). Hide the ring; the card
-            // caption still guides the user.
-            FtueSpotlight.Visibility = Visibility.Collapsed;
+            case PrepFlowStep.Profile:
+                PrimaryButton.IsEnabled = _viewModel.HasSelectedProfile;
+                PrimaryButton.ToolTip = _viewModel.HasSelectedProfile
+                    ? null
+                    : "Pick a Runner profile to continue.";
+                break;
+            case PrepFlowStep.Drive:
+                var blockedByConfigured = _viewModel.ShowAlreadyConfiguredBanner;
+                PrimaryButton.IsEnabled = _viewModel.HasDriveSelected && !blockedByConfigured;
+                PrimaryButton.ToolTip = !_viewModel.HasDriveSelected
+                    ? "Select a target drive to continue."
+                    : blockedByConfigured
+                        ? "This drive is already prepared — use Manage models or Start over above."
+                        : null;
+                break;
+            default:
+                PrimaryButton.IsEnabled = true;
+                PrimaryButton.ToolTip = null;
+                break;
         }
     }
 
-    private void OnFtueNextClick(object sender, RoutedEventArgs e)
+    private void OnStepGatingPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        _ftueStepIndex++;
-        if (_ftueStepIndex >= _ftueSteps.Length)
+        switch (e.PropertyName)
         {
-            FinishFtue();
-            return;
+            case nameof(PrepViewModel.HasSelectedProfile):
+            case nameof(PrepViewModel.HasDriveSelected):
+            case nameof(PrepViewModel.SelectedDrive):
+            case nameof(PrepViewModel.SelectedProfile):
+            case nameof(PrepViewModel.ShowAlreadyConfiguredBanner):
+            case nameof(PrepViewModel.CanInitiateFreshFormat):
+                UpdateFooterState();
+                break;
         }
-        ApplyFtueStep();
     }
 
-    private void OnFtueSkipClick(object sender, RoutedEventArgs e)
+    private void OnBackClick(object sender, RoutedEventArgs e)
     {
-        FinishFtue();
-    }
-
-    private void FinishFtue()
-    {
-        FtueOverlay.Visibility = Visibility.Collapsed;
-        FtueSpotlight.Visibility = Visibility.Collapsed;
-        _ftueCompleted = true;
-        SaveCurrentPreferences();
-    }
-
-    private void OnWindowSizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        if (FtueOverlay.Visibility == Visibility.Visible)
+        switch (_currentStep)
         {
-            PositionSpotlight();
+            case PrepFlowStep.Profile:
+                GoToStep(PrepFlowStep.Welcome);
+                break;
+            case PrepFlowStep.Drive:
+                GoToStep(PrepFlowStep.Profile);
+                break;
+            case PrepFlowStep.FormatSetup:
+                GoToStep(PrepFlowStep.Drive);
+                break;
+            case PrepFlowStep.Models:
+                GoToStep(_isManageMode ? PrepFlowStep.Drive : PrepFlowStep.FormatSetup);
+                break;
+            case PrepFlowStep.Finalize:
+                GoToStep(PrepFlowStep.Models);
+                break;
+        }
+    }
+
+    private void OnPrimaryClick(object sender, RoutedEventArgs e)
+    {
+        switch (_currentStep)
+        {
+            case PrepFlowStep.Welcome:
+                GoToStep(PrepFlowStep.Profile);
+                break;
+            case PrepFlowStep.Profile:
+                GoToStep(PrepFlowStep.Drive);
+                break;
+            case PrepFlowStep.Drive:
+                GoToStep(PrepFlowStep.FormatSetup);
+                break;
+            case PrepFlowStep.FormatSetup:
+                GoToStep(PrepFlowStep.Models);
+                break;
+            case PrepFlowStep.Models:
+                if (_isManageMode)
+                {
+                    Close();
+                }
+                else
+                {
+                    GoToStep(PrepFlowStep.Finalize);
+                }
+                break;
+            case PrepFlowStep.Finalize:
+                GoToStep(PrepFlowStep.Done);
+                break;
+            case PrepFlowStep.Done:
+                Close();
+                break;
         }
     }
 
