@@ -69,6 +69,11 @@ public partial class MainWindow : System.Windows.Window
     // Profile pill toggle state
     private bool _suppressPillEvents;
 
+    // Top-level tab selection — Mac-parity initiative #44 stage 1.
+    // See RunnerTab.cs for why this is a Grid-based "tab" rather than
+    // a WPF TabControl. Default landing tab is Chat.
+    private RunnerTab _currentTab = RunnerTab.Chat;
+
     // FTUE state
     private int _ftueStepIndex;
     private System.Windows.FrameworkElement[] _ftueTargets = Array.Empty<System.Windows.FrameworkElement>();
@@ -278,6 +283,16 @@ public partial class MainWindow : System.Windows.Window
         var vis = isFlightSim ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
         BindingsImportCard.Visibility = vis;
         PttCard.Visibility = vis;
+
+        // Mac-parity #44 stage 1: also gate the Voice/Sim tab buttons
+        // — empty tabs look broken. Bounce back to Chat if the user is
+        // currently sitting on a tab that just disappeared.
+        TabVoiceButton.Visibility = vis;
+        TabSimButton.Visibility = vis;
+        if (!isFlightSim && (_currentTab == RunnerTab.Voice || _currentTab == RunnerTab.Sim))
+        {
+            GoToTab(RunnerTab.Chat);
+        }
 
         _suppressPillEvents = true;
         ProfileFlightSimPill.IsChecked = isFlightSim;
@@ -1488,6 +1503,63 @@ public partial class MainWindow : System.Windows.Window
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Top-level tabs — Mac-parity initiative #44 stage 1.
+    // Grid-based "tab" shell: every named control stays in the visual tree
+    // (only the parent grid's Visibility flips). See RunnerTab.cs.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void TabChat_Click(object sender, System.Windows.RoutedEventArgs e) => GoToTab(RunnerTab.Chat);
+    private void TabVoice_Click(object sender, System.Windows.RoutedEventArgs e) => GoToTab(RunnerTab.Voice);
+    private void TabSim_Click(object sender, System.Windows.RoutedEventArgs e) => GoToTab(RunnerTab.Sim);
+    private void TabSystem_Click(object sender, System.Windows.RoutedEventArgs e) => GoToTab(RunnerTab.System);
+
+    private void GoToTab(RunnerTab tab)
+    {
+        _currentTab = tab;
+
+        ChatTab.Visibility = tab == RunnerTab.Chat ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+        VoiceTab.Visibility = tab == RunnerTab.Voice ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+        SimTab.Visibility = tab == RunnerTab.Sim ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+        SystemTab.Visibility = tab == RunnerTab.System ? System.Windows.Visibility.Visible : System.Windows.Visibility.Collapsed;
+
+        // The active header button paints the sunken surface + cyan
+        // underline via the SegmentedGameButton style's Tag=Selected trigger.
+        TabChatButton.Tag = tab == RunnerTab.Chat ? "Selected" : null;
+        TabVoiceButton.Tag = tab == RunnerTab.Voice ? "Selected" : null;
+        TabSimButton.Tag = tab == RunnerTab.Sim ? "Selected" : null;
+        TabSystemButton.Tag = tab == RunnerTab.System ? "Selected" : null;
+
+        // Reset the outer scroll so the new tab opens at its top rather than
+        // inheriting the previous tab's scroll offset.
+        RootScroll?.ScrollToTop();
+    }
+
+    /// <summary>
+    /// Returns the tab on which the given FTUE target lives so the FTUE
+    /// driver can switch tabs before painting the spotlight. Defaults to
+    /// Chat for any unmapped target.
+    /// </summary>
+    private RunnerTab TabForFtueTarget(System.Windows.FrameworkElement target)
+    {
+        if (target == SystemCompatibilityCard) return RunnerTab.System;
+        if (target == BindingsImportCard) return RunnerTab.Sim;
+        if (target == PttCard) return RunnerTab.Voice;
+        return RunnerTab.Chat;
+    }
+
+    /// <summary>
+    /// Whether the given tab's header button is currently visible.
+    /// Chat and System are always visible; Voice and Sim are gated by
+    /// <see cref="RefreshProfileVisibility"/> (General profile hides them).
+    /// </summary>
+    private bool IsTabHeaderVisible(RunnerTab tab) => tab switch
+    {
+        RunnerTab.Voice => TabVoiceButton.Visibility == System.Windows.Visibility.Visible,
+        RunnerTab.Sim => TabSimButton.Visibility == System.Windows.Visibility.Visible,
+        _ => true,
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────
     // FTUE (First-Time User Experience): 4-step spotlight tour.
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -1545,6 +1617,23 @@ public partial class MainWindow : System.Windows.Window
         else if (OllamaStatusLed.State == LedState.Busy && !_ollamaService.IsRunning)
         {
             OllamaStatusLed.State = LedState.Idle;
+        }
+
+        // Mac-parity #44 stage 1: the FTUE targets are spread across
+        // multiple tabs (System / Chat / Sim). Switch to the right tab
+        // BEFORE we position the spotlight, or the target won't be
+        // measured (Visibility=Collapsed parent => zero ActualWidth).
+        // Skip the switch if the target tab is hidden under the active
+        // profile (e.g. Sim under General) — the instruction card still
+        // describes the action; PositionSpotlight's visibility check
+        // will hide the ring rather than painting on nothing.
+        if (_ftueStepIndex < _ftueTargets.Length)
+        {
+            var targetTab = TabForFtueTarget(_ftueTargets[_ftueStepIndex]);
+            if (targetTab != _currentTab && IsTabHeaderVisible(targetTab))
+            {
+                GoToTab(targetTab);
+            }
         }
 
         // Defer spotlight positioning until the target has a real layout.
