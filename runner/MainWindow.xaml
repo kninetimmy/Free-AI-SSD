@@ -84,6 +84,10 @@
               Inner button inside the game-selector segmented control.
               Set Tag="Selected" on the active segment to render the
               sunken surface + cyan-gradient underline.
+
+              Also reused by the top-level tab strip (Chat / Voice /
+              Sim / System) — same affordance: active segment has the
+              sunken surface + cyan underline.
               ────────────────────────────────────────────────────────  -->
         <Style x:Key="SegmentedGameButton" TargetType="{x:Type Button}">
             <Setter Property="FontFamily" Value="{StaticResource PrimaryFontFamily}"/>
@@ -219,673 +223,737 @@
     <ScrollViewer x:Name="RootScroll"
                   VerticalScrollBarVisibility="Auto"
                   HorizontalScrollBarVisibility="Disabled">
+    <!-- ═══════════════════════════════════════════════════════════════
+         RootContent: tab header strip + four sibling tab grids.
+
+         Mac-parity initiative #44 stage 1 — a Grid-based "tab" shell
+         (not a WPF TabControl) so every named control stays in the
+         visual tree regardless of which tab is active. This keeps the
+         existing code-behind's x:Name references intact while moving
+         the cards into the right tab groupings (RECONSTRUCTION §4 +
+         §6, owner-confirmed: separate tabs Chat / Voice / Sim /
+         System).
+
+         Stage 2 will reorder the Chat tab to Mac §B1 calm-layout
+         (banners, sources list, etc.); stage 1 is structural only.
+         ═══════════════════════════════════════════════════════════════ -->
     <Grid x:Name="RootContent" Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
         <!-- ═══════════════════════════════════════════════════════════ -->
-        <!-- Row 0: Top Controls                                         -->
+        <!-- Tab header strip                                            -->
         <!-- ═══════════════════════════════════════════════════════════ -->
-        <Border x:Name="TopControlsCard" Grid.Row="0" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
+        <Border Grid.Row="0"
+                Margin="0,0,0,10"
+                HorizontalAlignment="Left"
+                CornerRadius="10"
+                Background="{StaticResource RaisedSurfaceGradientBrush}"
+                BorderBrush="{StaticResource SurfaceBorderBrush}"
+                BorderThickness="1"
+                Padding="4"
+                Effect="{StaticResource RaisedDarkShadowSmall}">
             <StackPanel Orientation="Horizontal">
-                <Button x:Name="StartOllamaButton" Content="Start Ollama"
-                        Style="{StaticResource TactileMagentaButton}"
-                        Click="Start_Click"
-                        ToolTip="Launch the local Ollama server from this SSD."/>
-                <Button x:Name="UnlockDriveButton" Content="Unlock Drive"
-                        Style="{StaticResource GhostSecondaryButton}"
-                        Margin="10,0,0,0"
-                        Click="UnlockDrive_Click"
-                        Visibility="Collapsed"
-                        ToolTip="Decrypt the portable config with your passphrase."/>
-                <Button x:Name="StopOllamaButton" Content="Stop Ollama"
-                        Style="{StaticResource GhostSecondaryButton}"
-                        Margin="10,0,0,0"
-                        Click="Stop_Click"
-                        ToolTip="Stop the running Ollama server process."/>
-                <Button Content="Open Chat UI (browser)"
-                        Style="{StaticResource TactilePrimaryButton}"
-                        Margin="10,0,0,0"
-                        Click="OpenBrowser_Click"
-                        ToolTip="Open the local Ollama chat web UI in your default browser."/>
+                <Button x:Name="TabChatButton"
+                        Content="Chat"
+                        Style="{StaticResource SegmentedGameButton}"
+                        Tag="Selected"
+                        Click="TabChat_Click"
+                        ToolTip="Chat with the model, manage RAG document libraries."/>
+                <Button x:Name="TabVoiceButton"
+                        Content="Voice"
+                        Style="{StaticResource SegmentedGameButton}"
+                        Click="TabVoice_Click"
+                        ToolTip="Push-to-Talk and voice I/O. Available with the Flight Sim profile."/>
+                <Button x:Name="TabSimButton"
+                        Content="Sim"
+                        Style="{StaticResource SegmentedGameButton}"
+                        Click="TabSim_Click"
+                        ToolTip="Flight-sim controller binding import. Available with the Flight Sim profile."/>
+                <Button x:Name="TabSystemButton"
+                        Content="System"
+                        Style="{StaticResource SegmentedGameButton}"
+                        Click="TabSystem_Click"
+                        ToolTip="Hardware compatibility, prerequisites, and dependencies."/>
+            </StackPanel>
+        </Border>
 
-                <StackPanel Orientation="Horizontal" Margin="16,0,0,0"
-                            VerticalAlignment="Center">
-                    <theme:LedStatusIndicator x:Name="OllamaStatusLed"
-                                              State="Idle"
-                                              VerticalAlignment="Center"
-                                              Margin="0,0,8,0"
-                                              ToolTip="Ollama server status: idle, busy, ready, or error."/>
-                    <TextBlock x:Name="StatusText"
-                               Foreground="{StaticResource TextSecondaryBrush}"
-                               VerticalAlignment="Center"/>
-                </StackPanel>
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!-- Tab body host: four overlapping grids, exactly one Visible. -->
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <Grid Grid.Row="1" x:Name="TabHost">
 
-                <Border Margin="16,0,0,0"
-                        CornerRadius="14"
-                        Background="{StaticResource BgSunkenBrush}"
-                        BorderBrush="{StaticResource SurfaceBorderBrush}"
-                        BorderThickness="1"
-                        Padding="3"
-                        Effect="{StaticResource SunkenDarkShadow}"
-                        VerticalAlignment="Center"
-                        ToolTip="Switch between Flight Sim and General Assistant profiles.">
+            <!-- ─────────────────────── Chat tab ─────────────────────── -->
+            <Grid x:Name="ChatTab">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- Chat / Row 0: Top Controls -->
+                <Border x:Name="TopControlsCard" Grid.Row="0" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
                     <StackPanel Orientation="Horizontal">
-                        <RadioButton x:Name="ProfileFlightSimPill"
-                                     Content="✈ Flight Sim"
-                                     Style="{StaticResource PillRadioButton}"
-                                     GroupName="ProfilePills"
-                                     Checked="ProfilePill_Checked"/>
-                        <RadioButton x:Name="ProfileGeneralPill"
-                                     Content="◈ General"
-                                     Style="{StaticResource PillRadioButton}"
-                                     GroupName="ProfilePills"
-                                     Checked="ProfilePill_Checked"/>
-                    </StackPanel>
-                </Border>
-            </StackPanel>
-        </Border>
-
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <!-- Row 1: System Compatibility                                 -->
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <Border x:Name="SystemCompatibilityCard" Grid.Row="1" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
-            <StackPanel>
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto"/>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0" Text="System Compatibility"
-                               Style="{StaticResource H2Text}"
-                               VerticalAlignment="Center"
-                               Margin="0,0,12,0"/>
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                        <theme:LedStatusIndicator x:Name="ReadinessLed"
-                                                  State="Idle"
-                                                  VerticalAlignment="Center"
-                                                  Margin="0,0,8,0"
-                                                  ToolTip="Overall readiness: green when all prerequisites are satisfied."/>
-                        <TextBlock x:Name="ReadinessSummaryText"
-                                   Text="Checking..."
-                                   VerticalAlignment="Center"
-                                   Foreground="{StaticResource TextSecondaryBrush}"/>
-                    </StackPanel>
-                </Grid>
-
-                <Expander x:Name="SystemDetailsExpander"
-                          Header="System details"
-                          Style="{StaticResource NeumorphicExpander}"
-                          IsExpanded="False"
-                          Margin="0,8,0,0"
-                          ToolTip="Show GPU, CPU, OS, and per-dependency status.">
-                    <StackPanel>
-                        <TextBlock x:Name="CompatibilityGpuText"
-                                   Foreground="{StaticResource TextPrimaryBrush}"
-                                   ToolTip="Best GPU detected on this machine."/>
-                        <TextBlock x:Name="CompatibilityCpuText"
-                                   Foreground="{StaticResource TextPrimaryBrush}"
-                                   Margin="0,2,0,0"
-                                   ToolTip="CPU instruction set / architecture."/>
-                        <TextBlock x:Name="CompatibilityOsText"
-                                   Foreground="{StaticResource TextPrimaryBrush}"
-                                   Margin="0,2,0,0"
-                                   ToolTip="Detected operating system version."/>
-                        <TextBlock x:Name="CompatibilityDepsText"
-                                   Foreground="{StaticResource TextPrimaryBrush}"
-                                   Margin="0,2,0,0"
-                                   ToolTip="Whether all required runtimes / drivers are installed."/>
-                        <TextBlock Text="Ollama typically auto-selects best available backend. This app detects hardware for visibility."
-                                   Style="{StaticResource CaptionText}"
-                                   TextWrapping="Wrap" Margin="0,8,0,0"/>
-                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                            <Button Content="Re-run dependency check"
-                                    Style="{StaticResource GhostSecondaryButton}"
-                                    Click="RerunDependencyCheck_Click"
-                                    ToolTip="Re-scan the machine and re-show the install prompt for anything missing."/>
-                            <Button Content="Open prerequisites folder"
-                                    Style="{StaticResource GhostSecondaryButton}"
-                                    Margin="8,0,0,0"
-                                    Click="OpenPrereqsFolder_Click"
-                                    ToolTip="Open the offline installer bundle on the SSD."/>
-                        </StackPanel>
-                    </StackPanel>
-                </Expander>
-            </StackPanel>
-        </Border>
-
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <!-- Row 2: Model + Prompt                                       -->
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <Border x:Name="ModelPromptCard" Grid.Row="2" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
-            <Grid>
-                <StackPanel x:Name="ModelPromptRow" Orientation="Horizontal">
-                    <TextBlock Text="Model:"
-                               Foreground="{StaticResource TextSecondaryBrush}"
-                               VerticalAlignment="Center"/>
-                    <ComboBox x:Name="ModelCombo"
-                              Style="{StaticResource GlowFocusComboBox}"
-                              Width="220" Margin="8,0,0,0"
-                              ToolTip="Pick which installed model handles this prompt."/>
-                    <TextBox x:Name="PromptText"
-                             Style="{StaticResource GlowFocusTextBox}"
-                             Width="400" Margin="10,0,0,0"
-                             Text="Say hello from portable SSD."
-                             ToolTip="Type the message to send to the selected model."/>
-                    <Button x:Name="SendButton" Content="Send"
-                            Style="{StaticResource TactilePrimaryButton}"
-                            MinWidth="100" Margin="10,0,0,0"
-                            Click="Send_Click"
-                            ToolTip="Send the prompt to the selected model."/>
-                    <Button x:Name="StopButton" Content="Stop"
-                            Style="{StaticResource TactileMagentaButton}"
-                            MinWidth="80" Margin="6,0,0,0"
-                            Click="Stop_Generation_Click"
-                            Visibility="Collapsed"
-                            ToolTip="Cancel the current streaming generation."/>
-                    <Button x:Name="VoiceButton" Content="🎤 Voice"
-                            Style="{StaticResource TactilePrimaryButton}"
-                            MinWidth="110" Margin="6,0,0,0"
-                            Click="Voice_Click"
-                            ToolTip="Record from the microphone and transcribe with Whisper."/>
-                    <TextBlock x:Name="VoiceStatusText"
-                               Margin="10,0,0,0" VerticalAlignment="Center"
-                               Foreground="{StaticResource AccentCyanBrush}"
-                               Visibility="Collapsed"/>
-                    <TextBlock x:Name="StreamingIndicator" Text="● Generating..."
-                               Margin="10,0,0,0" VerticalAlignment="Center"
-                               Foreground="{StaticResource AccentCyanBrush}"
-                               Visibility="Collapsed"/>
-                </StackPanel>
-
-                <!-- Empty state: no models installed in the portable config. -->
-                <Border x:Name="NoModelsEmptyState"
-                        Background="{StaticResource BgBaseBrush}"
-                        Visibility="Collapsed">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
-                        <theme:LedStatusIndicator State="Error"
-                                                  VerticalAlignment="Center"
-                                                  Margin="0,0,10,0"/>
-                        <TextBlock Text="Install a model in the Prep app first"
-                                   VerticalAlignment="Center"
-                                   Foreground="{StaticResource TextPrimaryBrush}"/>
-                        <Button Content="Open Prep app"
+                        <Button x:Name="StartOllamaButton" Content="Start Ollama"
+                                Style="{StaticResource TactileMagentaButton}"
+                                Click="Start_Click"
+                                ToolTip="Launch the local Ollama server from this SSD."/>
+                        <Button x:Name="UnlockDriveButton" Content="Unlock Drive"
                                 Style="{StaticResource GhostSecondaryButton}"
-                                Tag="{StaticResource AccentCyanBrush}"
-                                Margin="14,0,0,0"
-                                Click="OpenPrepApp_Click"
-                                ToolTip="Launch the Free AI SSD Prep app to download a starter model."/>
-                    </StackPanel>
-                </Border>
-            </Grid>
-        </Border>
-
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <!-- Row 3: Reference Documents                                  -->
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <Border x:Name="ReferenceDocsCard" Grid.Row="3" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
-            <StackPanel>
-                <TextBlock Text="Reference Documents" Style="{StaticResource H2Text}"/>
-                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                    <TextBlock Text="Library:"
-                               Foreground="{StaticResource TextSecondaryBrush}"
-                               VerticalAlignment="Center"/>
-                    <ComboBox x:Name="LibraryCombo"
-                              Style="{StaticResource GlowFocusComboBox}"
-                              Width="250" Margin="8,0,0,0"
-                              SelectionChanged="LibraryCombo_SelectionChanged"
-                              ToolTip="Pick which document library answers reference-grounded prompts."/>
-                    <TextBox x:Name="NewLibraryNameText"
-                             Style="{StaticResource GlowFocusTextBox}"
-                             Width="220" Margin="10,0,0,0"
-                             Text="My library"
-                             ToolTip="Display name for a new library you're about to create."/>
-                    <Button x:Name="CreateLibraryButton"
-                            Content="Create library"
-                            Style="{StaticResource GhostSecondaryButton}"
-                            Tag="{StaticResource AccentCyanBrush}"
-                            Margin="10,0,0,0"
-                            Click="CreateLibrary_Click"
-                            ToolTip="Create a new empty document library with the typed name."/>
-                </StackPanel>
-                <WrapPanel Margin="0,10,0,0">
-                    <Button x:Name="AddFilesButton" Content="Add files"
-                            Style="{StaticResource GhostSecondaryButton}"
-                            Margin="0,0,8,8" Click="AddFiles_Click"
-                            ToolTipService.ShowOnDisabled="True"
-                            ToolTip="Create or select a library first."/>
-                    <Button x:Name="AddFolderButton" Content="Add folder"
-                            Style="{StaticResource GhostSecondaryButton}"
-                            Margin="0,0,8,8" Click="AddFolder_Click"
-                            ToolTip="Watch a folder; new and changed files are swept on demand."/>
-                    <Button Content="Remove selected file"
-                            Style="{StaticResource GhostSecondaryButton}"
-                            Margin="0,0,0,8" Click="RemoveFile_Click"
-                            ToolTip="Remove the highlighted file from the active library."/>
-                </WrapPanel>
-
-                <Expander x:Name="IndexToolsExpander"
-                          Header="Index tools"
-                          Style="{StaticResource NeumorphicExpander}"
-                          IsExpanded="False"
-                          Margin="0,2,0,0"
-                          ToolTip="Maintenance actions for the embedding index.">
-                    <WrapPanel>
-                        <Button Content="Rebuild index"
+                                Margin="10,0,0,0"
+                                Click="UnlockDrive_Click"
+                                Visibility="Collapsed"
+                                ToolTip="Decrypt the portable config with your passphrase."/>
+                        <Button x:Name="StopOllamaButton" Content="Stop Ollama"
                                 Style="{StaticResource GhostSecondaryButton}"
-                                Margin="0,0,8,8" Click="RebuildIndex_Click"
-                                ToolTip="Re-embed every file in the active library from scratch."/>
-                        <Button Content="Pull embedding model"
-                                Style="{StaticResource GhostSecondaryButton}"
-                                Margin="0,0,8,8" Click="PullEmbeddingModel_Click"
-                                ToolTip="Download the configured embedding model via the running Ollama server."/>
-                        <Button Content="Sweep folders now"
-                                Style="{StaticResource GhostSecondaryButton}"
-                                Margin="0,0,0,8" Click="SweepFolders_Click"
-                                ToolTip="Re-scan all watched folders and ingest any new or changed files."/>
-                    </WrapPanel>
-                </Expander>
+                                Margin="10,0,0,0"
+                                Click="Stop_Click"
+                                ToolTip="Stop the running Ollama server process."/>
+                        <Button Content="Open Chat UI (browser)"
+                                Style="{StaticResource TactilePrimaryButton}"
+                                Margin="10,0,0,0"
+                                Click="OpenBrowser_Click"
+                                ToolTip="Open the local Ollama chat web UI in your default browser."/>
 
-                <TextBlock x:Name="IndexingStatusText"
-                           Foreground="{StaticResource TextSecondaryBrush}"
-                           Margin="0,8,0,0"/>
-                <Grid Margin="0,10,0,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <ListBox x:Name="LibraryFilesList"
-                             Style="{StaticResource ThemedListBox}"
-                             Height="90"
-                             Margin="0,0,4,0"
-                             DisplayMemberPath="FileName"
-                             ToolTip="Files currently indexed in the active library."/>
-                    <ListBox Grid.Column="1" x:Name="SourcesList"
-                             Style="{StaticResource ThemedListBox}"
-                             Height="90"
-                             Margin="4,0,0,0"
-                             ToolTip="Document chunks the model cited in its most recent answer."/>
-
-                    <!-- Empty state: no library selected yet. Overlays both lists. -->
-                    <Border x:Name="NoLibraryEmptyState"
-                            Grid.ColumnSpan="2"
-                            Background="{StaticResource BgBaseBrush}"
-                            Visibility="Collapsed">
-                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="360">
-                            <TextBlock Text="Create or select a library to begin"
-                                       Style="{StaticResource BodyText}"
+                        <StackPanel Orientation="Horizontal" Margin="16,0,0,0"
+                                    VerticalAlignment="Center">
+                            <theme:LedStatusIndicator x:Name="OllamaStatusLed"
+                                                      State="Idle"
+                                                      VerticalAlignment="Center"
+                                                      Margin="0,0,8,0"
+                                                      ToolTip="Ollama server status: idle, busy, ready, or error."/>
+                            <TextBlock x:Name="StatusText"
                                        Foreground="{StaticResource TextSecondaryBrush}"
-                                       TextAlignment="Center"
-                                       TextWrapping="Wrap"
-                                       Margin="0,0,0,10"/>
-                            <Button Content="Create library"
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+
+                        <Border Margin="16,0,0,0"
+                                CornerRadius="14"
+                                Background="{StaticResource BgSunkenBrush}"
+                                BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                BorderThickness="1"
+                                Padding="3"
+                                Effect="{StaticResource SunkenDarkShadow}"
+                                VerticalAlignment="Center"
+                                ToolTip="Switch between Flight Sim and General Assistant profiles.">
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton x:Name="ProfileFlightSimPill"
+                                             Content="✈ Flight Sim"
+                                             Style="{StaticResource PillRadioButton}"
+                                             GroupName="ProfilePills"
+                                             Checked="ProfilePill_Checked"/>
+                                <RadioButton x:Name="ProfileGeneralPill"
+                                             Content="◈ General"
+                                             Style="{StaticResource PillRadioButton}"
+                                             GroupName="ProfilePills"
+                                             Checked="ProfilePill_Checked"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Border>
+
+                <!-- Chat / Row 1: Model + Prompt -->
+                <Border x:Name="ModelPromptCard" Grid.Row="1" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
+                    <Grid>
+                        <StackPanel x:Name="ModelPromptRow" Orientation="Horizontal">
+                            <TextBlock Text="Model:"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       VerticalAlignment="Center"/>
+                            <ComboBox x:Name="ModelCombo"
+                                      Style="{StaticResource GlowFocusComboBox}"
+                                      Width="220" Margin="8,0,0,0"
+                                      ToolTip="Pick which installed model handles this prompt."/>
+                            <TextBox x:Name="PromptText"
+                                     Style="{StaticResource GlowFocusTextBox}"
+                                     Width="400" Margin="10,0,0,0"
+                                     Text="Say hello from portable SSD."
+                                     ToolTip="Type the message to send to the selected model."/>
+                            <Button x:Name="SendButton" Content="Send"
+                                    Style="{StaticResource TactilePrimaryButton}"
+                                    MinWidth="100" Margin="10,0,0,0"
+                                    Click="Send_Click"
+                                    ToolTip="Send the prompt to the selected model."/>
+                            <Button x:Name="StopButton" Content="Stop"
+                                    Style="{StaticResource TactileMagentaButton}"
+                                    MinWidth="80" Margin="6,0,0,0"
+                                    Click="Stop_Generation_Click"
+                                    Visibility="Collapsed"
+                                    ToolTip="Cancel the current streaming generation."/>
+                            <Button x:Name="VoiceButton" Content="🎤 Voice"
+                                    Style="{StaticResource TactilePrimaryButton}"
+                                    MinWidth="110" Margin="6,0,0,0"
+                                    Click="Voice_Click"
+                                    ToolTip="Record from the microphone and transcribe with Whisper."/>
+                            <TextBlock x:Name="VoiceStatusText"
+                                       Margin="10,0,0,0" VerticalAlignment="Center"
+                                       Foreground="{StaticResource AccentCyanBrush}"
+                                       Visibility="Collapsed"/>
+                            <TextBlock x:Name="StreamingIndicator" Text="● Generating..."
+                                       Margin="10,0,0,0" VerticalAlignment="Center"
+                                       Foreground="{StaticResource AccentCyanBrush}"
+                                       Visibility="Collapsed"/>
+                        </StackPanel>
+
+                        <!-- Empty state: no models installed in the portable config. -->
+                        <Border x:Name="NoModelsEmptyState"
+                                Background="{StaticResource BgBaseBrush}"
+                                Visibility="Collapsed">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
+                                <theme:LedStatusIndicator State="Error"
+                                                          VerticalAlignment="Center"
+                                                          Margin="0,0,10,0"/>
+                                <TextBlock Text="Install a model in the Prep app first"
+                                           VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextPrimaryBrush}"/>
+                                <Button Content="Open Prep app"
+                                        Style="{StaticResource GhostSecondaryButton}"
+                                        Tag="{StaticResource AccentCyanBrush}"
+                                        Margin="14,0,0,0"
+                                        Click="OpenPrepApp_Click"
+                                        ToolTip="Launch the Free AI SSD Prep app to download a starter model."/>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <!-- Chat / Row 2: Reference Documents -->
+                <Border x:Name="ReferenceDocsCard" Grid.Row="2" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
+                    <StackPanel>
+                        <TextBlock Text="Reference Documents" Style="{StaticResource H2Text}"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <TextBlock Text="Library:"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       VerticalAlignment="Center"/>
+                            <ComboBox x:Name="LibraryCombo"
+                                      Style="{StaticResource GlowFocusComboBox}"
+                                      Width="250" Margin="8,0,0,0"
+                                      SelectionChanged="LibraryCombo_SelectionChanged"
+                                      ToolTip="Pick which document library answers reference-grounded prompts."/>
+                            <TextBox x:Name="NewLibraryNameText"
+                                     Style="{StaticResource GlowFocusTextBox}"
+                                     Width="220" Margin="10,0,0,0"
+                                     Text="My library"
+                                     ToolTip="Display name for a new library you're about to create."/>
+                            <Button x:Name="CreateLibraryButton"
+                                    Content="Create library"
                                     Style="{StaticResource GhostSecondaryButton}"
                                     Tag="{StaticResource AccentCyanBrush}"
-                                    HorizontalAlignment="Center"
+                                    Margin="10,0,0,0"
                                     Click="CreateLibrary_Click"
                                     ToolTip="Create a new empty document library with the typed name."/>
                         </StackPanel>
-                    </Border>
-                </Grid>
-            </StackPanel>
-        </Border>
+                        <WrapPanel Margin="0,10,0,0">
+                            <Button x:Name="AddFilesButton" Content="Add files"
+                                    Style="{StaticResource GhostSecondaryButton}"
+                                    Margin="0,0,8,8" Click="AddFiles_Click"
+                                    ToolTipService.ShowOnDisabled="True"
+                                    ToolTip="Create or select a library first."/>
+                            <Button x:Name="AddFolderButton" Content="Add folder"
+                                    Style="{StaticResource GhostSecondaryButton}"
+                                    Margin="0,0,8,8" Click="AddFolder_Click"
+                                    ToolTip="Watch a folder; new and changed files are swept on demand."/>
+                            <Button Content="Remove selected file"
+                                    Style="{StaticResource GhostSecondaryButton}"
+                                    Margin="0,0,0,8" Click="RemoveFile_Click"
+                                    ToolTip="Remove the highlighted file from the active library."/>
+                        </WrapPanel>
 
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <!-- Row 4: Import Controller Bindings (multi-step wizard)       -->
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <Border x:Name="BindingsImportCard" Grid.Row="4" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
-            <StackPanel>
-                <TextBlock Text="Import Controller Bindings"
-                           Style="{StaticResource H2Text}"
-                           ToolTip="Import flight-sim controller bindings into a document library so the AI can reference them."/>
+                        <Expander x:Name="IndexToolsExpander"
+                                  Header="Index tools"
+                                  Style="{StaticResource NeumorphicExpander}"
+                                  IsExpanded="False"
+                                  Margin="0,2,0,0"
+                                  ToolTip="Maintenance actions for the embedding index.">
+                            <WrapPanel>
+                                <Button Content="Rebuild index"
+                                        Style="{StaticResource GhostSecondaryButton}"
+                                        Margin="0,0,8,8" Click="RebuildIndex_Click"
+                                        ToolTip="Re-embed every file in the active library from scratch."/>
+                                <Button Content="Pull embedding model"
+                                        Style="{StaticResource GhostSecondaryButton}"
+                                        Margin="0,0,8,8" Click="PullEmbeddingModel_Click"
+                                        ToolTip="Download the configured embedding model via the running Ollama server."/>
+                                <Button Content="Sweep folders now"
+                                        Style="{StaticResource GhostSecondaryButton}"
+                                        Margin="0,0,0,8" Click="SweepFolders_Click"
+                                        ToolTip="Re-scan all watched folders and ingest any new or changed files."/>
+                            </WrapPanel>
+                        </Expander>
 
-                <!-- Step 0: Game selection ─────────────────────────── -->
-                <StackPanel x:Name="BindingsStep0" Margin="0,8,0,0">
-                    <TextBlock Text="Select your game:"
-                               Foreground="{StaticResource TextSecondaryBrush}"
-                               Margin="0,0,0,8"/>
+                        <TextBlock x:Name="IndexingStatusText"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   Margin="0,8,0,0"/>
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <ListBox x:Name="LibraryFilesList"
+                                     Style="{StaticResource ThemedListBox}"
+                                     Height="90"
+                                     Margin="0,0,4,0"
+                                     DisplayMemberPath="FileName"
+                                     ToolTip="Files currently indexed in the active library."/>
+                            <ListBox Grid.Column="1" x:Name="SourcesList"
+                                     Style="{StaticResource ThemedListBox}"
+                                     Height="90"
+                                     Margin="4,0,0,0"
+                                     ToolTip="Document chunks the model cited in its most recent answer."/>
 
-                    <!-- Segmented control: one raised card with three inner buttons -->
-                    <Border HorizontalAlignment="Left"
-                            CornerRadius="10"
-                            Background="{StaticResource RaisedSurfaceGradientBrush}"
-                            BorderBrush="{StaticResource SurfaceBorderBrush}"
-                            BorderThickness="1"
-                            Padding="4"
-                            Effect="{StaticResource RaisedDarkShadowSmall}">
-                        <StackPanel Orientation="Horizontal">
-                            <Button Content="DCS World"
-                                    Style="{StaticResource SegmentedGameButton}"
-                                    Tag="Selected"
-                                    Click="BindingsDcsGame_Click"/>
-                            <Button Content="IL-2 — Coming Soon"
-                                    Style="{StaticResource SegmentedGameButton}"
-                                    IsEnabled="False"/>
-                            <Button Content="War Thunder — Coming Soon"
-                                    Style="{StaticResource SegmentedGameButton}"
-                                    IsEnabled="False"/>
-                        </StackPanel>
-                    </Border>
-                </StackPanel>
-
-                <!-- Step 1: Folder detection ───────────────────────── -->
-                <StackPanel x:Name="BindingsStep1" Visibility="Collapsed" Margin="0,10,0,0">
-                    <TextBlock x:Name="DcsFolderStatusText"
-                               Foreground="{StaticResource TextPrimaryBrush}"
-                               TextWrapping="Wrap" Margin="0,0,0,10"/>
-                    <StackPanel Orientation="Horizontal">
-                        <Button Content="Browse manually"
-                                Style="{StaticResource GhostSecondaryButton}"
-                                Margin="0,0,8,0"
-                                Click="BindingsBrowseFolder_Click"/>
-                        <Button x:Name="BindingsStep1NextButton"
-                                Content="Scan for aircraft"
-                                Style="{StaticResource TactilePrimaryButton}"
-                                Margin="0,0,8,0"
-                                Click="BindingsStep1Next_Click"/>
-                        <Button Content="← Back"
-                                Style="{StaticResource GhostSecondaryButton}"
-                                Click="BindingsStep1Back_Click"/>
-                    </StackPanel>
-                </StackPanel>
-
-                <!-- Step 2: Aircraft selection ─────────────────────── -->
-                <StackPanel x:Name="BindingsStep2" Visibility="Collapsed" Margin="0,10,0,0">
-                    <TextBlock x:Name="AircraftScanSummaryText"
-                               Foreground="{StaticResource TextSecondaryBrush}"
-                               Margin="0,0,0,8"/>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                        <Button Content="Select All"
-                                Style="{StaticResource GhostSecondaryButton}"
-                                Margin="0,0,8,0"
-                                Click="BindingsSelectAll_Click"/>
-                        <Button Content="Deselect All"
-                                Style="{StaticResource GhostSecondaryButton}"
-                                Click="BindingsDeselectAll_Click"/>
-                    </StackPanel>
-                    <ListView x:Name="AircraftList" Height="130" SelectionMode="Single"
-                              Background="{StaticResource BgSunkenBrush}"
-                              BorderBrush="{StaticResource SurfaceBorderBrush}"
-                              BorderThickness="1"
-                              Foreground="{StaticResource TextPrimaryBrush}">
-                        <ListView.ItemContainerStyle>
-                            <Style TargetType="ListViewItem">
-                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                                <Setter Property="Padding" Value="4,2"/>
-                                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-                                <Setter Property="Background" Value="Transparent"/>
-                            </Style>
-                        </ListView.ItemContainerStyle>
-                        <ListView.ItemTemplate>
-                            <DataTemplate>
-                                <StackPanel Orientation="Horizontal">
-                                    <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
-                                              IsEnabled="{Binding CanImport}"
-                                              VerticalAlignment="Center"/>
-                                    <TextBlock Text="{Binding DisplayLabel}"
-                                               Foreground="{StaticResource TextPrimaryBrush}"
-                                               VerticalAlignment="Center" Margin="6,0,0,0"/>
-                                    <TextBlock Text=" (already imported)" VerticalAlignment="Center"
-                                               Foreground="{StaticResource StatusWarningBrush}"
-                                               FontStyle="Italic"
-                                               Visibility="{Binding AlreadyImportedVisibility}"/>
+                            <!-- Empty state: no library selected yet. Overlays both lists. -->
+                            <Border x:Name="NoLibraryEmptyState"
+                                    Grid.ColumnSpan="2"
+                                    Background="{StaticResource BgBaseBrush}"
+                                    Visibility="Collapsed">
+                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="360">
+                                    <TextBlock Text="Create or select a library to begin"
+                                               Style="{StaticResource BodyText}"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               TextAlignment="Center"
+                                               TextWrapping="Wrap"
+                                               Margin="0,0,0,10"/>
+                                    <Button Content="Create library"
+                                            Style="{StaticResource GhostSecondaryButton}"
+                                            Tag="{StaticResource AccentCyanBrush}"
+                                            HorizontalAlignment="Center"
+                                            Click="CreateLibrary_Click"
+                                            ToolTip="Create a new empty document library with the typed name."/>
                                 </StackPanel>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
-                    <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                        <Button x:Name="BindingsImportButton" Content="Import selected"
-                                Style="{StaticResource TactilePrimaryButton}"
-                                Margin="0,0,8,0"
-                                Click="BindingsImport_Click"/>
-                        <Button Content="← Back"
-                                Style="{StaticResource GhostSecondaryButton}"
-                                Click="BindingsStep2Back_Click"/>
+                            </Border>
+                        </Grid>
                     </StackPanel>
-                </StackPanel>
+                </Border>
 
-                <!-- Step 3: Progress / results ─────────────────────── -->
-                <StackPanel x:Name="BindingsStep3" Visibility="Collapsed" Margin="0,10,0,0">
-                    <TextBlock x:Name="BindingsProgressText"
-                               Foreground="{StaticResource AccentCyanBrush}"
-                               Margin="0,0,0,6" TextWrapping="Wrap"/>
-                    <TextBlock x:Name="BindingsResultText" FontWeight="Bold"
-                               Foreground="{StaticResource TextPrimaryBrush}"
-                               TextWrapping="Wrap" Margin="0,0,0,4"/>
-                    <TextBlock x:Name="BindingsErrorText"
-                               Foreground="{StaticResource StatusDangerBrush}"
-                               TextWrapping="Wrap" Margin="0,0,0,6"
-                               Visibility="Collapsed"/>
-                    <TextBlock Text="These files are now in your document library. Rebuild the index to make them searchable."
-                               Style="{StaticResource CaptionText}"
-                               TextWrapping="Wrap" Margin="0,4,0,10"/>
-                    <StackPanel Orientation="Horizontal">
-                        <Button Content="Import again (overwrite)"
-                                Style="{StaticResource GhostSecondaryButton}"
-                                Margin="0,0,8,0"
-                                Click="BindingsImportAgain_Click"/>
-                        <Button Content="Start over"
-                                Style="{StaticResource GhostSecondaryButton}"
-                                Click="BindingsStartOver_Click"/>
-                    </StackPanel>
-                </StackPanel>
+                <!-- Chat / Row 3: Response TextBox (model output) -->
+                <TextBox Grid.Row="3" x:Name="ResponseText"
+                         Style="{StaticResource GlowFocusTextBox}"
+                         AcceptsReturn="True"
+                         VerticalScrollBarVisibility="Auto"
+                         TextWrapping="Wrap"
+                         MinHeight="300"
+                         MaxHeight="500"
+                         ToolTip="The model's most recent answer. Streaming output appears here token-by-token."/>
 
-            </StackPanel>
-        </Border>
+                <!-- Chat / Row 4: Bottom Log + Advanced expander (Replay tour) -->
+                <Border Grid.Row="4" Style="{StaticResource NeumorphicCard}"
+                        Margin="0,10,0,0" Padding="10">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid Grid.Row="0">
+                            <TextBox x:Name="LogText" Height="140"
+                                     AcceptsReturn="True" IsReadOnly="True"
+                                     VerticalScrollBarVisibility="Auto"
+                                     TextWrapping="Wrap"
+                                     Background="Transparent"
+                                     BorderThickness="0"
+                                     Foreground="{StaticResource AccentCyanBrush}"
+                                     FontFamily="{StaticResource MonoFontFamily}"
+                                     FontSize="13"
+                                     ToolTip="Live log of background activity — Ollama, indexing, voice, PTT.">
+                                <TextBox.Resources>
+                                    <Style TargetType="{x:Type ScrollViewer}"
+                                           BasedOn="{StaticResource SunkenLogViewer}"/>
+                                </TextBox.Resources>
+                            </TextBox>
 
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <!-- Row 5: Push-to-Talk (HOTAS Voice Input)                     -->
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <Border x:Name="PttCard" Grid.Row="5" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
-            <StackPanel>
-                <TextBlock Text="Push-to-Talk (HOTAS Voice Input)"
-                           Style="{StaticResource H2Text}"/>
-                <TextBlock Text="Assign a joystick button to trigger voice queries while flying."
-                           Style="{StaticResource CaptionText}"
-                           TextWrapping="Wrap" Margin="0,4,0,10"/>
+                            <!-- Empty state: Ollama is not running. Centered CTA covers the log. -->
+                            <Border x:Name="OllamaOfflineEmptyState"
+                                    Background="{StaticResource BgBaseBrush}"
+                                    Visibility="Collapsed">
+                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="380">
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,8">
+                                        <theme:LedStatusIndicator State="Idle"
+                                                                  VerticalAlignment="Center"
+                                                                  Margin="0,0,8,0"/>
+                                        <TextBlock Text="Ollama is offline"
+                                                   Style="{StaticResource H2Text}"
+                                                   Margin="0"/>
+                                    </StackPanel>
+                                    <TextBlock Text="Start the local server to send prompts and stream responses."
+                                               Style="{StaticResource CaptionText}"
+                                               TextAlignment="Center"
+                                               TextWrapping="Wrap"
+                                               Margin="0,0,0,12"/>
+                                    <Button Content="Start Ollama"
+                                            Style="{StaticResource TactilePrimaryButton}"
+                                            HorizontalAlignment="Center"
+                                            Click="Start_Click"
+                                            ToolTip="Launch the local Ollama server from this SSD."/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
 
-                <!-- Three NeonToggleSwitches in a row -->
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <ToggleButton x:Name="PttEnabledCheck"
-                                      Style="{StaticResource NeonToggleSwitch}"
-                                      Click="PttEnabled_Click"
-                                      ToolTip="Turn HOTAS-button voice input on or off."/>
-                        <TextBlock Text="Enable Push-to-Talk"
-                                   Margin="8,0,0,0"
-                                   VerticalAlignment="Center"
-                                   Foreground="{StaticResource TextPrimaryBrush}"/>
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="24,0,0,0">
-                        <ToggleButton x:Name="PttSoundCheck"
-                                      Style="{StaticResource NeonToggleSwitch}"
-                                      IsChecked="True"
-                                      Click="PttSound_Click"
-                                      ToolTip="Play a short beep when listening starts and stops."/>
-                        <TextBlock Text="Activation sounds"
-                                   Margin="8,0,0,0"
-                                   VerticalAlignment="Center"
-                                   Foreground="{StaticResource TextPrimaryBrush}"/>
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="24,0,0,0">
-                        <ToggleButton x:Name="PttOverlayCheck"
-                                      Style="{StaticResource NeonToggleSwitch}"
-                                      IsChecked="True"
-                                      Click="PttOverlay_Click"
-                                      ToolTip="Show the always-on-top status overlay while flying."/>
-                        <TextBlock Text="Show overlay"
-                                   Margin="8,0,0,0"
-                                   VerticalAlignment="Center"
-                                   Foreground="{StaticResource TextPrimaryBrush}"/>
-                    </StackPanel>
-                </StackPanel>
+                        <Expander Grid.Row="1"
+                                  Header="Advanced"
+                                  Style="{StaticResource NeumorphicExpander}"
+                                  IsExpanded="False"
+                                  Margin="0,8,0,0"
+                                  ToolTip="Less-used actions, such as replaying the guided tour.">
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Replay tour"
+                                        Style="{StaticResource GhostSecondaryButton}"
+                                        Tag="{StaticResource AccentCyanBrush}"
+                                        Click="ReplayTour_Click"
+                                        ToolTip="Re-show the 4-step guided tour."/>
+                            </StackPanel>
+                        </Expander>
+                    </Grid>
+                </Border>
+            </Grid>
 
-                <!-- Configure input: revealed only when PTT is enabled. -->
-                <Expander x:Name="PttConfigureInputExpander"
-                          Header="Configure input"
-                          Style="{StaticResource NeumorphicExpander}"
-                          IsExpanded="False"
-                          Margin="0,0,0,4"
-                          Visibility="{Binding ElementName=PttEnabledCheck, Path=IsChecked, Converter={StaticResource BoolToVisibilityConverter}}"
-                          ToolTip="Pick the joystick, the trigger button, and how the button latches.">
+            <!-- ────────────────────── Voice tab ─────────────────────── -->
+            <!-- Push-to-Talk / HOTAS voice input. Gated by the Flight
+                 Sim profile (RefreshProfileVisibility in code-behind
+                 also hides this card AND the Voice tab button when the
+                 General profile is active). -->
+            <Grid x:Name="VoiceTab" Visibility="Collapsed">
+                <Border x:Name="PttCard" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
                     <StackPanel>
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                            <TextBlock Text="Device:"
-                                       Foreground="{StaticResource TextSecondaryBrush}"
-                                       VerticalAlignment="Center"/>
-                            <ComboBox x:Name="PttDeviceCombo"
-                                      Style="{StaticResource GlowFocusComboBox}"
-                                      Width="250" Margin="8,0,0,0"
-                                      SelectionChanged="PttDeviceCombo_SelectionChanged"
-                                      ToolTip="Pick which connected HOTAS / joystick owns the PTT button."/>
-                            <Button Content="Refresh"
-                                    Style="{StaticResource GhostSecondaryButton}"
-                                    Margin="10,0,0,0" Click="PttRefreshDevices_Click"
-                                    ToolTip="Re-scan for connected DirectInput devices."/>
+                        <TextBlock Text="Push-to-Talk (HOTAS Voice Input)"
+                                   Style="{StaticResource H2Text}"/>
+                        <TextBlock Text="Assign a joystick button to trigger voice queries while flying."
+                                   Style="{StaticResource CaptionText}"
+                                   TextWrapping="Wrap" Margin="0,4,0,10"/>
+
+                        <!-- Three NeonToggleSwitches in a row -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <ToggleButton x:Name="PttEnabledCheck"
+                                              Style="{StaticResource NeonToggleSwitch}"
+                                              Click="PttEnabled_Click"
+                                              ToolTip="Turn HOTAS-button voice input on or off."/>
+                                <TextBlock Text="Enable Push-to-Talk"
+                                           Margin="8,0,0,0"
+                                           VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextPrimaryBrush}"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="24,0,0,0">
+                                <ToggleButton x:Name="PttSoundCheck"
+                                              Style="{StaticResource NeonToggleSwitch}"
+                                              IsChecked="True"
+                                              Click="PttSound_Click"
+                                              ToolTip="Play a short beep when listening starts and stops."/>
+                                <TextBlock Text="Activation sounds"
+                                           Margin="8,0,0,0"
+                                           VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextPrimaryBrush}"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="24,0,0,0">
+                                <ToggleButton x:Name="PttOverlayCheck"
+                                              Style="{StaticResource NeonToggleSwitch}"
+                                              IsChecked="True"
+                                              Click="PttOverlay_Click"
+                                              ToolTip="Show the always-on-top status overlay while flying."/>
+                                <TextBlock Text="Show overlay"
+                                           Margin="8,0,0,0"
+                                           VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextPrimaryBrush}"/>
+                            </StackPanel>
                         </StackPanel>
 
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                            <TextBlock Text="Button:"
-                                       Foreground="{StaticResource TextSecondaryBrush}"
-                                       VerticalAlignment="Center"/>
-                            <TextBlock x:Name="PttButtonLabel" Text="(none)"
-                                       Margin="8,0,0,0"
-                                       VerticalAlignment="Center"
-                                       Foreground="{StaticResource AccentCyanBrush}"
-                                       MinWidth="60"/>
-                            <Button x:Name="PttDetectButton" Content="Detect button"
-                                    Style="{StaticResource GhostSecondaryButton}"
-                                    Margin="10,0,0,0" Click="PttDetectButton_Click"
-                                    ToolTip="Press a HOTAS button next to assign it as the PTT trigger."/>
-                            <Button Content="Test beep"
-                                    Style="{StaticResource GhostSecondaryButton}"
-                                    Margin="8,0,0,0" Click="PttTestBeep_Click"
-                                    ToolTip="Play the activation beep so you can verify the output device."/>
-                        </StackPanel>
+                        <!-- Configure input: revealed only when PTT is enabled. -->
+                        <Expander x:Name="PttConfigureInputExpander"
+                                  Header="Configure input"
+                                  Style="{StaticResource NeumorphicExpander}"
+                                  IsExpanded="False"
+                                  Margin="0,0,0,4"
+                                  Visibility="{Binding ElementName=PttEnabledCheck, Path=IsChecked, Converter={StaticResource BoolToVisibilityConverter}}"
+                                  ToolTip="Pick the joystick, the trigger button, and how the button latches.">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <TextBlock Text="Device:"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               VerticalAlignment="Center"/>
+                                    <ComboBox x:Name="PttDeviceCombo"
+                                              Style="{StaticResource GlowFocusComboBox}"
+                                              Width="250" Margin="8,0,0,0"
+                                              SelectionChanged="PttDeviceCombo_SelectionChanged"
+                                              ToolTip="Pick which connected HOTAS / joystick owns the PTT button."/>
+                                    <Button Content="Refresh"
+                                            Style="{StaticResource GhostSecondaryButton}"
+                                            Margin="10,0,0,0" Click="PttRefreshDevices_Click"
+                                            ToolTip="Re-scan for connected DirectInput devices."/>
+                                </StackPanel>
 
-                        <!-- Mode pill segmented control -->
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                            <TextBlock Text="Mode:"
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <TextBlock Text="Button:"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="PttButtonLabel" Text="(none)"
+                                               Margin="8,0,0,0"
+                                               VerticalAlignment="Center"
+                                               Foreground="{StaticResource AccentCyanBrush}"
+                                               MinWidth="60"/>
+                                    <Button x:Name="PttDetectButton" Content="Detect button"
+                                            Style="{StaticResource GhostSecondaryButton}"
+                                            Margin="10,0,0,0" Click="PttDetectButton_Click"
+                                            ToolTip="Press a HOTAS button next to assign it as the PTT trigger."/>
+                                    <Button Content="Test beep"
+                                            Style="{StaticResource GhostSecondaryButton}"
+                                            Margin="8,0,0,0" Click="PttTestBeep_Click"
+                                            ToolTip="Play the activation beep so you can verify the output device."/>
+                                </StackPanel>
+
+                                <!-- Mode pill segmented control -->
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBlock Text="Mode:"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                    <Border CornerRadius="14"
+                                            Background="{StaticResource BgSunkenBrush}"
+                                            BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                            BorderThickness="1"
+                                            Padding="3"
+                                            Effect="{StaticResource SunkenDarkShadow}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <RadioButton x:Name="PttModeHold" Content="Hold to talk"
+                                                         Style="{StaticResource PillRadioButton}"
+                                                         IsChecked="True" Click="PttMode_Click"
+                                                         ToolTip="Hold the button while you speak; release to send."/>
+                                            <RadioButton x:Name="PttModeToggle" Content="Toggle (press to start/stop)"
+                                                         Style="{StaticResource PillRadioButton}"
+                                                         Click="PttMode_Click"
+                                                         ToolTip="Tap once to start listening, tap again to send."/>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </StackPanel>
+                        </Expander>
+
+                        <TextBlock x:Name="PttStatusText"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   Margin="0,8,0,0"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- ─────────────────────── Sim tab ──────────────────────── -->
+            <!-- DCS controller bindings import wizard. Gated by the
+                 Flight Sim profile (same rule as the Voice tab). -->
+            <Grid x:Name="SimTab" Visibility="Collapsed">
+                <Border x:Name="BindingsImportCard" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
+                    <StackPanel>
+                        <TextBlock Text="Import Controller Bindings"
+                                   Style="{StaticResource H2Text}"
+                                   ToolTip="Import flight-sim controller bindings into a document library so the AI can reference them."/>
+
+                        <!-- Step 0: Game selection ─────────────────────────── -->
+                        <StackPanel x:Name="BindingsStep0" Margin="0,8,0,0">
+                            <TextBlock Text="Select your game:"
                                        Foreground="{StaticResource TextSecondaryBrush}"
-                                       VerticalAlignment="Center" Margin="0,0,10,0"/>
-                            <Border CornerRadius="14"
-                                    Background="{StaticResource BgSunkenBrush}"
+                                       Margin="0,0,0,8"/>
+
+                            <!-- Segmented control: one raised card with three inner buttons -->
+                            <Border HorizontalAlignment="Left"
+                                    CornerRadius="10"
+                                    Background="{StaticResource RaisedSurfaceGradientBrush}"
                                     BorderBrush="{StaticResource SurfaceBorderBrush}"
                                     BorderThickness="1"
-                                    Padding="3"
-                                    Effect="{StaticResource SunkenDarkShadow}">
+                                    Padding="4"
+                                    Effect="{StaticResource RaisedDarkShadowSmall}">
                                 <StackPanel Orientation="Horizontal">
-                                    <RadioButton x:Name="PttModeHold" Content="Hold to talk"
-                                                 Style="{StaticResource PillRadioButton}"
-                                                 IsChecked="True" Click="PttMode_Click"
-                                                 ToolTip="Hold the button while you speak; release to send."/>
-                                    <RadioButton x:Name="PttModeToggle" Content="Toggle (press to start/stop)"
-                                                 Style="{StaticResource PillRadioButton}"
-                                                 Click="PttMode_Click"
-                                                 ToolTip="Tap once to start listening, tap again to send."/>
+                                    <Button Content="DCS World"
+                                            Style="{StaticResource SegmentedGameButton}"
+                                            Tag="Selected"
+                                            Click="BindingsDcsGame_Click"/>
+                                    <Button Content="IL-2 — Coming Soon"
+                                            Style="{StaticResource SegmentedGameButton}"
+                                            IsEnabled="False"/>
+                                    <Button Content="War Thunder — Coming Soon"
+                                            Style="{StaticResource SegmentedGameButton}"
+                                            IsEnabled="False"/>
                                 </StackPanel>
                             </Border>
                         </StackPanel>
-                    </StackPanel>
-                </Expander>
 
-                <TextBlock x:Name="PttStatusText"
-                           Foreground="{StaticResource TextSecondaryBrush}"
-                           Margin="0,8,0,0"/>
-            </StackPanel>
-        </Border>
-
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <!-- Row 6: Response TextBox (model output)                      -->
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <TextBox Grid.Row="6" x:Name="ResponseText"
-                 Style="{StaticResource GlowFocusTextBox}"
-                 AcceptsReturn="True"
-                 VerticalScrollBarVisibility="Auto"
-                 TextWrapping="Wrap"
-                 MinHeight="300"
-                 MaxHeight="500"
-                 ToolTip="The model's most recent answer. Streaming output appears here token-by-token."/>
-
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <!-- Row 7: Bottom Log + Advanced expander (Replay tour)         -->
-        <!-- ═══════════════════════════════════════════════════════════ -->
-        <Border Grid.Row="7" Style="{StaticResource NeumorphicCard}"
-                Margin="0,10,0,0" Padding="10">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*"/>
-                    <RowDefinition Height="Auto"/>
-                </Grid.RowDefinitions>
-                <Grid Grid.Row="0">
-                    <TextBox x:Name="LogText" Height="140"
-                             AcceptsReturn="True" IsReadOnly="True"
-                             VerticalScrollBarVisibility="Auto"
-                             TextWrapping="Wrap"
-                             Background="Transparent"
-                             BorderThickness="0"
-                             Foreground="{StaticResource AccentCyanBrush}"
-                             FontFamily="{StaticResource MonoFontFamily}"
-                             FontSize="13"
-                             ToolTip="Live log of background activity — Ollama, indexing, voice, PTT.">
-                        <TextBox.Resources>
-                            <Style TargetType="{x:Type ScrollViewer}"
-                                   BasedOn="{StaticResource SunkenLogViewer}"/>
-                        </TextBox.Resources>
-                    </TextBox>
-
-                    <!-- Empty state: Ollama is not running. Centered CTA covers the log. -->
-                    <Border x:Name="OllamaOfflineEmptyState"
-                            Background="{StaticResource BgBaseBrush}"
-                            Visibility="Collapsed">
-                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="380">
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,8">
-                                <theme:LedStatusIndicator State="Idle"
-                                                          VerticalAlignment="Center"
-                                                          Margin="0,0,8,0"/>
-                                <TextBlock Text="Ollama is offline"
-                                           Style="{StaticResource H2Text}"
-                                           Margin="0"/>
+                        <!-- Step 1: Folder detection ───────────────────────── -->
+                        <StackPanel x:Name="BindingsStep1" Visibility="Collapsed" Margin="0,10,0,0">
+                            <TextBlock x:Name="DcsFolderStatusText"
+                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                       TextWrapping="Wrap" Margin="0,0,0,10"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Browse manually"
+                                        Style="{StaticResource GhostSecondaryButton}"
+                                        Margin="0,0,8,0"
+                                        Click="BindingsBrowseFolder_Click"/>
+                                <Button x:Name="BindingsStep1NextButton"
+                                        Content="Scan for aircraft"
+                                        Style="{StaticResource TactilePrimaryButton}"
+                                        Margin="0,0,8,0"
+                                        Click="BindingsStep1Next_Click"/>
+                                <Button Content="← Back"
+                                        Style="{StaticResource GhostSecondaryButton}"
+                                        Click="BindingsStep1Back_Click"/>
                             </StackPanel>
-                            <TextBlock Text="Start the local server to send prompts and stream responses."
-                                       Style="{StaticResource CaptionText}"
-                                       TextAlignment="Center"
-                                       TextWrapping="Wrap"
-                                       Margin="0,0,0,12"/>
-                            <Button Content="Start Ollama"
-                                    Style="{StaticResource TactilePrimaryButton}"
-                                    HorizontalAlignment="Center"
-                                    Click="Start_Click"
-                                    ToolTip="Launch the local Ollama server from this SSD."/>
                         </StackPanel>
-                    </Border>
-                </Grid>
 
-                <Expander Grid.Row="1"
-                          Header="Advanced"
-                          Style="{StaticResource NeumorphicExpander}"
-                          IsExpanded="False"
-                          Margin="0,8,0,0"
-                          ToolTip="Less-used actions, such as replaying the guided tour.">
-                    <StackPanel Orientation="Horizontal">
-                        <Button Content="Replay tour"
-                                Style="{StaticResource GhostSecondaryButton}"
-                                Tag="{StaticResource AccentCyanBrush}"
-                                Click="ReplayTour_Click"
-                                ToolTip="Re-show the 4-step guided tour."/>
+                        <!-- Step 2: Aircraft selection ─────────────────────── -->
+                        <StackPanel x:Name="BindingsStep2" Visibility="Collapsed" Margin="0,10,0,0">
+                            <TextBlock x:Name="AircraftScanSummaryText"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       Margin="0,0,0,8"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <Button Content="Select All"
+                                        Style="{StaticResource GhostSecondaryButton}"
+                                        Margin="0,0,8,0"
+                                        Click="BindingsSelectAll_Click"/>
+                                <Button Content="Deselect All"
+                                        Style="{StaticResource GhostSecondaryButton}"
+                                        Click="BindingsDeselectAll_Click"/>
+                            </StackPanel>
+                            <ListView x:Name="AircraftList" Height="130" SelectionMode="Single"
+                                      Background="{StaticResource BgSunkenBrush}"
+                                      BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                      BorderThickness="1"
+                                      Foreground="{StaticResource TextPrimaryBrush}">
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                        <Setter Property="Padding" Value="4,2"/>
+                                        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                                        <Setter Property="Background" Value="Transparent"/>
+                                    </Style>
+                                </ListView.ItemContainerStyle>
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal">
+                                            <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                      IsEnabled="{Binding CanImport}"
+                                                      VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding DisplayLabel}"
+                                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                                       VerticalAlignment="Center" Margin="6,0,0,0"/>
+                                            <TextBlock Text=" (already imported)" VerticalAlignment="Center"
+                                                       Foreground="{StaticResource StatusWarningBrush}"
+                                                       FontStyle="Italic"
+                                                       Visibility="{Binding AlreadyImportedVisibility}"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                <Button x:Name="BindingsImportButton" Content="Import selected"
+                                        Style="{StaticResource TactilePrimaryButton}"
+                                        Margin="0,0,8,0"
+                                        Click="BindingsImport_Click"/>
+                                <Button Content="← Back"
+                                        Style="{StaticResource GhostSecondaryButton}"
+                                        Click="BindingsStep2Back_Click"/>
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!-- Step 3: Progress / results ─────────────────────── -->
+                        <StackPanel x:Name="BindingsStep3" Visibility="Collapsed" Margin="0,10,0,0">
+                            <TextBlock x:Name="BindingsProgressText"
+                                       Foreground="{StaticResource AccentCyanBrush}"
+                                       Margin="0,0,0,6" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="BindingsResultText" FontWeight="Bold"
+                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                       TextWrapping="Wrap" Margin="0,0,0,4"/>
+                            <TextBlock x:Name="BindingsErrorText"
+                                       Foreground="{StaticResource StatusDangerBrush}"
+                                       TextWrapping="Wrap" Margin="0,0,0,6"
+                                       Visibility="Collapsed"/>
+                            <TextBlock Text="These files are now in your document library. Rebuild the index to make them searchable."
+                                       Style="{StaticResource CaptionText}"
+                                       TextWrapping="Wrap" Margin="0,4,0,10"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Import again (overwrite)"
+                                        Style="{StaticResource GhostSecondaryButton}"
+                                        Margin="0,0,8,0"
+                                        Click="BindingsImportAgain_Click"/>
+                                <Button Content="Start over"
+                                        Style="{StaticResource GhostSecondaryButton}"
+                                        Click="BindingsStartOver_Click"/>
+                            </StackPanel>
+                        </StackPanel>
+
                     </StackPanel>
-                </Expander>
+                </Border>
             </Grid>
-        </Border>
+
+            <!-- ────────────────────── System tab ────────────────────── -->
+            <!-- System Compatibility probe + (stage 2) Dependencies. -->
+            <Grid x:Name="SystemTab" Visibility="Collapsed">
+                <Border x:Name="SystemCompatibilityCard" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="System Compatibility"
+                                       Style="{StaticResource H2Text}"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,12,0"/>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <theme:LedStatusIndicator x:Name="ReadinessLed"
+                                                          State="Idle"
+                                                          VerticalAlignment="Center"
+                                                          Margin="0,0,8,0"
+                                                          ToolTip="Overall readiness: green when all prerequisites are satisfied."/>
+                                <TextBlock x:Name="ReadinessSummaryText"
+                                           Text="Checking..."
+                                           VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextSecondaryBrush}"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <Expander x:Name="SystemDetailsExpander"
+                                  Header="System details"
+                                  Style="{StaticResource NeumorphicExpander}"
+                                  IsExpanded="False"
+                                  Margin="0,8,0,0"
+                                  ToolTip="Show GPU, CPU, OS, and per-dependency status.">
+                            <StackPanel>
+                                <TextBlock x:Name="CompatibilityGpuText"
+                                           Foreground="{StaticResource TextPrimaryBrush}"
+                                           ToolTip="Best GPU detected on this machine."/>
+                                <TextBlock x:Name="CompatibilityCpuText"
+                                           Foreground="{StaticResource TextPrimaryBrush}"
+                                           Margin="0,2,0,0"
+                                           ToolTip="CPU instruction set / architecture."/>
+                                <TextBlock x:Name="CompatibilityOsText"
+                                           Foreground="{StaticResource TextPrimaryBrush}"
+                                           Margin="0,2,0,0"
+                                           ToolTip="Detected operating system version."/>
+                                <TextBlock x:Name="CompatibilityDepsText"
+                                           Foreground="{StaticResource TextPrimaryBrush}"
+                                           Margin="0,2,0,0"
+                                           ToolTip="Whether all required runtimes / drivers are installed."/>
+                                <TextBlock Text="Ollama typically auto-selects best available backend. This app detects hardware for visibility."
+                                           Style="{StaticResource CaptionText}"
+                                           TextWrapping="Wrap" Margin="0,8,0,0"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                    <Button Content="Re-run dependency check"
+                                            Style="{StaticResource GhostSecondaryButton}"
+                                            Click="RerunDependencyCheck_Click"
+                                            ToolTip="Re-scan the machine and re-show the install prompt for anything missing."/>
+                                    <Button Content="Open prerequisites folder"
+                                            Style="{StaticResource GhostSecondaryButton}"
+                                            Margin="8,0,0,0"
+                                            Click="OpenPrereqsFolder_Click"
+                                            ToolTip="Open the offline installer bundle on the SSD."/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Expander>
+                    </StackPanel>
+                </Border>
+
+                <!-- Stage 2 placeholder: the modal DependencyInstallDialog
+                     stays as today; a future slice gives Dependencies a
+                     persistent surface here for re-install / re-verify. -->
+            </Grid>
+
+        </Grid>
     </Grid>
     </ScrollViewer>
 
