@@ -5,7 +5,10 @@
         Height="190"
         Width="420"
         WindowStartupLocation="CenterOwner"
-        ResizeMode="NoResize">
+        ResizeMode="NoResize"
+        Background="{StaticResource BgBaseBrush}"
+        Foreground="{StaticResource TextPrimaryBrush}"
+        FontFamily="{StaticResource PrimaryFontFamily}">
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -23,8 +26,16 @@
         </StackPanel>
 
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Content="Cancel" Width="90" Margin="0,0,8,0" Click="Cancel_Click"/>
-            <Button Content="Unlock" Width="90" IsDefault="True" Click="Unlock_Click"/>
+            <Button Content="Cancel"
+                    MinWidth="90"
+                    Margin="0,0,8,0"
+                    Style="{StaticResource GhostSecondaryButton}"
+                    Click="Cancel_Click"/>
+            <Button Content="Unlock"
+                    MinWidth="90"
+                    IsDefault="True"
+                    Style="{StaticResource TactilePrimaryButton}"
+                    Click="Unlock_Click"/>
         </StackPanel>
     </Grid>
 </Window>

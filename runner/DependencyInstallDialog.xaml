@@ -2,7 +2,10 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Offline first-run setup" Height="360" Width="640"
-        WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        Background="{StaticResource BgBaseBrush}"
+        Foreground="{StaticResource TextPrimaryBrush}"
+        FontFamily="{StaticResource PrimaryFontFamily}">
     <Grid Margin="12">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -13,7 +16,10 @@
         <TextBlock Text="This PC is missing required components to run Ollama offline."
                    TextWrapping="Wrap" FontWeight="SemiBold"/>
 
-        <ListBox Grid.Row="1" x:Name="MissingList" Margin="0,10,0,10">
+        <ListBox Grid.Row="1" x:Name="MissingList" Margin="0,10,0,10"
+                 Background="{StaticResource BgSunkenBrush}"
+                 BorderBrush="{StaticResource SurfaceBorderBrush}"
+                 BorderThickness="1">
             <ListBox.ItemTemplate>
                 <DataTemplate>
                     <CheckBox Content="{Binding DisplayLabel}" IsChecked="{Binding IsSelected}"/>
@@ -22,9 +28,18 @@
         </ListBox>
 
         <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Content="Install selected (recommended)" Click="InstallSelected_Click" Padding="10,5"/>
-            <Button Content="Skip (not recommended)" Margin="8,0,0,0" Click="Skip_Click" Padding="10,5"/>
-            <Button Content="Cancel / Exit" Margin="8,0,0,0" Click="CancelExit_Click" Padding="10,5"/>
+            <Button Content="Install selected (recommended)"
+                    Style="{StaticResource TactilePrimaryButton}"
+                    Click="InstallSelected_Click"/>
+            <Button Content="Skip (not recommended)"
+                    Margin="8,0,0,0"
+                    Style="{StaticResource GhostSecondaryButton}"
+                    Click="Skip_Click"/>
+            <Button Content="Cancel / Exit"
+                    Margin="8,0,0,0"
+                    Style="{StaticResource GhostSecondaryButton}"
+                    Tag="{StaticResource AccentMagentaBrush}"
+                    Click="CancelExit_Click"/>
         </StackPanel>
     </Grid>
 </Window>
