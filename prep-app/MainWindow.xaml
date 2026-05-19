@@ -3,7 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:theme="clr-namespace:FreeAiSsd.Shared.UI.Theme"
         xmlns:local="clr-namespace:FreeAiSsd.PrepApp"
-        Title="Free AI SSD - Host Setup" Height="900" Width="1020" MinHeight="768"
+        Title="Free AI SSD — Prep" Height="900" Width="1020"
+        MinHeight="620" MinWidth="760"
         Background="{StaticResource BgBaseBrush}"
         ToolTipService.InitialShowDelay="400"
         ToolTipService.BetweenShowDelay="200"
@@ -13,1041 +14,1113 @@
         <local:EmptyToVisibilityConverter x:Key="EmptyToVisibilityConverter"/>
     </Window.Resources>
 
-    <!-- Root Grid: main content + FTUE overlay layered on top. -->
-    <Grid>
-        <DockPanel LastChildFill="True">
-            <!-- ═════════════════════════════════════════════════════════════
-                 Elevation banner: persistent strip shown whenever PrepApp
-                 is running elevated. Unchanged from prior layout.
-                 ═════════════════════════════════════════════════════════════ -->
-            <Border DockPanel.Dock="Top"
-                    Background="{StaticResource AccentCyanBrush}"
-                    Padding="12,6"
-                    Visibility="{Binding IsElevated, Converter={StaticResource BoolToVisibilityConverter}}">
-                <StackPanel Orientation="Horizontal">
-                    <theme:LedStatusIndicator State="Ok" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <TextBlock Text="{Binding ElevationBannerText}"
-                               Foreground="{StaticResource BgBaseBrush}"
+    <!-- ═════════════════════════════════════════════════════════════════
+         One-step-at-a-time shell (replaces the prior two-tab window).
+         Persistent header (title + step counter + status) on top, footer
+         nav (Back / primary) at the bottom, exactly one step panel in the
+         body. The view-layer step machine lives in MainWindow.xaml.cs
+         (PrepFlowStep); the shared PrepViewModel is unchanged. See
+         docs/mac-ui-reference/RECONSTRUCTION.md §1, §3.
+         ═════════════════════════════════════════════════════════════════ -->
+    <DockPanel LastChildFill="True">
+        <!-- Elevation banner: persistent strip shown whenever PrepApp is
+             running elevated. Unchanged from the prior layout. -->
+        <Border DockPanel.Dock="Top"
+                Background="{StaticResource AccentCyanBrush}"
+                Padding="12,6"
+                Visibility="{Binding IsElevated, Converter={StaticResource BoolToVisibilityConverter}}">
+            <StackPanel Orientation="Horizontal">
+                <theme:LedStatusIndicator State="Ok" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <TextBlock Text="{Binding ElevationBannerText}"
+                           Foreground="{StaticResource BgBaseBrush}"
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Center"
+                           TextWrapping="Wrap"/>
+            </StackPanel>
+        </Border>
+
+        <DockPanel x:Name="Shell" Margin="20" LastChildFill="True">
+            <!-- ── Persistent header: brand title (left) + step counter and
+                 live status (right). Constant orientation, every step. ── -->
+            <Grid DockPanel.Dock="Top">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0"
+                           Text="Free AI SSD — Prep"
+                           Style="{StaticResource H2Text}"
+                           VerticalAlignment="Center"/>
+                <StackPanel Grid.Column="1" HorizontalAlignment="Right">
+                    <TextBlock x:Name="StepCounterText"
+                               Style="{StaticResource CaptionText}"
+                               Foreground="{StaticResource AccentCyanBrush}"
                                FontWeight="SemiBold"
-                               VerticalAlignment="Center"
-                               TextWrapping="Wrap"/>
+                               HorizontalAlignment="Right"/>
+                    <StackPanel Orientation="Horizontal"
+                                HorizontalAlignment="Right"
+                                Margin="0,4,0,0">
+                        <ProgressBar Width="160"
+                                     Style="{StaticResource GradientProgressBar}"
+                                     Value="{Binding ProgressValue}"
+                                     IsIndeterminate="{Binding ProgressIsIndeterminate}"/>
+                        <TextBlock Text="{Binding StatusText}"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   VerticalAlignment="Center"
+                                   Margin="8,0,0,0"/>
+                    </StackPanel>
                 </StackPanel>
-            </Border>
+            </Grid>
 
-            <Grid x:Name="RootContent" Margin="12,8,12,8">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="5*"/>
-                    <RowDefinition Height="1.5*"/>
-                </Grid.RowDefinitions>
+            <Border DockPanel.Dock="Top"
+                    Height="1"
+                    Background="{StaticResource SurfaceBorderBrush}"
+                    Margin="0,12,0,12"/>
 
-                <!-- Row 0: Two-tab control. Drive selector and warning strip
-                     moved INTO the Drive tab per the F3 restructure. -->
-                <TabControl x:Name="MainTabs"
-                            Grid.Row="0" Margin="0,0,0,8"
-                            Background="Transparent"
-                            BorderThickness="0">
+            <!-- ── Footer: secondary bottom-left (Back), primary bottom-right
+                 (Continue / Get started / Quit, default action). Labels and
+                 handlers are set per step in code-behind. ── -->
+            <Grid DockPanel.Dock="Bottom" Margin="0,12,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Button x:Name="BackButton"
+                        Grid.Column="0"
+                        Content="Back"
+                        Padding="14,5" MinHeight="0"
+                        Style="{StaticResource GhostSecondaryButton}"
+                        Click="OnBackClick"
+                        ToolTip="Return to the previous step. Nothing you entered is lost."/>
+                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <Button x:Name="CancelOpButton"
+                            Content="Cancel"
+                            Padding="12,5" MinHeight="0"
+                            Margin="0,0,8,0"
+                            Style="{StaticResource GhostSecondaryButton}"
+                            Tag="{StaticResource AccentMagentaBrush}"
+                            Command="{Binding CancelOperationCommand}"
+                            Visibility="{Binding IsModelOperationRunning, Converter={StaticResource BoolToVisibilityConverter}}"
+                            ToolTip="Abort the in-progress operation."/>
+                    <Button x:Name="PrimaryButton"
+                            Content="Continue"
+                            Padding="18,5" MinHeight="0"
+                            IsDefault="True"
+                            Style="{StaticResource TactilePrimaryButton}"
+                            Click="OnPrimaryClick"/>
+                </StackPanel>
+            </Grid>
 
-                    <!-- ═══════════════════════════════════════════════════
-                         Tab 0: Models — merged starter + configured grid.
-                         ═══════════════════════════════════════════════════ -->
-                    <TabItem Header="Models">
-                        <Border Style="{StaticResource NeumorphicCard}" Margin="0,4,0,0" Padding="10">
-                            <DockPanel>
-                                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel Grid.Column="0">
-                                            <TextBlock Text="Models"
-                                                       Style="{StaticResource H2Text}"
-                                                       FontSize="16"/>
-                                            <TextBlock Text="Pick one or more models to download onto your SSD."
-                                                       Style="{StaticResource CaptionText}"/>
-                                        </StackPanel>
-                                        <!-- C27 Stage 1: source dropdown sits between the title and
-                                             the Refresh button. Ollama covers the bundled catalog
-                                             plus live ollama.com/library scrape; Hugging Face covers
-                                             the HF Search API. Switching sources clears the catalog
-                                             and refetches via ActiveSourceChanged. -->
-                                        <ComboBox x:Name="SourceCombo"
-                                                  Grid.Column="1"
-                                                  MinWidth="140"
-                                                  Margin="0,0,8,0"
-                                                  VerticalAlignment="Top"
-                                                  SelectionChanged="SourceCombo_SelectionChanged"
-                                                  ToolTip="Pick where to browse models. Ollama (bundled + ollama.com) or Hugging Face (live GGUF Search API).">
-                                            <ComboBoxItem Content="Ollama" Tag="Ollama" IsSelected="True"/>
-                                            <ComboBoxItem Content="Hugging Face" Tag="HuggingFace"/>
-                                        </ComboBox>
-                                        <Button x:Name="RefreshCatalogButton"
-                                                Grid.Column="2"
-                                                Content="Refresh"
-                                                VerticalAlignment="Top"
-                                                Padding="10,4" MinHeight="0"
-                                                Style="{StaticResource GhostSecondaryButton}"
-                                                Click="RefreshCatalogButton_Click"
-                                                ToolTip="Fetch the latest model list from the selected source. The previous list stays in place if the fetch fails."/>
-                                    </Grid>
-                                    <TextBlock x:Name="StarterCatalogWarningText"
-                                               Foreground="{StaticResource StatusWarningBrush}"
-                                               Margin="0,4,0,0"
-                                               TextWrapping="Wrap"
-                                               Visibility="Collapsed"/>
-                                    <TextBlock x:Name="CatalogLastUpdatedText"
-                                               Style="{StaticResource CaptionText}"
-                                               Margin="0,4,0,0"
-                                               Visibility="Collapsed"/>
+            <!-- ── Activity log: the Windows equivalent of the Mac transient
+                 progress screens (A4/A5/A8). Demoted to a collapsed
+                 disclosure shown only on the operational steps; status +
+                 progress live in the header above. Single instance so the
+                 auto-scroll code-behind keeps one LogListBox. ── -->
+            <Expander x:Name="LogPanel"
+                      DockPanel.Dock="Bottom"
+                      Header="Activity log"
+                      Style="{StaticResource NeumorphicExpander}"
+                      IsExpanded="False"
+                      Visibility="Collapsed"
+                      Margin="0,12,0,0"
+                      ToolTip="Live output from formatting, model pulls, and finalize.">
+                <Grid Height="150" Margin="0,6,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <!-- MAC31: ANSI-stripped in-place pull progress line.
+                         Hidden when empty so the layout doesn't shift. -->
+                    <TextBlock Grid.Row="0"
+                               Text="{Binding PullProgressLine}"
+                               FontFamily="Consolas, Menlo, monospace"
+                               FontSize="12"
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               TextTrimming="CharacterEllipsis"
+                               Margin="0,0,0,4"
+                               Visibility="{Binding PullProgressLine, Converter={StaticResource EmptyToVisibilityConverter}, ConverterParameter=Inverted}"/>
+                    <Grid Grid.Row="1">
+                        <!--  ListBox keeps its internal ScrollViewer so UI
+                              virtualization stays active and ScrollIntoView
+                              (code-behind) keeps working.  -->
+                        <ListBox ItemsSource="{Binding LogLines}"
+                                 x:Name="LogListBox"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 Foreground="{StaticResource AccentCyanBrush}"
+                                 VerticalAlignment="Stretch"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto">
+                            <ListBox.Resources>
+                                <Style TargetType="{x:Type ScrollViewer}"
+                                       BasedOn="{StaticResource SunkenLogViewer}"/>
+                            </ListBox.Resources>
+                        </ListBox>
+                        <TextBlock Text="Actions will appear here"
+                                   Style="{StaticResource CaptionText}"
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   IsHitTestVisible="False"
+                                   Visibility="{Binding LogLines.Count, Converter={StaticResource EmptyToVisibilityConverter}}"/>
+                    </Grid>
+                </Grid>
+            </Expander>
 
-                                    <!-- C27 Stage 3: inline HF token entry. Visible only when
-                                         the Source dropdown is set to Hugging Face. The token
-                                         is pushed into the catalog service on PasswordChanged
-                                         so gated/private repos unlock immediately; persists
-                                         to PortableConfig.HuggingFaceToken at finalize time
-                                         (sealed under AES-256-GCM when encryption is on). -->
-                                    <Grid x:Name="HuggingFaceTokenRow"
-                                          Margin="0,8,0,0"
-                                          Visibility="{Binding IsHuggingFaceTokenFieldVisible, Converter={StaticResource BoolToVisibilityConverter}}">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Column="0"
-                                                   Text="HF token (optional)"
-                                                   Style="{StaticResource CaptionText}"
-                                                   VerticalAlignment="Center"
-                                                   Margin="0,0,8,0"
-                                                   ToolTip="Personal Hugging Face access token. Required for gated or private GGUF repos. Stored on the SSD; sealed with AES-256-GCM when SSD encryption is on. Leave blank for anonymous browsing."/>
-                                        <PasswordBox x:Name="HuggingFaceTokenBox"
-                                                     Grid.Column="1"
-                                                     Padding="8,4"
-                                                     VerticalAlignment="Center"
-                                                     PasswordChanged="HuggingFaceTokenBox_PasswordChanged"
-                                                     ToolTip="Paste your HF token (hf_...). Token never leaves this machine; sent only over HTTPS to huggingface.co."/>
-                                    </Grid>
-                                    <TextBlock x:Name="HuggingFaceTokenPlaintextWarning"
-                                               Margin="0,4,0,0"
-                                               Foreground="{StaticResource StatusWarningBrush}"
-                                               TextWrapping="Wrap"
-                                               Text="⚠ Encryption is off — your Hugging Face token will be stored in plaintext on the SSD. Enable encryption (Drive tab) for defense in depth."
-                                               Visibility="{Binding IsHuggingFaceTokenPlaintextWarningVisible, Converter={StaticResource BoolToVisibilityConverter}}"/>
+            <!-- ═══════════════════════════════════════════════════════════
+                 Step body. Exactly one child is visible at a time; the
+                 step controller in code-behind toggles Visibility. Every
+                 inner binding / x:Name / handler is carried over verbatim
+                 from the prior two-tab layout.
+                 ═══════════════════════════════════════════════════════════ -->
+            <Grid x:Name="StepHost">
 
-                                    <!-- F2a: search + Most popular cap. C26 adds the
-                                         limit dropdown next to the toggle. The Refresh
-                                         button stays in the title row above; this row
-                                         drives the DataGrid's CollectionView Filter via
-                                         PrepViewModel.IsModelRowVisible (wired in code-
-                                         behind, refreshed on ModelRowsViewInvalidated). -->
-                                    <Grid Margin="0,8,0,0">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <ToggleButton x:Name="MostPopularToggle"
-                                                      Grid.Column="0"
-                                                      Content="Most popular"
-                                                      Padding="10,4" MinHeight="0"
-                                                      VerticalAlignment="Center"
-                                                      IsChecked="{Binding ShowOnlyMostPopular, Mode=TwoWay}"
-                                                      ToolTip="Show only the top-N recommended models by ollama.com pull count. Click Refresh from Ollama first to populate pull counts on the bundled list."/>
-                                        <ComboBox x:Name="MostPopularLimitCombo"
-                                                  Grid.Column="1"
-                                                  MinWidth="64"
-                                                  Margin="6,0,0,0"
-                                                  VerticalAlignment="Center"
-                                                  SelectionChanged="MostPopularLimitCombo_SelectionChanged"
-                                                  ToolTip="Choose how many top entries the Most-popular toggle exposes. Sorted desc by pull count from the live ollama.com catalog.">
-                                            <ComboBoxItem Content="Top 10" Tag="10"/>
-                                            <ComboBoxItem Content="Top 15" Tag="15" IsSelected="True"/>
-                                            <ComboBoxItem Content="Top 25" Tag="25"/>
-                                            <ComboBoxItem Content="Top 50" Tag="50"/>
-                                        </ComboBox>
-                                        <TextBlock Grid.Column="2"
-                                                   Text="Search"
-                                                   Style="{StaticResource CaptionText}"
-                                                   VerticalAlignment="Center"
-                                                   Margin="14,0,6,0"/>
-                                        <TextBox x:Name="ModelSearchBox"
-                                                 Grid.Column="3"
-                                                 Padding="8,4"
-                                                 VerticalAlignment="Center"
-                                                 Style="{StaticResource GlowFocusTextBox}"
-                                                 Text="{Binding ModelSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                 ToolTip="Filter the grid by tag, tier, or capability description (case-insensitive). Under the Hugging Face source the box also drives a debounced server query."/>
-                                    </Grid>
-                                    <!-- M11: announce the visible row count + cap reason
-                                         when a filter is active. ollama.com's natural
-                                         order is already popularity-desc, so without
-                                         this caption the Most-popular toggle's effect
-                                         (grid shrinks to top 15) is easy to miss. -->
-                                    <TextBlock x:Name="StarterRowCountCaptionText"
-                                               Margin="0,4,0,0"
-                                               FontWeight="SemiBold"
-                                               Foreground="{StaticResource AccentCyanBrush}"
-                                               Text="{Binding StarterRowCountCaption}"
-                                               Visibility="{Binding StarterRowCountCaption, Converter={StaticResource EmptyToVisibilityConverter}, ConverterParameter=Inverted}"/>
-
-                                    <!-- C3 / C4 / C5: second filter row. Param cap dropdown
-                                         on the left, capability AND-toggles in the middle,
-                                         sort dropdown on the right. SelectionChanged handlers
-                                         in code-behind translate to the VM properties; the
-                                         capability ToggleButtons two-way bind via the four
-                                         FilterCapability* bool properties on PrepViewModel. -->
-                                    <Grid Margin="0,6,0,0">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto"/>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                                            <TextBlock Text="Max size"
-                                                       Style="{StaticResource CaptionText}"
-                                                       VerticalAlignment="Center"
-                                                       Margin="0,0,6,0"/>
-                                            <ComboBox x:Name="ParameterCapCombo"
-                                                      MinWidth="80"
-                                                      VerticalAlignment="Center"
-                                                      SelectedIndex="0"
-                                                      SelectionChanged="ParameterCapCombo_SelectionChanged"
-                                                      ToolTip="Hide models with a parameter count above the chosen cap. Models without a known size pass through (your existing config and on-disk models stay visible).">
-                                                <ComboBoxItem Content="All" Tag=""/>
-                                                <ComboBoxItem Content="≤7B" Tag="7"/>
-                                                <ComboBoxItem Content="≤14B" Tag="14"/>
-                                                <ComboBoxItem Content="≤30B" Tag="30"/>
-                                                <ComboBoxItem Content="≤70B" Tag="70"/>
-                                            </ComboBox>
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
-                                            <TextBlock Text="Capabilities"
-                                                       Style="{StaticResource CaptionText}"
-                                                       VerticalAlignment="Center"
-                                                       Margin="0,0,6,0"/>
-                                            <ToggleButton Content="tools" Padding="8,3" MinHeight="0" Margin="2,0"
-                                                          IsChecked="{Binding FilterCapabilityTools, Mode=TwoWay}"
-                                                          ToolTip="Show only models that advertise tool/function-calling support."/>
-                                            <ToggleButton Content="vision" Padding="8,3" MinHeight="0" Margin="2,0"
-                                                          IsChecked="{Binding FilterCapabilityVision, Mode=TwoWay}"
-                                                          ToolTip="Show only models that accept image input."/>
-                                            <ToggleButton Content="thinking" Padding="8,3" MinHeight="0" Margin="2,0"
-                                                          IsChecked="{Binding FilterCapabilityThinking, Mode=TwoWay}"
-                                                          ToolTip="Show only models with extended thinking / chain-of-thought support."/>
-                                            <ToggleButton Content="audio" Padding="8,3" MinHeight="0" Margin="2,0"
-                                                          IsChecked="{Binding FilterCapabilityAudio, Mode=TwoWay}"
-                                                          ToolTip="Show only models that accept audio input."/>
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                                            <TextBlock Text="Sort"
-                                                       Style="{StaticResource CaptionText}"
-                                                       VerticalAlignment="Center"
-                                                       Margin="0,0,6,0"/>
-                                            <ComboBox x:Name="SortModeCombo"
-                                                      MinWidth="100"
-                                                      VerticalAlignment="Center"
-                                                      SelectedIndex="0"
-                                                      SelectionChanged="SortModeCombo_SelectionChanged"
-                                                      ToolTip="Reorder the picker. Popular keeps the natural ollama.com order. Newest sorts by the scraped last-updated timestamp; entries without a timestamp sort last.">
-                                                <ComboBoxItem Content="Popular"/>
-                                                <ComboBoxItem Content="Newest"/>
-                                                <ComboBoxItem Content="A–Z"/>
-                                            </ComboBox>
-                                        </StackPanel>
-                                    </Grid>
-                                </StackPanel>
-
-                                <!-- Actions row: Download (primary), then ghost buttons. -->
-                                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
-                                    <Button x:Name="DownloadButton"
-                                            Content="Download"
-                                            Padding="12,4" MinHeight="0"
-                                            Style="{StaticResource TactilePrimaryButton}"
-                                            Command="{Binding DownloadCommand}"
-                                            ToolTip="Download and verify every checked model that is not already on the drive."/>
-                                    <Button Content="Remove" Margin="6,0,0,0"
-                                            Padding="10,4" MinHeight="0"
-                                            Style="{StaticResource GhostSecondaryButton}"
-                                            Tag="{StaticResource AccentMagentaBrush}"
-                                            Command="{Binding RemoveCommand}"
-                                            ToolTip="Apply one remove action to every checked model already in the configuration or on the drive."/>
-                                    <Button Content="Clear selection" Margin="6,0,0,0"
-                                            Padding="10,4" MinHeight="0"
-                                            Style="{StaticResource GhostSecondaryButton}"
-                                            Command="{Binding ClearSelectionCommand}"
-                                            ToolTip="Uncheck every row in the grid."/>
-                                    <Button Content="Cancel" Margin="14,0,0,0"
-                                            Padding="10,4" MinHeight="0"
-                                            Style="{StaticResource GhostSecondaryButton}"
-                                            Tag="{StaticResource AccentMagentaBrush}"
-                                            Command="{Binding CancelOperationCommand}"
-                                            Visibility="{Binding IsModelOperationRunning, Converter={StaticResource BoolToVisibilityConverter}}"
-                                            ToolTip="Abort the in-progress download."/>
-                                </StackPanel>
-
-                                <!-- Progressive disclosure: add custom tag. -->
-                                <Expander DockPanel.Dock="Bottom"
-                                          Header="Add custom model tag"
-                                          Style="{StaticResource NeumorphicExpander}"
-                                          IsExpanded="False"
-                                          Margin="0,8,0,0"
-                                          ToolTip="Add an Ollama model tag that isn't in the recommended list (e.g. llama3.2:3b, qwen2.5:3b).">
-                                    <StackPanel Orientation="Horizontal" Margin="4,6,0,4">
-                                        <TextBlock Text="Custom tag"
-                                                   Foreground="{StaticResource TextSecondaryBrush}"
-                                                   VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                        <TextBox Width="260"
-                                                 Style="{StaticResource GlowFocusTextBox}"
-                                                 Padding="8,4"
-                                                 Text="{Binding ModelTagInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                 IsEnabled="{Binding CanMutateDrive}"
-                                                 ToolTip="Ollama model tag to add as a Custom row (e.g. llama3.2:3b)."/>
-                                        <Button Content="Add" Margin="6,0,0,0"
-                                                Style="{StaticResource GhostSecondaryButton}"
-                                                Command="{Binding AddModelCommand}"
-                                                ToolTip="Append the typed tag to the grid under Tier 'Custom'."/>
-                                    </StackPanel>
-                                </Expander>
-
-                                <!-- Progressive disclosure: advanced operations. -->
-                                <Expander DockPanel.Dock="Bottom"
-                                          Header="Advanced"
-                                          Style="{StaticResource NeumorphicExpander}"
-                                          IsExpanded="False"
-                                          Margin="0,8,0,0"
-                                          ToolTip="Rarely-needed operations. Ignore unless you added models to the drive outside PrepApp.">
-                                    <StackPanel Orientation="Horizontal" Margin="4,6,0,4">
-                                        <Button Content="Re-register on-disk model"
-                                                Padding="10,4" MinHeight="0"
-                                                Style="{StaticResource GhostSecondaryButton}"
-                                                Command="{Binding AddOrphanToConfigCommand}"
-                                                ToolTip="Register checked 'On drive only' rows into the configuration so they appear as Downloaded."/>
-                                        <TextBlock Text="Show details"
-                                                   Style="{StaticResource CaptionText}"
-                                                   VerticalAlignment="Center"
-                                                   Margin="18,0,8,0"/>
-                                        <ToggleButton x:Name="ShowModelDetailsToggle"
-                                                      Style="{StaticResource NeonToggleSwitch}"
-                                                      IsChecked="False"
-                                                      ToolTip="Toggle the Sha256 and Last verified columns in the grid."/>
-                                    </StackPanel>
-                                </Expander>
-
-                                <!-- Merged grid. x:Name preserved so the FTUE
-                                     spotlight can target the same visual. -->
-                                <Border x:Name="StarterModelsCard"
-                                        Style="{StaticResource NeumorphicCard}"
-                                        Padding="8"
-                                        Margin="0,0,0,0">
-                                    <Grid>
-                                        <DataGrid x:Name="ModelStatusGrid"
-                                                  AutoGenerateColumns="False"
-                                                  IsReadOnly="False"
-                                                  HeadersVisibility="Column"
-                                                  CanUserAddRows="False"
-                                                  MinHeight="120"
-                                                  Background="Transparent"
-                                                  BorderThickness="0">
-                                            <!-- C25: capability pass-through marker.
-                                                 Rows with empty Capabilities (configured /
-                                                 on-disk / custom — anything outside the
-                                                 live scrape) survive the C4 chip filter
-                                                 via pass-through. The MultiDataTrigger
-                                                 mutes those rows only when at least one
-                                                 chip is engaged, so the picker stays
-                                                 quiet in the default view. -->
-                                            <DataGrid.RowStyle>
-                                                <Style TargetType="DataGridRow">
-                                                    <Style.Triggers>
-                                                        <!-- IsCapabilityFadeEligible AND's HF rows out
-                                                             of the trigger — they never carry HF API
-                                                             capability tags, so fading every one made
-                                                             them look disabled under any chip. -->
-                                                        <MultiDataTrigger>
-                                                            <MultiDataTrigger.Conditions>
-                                                                <Condition Binding="{Binding Capabilities.Count}" Value="0"/>
-                                                                <Condition Binding="{Binding IsCapabilityFadeEligible}" Value="True"/>
-                                                                <Condition Binding="{Binding DataContext.HasActiveCapabilityFilter, RelativeSource={RelativeSource AncestorType=DataGrid}}" Value="True"/>
-                                                            </MultiDataTrigger.Conditions>
-                                                            <Setter Property="Opacity" Value="0.55"/>
-                                                            <Setter Property="ToolTip" Value="No capability data for this entry — surviving the chip filter via pass-through. Refresh from Ollama to populate."/>
-                                                        </MultiDataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </DataGrid.RowStyle>
-                                            <DataGrid.GroupStyle>
-                                                <GroupStyle>
-                                                    <GroupStyle.HeaderTemplate>
-                                                        <DataTemplate>
-                                                            <TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="12" Margin="4,4,0,2"/>
-                                                        </DataTemplate>
-                                                    </GroupStyle.HeaderTemplate>
-                                                </GroupStyle>
-                                            </DataGrid.GroupStyle>
-                                            <DataGrid.Columns>
-                                                <DataGridTemplateColumn Header="Select" Width="Auto">
-                                                    <DataGridTemplateColumn.CellTemplate>
-                                                        <DataTemplate>
-                                                            <!-- IsRowSelectable disables HF parent rows
-                                                                 (IsExpandable=true). Ollama can't pull
-                                                                 `hf.co/owner/repo` without a quant suffix —
-                                                                 force the user through the chevron + a
-                                                                 quant child instead. -->
-                                                            <ToggleButton Style="{StaticResource NeonToggleSwitch}"
-                                                                          IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                                          IsEnabled="{Binding IsRowSelectable}"
-                                                                          HorizontalAlignment="Center">
-                                                                <ToggleButton.ToolTip>
-                                                                    <ToolTip>
-                                                                        <ToolTip.Style>
-                                                                            <Style TargetType="ToolTip">
-                                                                                <Setter Property="Visibility" Value="Collapsed"/>
-                                                                                <Style.Triggers>
-                                                                                    <DataTrigger Binding="{Binding IsExpandable}" Value="True">
-                                                                                        <Setter Property="Visibility" Value="Visible"/>
-                                                                                    </DataTrigger>
-                                                                                </Style.Triggers>
-                                                                            </Style>
-                                                                        </ToolTip.Style>
-                                                                        <TextBlock Text="Expand the chevron and pick a quant (e.g. Q4_K_M) — Ollama can't pull an HF repo without a quant tag."/>
-                                                                    </ToolTip>
-                                                                </ToggleButton.ToolTip>
-                                                            </ToggleButton>
-                                                        </DataTemplate>
-                                                    </DataGridTemplateColumn.CellTemplate>
-                                                </DataGridTemplateColumn>
-                                                <!-- C27 Stage 4: chevron column. Visible only on
-                                                     HF parent rows (IsExpandable=true). Toggles
-                                                     between ▶ collapsed and ▼ expanded; the click
-                                                     handler delegates to ToggleRepoExpansionAsync
-                                                     which lazy-fetches siblings on first expand. -->
-                                                <DataGridTemplateColumn Header="" Width="28">
-                                                    <DataGridTemplateColumn.CellTemplate>
-                                                        <DataTemplate>
-                                                            <!-- IsEnabled gating omitted: the VM's
-                                                                 ToggleRepoExpansionAsync no-ops if a
-                                                                 fetch is already in flight (parent.IsExpanding),
-                                                                 so a double-click is harmless. -->
-                                                            <Button Click="RepoExpandToggle_Click"
-                                                                    BorderThickness="0"
-                                                                    Background="Transparent"
-                                                                    Padding="2"
-                                                                    MinWidth="0" MinHeight="0"
-                                                                    HorizontalAlignment="Center"
-                                                                    Visibility="{Binding IsExpandable, Converter={StaticResource BoolToVisibilityConverter}}"
-                                                                    ToolTip="Show or hide the GGUF quants for this Hugging Face repo. First expand fetches sizes from huggingface.co.">
-                                                                <TextBlock FontFamily="Segoe UI Symbol"
-                                                                           FontSize="11">
-                                                                    <TextBlock.Style>
-                                                                        <Style TargetType="TextBlock">
-                                                                            <Setter Property="Text" Value="▶"/>
-                                                                            <Style.Triggers>
-                                                                                <DataTrigger Binding="{Binding IsExpanded}" Value="True">
-                                                                                    <Setter Property="Text" Value="▼"/>
-                                                                                </DataTrigger>
-                                                                                <DataTrigger Binding="{Binding IsExpanding}" Value="True">
-                                                                                    <Setter Property="Text" Value="…"/>
-                                                                                </DataTrigger>
-                                                                            </Style.Triggers>
-                                                                        </Style>
-                                                                    </TextBlock.Style>
-                                                                </TextBlock>
-                                                            </Button>
-                                                        </DataTemplate>
-                                                    </DataGridTemplateColumn.CellTemplate>
-                                                </DataGridTemplateColumn>
-                                                <DataGridTemplateColumn Header="Tag" Width="2*">
-                                                    <DataGridTemplateColumn.CellTemplate>
-                                                        <DataTemplate>
-                                                            <!-- C27 Stage 4: quant child rows render with a 20px
-                                                                 indent + ⌞ glyph so they nest visually under the
-                                                                 parent. Parent + non-HF rows have no indent. -->
-                                                            <StackPanel Orientation="Horizontal">
-                                                                <TextBlock Text="⌞ "
-                                                                           Foreground="{StaticResource AccentCyanBrush}"
-                                                                           Margin="14,0,2,0"
-                                                                           Visibility="{Binding IsQuantChild, Converter={StaticResource BoolToVisibilityConverter}}"/>
-                                                                <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
-                                                            </StackPanel>
-                                                        </DataTemplate>
-                                                    </DataGridTemplateColumn.CellTemplate>
-                                                </DataGridTemplateColumn>
-                                                <DataGridTextColumn Header="Tier" Binding="{Binding Tier}" Width="*" IsReadOnly="True"/>
-                                                <DataGridTextColumn Header="Best at" Binding="{Binding BestAt}" Width="3*" IsReadOnly="True"/>
-                                                <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="*" IsReadOnly="True"/>
-                                                <DataGridTextColumn Header="Size" Binding="{Binding SizeDisplay}" Width="*" IsReadOnly="True"/>
-                                                <DataGridTextColumn Header="Sizing" Binding="{Binding SizingWarning}" Width="2*" IsReadOnly="True"/>
-                                                <DataGridTextColumn x:Name="Sha256Column"
-                                                                    Header="Sha256"
-                                                                    Binding="{Binding ShaPreview}"
-                                                                    Width="*"
-                                                                    IsReadOnly="True"
-                                                                    Visibility="Collapsed"/>
-                                                <DataGridTextColumn x:Name="LastVerifiedColumn"
-                                                                    Header="Last verified"
-                                                                    Binding="{Binding LastVerifiedDisplay}"
-                                                                    Width="*"
-                                                                    IsReadOnly="True"
-                                                                    Visibility="Collapsed"/>
-                                            </DataGrid.Columns>
-                                        </DataGrid>
-
-                                        <!-- Empty state shown only while the grid has zero rows.
-                                             With the starter catalog populating rows by default
-                                             this is really a fallback for catalog-load failure. -->
-                                        <Border IsHitTestVisible="True"
-                                                Background="{StaticResource BgBaseBrush}"
-                                                Visibility="{Binding ModelRows.Count, Converter={StaticResource EmptyToVisibilityConverter}}">
-                                            <StackPanel HorizontalAlignment="Center"
-                                                        VerticalAlignment="Center"
-                                                        MaxWidth="360">
-                                                <Border Width="44" Height="44"
-                                                        CornerRadius="22"
-                                                        HorizontalAlignment="Center"
-                                                        Margin="0,0,0,6"
-                                                        Background="{StaticResource BgSunkenBrush}"
-                                                        BorderBrush="{StaticResource FocusBorderGradientBrush}"
-                                                        BorderThickness="1"
-                                                        Effect="{StaticResource HoverGlowCyan}">
-                                                    <TextBlock Text="&#x2737;"
-                                                               FontSize="20"
-                                                               HorizontalAlignment="Center"
-                                                               VerticalAlignment="Center"
-                                                               Foreground="{StaticResource AccentCyanBrush}"/>
-                                                </Border>
-                                                <TextBlock Text="No models yet"
-                                                           Style="{StaticResource H2Text}"
-                                                           FontSize="14"
-                                                           HorizontalAlignment="Center"/>
-                                                <TextBlock Text="Use 'Add custom model tag' below to enter an Ollama tag."
-                                                           Style="{StaticResource CaptionText}"
-                                                           TextAlignment="Center"
-                                                           TextWrapping="Wrap"
-                                                           Margin="0,2,0,0"/>
-                                            </StackPanel>
-                                        </Border>
-                                    </Grid>
-                                </Border>
-                            </DockPanel>
+                <!-- ───────────────────────── A1 — Welcome ───────────────────────── -->
+                <Grid x:Name="StepWelcome" Visibility="Collapsed">
+                    <StackPanel MaxWidth="640"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center">
+                        <TextBlock Text="Prepare a drive for Free AI SSD"
+                                   Style="{StaticResource H1Text}"/>
+                        <TextBlock Style="{StaticResource BodySecondaryText}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,8,0,0"
+                                   Text="This stages the Ollama runtime, the Free AI SSD Runner, and an encrypted configuration onto an external SSD so it runs fully offline. You'll pick a Runner profile, choose a drive, set it up, download models, then finalize."/>
+                        <TextBlock Style="{StaticResource BodySecondaryText}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,12,0,0"
+                                   Text="One SSD covers both layouts: keep everything on a single AI host PC, or stage the optional VR companion for a second machine over your LAN."/>
+                        <Border Margin="0,16,0,0"
+                                Padding="12,8"
+                                Background="{StaticResource BgRaisedBrush}"
+                                BorderBrush="{StaticResource StatusWarningBrush}"
+                                BorderThickness="1"
+                                CornerRadius="6">
+                            <StackPanel Orientation="Horizontal">
+                                <theme:LedStatusIndicator State="Error" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <TextBlock Text="The drive you choose will be erased. Back up anything on it first."
+                                           Foreground="{StaticResource StatusWarningBrush}"
+                                           VerticalAlignment="Center"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
                         </Border>
-                    </TabItem>
+                    </StackPanel>
+                </Grid>
 
-                    <!-- ═══════════════════════════════════════════════════
-                         Tab 1: Drive — selector + warning + prep + finalize.
-                         ═══════════════════════════════════════════════════ -->
-                    <TabItem Header="Drive">
-                        <Border Style="{StaticResource NeumorphicCard}" Margin="0,4,0,0" Padding="10">
-                            <StackPanel>
-                                <TextBlock Text="Drive"
-                                           Style="{StaticResource H2Text}"
-                                           FontSize="16"/>
-                                <TextBlock Text="Prepare and finalize the SSD."
-                                           Style="{StaticResource CaptionText}"
-                                           Margin="0,0,0,8"/>
+                <!-- ──────────────── Windows-only — Choose Runner profile ──────────────── -->
+                <Grid x:Name="StepProfile" Visibility="Collapsed">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <TextBlock Text="Choose your Runner profile"
+                                       Style="{StaticResource H2Text}"/>
+                            <TextBlock Text="This sets the default layout the Runner opens with. You can switch it later from the Runner main window."
+                                       Style="{StaticResource CaptionText}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,12"/>
 
-                                <Border x:Name="TwoMachineExplainerCard"
-                                        Style="{StaticResource NeumorphicCard}"
-                                        Padding="12"
-                                        Margin="0,0,0,10">
-                                    <StackPanel>
-                                        <TextBlock Text="Single PC or split-PC setup"
-                                                   Style="{StaticResource H2Text}"
-                                                   FontSize="14"/>
-                                        <TextBlock Text="One SSD can cover both layouts: keep everything on one AI host PC, or stage the optional VR companion for a second machine over LAN."
-                                                   Style="{StaticResource CaptionText}"
-                                                   TextWrapping="Wrap"
-                                                   Margin="0,2,0,0"/>
-                                        <Grid Margin="0,10,0,0">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*"/>
-                                                <ColumnDefinition Width="12"/>
-                                                <ColumnDefinition Width="*"/>
-                                            </Grid.ColumnDefinitions>
-                                            <Border Grid.Column="0"
-                                                    Background="{StaticResource BgRaisedBrush}"
-                                                    BorderBrush="{StaticResource SurfaceBorderBrush}"
-                                                    BorderThickness="1"
-                                                    CornerRadius="10"
-                                                    Padding="10">
-                                                <StackPanel>
-                                                    <TextBlock Text="AI host PC"
-                                                               Style="{StaticResource H2Text}"
-                                                               FontSize="13"/>
-                                                    <TextBlock Text="Runs the Runner app, Ollama runtime, and downloaded models from this SSD."
-                                                               Style="{StaticResource CaptionText}"
-                                                               TextWrapping="Wrap"
-                                                               Margin="0,4,0,0"/>
-                                                </StackPanel>
-                                            </Border>
-                                            <Border Grid.Column="2"
-                                                    Background="{StaticResource BgRaisedBrush}"
-                                                    BorderBrush="{StaticResource SurfaceBorderBrush}"
-                                                    BorderThickness="1"
-                                                    CornerRadius="10"
-                                                    Padding="10">
-                                                <StackPanel>
-                                                    <TextBlock Text="Optional VR PC"
-                                                               Style="{StaticResource H2Text}"
-                                                               FontSize="13"/>
-                                                    <TextBlock Text="Use the companion on a second machine while the AI host stays on your main PC. Configure its host address below if you need it."
-                                                               Style="{StaticResource CaptionText}"
-                                                               TextWrapping="Wrap"
-                                                               Margin="0,4,0,0"/>
-                                                </StackPanel>
-                                            </Border>
-                                        </Grid>
-                                    </StackPanel>
-                                </Border>
-
-                                <GroupBox x:Name="ProfileSelectionCard" Header="Runner profile" Margin="0,0,0,10">
-                                    <StackPanel Margin="8">
-                                        <TextBlock Text="Choose your default profile. You can switch it later from the Runner main window."
-                                                   Style="{StaticResource CaptionText}"
-                                                   TextWrapping="Wrap"/>
-                                        <UniformGrid Columns="2" Margin="0,10,0,0">
-                                            <Border x:Name="FlightSimProfileCard"
-                                                    Margin="0,0,8,0"
-                                                    CornerRadius="12"
-                                                    Background="{StaticResource BgRaisedBrush}"
-                                                    BorderBrush="{StaticResource SurfaceBorderBrush}"
-                                                    BorderThickness="2"
-                                                    Cursor="Hand"
-                                                    SnapsToDevicePixels="True"
-                                                    Effect="{StaticResource RaisedDarkShadow}"
-                                                    MouseLeftButtonDown="FlightSimProfileCard_Click"
-                                                    KeyDown="ProfileCard_KeyDown"
-                                                    Focusable="True">
-                                                <StackPanel Margin="16">
-                                                    <TextBlock Text="Flight Sim"
-                                                               Style="{StaticResource H2Text}"
-                                                               HorizontalAlignment="Center"/>
-                                                    <TextBlock Text="DCS bindings import, HOTAS push-to-talk, and voice defaults tuned for cockpit use."
-                                                               Style="{StaticResource CaptionText}"
-                                                               TextAlignment="Center"
-                                                               TextWrapping="Wrap"
-                                                               Margin="0,6,0,0"/>
-                                                </StackPanel>
-                                            </Border>
-                                            <Border x:Name="GeneralAssistantProfileCard"
-                                                    Margin="8,0,0,0"
-                                                    CornerRadius="12"
-                                                    Background="{StaticResource BgRaisedBrush}"
-                                                    BorderBrush="{StaticResource SurfaceBorderBrush}"
-                                                    BorderThickness="2"
-                                                    Cursor="Hand"
-                                                    SnapsToDevicePixels="True"
-                                                    Effect="{StaticResource RaisedDarkShadow}"
-                                                    MouseLeftButtonDown="GeneralAssistantProfileCard_Click"
-                                                    KeyDown="ProfileCard_KeyDown"
-                                                    Focusable="True">
-                                                <StackPanel Margin="16">
-                                                    <TextBlock Text="General Assistant"
-                                                               Style="{StaticResource H2Text}"
-                                                               HorizontalAlignment="Center"/>
-                                                    <TextBlock Text="Chat-first layout with docs/RAG focus and no flight-sim-only panels shown by default."
-                                                               Style="{StaticResource CaptionText}"
-                                                               TextAlignment="Center"
-                                                               TextWrapping="Wrap"
-                                                               Margin="0,6,0,0"/>
-                                                </StackPanel>
-                                            </Border>
-                                        </UniformGrid>
-                                        <Border Margin="0,10,0,0"
-                                                Padding="8,5"
+                            <Border x:Name="TwoMachineExplainerCard"
+                                    Style="{StaticResource NeumorphicCard}"
+                                    Padding="12"
+                                    Margin="0,0,0,10">
+                                <StackPanel>
+                                    <TextBlock Text="Single PC or split-PC setup"
+                                               Style="{StaticResource H2Text}"
+                                               FontSize="14"/>
+                                    <TextBlock Text="One SSD can cover both layouts: keep everything on one AI host PC, or stage the optional VR companion for a second machine over LAN."
+                                               Style="{StaticResource CaptionText}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,2,0,0"/>
+                                    <Grid Margin="0,10,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="12"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Border Grid.Column="0"
                                                 Background="{StaticResource BgRaisedBrush}"
                                                 BorderBrush="{StaticResource SurfaceBorderBrush}"
                                                 BorderThickness="1"
-                                                CornerRadius="6">
-                                            <Border.Style>
-                                                <Style TargetType="Border">
-                                                    <Setter Property="Visibility" Value="Visible"/>
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding ProfileSelectionWarning}" Value="">
-                                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                                        </DataTrigger>
-                                                        <DataTrigger Binding="{Binding ProfileSelectionWarning}" Value="{x:Null}">
-                                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </Border.Style>
-                                            <StackPanel Orientation="Horizontal">
-                                                <theme:LedStatusIndicator State="Error" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                                <TextBlock Text="{Binding ProfileSelectionWarning}"
-                                                           Foreground="{StaticResource AccentMagentaBrush}"
-                                                           VerticalAlignment="Center"
-                                                           TextWrapping="Wrap"/>
+                                                CornerRadius="10"
+                                                Padding="10">
+                                            <StackPanel>
+                                                <TextBlock Text="AI host PC"
+                                                           Style="{StaticResource H2Text}"
+                                                           FontSize="13"/>
+                                                <TextBlock Text="Runs the Runner app, Ollama runtime, and downloaded models from this SSD."
+                                                           Style="{StaticResource CaptionText}"
+                                                           TextWrapping="Wrap"
+                                                           Margin="0,4,0,0"/>
                                             </StackPanel>
                                         </Border>
-                                    </StackPanel>
-                                </GroupBox>
-
-                                <!-- Drive selector. x:Name preserved for FTUE step 3. -->
-                                <StackPanel x:Name="TargetDriveRow" Orientation="Horizontal" Margin="0,0,0,10">
-                                    <TextBlock Text="Target drive:"
-                                               Foreground="{StaticResource TextSecondaryBrush}"
-                                               VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                    <ComboBox Width="500"
-                                              Style="{StaticResource GlowFocusComboBox}"
-                                              DisplayMemberPath="Name"
-                                              ItemsSource="{Binding Drives}"
-                                              SelectedItem="{Binding SelectedDrive, Mode=TwoWay}"
-                                              ToolTip="The SSD where Ollama and models will be installed."/>
-                                    <Button Content="Refresh" Margin="8,0,0,0"
-                                            Style="{StaticResource GhostSecondaryButton}"
-                                            Command="{Binding RefreshDrivesCommand}"
-                                            ToolTip="Re-scan connected drives and update the list."/>
+                                        <Border Grid.Column="2"
+                                                Background="{StaticResource BgRaisedBrush}"
+                                                BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="10"
+                                                Padding="10">
+                                            <StackPanel>
+                                                <TextBlock Text="Optional VR PC"
+                                                           Style="{StaticResource H2Text}"
+                                                           FontSize="13"/>
+                                                <TextBlock Text="Use the companion on a second machine while the AI host stays on your main PC. Configure its host address in the next step if you need it."
+                                                           Style="{StaticResource CaptionText}"
+                                                           TextWrapping="Wrap"
+                                                           Margin="0,4,0,0"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
                                 </StackPanel>
+                            </Border>
 
-                                <!-- Warning strip promoted to a prominent spot
-                                     at the top of the Drive tab. -->
-                                <Border Margin="0,0,0,10" Padding="8,5"
-                                        Background="{StaticResource BgRaisedBrush}"
-                                        BorderBrush="{StaticResource SurfaceBorderBrush}"
-                                        BorderThickness="1" CornerRadius="6">
-                                    <Border.Style>
-                                        <Style TargetType="Border">
-                                            <Setter Property="Visibility" Value="Visible"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding SelectedDriveWarning}" Value="">
-                                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                                </DataTrigger>
-                                                <DataTrigger Binding="{Binding SelectedDriveWarning}" Value="{x:Null}">
-                                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </Border.Style>
-                                    <StackPanel Orientation="Horizontal">
-                                        <theme:LedStatusIndicator State="Error" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                        <TextBlock Text="{Binding SelectedDriveWarning}"
-                                                   Foreground="{StaticResource AccentMagentaBrush}"
-                                                   VerticalAlignment="Center"
-                                                   TextWrapping="Wrap"/>
-                                    </StackPanel>
-                                </Border>
-
-                                <!-- C6: contextual banner shown when the selected drive
-                                     was previously prepared by Free-AI-SSD. Offers two
-                                     skip-format paths and disables the Drive-preparation
-                                     controls below. -->
-                                <Border Margin="0,0,0,10" Padding="10,8"
-                                        Background="{StaticResource BgRaisedBrush}"
-                                        BorderBrush="{StaticResource AccentCyanBrush}"
-                                        BorderThickness="1" CornerRadius="6"
-                                        Visibility="{Binding ShowAlreadyConfiguredBanner, Converter={StaticResource BoolToVisibilityConverter}}">
-                                    <StackPanel>
+                            <GroupBox x:Name="ProfileSelectionCard" Header="Runner profile" Margin="0,0,0,10">
+                                <StackPanel Margin="8">
+                                    <TextBlock Text="Choose your default profile. You can switch it later from the Runner main window."
+                                               Style="{StaticResource CaptionText}"
+                                               TextWrapping="Wrap"/>
+                                    <UniformGrid Columns="2" Margin="0,10,0,0">
+                                        <Border x:Name="FlightSimProfileCard"
+                                                Margin="0,0,8,0"
+                                                CornerRadius="12"
+                                                Background="{StaticResource BgRaisedBrush}"
+                                                BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                                BorderThickness="2"
+                                                Cursor="Hand"
+                                                SnapsToDevicePixels="True"
+                                                Effect="{StaticResource RaisedDarkShadow}"
+                                                MouseLeftButtonDown="FlightSimProfileCard_Click"
+                                                KeyDown="ProfileCard_KeyDown"
+                                                Focusable="True">
+                                            <StackPanel Margin="16">
+                                                <TextBlock Text="Flight Sim"
+                                                           Style="{StaticResource H2Text}"
+                                                           HorizontalAlignment="Center"/>
+                                                <TextBlock Text="DCS bindings import, HOTAS push-to-talk, and voice defaults tuned for cockpit use."
+                                                           Style="{StaticResource CaptionText}"
+                                                           TextAlignment="Center"
+                                                           TextWrapping="Wrap"
+                                                           Margin="0,6,0,0"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <Border x:Name="GeneralAssistantProfileCard"
+                                                Margin="8,0,0,0"
+                                                CornerRadius="12"
+                                                Background="{StaticResource BgRaisedBrush}"
+                                                BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                                BorderThickness="2"
+                                                Cursor="Hand"
+                                                SnapsToDevicePixels="True"
+                                                Effect="{StaticResource RaisedDarkShadow}"
+                                                MouseLeftButtonDown="GeneralAssistantProfileCard_Click"
+                                                KeyDown="ProfileCard_KeyDown"
+                                                Focusable="True">
+                                            <StackPanel Margin="16">
+                                                <TextBlock Text="General Assistant"
+                                                           Style="{StaticResource H2Text}"
+                                                           HorizontalAlignment="Center"/>
+                                                <TextBlock Text="Chat-first layout with docs/RAG focus and no flight-sim-only panels shown by default."
+                                                           Style="{StaticResource CaptionText}"
+                                                           TextAlignment="Center"
+                                                           TextWrapping="Wrap"
+                                                           Margin="0,6,0,0"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </UniformGrid>
+                                    <Border Margin="0,10,0,0"
+                                            Padding="8,5"
+                                            Background="{StaticResource BgRaisedBrush}"
+                                            BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="6">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding ProfileSelectionWarning}" Value="">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding ProfileSelectionWarning}" Value="{x:Null}">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
                                         <StackPanel Orientation="Horizontal">
-                                            <theme:LedStatusIndicator State="Ok" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                            <TextBlock Text="{Binding AlreadyConfiguredBannerText}"
-                                                       Foreground="{StaticResource AccentCyanBrush}"
+                                            <theme:LedStatusIndicator State="Error" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                            <TextBlock Text="{Binding ProfileSelectionWarning}"
+                                                       Foreground="{StaticResource AccentMagentaBrush}"
                                                        VerticalAlignment="Center"
                                                        TextWrapping="Wrap"/>
                                         </StackPanel>
-                                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                            <Button Content="Manage models"
-                                                    Padding="14,4" MinHeight="0"
-                                                    Style="{StaticResource TactilePrimaryButton}"
-                                                    Command="{Binding ManageModelsCommand}"
-                                                    Visibility="{Binding ShowManageModelsButton, Converter={StaticResource BoolToVisibilityConverter}}"
-                                                    ToolTip="Switch to the Models tab to add or remove models on this SSD."/>
-                                            <!-- C7: Unlock visible only on encrypted + not-yet-unlocked drives. Once unlocked, the green banner below replaces this button. -->
-                                            <Button Content="Unlock…" Margin="8,0,0,0"
-                                                    Padding="14,4" MinHeight="0"
-                                                    Style="{StaticResource GhostSecondaryButton}"
-                                                    Command="{Binding UnlockCommand}"
-                                                    Visibility="{Binding ShowUnlockButton, Converter={StaticResource BoolToVisibilityConverter}}"
-                                                    ToolTip="Prompt for the SSD passphrase so Add and Remove become enabled for this session."/>
-                                            <Button Content="Start over (formats drive)" Margin="8,0,0,0"
-                                                    Padding="14,4" MinHeight="0"
-                                                    Style="{StaticResource GhostSecondaryButton}"
-                                                    Command="{Binding StartOverCommand}"
-                                                    Visibility="{Binding ShowStartOverButton, Converter={StaticResource BoolToVisibilityConverter}}"
-                                                    ToolTip="Erase this SSD and run the full prep flow again. All models, configuration, and documents will be lost."/>
-                                        </StackPanel>
-                                        <!-- C7: green confirmation that the SSD is unlocked for the current session. Mirrors the Mac PrepApp's banner. -->
-                                        <Border Margin="0,8,0,0" Padding="10,6"
-                                                Background="{StaticResource BgRaisedBrush}"
-                                                BorderBrush="{StaticResource StatusSuccessBrush}"
-                                                BorderThickness="1" CornerRadius="6"
-                                                Visibility="{Binding ShowSessionUnlockedBanner, Converter={StaticResource BoolToVisibilityConverter}}">
-                                            <StackPanel Orientation="Horizontal">
-                                                <theme:LedStatusIndicator State="Ok" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                                <TextBlock Text="Unlocked for this session. Add and Remove enabled."
-                                                           Foreground="{StaticResource StatusSuccessBrush}"
-                                                           VerticalAlignment="Center"
-                                                           TextWrapping="Wrap"/>
-                                            </StackPanel>
-                                        </Border>
-                                    </StackPanel>
-                                </Border>
+                                    </Border>
+                                </StackPanel>
+                            </GroupBox>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
 
-                                <GroupBox Header="Drive preparation" Margin="0,0,0,10"
-                                          IsEnabled="{Binding CanInitiateFreshFormat}">
-                                    <StackPanel Margin="8">
-                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                            <TextBlock Text="Prep targets:"
-                                                       Foreground="{StaticResource TextSecondaryBrush}"
-                                                       VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                            <CheckBox Content="Prepare for Windows"
-                                                      Foreground="{StaticResource TextSecondaryBrush}"
-                                                      IsChecked="{Binding PrepareWindows, Mode=TwoWay}"
-                                                      Margin="0,0,10,0"
-                                                      ToolTip="Stage artifacts so the SSD can boot the Windows runner."/>
-                                            <CheckBox Content="Prepare for macOS"
-                                                      Foreground="{StaticResource TextSecondaryBrush}"
-                                                      IsChecked="{Binding PrepareMac, Mode=TwoWay}"
-                                                      IsEnabled="{Binding IsMacPrepAvailable}"
-                                                      ToolTip="Stage artifacts so the SSD can boot the macOS runner. Requires the mac-runner payload."/>
-                                        </StackPanel>
-                                        <TextBlock Text="{Binding MacPrepAvailabilityMessage}"
-                                                   Margin="0,0,0,8"
-                                                   Foreground="{StaticResource StatusWarningBrush}"
+                <!-- ───────────────────── A2 — Drive selection ───────────────────── -->
+                <Grid x:Name="StepDrive" Visibility="Collapsed">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <TextBlock Text="Pick a drive to prepare"
+                                       Style="{StaticResource H2Text}"/>
+                            <TextBlock Text="Choose the external SSD where the Runner payload, Ollama runtime, and models will be staged."
+                                       Style="{StaticResource CaptionText}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,12"/>
+
+                            <!-- Drive selector. x:Name preserved. -->
+                            <StackPanel x:Name="TargetDriveRow" Orientation="Horizontal" Margin="0,0,0,10">
+                                <TextBlock Text="Target drive:"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <ComboBox Width="500"
+                                          Style="{StaticResource GlowFocusComboBox}"
+                                          DisplayMemberPath="Name"
+                                          ItemsSource="{Binding Drives}"
+                                          SelectedItem="{Binding SelectedDrive, Mode=TwoWay}"
+                                          ToolTip="The SSD where Ollama and models will be installed."/>
+                                <Button Content="Refresh" Margin="8,0,0,0"
+                                        Style="{StaticResource GhostSecondaryButton}"
+                                        Command="{Binding RefreshDrivesCommand}"
+                                        ToolTip="Re-scan connected drives and update the list."/>
+                            </StackPanel>
+
+                            <!-- Selected-drive warning strip. -->
+                            <Border Margin="0,0,0,10" Padding="8,5"
+                                    Background="{StaticResource BgRaisedBrush}"
+                                    BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                    BorderThickness="1" CornerRadius="6">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Visibility" Value="Visible"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedDriveWarning}" Value="">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding SelectedDriveWarning}" Value="{x:Null}">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <StackPanel Orientation="Horizontal">
+                                    <theme:LedStatusIndicator State="Error" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBlock Text="{Binding SelectedDriveWarning}"
+                                               Foreground="{StaticResource AccentMagentaBrush}"
+                                               VerticalAlignment="Center"
+                                               TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- C6: contextual banner shown when the selected drive
+                                 was previously prepared by Free-AI-SSD. Offers the
+                                 manage / unlock / start-over (off-linear) paths. -->
+                            <Border Margin="0,0,0,10" Padding="10,8"
+                                    Background="{StaticResource BgRaisedBrush}"
+                                    BorderBrush="{StaticResource AccentCyanBrush}"
+                                    BorderThickness="1" CornerRadius="6"
+                                    Visibility="{Binding ShowAlreadyConfiguredBanner, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <theme:LedStatusIndicator State="Ok" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <TextBlock Text="{Binding AlreadyConfiguredBannerText}"
+                                                   Foreground="{StaticResource AccentCyanBrush}"
+                                                   VerticalAlignment="Center"
                                                    TextWrapping="Wrap"/>
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="Volume label:"
-                                                       Foreground="{StaticResource TextSecondaryBrush}"
-                                                       VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                            <TextBox Width="240"
-                                                     Style="{StaticResource GlowFocusTextBox}"
-                                                     Padding="8,4"
-                                                     Text="{Binding VolumeLabel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                     ToolTip="Filesystem label written when the drive is formatted."/>
-                                            <Button Content="Format drive" Margin="10,0,0,0"
-                                                    Padding="10,4" MinHeight="0"
-                                                    Style="{StaticResource TactilePrimaryButton}"
-                                                    Command="{Binding FormatPrepareCommand}"
-                                                    ToolTip="Erase and re-layout the target drive for Free AI SSD use. Destroys existing data."/>
-                                        </StackPanel>
-                                        <CheckBox Margin="0,10,0,0"
-                                                  Foreground="{StaticResource TextSecondaryBrush}"
-                                                  Content="Encrypt SSD config (optional, recommended for Network Mode)"
-                                                  IsChecked="{Binding EnableEncryption, Mode=TwoWay}"
-                                                  IsEnabled="{Binding CanMutateDrive}"
-                                                  ToolTip="Wrap portable-config.json with a passphrase-derived key. The runner will prompt for the passphrase on every launch. Required if you plan to expose the Runner API on your LAN — your API key is only stored encrypted."/>
-                                        <TextBlock Margin="22,4,0,0"
-                                                   FontSize="11"
-                                                   Foreground="{StaticResource TextSecondaryBrush}"
-                                                   TextWrapping="Wrap"
-                                                   Text="Off by default. Enable Network Mode requires this on (the LAN API key is never written in plaintext)."/>
                                     </StackPanel>
-                                </GroupBox>
-
-                                <GroupBox Header="VR companion (optional)" Margin="0,0,0,10">
-                                    <StackPanel Margin="8">
-                                        <CheckBox Foreground="{StaticResource TextSecondaryBrush}"
-                                                  Content="Install VR-machine companion on SSD (for split-PC setups)"
-                                                  IsChecked="{Binding InstallVrCompanion, Mode=TwoWay}"
-                                                  IsEnabled="{Binding CanMutateDrive}"
-                                                  ToolTip="Copy the VR companion client so the SSD can bridge to a separate AI host over the network."/>
-                                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                                            <TextBlock Text="AI host IP/hostname:"
-                                                       Foreground="{StaticResource TextSecondaryBrush}"
-                                                       VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                            <TextBox Width="220"
-                                                     Style="{StaticResource GlowFocusTextBox}"
-                                                     Padding="8,4"
-                                                     Text="{Binding CompanionHostAddress, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                     ToolTip="Address the VR companion should reach out to for inference."/>
-                                            <TextBlock Text="Port:"
-                                                       Foreground="{StaticResource TextSecondaryBrush}"
-                                                       VerticalAlignment="Center" Margin="10,0,6,0"/>
-                                            <TextBox Width="80"
-                                                     Style="{StaticResource GlowFocusTextBox}"
-                                                     Padding="8,4"
-                                                     Text="{Binding CompanionHostPort, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                     ToolTip="TCP port the AI host is listening on (default 41555)."/>
-                                        </StackPanel>
-                                    </StackPanel>
-                                </GroupBox>
-
-                                <GroupBox Header="Finish &amp; readiness" Margin="0,0,0,10">
-                                    <StackPanel Margin="8">
-                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                            <Button Content="Finish setup"
-                                                    Padding="10,4" MinHeight="0"
-                                                    Style="{StaticResource TactilePrimaryButton}"
-                                                    Command="{Binding FinalizeCommand}"
-                                                    ToolTip="Write the final manifest and lock the drive layout for runtime use."/>
-                                            <Button Content="Run checks"
-                                                    Padding="10,4" MinHeight="0" Margin="8,0,0,0"
-                                                    Style="{StaticResource GhostSecondaryButton}"
-                                                    Command="{Binding CheckReadinessCommand}"
-                                                    ToolTip="Run the readiness diagnostics against the currently selected drive."/>
-                                        </StackPanel>
-                                        <TextBlock Foreground="{StaticResource StatusInfoBrush}" Margin="0,0,0,4"
-                                                   Text="{Binding PrereqStatusText}"/>
-
-                                        <DataGrid AutoGenerateColumns="False"
-                                                  IsReadOnly="True"
-                                                  CanUserAddRows="False"
-                                                  HeadersVisibility="Column"
-                                                  MinHeight="80"
-                                                  MaxHeight="240"
-                                                  Background="Transparent"
-                                                  BorderThickness="0"
-                                                  ItemsSource="{Binding ReadinessItems}">
-                                            <DataGrid.Columns>
-                                                <DataGridTextColumn Header="Check" Binding="{Binding Check}" Width="2*"/>
-                                                <DataGridTextColumn Header="Result" Binding="{Binding Result}" Width="3*"/>
-                                            </DataGrid.Columns>
-                                        </DataGrid>
-                                    </StackPanel>
-                                </GroupBox>
-
-                                <Expander Header="Advanced"
-                                          Style="{StaticResource NeumorphicExpander}"
-                                          IsExpanded="False"
-                                          Margin="0,0,0,0"
-                                          ToolTip="Rarely-used settings: listing fixed drives, manual update check.">
-                                    <StackPanel Margin="8">
-                                        <CheckBox VerticalAlignment="Center"
-                                                  Foreground="{StaticResource TextSecondaryBrush}"
-                                                  Content="Show fixed drives (advanced)"
-                                                  IsChecked="{Binding ShowFixedDrives, Mode=TwoWay}"
-                                                  Margin="0,0,0,8"
-                                                  ToolTip="Include non-removable drives in the Target drive list. Only for power users."/>
-                                        <Button Content="Check for updates"
-                                                HorizontalAlignment="Left"
-                                                Padding="10,4" MinHeight="0"
+                                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                        <Button Content="Manage models"
+                                                Padding="14,4" MinHeight="0"
+                                                Style="{StaticResource TactilePrimaryButton}"
+                                                Command="{Binding ManageModelsCommand}"
+                                                Visibility="{Binding ShowManageModelsButton, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                ToolTip="Open the model picker for this SSD to add or remove models without reformatting."/>
+                                        <!-- C7: Unlock visible only on encrypted + not-yet-unlocked drives. -->
+                                        <Button Content="Unlock…" Margin="8,0,0,0"
+                                                Padding="14,4" MinHeight="0"
                                                 Style="{StaticResource GhostSecondaryButton}"
-                                                Command="{Binding CheckPrereqUpdatesCommand}"
-                                                ToolTip="Query the prereq manifest for newer installer versions."/>
+                                                Command="{Binding UnlockCommand}"
+                                                Visibility="{Binding ShowUnlockButton, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                ToolTip="Prompt for the SSD passphrase so Add and Remove become enabled for this session."/>
+                                        <Button Content="Start over (formats drive)" Margin="8,0,0,0"
+                                                Padding="14,4" MinHeight="0"
+                                                Style="{StaticResource GhostSecondaryButton}"
+                                                Command="{Binding StartOverCommand}"
+                                                Visibility="{Binding ShowStartOverButton, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                ToolTip="Erase this SSD and run the full prep flow again. All models, configuration, and documents will be lost."/>
                                     </StackPanel>
-                                </Expander>
+                                    <!-- C7: green confirmation that the SSD is unlocked for the current session. -->
+                                    <Border Margin="0,8,0,0" Padding="10,6"
+                                            Background="{StaticResource BgRaisedBrush}"
+                                            BorderBrush="{StaticResource StatusSuccessBrush}"
+                                            BorderThickness="1" CornerRadius="6"
+                                            Visibility="{Binding ShowSessionUnlockedBanner, Converter={StaticResource BoolToVisibilityConverter}}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <theme:LedStatusIndicator State="Ok" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                            <TextBlock Text="Unlocked for this session. Add and Remove enabled."
+                                                       Foreground="{StaticResource StatusSuccessBrush}"
+                                                       VerticalAlignment="Center"
+                                                       TextWrapping="Wrap"/>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+
+                <!-- ─────────────── Windows-only — Format setup (A6-ish) ─────────────── -->
+                <Grid x:Name="StepFormatSetup" Visibility="Collapsed">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <TextBlock Text="Set up the drive"
+                                       Style="{StaticResource H2Text}"/>
+                            <TextBlock Text="Choose what to stage, name the volume, and decide on encryption. Format the drive when you're ready — you'll be asked to confirm before anything is erased."
+                                       Style="{StaticResource CaptionText}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,12"/>
+
+                            <GroupBox Header="Drive preparation" Margin="0,0,0,10"
+                                      IsEnabled="{Binding CanInitiateFreshFormat}">
+                                <StackPanel Margin="8">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                        <TextBlock Text="Prep targets:"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                                   VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <CheckBox Content="Prepare for Windows"
+                                                  Foreground="{StaticResource TextSecondaryBrush}"
+                                                  IsChecked="{Binding PrepareWindows, Mode=TwoWay}"
+                                                  Margin="0,0,10,0"
+                                                  ToolTip="Stage artifacts so the SSD can boot the Windows runner."/>
+                                        <CheckBox Content="Prepare for macOS"
+                                                  Foreground="{StaticResource TextSecondaryBrush}"
+                                                  IsChecked="{Binding PrepareMac, Mode=TwoWay}"
+                                                  IsEnabled="{Binding IsMacPrepAvailable}"
+                                                  ToolTip="Stage artifacts so the SSD can boot the macOS runner. Requires the mac-runner payload."/>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding MacPrepAvailabilityMessage}"
+                                               Margin="0,0,0,8"
+                                               Foreground="{StaticResource StatusWarningBrush}"
+                                               TextWrapping="Wrap"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Volume label:"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                                   VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <TextBox Width="240"
+                                                 Style="{StaticResource GlowFocusTextBox}"
+                                                 Padding="8,4"
+                                                 Text="{Binding VolumeLabel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 ToolTip="Filesystem label written when the drive is formatted."/>
+                                        <Button Content="Format drive" Margin="10,0,0,0"
+                                                Padding="10,4" MinHeight="0"
+                                                Style="{StaticResource TactilePrimaryButton}"
+                                                Command="{Binding FormatPrepareCommand}"
+                                                ToolTip="Erase and re-layout the target drive for Free AI SSD use. Destroys existing data. You'll be asked to confirm first."/>
+                                    </StackPanel>
+                                    <CheckBox Margin="0,10,0,0"
+                                              Foreground="{StaticResource TextSecondaryBrush}"
+                                              Content="Encrypt SSD config (optional, recommended for Network Mode)"
+                                              IsChecked="{Binding EnableEncryption, Mode=TwoWay}"
+                                              IsEnabled="{Binding CanMutateDrive}"
+                                              ToolTip="Wrap portable-config.json with a passphrase-derived key. The runner will prompt for the passphrase on every launch. Required if you plan to expose the Runner API on your LAN — your API key is only stored encrypted."/>
+                                    <TextBlock Margin="22,4,0,0"
+                                               FontSize="11"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               TextWrapping="Wrap"
+                                               Text="Off by default. Enabling Network Mode later requires this on (the LAN API key is never written in plaintext)."/>
+                                </StackPanel>
+                            </GroupBox>
+
+                            <!-- VR companion folded into a collapsed disclosure
+                                 (split-PC setups only). -->
+                            <Expander Header="VR companion (split-PC, optional)"
+                                      Style="{StaticResource NeumorphicExpander}"
+                                      IsExpanded="False"
+                                      Margin="0,0,0,10"
+                                      ToolTip="Only needed if the AI host and the VR machine are different PCs.">
+                                <StackPanel Margin="8">
+                                    <CheckBox Foreground="{StaticResource TextSecondaryBrush}"
+                                              Content="Install VR-machine companion on SSD (for split-PC setups)"
+                                              IsChecked="{Binding InstallVrCompanion, Mode=TwoWay}"
+                                              IsEnabled="{Binding CanMutateDrive}"
+                                              ToolTip="Copy the VR companion client so the SSD can bridge to a separate AI host over the network."/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                        <TextBlock Text="AI host IP/hostname:"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                                   VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <TextBox Width="220"
+                                                 Style="{StaticResource GlowFocusTextBox}"
+                                                 Padding="8,4"
+                                                 Text="{Binding CompanionHostAddress, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 ToolTip="Address the VR companion should reach out to for inference."/>
+                                        <TextBlock Text="Port:"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                                   VerticalAlignment="Center" Margin="10,0,6,0"/>
+                                        <TextBox Width="80"
+                                                 Style="{StaticResource GlowFocusTextBox}"
+                                                 Padding="8,4"
+                                                 Text="{Binding CompanionHostPort, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                 ToolTip="TCP port the AI host is listening on (default 41555)."/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Expander>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+
+                <!-- ───────────────── A-MP / A7 — Models (also Manage models) ───────────────── -->
+                <Grid x:Name="StepModels" Visibility="Collapsed">
+                    <Border Style="{StaticResource NeumorphicCard}" Padding="10">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="Choose models"
+                                                   Style="{StaticResource H2Text}"
+                                                   FontSize="16"/>
+                                        <TextBlock Text="Pick one or more models to download onto your SSD."
+                                                   Style="{StaticResource CaptionText}"/>
+                                    </StackPanel>
+                                    <!-- C27 Stage 1: source dropdown. Ollama covers the bundled
+                                         catalog plus live ollama.com/library scrape; Hugging Face
+                                         covers the HF Search API. -->
+                                    <ComboBox x:Name="SourceCombo"
+                                              Grid.Column="1"
+                                              MinWidth="140"
+                                              Margin="0,0,8,0"
+                                              VerticalAlignment="Top"
+                                              SelectionChanged="SourceCombo_SelectionChanged"
+                                              ToolTip="Pick where to browse models. Ollama (bundled + ollama.com) or Hugging Face (live GGUF Search API).">
+                                        <ComboBoxItem Content="Ollama" Tag="Ollama" IsSelected="True"/>
+                                        <ComboBoxItem Content="Hugging Face" Tag="HuggingFace"/>
+                                    </ComboBox>
+                                    <Button x:Name="RefreshCatalogButton"
+                                            Grid.Column="2"
+                                            Content="Refresh"
+                                            VerticalAlignment="Top"
+                                            Padding="10,4" MinHeight="0"
+                                            Style="{StaticResource GhostSecondaryButton}"
+                                            Click="RefreshCatalogButton_Click"
+                                            ToolTip="Fetch the latest model list from the selected source. The previous list stays in place if the fetch fails."/>
+                                </Grid>
+                                <TextBlock x:Name="StarterCatalogWarningText"
+                                           Foreground="{StaticResource StatusWarningBrush}"
+                                           Margin="0,4,0,0"
+                                           TextWrapping="Wrap"
+                                           Visibility="Collapsed"/>
+                                <TextBlock x:Name="CatalogLastUpdatedText"
+                                           Style="{StaticResource CaptionText}"
+                                           Margin="0,4,0,0"
+                                           Visibility="Collapsed"/>
+
+                                <!-- C27 Stage 3: inline HF token entry. Visible only when
+                                     the Source dropdown is set to Hugging Face. -->
+                                <Grid x:Name="HuggingFaceTokenRow"
+                                      Margin="0,8,0,0"
+                                      Visibility="{Binding IsHuggingFaceTokenFieldVisible, Converter={StaticResource BoolToVisibilityConverter}}">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0"
+                                               Text="HF token (optional)"
+                                               Style="{StaticResource CaptionText}"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,8,0"
+                                               ToolTip="Personal Hugging Face access token. Required for gated or private GGUF repos. Stored on the SSD; sealed with AES-256-GCM when SSD encryption is on. Leave blank for anonymous browsing."/>
+                                    <PasswordBox x:Name="HuggingFaceTokenBox"
+                                                 Grid.Column="1"
+                                                 Padding="8,4"
+                                                 VerticalAlignment="Center"
+                                                 PasswordChanged="HuggingFaceTokenBox_PasswordChanged"
+                                                 ToolTip="Paste your HF token (hf_...). Token never leaves this machine; sent only over HTTPS to huggingface.co."/>
+                                </Grid>
+                                <TextBlock x:Name="HuggingFaceTokenPlaintextWarning"
+                                           Margin="0,4,0,0"
+                                           Foreground="{StaticResource StatusWarningBrush}"
+                                           TextWrapping="Wrap"
+                                           Text="⚠ Encryption is off — your Hugging Face token will be stored in plaintext on the SSD. Enable encryption (Set up the drive step) for defense in depth."
+                                           Visibility="{Binding IsHuggingFaceTokenPlaintextWarningVisible, Converter={StaticResource BoolToVisibilityConverter}}"/>
+
+                                <!-- F2a: search + Most popular cap. C26 adds the
+                                     limit dropdown next to the toggle. -->
+                                <Grid Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ToggleButton x:Name="MostPopularToggle"
+                                                  Grid.Column="0"
+                                                  Content="Most popular"
+                                                  Padding="10,4" MinHeight="0"
+                                                  VerticalAlignment="Center"
+                                                  IsChecked="{Binding ShowOnlyMostPopular, Mode=TwoWay}"
+                                                  ToolTip="Show only the top-N recommended models by ollama.com pull count. Click Refresh from Ollama first to populate pull counts on the bundled list."/>
+                                    <ComboBox x:Name="MostPopularLimitCombo"
+                                              Grid.Column="1"
+                                              MinWidth="64"
+                                              Margin="6,0,0,0"
+                                              VerticalAlignment="Center"
+                                              SelectionChanged="MostPopularLimitCombo_SelectionChanged"
+                                              ToolTip="Choose how many top entries the Most-popular toggle exposes. Sorted desc by pull count from the live ollama.com catalog.">
+                                        <ComboBoxItem Content="Top 10" Tag="10"/>
+                                        <ComboBoxItem Content="Top 15" Tag="15" IsSelected="True"/>
+                                        <ComboBoxItem Content="Top 25" Tag="25"/>
+                                        <ComboBoxItem Content="Top 50" Tag="50"/>
+                                    </ComboBox>
+                                    <TextBlock Grid.Column="2"
+                                               Text="Search"
+                                               Style="{StaticResource CaptionText}"
+                                               VerticalAlignment="Center"
+                                               Margin="14,0,6,0"/>
+                                    <TextBox x:Name="ModelSearchBox"
+                                             Grid.Column="3"
+                                             Padding="8,4"
+                                             VerticalAlignment="Center"
+                                             Style="{StaticResource GlowFocusTextBox}"
+                                             Text="{Binding ModelSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                             ToolTip="Filter the grid by tag, tier, or capability description (case-insensitive). Under the Hugging Face source the box also drives a debounced server query."/>
+                                </Grid>
+                                <!-- M11: announce the visible row count + cap reason
+                                     when a filter is active. -->
+                                <TextBlock x:Name="StarterRowCountCaptionText"
+                                           Margin="0,4,0,0"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource AccentCyanBrush}"
+                                           Text="{Binding StarterRowCountCaption}"
+                                           Visibility="{Binding StarterRowCountCaption, Converter={StaticResource EmptyToVisibilityConverter}, ConverterParameter=Inverted}"/>
+
+                                <!-- C3 / C4 / C5: second filter row. -->
+                                <Grid Margin="0,6,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="Max size"
+                                                   Style="{StaticResource CaptionText}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,6,0"/>
+                                        <ComboBox x:Name="ParameterCapCombo"
+                                                  MinWidth="80"
+                                                  VerticalAlignment="Center"
+                                                  SelectedIndex="0"
+                                                  SelectionChanged="ParameterCapCombo_SelectionChanged"
+                                                  ToolTip="Hide models with a parameter count above the chosen cap. Models without a known size pass through (your existing config and on-disk models stay visible).">
+                                            <ComboBoxItem Content="All" Tag=""/>
+                                            <ComboBoxItem Content="≤7B" Tag="7"/>
+                                            <ComboBoxItem Content="≤14B" Tag="14"/>
+                                            <ComboBoxItem Content="≤30B" Tag="30"/>
+                                            <ComboBoxItem Content="≤70B" Tag="70"/>
+                                        </ComboBox>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
+                                        <TextBlock Text="Capabilities"
+                                                   Style="{StaticResource CaptionText}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,6,0"/>
+                                        <ToggleButton Content="tools" Padding="8,3" MinHeight="0" Margin="2,0"
+                                                      IsChecked="{Binding FilterCapabilityTools, Mode=TwoWay}"
+                                                      ToolTip="Show only models that advertise tool/function-calling support."/>
+                                        <ToggleButton Content="vision" Padding="8,3" MinHeight="0" Margin="2,0"
+                                                      IsChecked="{Binding FilterCapabilityVision, Mode=TwoWay}"
+                                                      ToolTip="Show only models that accept image input."/>
+                                        <ToggleButton Content="thinking" Padding="8,3" MinHeight="0" Margin="2,0"
+                                                      IsChecked="{Binding FilterCapabilityThinking, Mode=TwoWay}"
+                                                      ToolTip="Show only models with extended thinking / chain-of-thought support."/>
+                                        <ToggleButton Content="audio" Padding="8,3" MinHeight="0" Margin="2,0"
+                                                      IsChecked="{Binding FilterCapabilityAudio, Mode=TwoWay}"
+                                                      ToolTip="Show only models that accept audio input."/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="Sort"
+                                                   Style="{StaticResource CaptionText}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,6,0"/>
+                                        <ComboBox x:Name="SortModeCombo"
+                                                  MinWidth="100"
+                                                  VerticalAlignment="Center"
+                                                  SelectedIndex="0"
+                                                  SelectionChanged="SortModeCombo_SelectionChanged"
+                                                  ToolTip="Reorder the picker. Popular keeps the natural ollama.com order. Newest sorts by the scraped last-updated timestamp; entries without a timestamp sort last.">
+                                            <ComboBoxItem Content="Popular"/>
+                                            <ComboBoxItem Content="Newest"/>
+                                            <ComboBoxItem Content="A–Z"/>
+                                        </ComboBox>
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+
+                            <!-- Actions row: Download (primary), then ghost buttons. -->
+                            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
+                                <Button x:Name="DownloadButton"
+                                        Content="Download"
+                                        Padding="12,4" MinHeight="0"
+                                        Style="{StaticResource TactilePrimaryButton}"
+                                        Command="{Binding DownloadCommand}"
+                                        ToolTip="Download and verify every checked model that is not already on the drive."/>
+                                <Button Content="Remove" Margin="6,0,0,0"
+                                        Padding="10,4" MinHeight="0"
+                                        Style="{StaticResource GhostSecondaryButton}"
+                                        Tag="{StaticResource AccentMagentaBrush}"
+                                        Command="{Binding RemoveCommand}"
+                                        ToolTip="Apply one remove action to every checked model already in the configuration or on the drive."/>
+                                <Button Content="Clear selection" Margin="6,0,0,0"
+                                        Padding="10,4" MinHeight="0"
+                                        Style="{StaticResource GhostSecondaryButton}"
+                                        Command="{Binding ClearSelectionCommand}"
+                                        ToolTip="Uncheck every row in the grid."/>
+                            </StackPanel>
+
+                            <!-- Progressive disclosure: add custom tag. -->
+                            <Expander DockPanel.Dock="Bottom"
+                                      Header="Add custom model tag"
+                                      Style="{StaticResource NeumorphicExpander}"
+                                      IsExpanded="False"
+                                      Margin="0,8,0,0"
+                                      ToolTip="Add an Ollama model tag that isn't in the recommended list (e.g. llama3.2:3b, qwen2.5:3b).">
+                                <StackPanel Orientation="Horizontal" Margin="4,6,0,4">
+                                    <TextBlock Text="Custom tag"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBox Width="260"
+                                             Style="{StaticResource GlowFocusTextBox}"
+                                             Padding="8,4"
+                                             Text="{Binding ModelTagInput, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                             IsEnabled="{Binding CanMutateDrive}"
+                                             ToolTip="Ollama model tag to add as a Custom row (e.g. llama3.2:3b)."/>
+                                    <Button Content="Add" Margin="6,0,0,0"
+                                            Style="{StaticResource GhostSecondaryButton}"
+                                            Command="{Binding AddModelCommand}"
+                                            ToolTip="Append the typed tag to the grid under Tier 'Custom'."/>
+                                </StackPanel>
+                            </Expander>
+
+                            <!-- Progressive disclosure: advanced operations. -->
+                            <Expander DockPanel.Dock="Bottom"
+                                      Header="Advanced"
+                                      Style="{StaticResource NeumorphicExpander}"
+                                      IsExpanded="False"
+                                      Margin="0,8,0,0"
+                                      ToolTip="Rarely-needed operations. Ignore unless you added models to the drive outside PrepApp.">
+                                <StackPanel Orientation="Horizontal" Margin="4,6,0,4">
+                                    <Button Content="Re-register on-disk model"
+                                            Padding="10,4" MinHeight="0"
+                                            Style="{StaticResource GhostSecondaryButton}"
+                                            Command="{Binding AddOrphanToConfigCommand}"
+                                            ToolTip="Register checked 'On drive only' rows into the configuration so they appear as Downloaded."/>
+                                    <TextBlock Text="Show details"
+                                               Style="{StaticResource CaptionText}"
+                                               VerticalAlignment="Center"
+                                               Margin="18,0,8,0"/>
+                                    <ToggleButton x:Name="ShowModelDetailsToggle"
+                                                  Style="{StaticResource NeonToggleSwitch}"
+                                                  IsChecked="False"
+                                                  ToolTip="Toggle the Sha256 and Last verified columns in the grid."/>
+                                </StackPanel>
+                            </Expander>
+
+                            <!-- Merged grid. x:Name preserved. -->
+                            <Border x:Name="StarterModelsCard"
+                                    Style="{StaticResource NeumorphicCard}"
+                                    Padding="8"
+                                    Margin="0,0,0,0">
+                                <Grid>
+                                    <DataGrid x:Name="ModelStatusGrid"
+                                              AutoGenerateColumns="False"
+                                              IsReadOnly="False"
+                                              HeadersVisibility="Column"
+                                              CanUserAddRows="False"
+                                              MinHeight="120"
+                                              Background="Transparent"
+                                              BorderThickness="0">
+                                        <DataGrid.RowStyle>
+                                            <Style TargetType="DataGridRow">
+                                                <Style.Triggers>
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding Capabilities.Count}" Value="0"/>
+                                                            <Condition Binding="{Binding IsCapabilityFadeEligible}" Value="True"/>
+                                                            <Condition Binding="{Binding DataContext.HasActiveCapabilityFilter, RelativeSource={RelativeSource AncestorType=DataGrid}}" Value="True"/>
+                                                        </MultiDataTrigger.Conditions>
+                                                        <Setter Property="Opacity" Value="0.55"/>
+                                                        <Setter Property="ToolTip" Value="No capability data for this entry — surviving the chip filter via pass-through. Refresh from Ollama to populate."/>
+                                                    </MultiDataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </DataGrid.RowStyle>
+                                        <DataGrid.GroupStyle>
+                                            <GroupStyle>
+                                                <GroupStyle.HeaderTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding Name}" FontWeight="Bold" FontSize="12" Margin="4,4,0,2"/>
+                                                    </DataTemplate>
+                                                </GroupStyle.HeaderTemplate>
+                                            </GroupStyle>
+                                        </DataGrid.GroupStyle>
+                                        <DataGrid.Columns>
+                                            <DataGridTemplateColumn Header="Select" Width="Auto">
+                                                <DataGridTemplateColumn.CellTemplate>
+                                                    <DataTemplate>
+                                                        <ToggleButton Style="{StaticResource NeonToggleSwitch}"
+                                                                      IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                      IsEnabled="{Binding IsRowSelectable}"
+                                                                      HorizontalAlignment="Center">
+                                                            <ToggleButton.ToolTip>
+                                                                <ToolTip>
+                                                                    <ToolTip.Style>
+                                                                        <Style TargetType="ToolTip">
+                                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding IsExpandable}" Value="True">
+                                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </ToolTip.Style>
+                                                                    <TextBlock Text="Expand the chevron and pick a quant (e.g. Q4_K_M) — Ollama can't pull an HF repo without a quant tag."/>
+                                                                </ToolTip>
+                                                            </ToggleButton.ToolTip>
+                                                        </ToggleButton>
+                                                    </DataTemplate>
+                                                </DataGridTemplateColumn.CellTemplate>
+                                            </DataGridTemplateColumn>
+                                            <!-- C27 Stage 4: chevron column. Visible only on
+                                                 HF parent rows (IsExpandable=true). -->
+                                            <DataGridTemplateColumn Header="" Width="28">
+                                                <DataGridTemplateColumn.CellTemplate>
+                                                    <DataTemplate>
+                                                        <Button Click="RepoExpandToggle_Click"
+                                                                BorderThickness="0"
+                                                                Background="Transparent"
+                                                                Padding="2"
+                                                                MinWidth="0" MinHeight="0"
+                                                                HorizontalAlignment="Center"
+                                                                Visibility="{Binding IsExpandable, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                                ToolTip="Show or hide the GGUF quants for this Hugging Face repo. First expand fetches sizes from huggingface.co.">
+                                                            <TextBlock FontFamily="Segoe UI Symbol"
+                                                                       FontSize="11">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Text" Value="▶"/>
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                                                                <Setter Property="Text" Value="▼"/>
+                                                                            </DataTrigger>
+                                                                            <DataTrigger Binding="{Binding IsExpanding}" Value="True">
+                                                                                <Setter Property="Text" Value="…"/>
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
+                                                        </Button>
+                                                    </DataTemplate>
+                                                </DataGridTemplateColumn.CellTemplate>
+                                            </DataGridTemplateColumn>
+                                            <DataGridTemplateColumn Header="Tag" Width="2*">
+                                                <DataGridTemplateColumn.CellTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="⌞ "
+                                                                       Foreground="{StaticResource AccentCyanBrush}"
+                                                                       Margin="14,0,2,0"
+                                                                       Visibility="{Binding IsQuantChild, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                                                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center"/>
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </DataGridTemplateColumn.CellTemplate>
+                                            </DataGridTemplateColumn>
+                                            <DataGridTextColumn Header="Tier" Binding="{Binding Tier}" Width="*" IsReadOnly="True"/>
+                                            <DataGridTextColumn Header="Best at" Binding="{Binding BestAt}" Width="3*" IsReadOnly="True"/>
+                                            <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="*" IsReadOnly="True"/>
+                                            <DataGridTextColumn Header="Size" Binding="{Binding SizeDisplay}" Width="*" IsReadOnly="True"/>
+                                            <DataGridTextColumn Header="Sizing" Binding="{Binding SizingWarning}" Width="2*" IsReadOnly="True"/>
+                                            <DataGridTextColumn x:Name="Sha256Column"
+                                                                Header="Sha256"
+                                                                Binding="{Binding ShaPreview}"
+                                                                Width="*"
+                                                                IsReadOnly="True"
+                                                                Visibility="Collapsed"/>
+                                            <DataGridTextColumn x:Name="LastVerifiedColumn"
+                                                                Header="Last verified"
+                                                                Binding="{Binding LastVerifiedDisplay}"
+                                                                Width="*"
+                                                                IsReadOnly="True"
+                                                                Visibility="Collapsed"/>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+
+                                    <!-- Empty state shown only while the grid has zero rows. -->
+                                    <Border IsHitTestVisible="True"
+                                            Background="{StaticResource BgBaseBrush}"
+                                            Visibility="{Binding ModelRows.Count, Converter={StaticResource EmptyToVisibilityConverter}}">
+                                        <StackPanel HorizontalAlignment="Center"
+                                                    VerticalAlignment="Center"
+                                                    MaxWidth="360">
+                                            <Border Width="44" Height="44"
+                                                    CornerRadius="22"
+                                                    HorizontalAlignment="Center"
+                                                    Margin="0,0,0,6"
+                                                    Background="{StaticResource BgSunkenBrush}"
+                                                    BorderBrush="{StaticResource FocusBorderGradientBrush}"
+                                                    BorderThickness="1"
+                                                    Effect="{StaticResource HoverGlowCyan}">
+                                                <TextBlock Text="&#x2737;"
+                                                           FontSize="20"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="{StaticResource AccentCyanBrush}"/>
+                                            </Border>
+                                            <TextBlock Text="No models yet"
+                                                       Style="{StaticResource H2Text}"
+                                                       FontSize="14"
+                                                       HorizontalAlignment="Center"/>
+                                            <TextBlock Text="Use 'Add custom model tag' below to enter an Ollama tag."
+                                                       Style="{StaticResource CaptionText}"
+                                                       TextAlignment="Center"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,2,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </Border>
+                        </DockPanel>
+                    </Border>
+                </Grid>
+
+                <!-- ───────────────── A8 — Finalize & readiness ───────────────── -->
+                <Grid x:Name="StepFinalize" Visibility="Collapsed">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <TextBlock Text="Finish &amp; readiness"
+                                       Style="{StaticResource H2Text}"/>
+                            <TextBlock Text="Write the final manifest and lock the drive layout for runtime use, then confirm the SSD is ready."
+                                       Style="{StaticResource CaptionText}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,12"/>
+
+                            <GroupBox Header="Finish &amp; readiness" Margin="0,0,0,10">
+                                <StackPanel Margin="8">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                        <Button Content="Finish setup"
+                                                Padding="10,4" MinHeight="0"
+                                                Style="{StaticResource TactilePrimaryButton}"
+                                                Command="{Binding FinalizeCommand}"
+                                                ToolTip="Write the final manifest and lock the drive layout for runtime use."/>
+                                        <Button Content="Run checks"
+                                                Padding="10,4" MinHeight="0" Margin="8,0,0,0"
+                                                Style="{StaticResource GhostSecondaryButton}"
+                                                Command="{Binding CheckReadinessCommand}"
+                                                ToolTip="Run the readiness diagnostics against the currently selected drive."/>
+                                    </StackPanel>
+                                    <TextBlock Foreground="{StaticResource StatusInfoBrush}" Margin="0,0,0,4"
+                                               Text="{Binding PrereqStatusText}"/>
+
+                                    <DataGrid AutoGenerateColumns="False"
+                                              IsReadOnly="True"
+                                              CanUserAddRows="False"
+                                              HeadersVisibility="Column"
+                                              MinHeight="80"
+                                              MaxHeight="240"
+                                              Background="Transparent"
+                                              BorderThickness="0"
+                                              ItemsSource="{Binding ReadinessItems}">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Check" Binding="{Binding Check}" Width="2*"/>
+                                            <DataGridTextColumn Header="Result" Binding="{Binding Result}" Width="3*"/>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </StackPanel>
+                            </GroupBox>
+
+                            <Expander Header="Advanced"
+                                      Style="{StaticResource NeumorphicExpander}"
+                                      IsExpanded="False"
+                                      Margin="0,0,0,0"
+                                      ToolTip="Rarely-used settings: listing fixed drives, manual update check.">
+                                <StackPanel Margin="8">
+                                    <CheckBox VerticalAlignment="Center"
+                                              Foreground="{StaticResource TextSecondaryBrush}"
+                                              Content="Show fixed drives (advanced)"
+                                              IsChecked="{Binding ShowFixedDrives, Mode=TwoWay}"
+                                              Margin="0,0,0,8"
+                                              ToolTip="Include non-removable drives in the Target drive list. Only for power users."/>
+                                    <Button Content="Check for updates"
+                                            HorizontalAlignment="Left"
+                                            Padding="10,4" MinHeight="0"
+                                            Style="{StaticResource GhostSecondaryButton}"
+                                            Command="{Binding CheckPrereqUpdatesCommand}"
+                                            ToolTip="Query the prereq manifest for newer installer versions."/>
+                                </StackPanel>
+                            </Expander>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+
+                <!-- ───────────────────────── A10 — Done ───────────────────────── -->
+                <Grid x:Name="StepDone" Visibility="Collapsed">
+                    <StackPanel MaxWidth="640"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <theme:LedStatusIndicator State="Ok" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                            <TextBlock Text="Drive ready"
+                                       Style="{StaticResource H1Text}"
+                                       Margin="0"/>
+                        </StackPanel>
+                        <TextBlock Style="{StaticResource BodySecondaryText}"
+                                   TextWrapping="Wrap"
+                                   TextAlignment="Center"
+                                   Margin="0,12,0,0"
+                                   Text="Eject this SSD and plug it into the machine that will run Free AI SSD, then launch the Runner from the drive."/>
+                        <Border Margin="0,16,0,0"
+                                Padding="10"
+                                Background="{StaticResource BgRaisedBrush}"
+                                BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                Visibility="{Binding ReadinessItems.Count, Converter={StaticResource EmptyToVisibilityConverter}, ConverterParameter=Inverted}">
+                            <StackPanel>
+                                <TextBlock Text="Readiness"
+                                           Style="{StaticResource H2Text}"
+                                           FontSize="14"/>
+                                <ItemsControl ItemsSource="{Binding ReadinessItems}" Margin="0,4,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,2">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="2*"/>
+                                                    <ColumnDefinition Width="3*"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding Check}"
+                                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                                           TextWrapping="Wrap"/>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding Result}"
+                                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                                           TextWrapping="Wrap"/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
                             </StackPanel>
                         </Border>
-                    </TabItem>
-                </TabControl>
+                    </StackPanel>
+                </Grid>
 
-                <!-- Row 1: Log card (unchanged from prior layout). -->
-                <Border Grid.Row="1" Style="{StaticResource NeumorphicCard}" Padding="10">
-                    <DockPanel>
-                        <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <!-- MAC31: in-place pull progress line. Empty between
-                                     pulls so the row collapses via TextBlock visibility. -->
-                                <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Row="0" Grid.Column="0"
-                                       Text="Log"
-                                       Style="{StaticResource H2Text}"
-                                       FontSize="14"
-                                       Margin="0"/>
-                            <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                                <ProgressBar Width="160"
-                                             Style="{StaticResource GradientProgressBar}"
-                                             Value="{Binding ProgressValue}"
-                                             IsIndeterminate="{Binding ProgressIsIndeterminate}"/>
-                                <TextBlock Text="{Binding StatusText}"
-                                           Foreground="{StaticResource TextSecondaryBrush}"
-                                           VerticalAlignment="Center"
-                                           Margin="8,0,0,0"/>
-                            </StackPanel>
-                            <!-- MAC31: ANSI-stripped pull progress lines from
-                                 ModelOperations.Consume's onProgress channel land
-                                 here. Single-line, monospaced, hidden when empty
-                                 so the layout doesn't shift between pulls. -->
-                            <TextBlock Grid.Row="1" Grid.ColumnSpan="3"
-                                       Text="{Binding PullProgressLine}"
-                                       FontFamily="Consolas, Menlo, monospace"
-                                       FontSize="12"
-                                       Foreground="{StaticResource TextSecondaryBrush}"
-                                       TextTrimming="CharacterEllipsis"
-                                       Margin="0,4,0,0"
-                                       Visibility="{Binding PullProgressLine, Converter={StaticResource EmptyToVisibilityConverter}, ConverterParameter=Inverted}"/>
-                        </Grid>
-                        <Grid>
-                            <!--  ListBox keeps its internal ScrollViewer so UI virtualization
-                                  stays active and ScrollIntoView (code-behind) keeps working.
-                                  The sunken visual comes from styling that inner ScrollViewer
-                                  via ListBox.Resources.  -->
-                            <ListBox ItemsSource="{Binding LogLines}"
-                                     x:Name="LogListBox"
-                                     Background="Transparent"
-                                     BorderThickness="0"
-                                     Foreground="{StaticResource AccentCyanBrush}"
-                                     VerticalAlignment="Stretch"
-                                     ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                                     ScrollViewer.VerticalScrollBarVisibility="Auto">
-                                <ListBox.Resources>
-                                    <Style TargetType="{x:Type ScrollViewer}"
-                                           BasedOn="{StaticResource SunkenLogViewer}"/>
-                                </ListBox.Resources>
-                            </ListBox>
-
-                            <!-- Empty-state caption overlaid on top of the ListBox surface. -->
-                            <TextBlock Text="Actions will appear here"
-                                       Style="{StaticResource CaptionText}"
-                                       Foreground="{StaticResource TextMutedBrush}"
-                                       HorizontalAlignment="Center"
-                                       VerticalAlignment="Center"
-                                       IsHitTestVisible="False"
-                                       Visibility="{Binding LogLines.Count, Converter={StaticResource EmptyToVisibilityConverter}}"/>
-                        </Grid>
-                    </DockPanel>
-                </Border>
             </Grid>
         </DockPanel>
-
-        <!-- ═════════════════════════════════════════════════════════════
-             FTUE Overlay: shown on first launch. Semi-transparent scrim
-             plus a neon "spotlight" ring positioned over the step's
-             target element (set in code-behind). The instruction card
-             floats in the lower-right corner.
-             ═════════════════════════════════════════════════════════════ -->
-        <Grid x:Name="FtueOverlay" Visibility="Collapsed">
-            <!-- Scrim: catches clicks so the user can't interact with
-                 the underlying UI until they finish or skip FTUE. -->
-            <Rectangle Fill="#B3000000"/>
-
-            <!-- Spotlight canvas: code-behind positions FtueSpotlight
-                 over the target element using TransformToAncestor. -->
-            <Canvas x:Name="FtueSpotlightCanvas">
-                <Border x:Name="FtueSpotlight"
-                        Style="{StaticResource SpotlightRing}"
-                        Visibility="Collapsed"/>
-            </Canvas>
-
-            <!-- Instruction card: pinned to the bottom-right. -->
-            <Border HorizontalAlignment="Right"
-                    VerticalAlignment="Bottom"
-                    Margin="0,0,32,40"
-                    MaxWidth="360"
-                    Style="{StaticResource NeumorphicCard}">
-                <StackPanel>
-                    <TextBlock x:Name="FtueStepLabel"
-                               Text="Step 1 of 4"
-                               Style="{StaticResource CaptionText}"
-                               Foreground="{StaticResource AccentCyanBrush}"
-                               Margin="0,0,0,6"/>
-                    <TextBlock x:Name="FtueTitleText"
-                               Text="How the SSD fits your setup"
-                               Style="{StaticResource H2Text}"/>
-                    <TextBlock x:Name="FtueBodyText"
-                               Text="PrepApp can stage one SSD for either a single-PC install or a split AI-host plus VR-companion setup."
-                               Style="{StaticResource BodyText}"
-                               TextWrapping="Wrap"
-                               Margin="0,0,0,16"/>
-                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                        <Button Content="Skip"
-                                Style="{StaticResource GhostSecondaryButton}"
-                                Click="OnFtueSkipClick"/>
-                        <Button x:Name="FtueNextButton"
-                                Content="Next"
-                                Margin="8,0,0,0"
-                                Style="{StaticResource TactilePrimaryButton}"
-                                Click="OnFtueNextClick"/>
-                    </StackPanel>
-                </StackPanel>
-            </Border>
-        </Grid>
-    </Grid>
+    </DockPanel>
 </Window>
