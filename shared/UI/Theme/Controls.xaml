@@ -78,16 +78,19 @@
                         </Border>
                     </Grid>
                     <ControlTemplate.Triggers>
+                        <!-- Phase B: hover/focus border = solid cyan, not
+                             cyan->magenta->purple gradient. Mac sec.2 spec:
+                             color used only for *meaning*, sparse accent. -->
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Surface" Property="BorderBrush"
-                                    Value="{StaticResource FocusBorderGradientBrush}"/>
+                                    Value="{StaticResource AccentCyanBrush}"/>
                         </Trigger>
-                        <!-- Keyboard focus: matches mouse-hover affordance so
-                             tab-navigating users see the same gradient ring
-                             plus a soft cyan glow. -->
+                        <!-- Keyboard focus: matches mouse-hover affordance plus
+                             a soft cyan glow so tab-navigating users see the
+                             control is active. -->
                         <Trigger Property="IsKeyboardFocused" Value="True">
                             <Setter TargetName="Surface" Property="BorderBrush"
-                                    Value="{StaticResource FocusBorderGradientBrush}"/>
+                                    Value="{StaticResource AccentCyanBrush}"/>
                             <Setter TargetName="Surface" Property="Effect"
                                     Value="{StaticResource FocusGlowCyan}"/>
                         </Trigger>
@@ -761,11 +764,14 @@
           Track = sunken surface; indicator = cyan→magenta gradient
           with a soft cyan glow.
           ────────────────────────────────────────────────────────────  -->
+    <!-- Style key retained for backward compat with existing call sites
+         (renaming would touch a dozen XAML files for no behavioural gain).
+         Phase B: indicator is now SOLID cyan, not a cyan->magenta gradient. -->
     <Style x:Key="GradientProgressBar" TargetType="{x:Type ProgressBar}">
         <Setter Property="Height" Value="10"/>
         <Setter Property="MinHeight" Value="10"/>
         <Setter Property="Background" Value="{StaticResource BgSunkenBrush}"/>
-        <Setter Property="Foreground" Value="{StaticResource NeonGradientBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource AccentCyanBrush}"/>
         <Setter Property="BorderBrush" Value="{StaticResource SurfaceBorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>

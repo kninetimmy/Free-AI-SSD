@@ -23,31 +23,39 @@
     <!--  Raised: light from upper left  -->
 
     <!-- Soft light bleed cast toward upper left. Pair with a Border that
-         sits behind the surface, or set as the Effect on a child layer. -->
+         sits behind the surface, or set as the Effect on a child layer.
+         Phase B (Mac-parity restyle): opacity dialled back from 0.85 to
+         0.45 so the "light source" illusion reads as ambient depth, not
+         a halo. -->
     <DropShadowEffect x:Key="RaisedHighlightShadow"
                       Color="#2A2F3A"
                       Direction="135"
                       ShadowDepth="6"
                       BlurRadius="14"
-                      Opacity="0.85"
+                      Opacity="0.45"
                       RenderingBias="Quality"/>
 
-    <!-- Deep matte shadow falling toward lower right. -->
+    <!-- Deep matte shadow falling toward lower right.
+         Phase B (Mac-parity restyle): the dominant "raised surface" cue
+         was reading as neon glow on dark backgrounds. Reduced depth
+         6->3, blur 16->10, opacity 0.95->0.55 so raised surfaces sit
+         calmly above the canvas (Mac-app feel) instead of floating. -->
     <DropShadowEffect x:Key="RaisedDarkShadow"
                       Color="#0B0D12"
                       Direction="315"
-                      ShadowDepth="6"
-                      BlurRadius="16"
-                      Opacity="0.95"
+                      ShadowDepth="3"
+                      BlurRadius="10"
+                      Opacity="0.55"
                       RenderingBias="Quality"/>
 
-    <!-- Tighter dark variant for small / subtle elements (chips, inline buttons). -->
+    <!-- Tighter dark variant for small / subtle elements (chips, inline buttons).
+         Phase B: opacity 0.9->0.55 to match the new RaisedDarkShadow. -->
     <DropShadowEffect x:Key="RaisedDarkShadowSmall"
                       Color="#0B0D12"
                       Direction="315"
                       ShadowDepth="3"
                       BlurRadius="8"
-                      Opacity="0.9"
+                      Opacity="0.55"
                       RenderingBias="Quality"/>
 
     <!--  Sunken: invert direction so the lip catches darkness  -->
@@ -62,12 +70,15 @@
 
     <!--  Focus glows (omnidirectional)  -->
 
+    <!-- Phase B: opacity 0.85->0.55 so keyboard focus reads as a clear
+         signal, not a halo. Still well above WCAG 2.1 focus-indicator
+         contrast against the dark canvas. -->
     <DropShadowEffect x:Key="FocusGlowCyan"
                       Color="#00E5FF"
                       Direction="0"
                       ShadowDepth="0"
                       BlurRadius="14"
-                      Opacity="0.85"
+                      Opacity="0.55"
                       RenderingBias="Quality"/>
 
     <DropShadowEffect x:Key="FocusGlowMagenta"
@@ -78,7 +89,9 @@
                       Opacity="0.85"
                       RenderingBias="Quality"/>
 
-    <!-- Subtle ambient glow for hover states. -->
+    <!-- Subtle ambient glow for hover states.
+         Phase B: kept at 0.45 — already subtle enough; the louder
+         FocusGlowCyan was the offender, this one is fine. -->
     <DropShadowEffect x:Key="HoverGlowCyan"
                       Color="#00E5FF"
                       Direction="0"
