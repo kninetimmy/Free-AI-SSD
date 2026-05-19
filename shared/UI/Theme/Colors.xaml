@@ -67,6 +67,16 @@
     <SolidColorBrush x:Key="StatusDangerBrush"  Color="{StaticResource StatusDangerColor}"/>
     <SolidColorBrush x:Key="StatusInfoBrush"    Color="{StaticResource StatusInfoColor}"/>
 
+    <!-- Tinted-background brushes for banners (cyan/warning/danger).
+         Used as the fill on InfoBanner / WarningBanner / DangerBanner
+         border styles (see Controls.xaml). Matches the Mac app's
+         12 % tint + 1 px solid stroke pattern documented in
+         docs/mac-ui-reference/RECONSTRUCTION.md sec. 3-A2 + sec. 1. -->
+    <SolidColorBrush x:Key="AccentCyanSoftBrush"     Color="#1F00E5FF"/>
+    <SolidColorBrush x:Key="StatusWarningSoftBrush"  Color="#1FFFB454"/>
+    <SolidColorBrush x:Key="StatusDangerSoftBrush"   Color="#1FFF4D6D"/>
+    <SolidColorBrush x:Key="StatusSuccessSoftBrush"  Color="#1F4CE0B3"/>
+
     <!--  Neon gradient brushes  -->
 
     <!-- Primary accent: cyan → magenta. Use for primary action buttons,

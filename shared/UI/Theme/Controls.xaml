@@ -78,16 +78,19 @@
                         </Border>
                     </Grid>
                     <ControlTemplate.Triggers>
+                        <!-- Phase B: hover/focus border = solid cyan, not
+                             cyan->magenta->purple gradient. Mac sec.2 spec:
+                             color used only for *meaning*, sparse accent. -->
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Surface" Property="BorderBrush"
-                                    Value="{StaticResource FocusBorderGradientBrush}"/>
+                                    Value="{StaticResource AccentCyanBrush}"/>
                         </Trigger>
-                        <!-- Keyboard focus: matches mouse-hover affordance so
-                             tab-navigating users see the same gradient ring
-                             plus a soft cyan glow. -->
+                        <!-- Keyboard focus: matches mouse-hover affordance plus
+                             a soft cyan glow so tab-navigating users see the
+                             control is active. -->
                         <Trigger Property="IsKeyboardFocused" Value="True">
                             <Setter TargetName="Surface" Property="BorderBrush"
-                                    Value="{StaticResource FocusBorderGradientBrush}"/>
+                                    Value="{StaticResource AccentCyanBrush}"/>
                             <Setter TargetName="Surface" Property="Effect"
                                     Value="{StaticResource FocusGlowCyan}"/>
                         </Trigger>
@@ -297,6 +300,16 @@
     </Style>
 
     <!--  ────────────────────────────────────────────────────────────
+          5a-implicit. Default TextBox = GlowFocusTextBox
+          Any <TextBox/> that does not opt out via explicit Style gets
+          the themed sunken surface + focus glow. Required so dialog
+          inputs (UnlockDialog, EncryptionSetupDialog, etc.) and any
+          stray TextBox in MainWindow render dark instead of falling
+          back to system chrome.
+          ────────────────────────────────────────────────────────────  -->
+    <Style TargetType="{x:Type TextBox}" BasedOn="{StaticResource GlowFocusTextBox}"/>
+
+    <!--  ────────────────────────────────────────────────────────────
           5b. GlowFocusComboBox (+ matching ComboBoxItem style)
           Same sunken surface + focus glow treatment as GlowFocusTextBox,
           adapted for ComboBox's ToggleButton + Popup structure.
@@ -430,6 +443,72 @@
     </Style>
 
     <!--  ────────────────────────────────────────────────────────────
+          5b-implicit. Default ComboBox = GlowFocusComboBox
+          Closes bug 42 (Models-page ComboBoxes rendering white-on-white
+          because they did not opt into the keyed style). The
+          ItemContainerStyle setter on the keyed parent carries through
+          via BasedOn, so dropdown items also pick up GlowFocusComboBoxItem.
+          ────────────────────────────────────────────────────────────  -->
+    <Style TargetType="{x:Type ComboBox}" BasedOn="{StaticResource GlowFocusComboBox}"/>
+
+    <!--  ────────────────────────────────────────────────────────────
+          5c. GlowFocusPasswordBox
+          PasswordBox uses the same content host (PART_ContentHost
+          ScrollViewer) as TextBox, so the template mirrors
+          GlowFocusTextBox. Required for UnlockDialog / UnlockDriveDialog
+          / EncryptionSetupDialog to render dark (closes task X16).
+          ────────────────────────────────────────────────────────────  -->
+    <Style x:Key="GlowFocusPasswordBox" TargetType="{x:Type PasswordBox}">
+        <Setter Property="FontFamily" Value="{StaticResource PrimaryFontFamily}"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="CaretBrush" Value="{StaticResource AccentCyanBrush}"/>
+        <Setter Property="SelectionBrush" Value="{StaticResource AccentCyanBrush}"/>
+        <Setter Property="Padding" Value="10,8"/>
+        <Setter Property="MinHeight" Value="34"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type PasswordBox}">
+                    <Border x:Name="Surface"
+                            CornerRadius="8"
+                            Background="{StaticResource BgSunkenBrush}"
+                            BorderBrush="{StaticResource SurfaceBorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            Effect="{StaticResource SunkenDarkShadow}">
+                        <ScrollViewer x:Name="PART_ContentHost"
+                                      Margin="{TemplateBinding Padding}"
+                                      VerticalAlignment="Center"
+                                      Focusable="False"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                            <Setter TargetName="Surface" Property="BorderBrush"
+                                    Value="{StaticResource FocusBorderGradientBrush}"/>
+                            <Setter TargetName="Surface" Property="Effect">
+                                <Setter.Value>
+                                    <DropShadowEffect Color="#00E5FF"
+                                                      ShadowDepth="0"
+                                                      BlurRadius="12"
+                                                      Opacity="0.75"/>
+                                </Setter.Value>
+                            </Setter>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource TextDisabledBrush}"/>
+                            <Setter TargetName="Surface" Property="Opacity" Value="0.6"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style TargetType="{x:Type PasswordBox}" BasedOn="{StaticResource GlowFocusPasswordBox}"/>
+
+    <!--  ────────────────────────────────────────────────────────────
           6. SunkenLogViewer
           Styled ScrollViewer for read-only logs / transcripts. WPF
           has no real inner-shadow primitive so we overlay a second
@@ -515,6 +594,57 @@
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+    </Style>
+
+    <!--  ────────────────────────────────────────────────────────────
+          6a. Banners — Info / Warning / Danger / Success
+          Border styles for the Mac-app banner pattern documented in
+          docs/mac-ui-reference/RECONSTRUCTION.md sec. 3-A2 and sec. 1:
+          "12 % tinted background + 1 px solid stroke matching the
+          tint colour".
+
+          Usage:
+              <Border Style="{StaticResource InfoBanner}">
+                  <TextBlock Text="..."/>
+              </Border>
+
+          These primitives exist for the initiative 44 redesign to lean
+          on directly. They are not used by any current screen.
+          ────────────────────────────────────────────────────────────  -->
+    <Style x:Key="InfoBanner" TargetType="{x:Type Border}">
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Background"   Value="{StaticResource AccentCyanSoftBrush}"/>
+        <Setter Property="BorderBrush"  Value="{StaticResource AccentCyanBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="12,10"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+    </Style>
+
+    <Style x:Key="WarningBanner" TargetType="{x:Type Border}">
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Background"   Value="{StaticResource StatusWarningSoftBrush}"/>
+        <Setter Property="BorderBrush"  Value="{StaticResource StatusWarningBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="12,10"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+    </Style>
+
+    <Style x:Key="DangerBanner" TargetType="{x:Type Border}">
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Background"   Value="{StaticResource StatusDangerSoftBrush}"/>
+        <Setter Property="BorderBrush"  Value="{StaticResource StatusDangerBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="12,10"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+    </Style>
+
+    <Style x:Key="SuccessBanner" TargetType="{x:Type Border}">
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Background"   Value="{StaticResource StatusSuccessSoftBrush}"/>
+        <Setter Property="BorderBrush"  Value="{StaticResource StatusSuccessBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="12,10"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
     </Style>
 
     <!--  ────────────────────────────────────────────────────────────
@@ -685,11 +815,14 @@
           Track = sunken surface; indicator = cyan→magenta gradient
           with a soft cyan glow.
           ────────────────────────────────────────────────────────────  -->
+    <!-- Style key retained for backward compat with existing call sites
+         (renaming would touch a dozen XAML files for no behavioural gain).
+         Phase B: indicator is now SOLID cyan, not a cyan->magenta gradient. -->
     <Style x:Key="GradientProgressBar" TargetType="{x:Type ProgressBar}">
         <Setter Property="Height" Value="10"/>
         <Setter Property="MinHeight" Value="10"/>
         <Setter Property="Background" Value="{StaticResource BgSunkenBrush}"/>
-        <Setter Property="Foreground" Value="{StaticResource NeonGradientBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource AccentCyanBrush}"/>
         <Setter Property="BorderBrush" Value="{StaticResource SurfaceBorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="SnapsToDevicePixels" Value="True"/>
