@@ -341,7 +341,8 @@ public sealed class MacPrepHostRemoveModelTests : IDisposable
         public async Task<ModelPullResult> PullModelAsync(
             string ollamaExe, string modelsRoot, string modelTag,
             Action<string> onLog, CancellationToken ct, string? ollamaHost = null,
-            Action<OllamaPullProgress>? onProgress = null)
+            Action<OllamaPullProgress>? onProgress = null,
+            Action? onFinalize = null)
         {
             _pullEntered?.TrySetResult();
             if (_pullRelease is not null)

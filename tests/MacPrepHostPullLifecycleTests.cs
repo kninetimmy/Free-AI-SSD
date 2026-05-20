@@ -262,7 +262,8 @@ public sealed class MacPrepHostPullLifecycleTests : IDisposable
         public Task<ModelPullResult> PullModelAsync(
             string ollamaExe, string modelsRoot, string modelTag,
             Action<string> onLog, CancellationToken ct, string? ollamaHost = null,
-            Action<OllamaPullProgress>? onProgress = null)
+            Action<OllamaPullProgress>? onProgress = null,
+            Action? onFinalize = null)
         {
             PullCalls.Add(new PullCall(ollamaExe, modelsRoot, modelTag, ollamaHost));
 

@@ -748,7 +748,7 @@ public class PrepViewModelTests
             It.IsAny<Action<string>>(),
             It.IsAny<CancellationToken>(),
             It.IsAny<string?>(),
-            It.IsAny<Action<OllamaPullProgress>?>()), Times.Never);
+            It.IsAny<Action<OllamaPullProgress>?>(), It.IsAny<Action?>()), Times.Never);
         Assert.Contains(vm.LogLines, l => l.Contains("nothing to download"));
     }
 
@@ -1582,7 +1582,7 @@ public class PrepViewModelTests
             .Setup(m => m.PullModelAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
                 It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
-                It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()))
+                It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>(), It.IsAny<Action?>()))
             .ReturnsAsync(new ModelPullResult("0123456789abcdef", 270_000_000));
 
         var vm = CreateViewModel();
@@ -1597,7 +1597,7 @@ public class PrepViewModelTests
         _modelService.Verify(m => m.PullModelAsync(
             It.IsAny<string>(), It.IsAny<string>(), "llama3.2:3b",
             It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
-            "127.0.0.1:11434", It.IsAny<Action<OllamaPullProgress>?>()),
+            "127.0.0.1:11434", It.IsAny<Action<OllamaPullProgress>?>(), It.IsAny<Action?>()),
             Times.Once);
 
         // Embedder pulled (default EmbeddingModelName = "nomic-embed-text",
@@ -1605,7 +1605,7 @@ public class PrepViewModelTests
         _modelService.Verify(m => m.PullModelAsync(
             It.IsAny<string>(), It.IsAny<string>(), "nomic-embed-text:latest",
             It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
-            "127.0.0.1:11434", It.IsAny<Action<OllamaPullProgress>?>()),
+            "127.0.0.1:11434", It.IsAny<Action<OllamaPullProgress>?>(), It.IsAny<Action?>()),
             Times.Once);
 
         // Embedder marked Installed in the on-disk config.
@@ -1642,7 +1642,7 @@ public class PrepViewModelTests
             .Setup(m => m.PullModelAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
                 It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
-                It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()))
+                It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>(), It.IsAny<Action?>()))
             .ReturnsAsync(new ModelPullResult("abcdefabcdef", 4_000_000_000L));
 
         var vm = CreateViewModel();
@@ -1656,7 +1656,7 @@ public class PrepViewModelTests
         _modelService.Verify(m => m.PullModelAsync(
             It.IsAny<string>(), It.IsAny<string>(), "nomic-embed-text:latest",
             It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
-            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()),
+            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>(), It.IsAny<Action?>()),
             Times.Never);
     }
 
@@ -1688,7 +1688,7 @@ public class PrepViewModelTests
             .Setup(m => m.PullModelAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
                 It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
-                It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()))
+                It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>(), It.IsAny<Action?>()))
             .ReturnsAsync(new ModelPullResult("ee11ee11", 270_000_000));
 
         var config = new PortableConfig
@@ -1713,7 +1713,7 @@ public class PrepViewModelTests
         _modelService.Verify(m => m.PullModelAsync(
             It.IsAny<string>(), It.IsAny<string>(), "nomic-embed-text:latest",
             It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
-            "127.0.0.1:11434", It.IsAny<Action<OllamaPullProgress>?>()),
+            "127.0.0.1:11434", It.IsAny<Action<OllamaPullProgress>?>(), It.IsAny<Action?>()),
             Times.Once);
     }
 
@@ -1763,7 +1763,7 @@ public class PrepViewModelTests
         _modelService.Verify(m => m.PullModelAsync(
             It.IsAny<string>(), It.IsAny<string>(), "nomic-embed-text:latest",
             It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
-            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()),
+            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>(), It.IsAny<Action?>()),
             Times.Never);
 
         // Existing Windows-runner staging path calls StartTemporaryServerAsync
@@ -1882,7 +1882,7 @@ public class PrepViewModelTests
         _modelService.Verify(m => m.PullModelAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
             It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
-            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()),
+            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>(), It.IsAny<Action?>()),
             Times.Never);
     }
 
@@ -1984,7 +1984,7 @@ public class PrepViewModelTests
         _modelService
             .Setup(m => m.PullModelAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
                 It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(), It.IsAny<string?>(),
-                It.IsAny<Action<OllamaPullProgress>?>()))
+                It.IsAny<Action<OllamaPullProgress>?>(), It.IsAny<Action?>()))
             .ReturnsAsync(new ModelPullResult("deadbeef", 4_900_000_000L));
 
         var vm = CreateViewModel();
@@ -2012,7 +2012,7 @@ public class PrepViewModelTests
         _modelService.Verify(m => m.PullModelAsync(
             It.IsAny<string>(), It.IsAny<string>(), "hf.co/bartowski/Qwen3-8B-GGUF",
             It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
-            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()),
+            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>(), It.IsAny<Action?>()),
             Times.Once);
         Assert.DoesNotContain("Stage 2", vm.StatusText);
     }
@@ -2068,7 +2068,7 @@ public class PrepViewModelTests
         _modelService.Verify(m => m.PullModelAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
             It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
-            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()),
+            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>(), It.IsAny<Action?>()),
             Times.Never);
         _dialogService.Verify(d => d.ConfirmSizingWarnings(
             It.Is<IReadOnlyList<string>>(w => w.Any(s => s.Contains("under 2× headroom")))),
@@ -2095,7 +2095,7 @@ public class PrepViewModelTests
         _modelService
             .Setup(m => m.PullModelAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
                 It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(), It.IsAny<string?>(),
-                It.IsAny<Action<OllamaPullProgress>?>()))
+                It.IsAny<Action<OllamaPullProgress>?>(), It.IsAny<Action?>()))
             .ReturnsAsync(new ModelPullResult("deadbeef", 4_900_000_000L));
 
         var vm = CreateViewModel();
@@ -2123,7 +2123,7 @@ public class PrepViewModelTests
         _modelService.Verify(m => m.PullModelAsync(
             It.IsAny<string>(), It.IsAny<string>(), "hf.co/Qwen/Qwen3-8B-GGUF",
             It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
-            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()),
+            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>(), It.IsAny<Action?>()),
             Times.Once);
         Assert.Contains(vm.LogLines, l => l.Contains("Could not fetch Hugging Face"));
     }
@@ -2148,7 +2148,7 @@ public class PrepViewModelTests
         _modelService
             .Setup(m => m.PullModelAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
                 It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(), It.IsAny<string?>(),
-                It.IsAny<Action<OllamaPullProgress>?>()))
+                It.IsAny<Action<OllamaPullProgress>?>(), It.IsAny<Action?>()))
             .ReturnsAsync(new ModelPullResult("deadbeef", 4_900_000_000L));
 
         var vm = CreateViewModel();
@@ -2176,7 +2176,7 @@ public class PrepViewModelTests
         _modelService.Verify(m => m.PullModelAsync(
             It.IsAny<string>(), It.IsAny<string>(), "hf.co/Qwen/Qwen3-8B-GGUF",
             It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
-            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>()),
+            It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>(), It.IsAny<Action?>()),
             Times.Once);
         _dialogService.Verify(d => d.ConfirmSizingWarnings(It.IsAny<IReadOnlyList<string>>()), Times.Never);
     }
@@ -2954,5 +2954,133 @@ public class PrepViewModelTests
             Assert.Equal(1, raised);
         }
         finally { cleanup(); }
+    }
+
+    // ───── #48 / #49: model-download UX (finalize state + friendly labels) ─────
+
+    /// #49 pin: when an Ollama pull frame arrives with the user-opaque
+    /// "pulling &lt;hex&gt;" status, PullProgressLine must render it
+    /// with the parent model name + a layer counter — the raw hash is
+    /// what surfaced as a 6.9 GB "undisclosed" download to the user.
+    [Fact]
+    public async Task DownloadCommand_RewritesBlobHashProgress_WithModelNameAndLayerCounter()
+    {
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        _modelService.Setup(m => m.BuildPullSelectionWarnings(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int?>())).Returns(new List<string>());
+
+        var config = new PortableConfig();
+        config.Models.Add(new ModelConfigEntry { Name = "llama3.2:3b", Status = ModelInstallStatus.NotInstalled });
+        _modelService.Setup(m => m.LoadConfigAsync(It.IsAny<string>())).ReturnsAsync(config);
+        _ollamaPackageService
+            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
+        _ollamaPackageService
+            .Setup(s => s.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(), It.IsAny<IReadOnlyDictionary<string, string>?>()))
+            .ReturnsAsync(new FakeOllamaServerHandle("127.0.0.1:11434"));
+
+        // Capture the in-flight progress + finalize callbacks so the
+        // test can drive synthetic NDJSON frames through them and watch
+        // PullProgressLine end up with a friendly label.
+        var renderedLines = new List<string>();
+        _modelService
+            .Setup(m => m.PullModelAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
+                It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>(), It.IsAny<Action?>()))
+            .Callback<string, string, string, Action<string>, CancellationToken, string?, Action<OllamaPullProgress>?, Action?>(
+                (_, _, modelTag, _, _, _, onProgress, onFinalize) =>
+                {
+                    // Two distinct layer digests + one stage frame — the
+                    // shape Ollama emits for a multi-blob model. Repeat
+                    // the second digest to confirm the layer counter
+                    // doesn't double-count repeat frames.
+                    onProgress?.Invoke(new OllamaPullProgress(
+                        "pulling 96c415656d37", "sha256:96c415656d37", 4_700_000_000L, 1_000_000_000L));
+                    onProgress?.Invoke(new OllamaPullProgress(
+                        "pulling e73cc17c7181", "sha256:e73cc17c7181", 6_900_000_000L, 3_450_000_000L));
+                    onProgress?.Invoke(new OllamaPullProgress(
+                        "pulling e73cc17c7181", "sha256:e73cc17c7181", 6_900_000_000L, 6_900_000_000L));
+                    onProgress?.Invoke(new OllamaPullProgress(
+                        "verifying sha256 digest", null, null, null));
+                    onFinalize?.Invoke();
+                })
+            .ReturnsAsync(new ModelPullResult("0123456789abcdef", 270_000_000));
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        Thread.Sleep(100);
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(PrepViewModel.PullProgressLine))
+                renderedLines.Add(vm.PullProgressLine);
+        };
+        vm.ModelRows.Single(r => r.Name == "llama3.2:3b").IsSelected = true;
+
+        vm.DownloadCommand.Execute(null);
+        await WaitForCommandAsync(vm.DownloadCommand);
+
+        // First layer frame names the model. We deliberately suppress
+        // "layer 1 of 1" — it's noise until a second digest appears.
+        Assert.Contains(renderedLines, l =>
+            l.Contains("pulling llama3.2:3b")
+            && !l.Contains("layer")
+            && l.Contains("21%"));
+        // Layer 2 frame bumps the counter — both digests seen now.
+        Assert.Contains(renderedLines, l => l.Contains("llama3.2:3b") && l.Contains("layer 2 of 2"));
+        // Repeat of layer-2 digest stays at "layer 2 of 2" (no double-count).
+        Assert.DoesNotContain(renderedLines, l => l.Contains("layer 2 of 3"));
+        // Stage frame is prefixed with the parent model.
+        Assert.Contains(renderedLines, l => l.Contains("llama3.2:3b") && l.Contains("verifying sha256 digest"));
+        // #48: finalize hook flipped the line to the "Finalizing…" state.
+        Assert.Contains(renderedLines, l => l.Contains("Finalizing llama3.2:3b") && l.Contains("verifying integrity"));
+        // None of the rendered lines leak the raw blob hash.
+        Assert.DoesNotContain(renderedLines, l => l.Contains("96c415656d37"));
+        Assert.DoesNotContain(renderedLines, l => l.Contains("e73cc17c7181"));
+    }
+
+    /// #49 pin: the embedding-model pull (the "e73cc17c7181"-style
+    /// surprise companion install) must surface an explicit log line
+    /// naming the model and explaining why it's being installed, BEFORE
+    /// the pull starts.
+    [Fact]
+    public async Task DownloadCommand_LogsCompanionEmbedderInstallExplicitly_BeforePull()
+    {
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        _modelService.Setup(m => m.BuildPullSelectionWarnings(It.IsAny<IReadOnlyList<string>>(), It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<int?>())).Returns(new List<string>());
+
+        var config = new PortableConfig();
+        config.Models.Add(new ModelConfigEntry { Name = "llama3.2:3b", Status = ModelInstallStatus.NotInstalled });
+        _modelService.Setup(m => m.LoadConfigAsync(It.IsAny<string>())).ReturnsAsync(config);
+        _modelService.Setup(m => m.DiscoverModelsOnDisk(It.IsAny<string>())).Returns(Array.Empty<string>());
+        _ollamaPackageService
+            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
+        _ollamaPackageService
+            .Setup(s => s.StartTemporaryServerAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(), It.IsAny<IReadOnlyDictionary<string, string>?>()))
+            .ReturnsAsync(new FakeOllamaServerHandle("127.0.0.1:11434"));
+        _modelService
+            .Setup(m => m.PullModelAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Action<string>>(), It.IsAny<CancellationToken>(),
+                It.IsAny<string?>(), It.IsAny<Action<OllamaPullProgress>?>(), It.IsAny<Action?>()))
+            .ReturnsAsync(new ModelPullResult("0123456789abcdef", 270_000_000));
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        Thread.Sleep(100);
+        vm.ModelRows.Single(r => r.Name == "llama3.2:3b").IsSelected = true;
+
+        vm.DownloadCommand.Execute(null);
+        await WaitForCommandAsync(vm.DownloadCommand);
+
+        // The pre-pull "Also installing" line is what the user-reported
+        // bug specifically asked for — it names the model AND tells the
+        // user *why* it's being installed (RAG).
+        Assert.Contains(vm.LogLines, l =>
+            l.Contains("Also installing")
+            && l.Contains("nomic-embed-text")
+            && l.Contains("RAG"));
     }
 }

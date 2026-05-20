@@ -1806,6 +1806,16 @@ public class PrepViewModel : BaseViewModel
                     ? $"Resuming {model} from {seed:P0}…"
                     : $"Pulling {model}…";
 
+                // #49: track layer digests as they arrive so the in-place
+                // label can render "layer N of M" instead of a raw blob
+                // hash. The model's manifest doesn't tell us M up front,
+                // so layerCount grows as new digests appear — a fresh
+                // digest bumps the visible count, repeat digests keep
+                // their existing index. Per-pull state; cleared between
+                // models.
+                var layerOrder = new List<string>();
+                var pullCtx = new PullDisplayContext(model);
+
                 try
                 {
                     var result = await _modelService.PullModelAsync(
@@ -1815,7 +1825,15 @@ public class PrepViewModel : BaseViewModel
                         // SetPullProgressLineSafe dispatches via the UI
                         // sync context because the lambda fires from
                         // OllamaPullClient's HTTP-response drain thread.
-                        onProgress: progress => SetPullProgressLineSafe(progress.ToDisplayString()));
+                        onProgress: progress => SetPullProgressLineSafe(
+                            RenderPullProgress(progress, pullCtx, layerOrder)),
+                        // #48: between Ollama's "success" frame and the
+                        // PullModelResult return, we compute SHA-256
+                        // over the (multi-GB) blob. That gap had no UI
+                        // feedback — the bar stayed at 100% and the
+                        // window appeared to hang. Surface an explicit
+                        // "Finalizing" indeterminate state instead.
+                        onFinalize: () => OnPullFinalizing(model));
 
                     await _modelService.UpdateModelStatusAsync(configPath, model, ModelInstallStatus.Installed, result.Sha256, result.SizeBytes, DateTime.UtcNow);
                     AppendLog($"Downloaded {model} ({FormatSize(result.SizeBytes)}). Sha256 {result.Sha256[..8]}...");
@@ -1897,19 +1915,29 @@ public class PrepViewModel : BaseViewModel
             return;
         }
 
-        AppendLog($"Pulling embedding model {canonicalTag}…");
+        // #49: every chat-model pull is followed by an embedding-model
+        // pull the user did not explicitly check. Pre-fix this read as
+        // an "undisclosed extra download". Surface it explicitly as a
+        // companion-model install so the user knows what it is and why
+        // it's happening.
+        AppendLog($"Also installing: {canonicalTag} — required for document search (RAG).");
         await _modelService.UpdateModelStatusAsync(configPath, canonicalTag, ModelInstallStatus.Downloading);
 
         var seed = _modelService.EstimatePartialPullProgress(modelsRoot, canonicalTag);
         PullProgressLine = seed > 0
-            ? $"Resuming {canonicalTag} from {seed:P0}…"
-            : $"Pulling {canonicalTag}…";
+            ? $"Resuming companion model {canonicalTag} from {seed:P0}…"
+            : $"Installing companion model {canonicalTag}…";
+
+        var embedLayerOrder = new List<string>();
+        var embedCtx = new PullDisplayContext(canonicalTag);
 
         try
         {
             var result = await _modelService.PullModelAsync(
                 ollamaExe, modelsRoot, canonicalTag, AppendLog, ct, ollamaHost,
-                onProgress: progress => SetPullProgressLineSafe(progress.ToDisplayString()));
+                onProgress: progress => SetPullProgressLineSafe(
+                    RenderPullProgress(progress, embedCtx, embedLayerOrder)),
+                onFinalize: () => OnPullFinalizing(canonicalTag));
 
             await _modelService.UpdateModelStatusAsync(
                 configPath, canonicalTag, ModelInstallStatus.Installed,
@@ -2842,6 +2870,63 @@ public class PrepViewModel : BaseViewModel
         }
 
         _logService.AppendLog(message);
+    }
+
+    /// <summary>
+    /// Per-pull context handed to <see cref="RenderPullProgress"/> so
+    /// the rendered label can name the parent model and number the
+    /// layers as their digests come off the wire. Fresh instance per
+    /// model in the batch; never shared.
+    /// </summary>
+    private sealed record PullDisplayContext(string ParentModel);
+
+    /// <summary>
+    /// #49: renders one NDJSON frame into the in-place progress line.
+    /// Maintains the per-pull layer order so the user sees
+    /// <c>"pulling &lt;model&gt; (layer 2 of 3)"</c> instead of an opaque
+    /// blob hash. A repeat digest keeps its existing index; a new digest
+    /// gets appended.
+    /// </summary>
+    private static string RenderPullProgress(
+        OllamaPullProgress progress,
+        PullDisplayContext ctx,
+        List<string> layerOrder)
+    {
+        int? layerIndex = null;
+        int? layerCount = null;
+        if (!string.IsNullOrEmpty(progress.Digest))
+        {
+            var idx = layerOrder.IndexOf(progress.Digest);
+            if (idx < 0)
+            {
+                layerOrder.Add(progress.Digest);
+                idx = layerOrder.Count - 1;
+            }
+            layerIndex = idx + 1;
+            layerCount = layerOrder.Count;
+        }
+
+        return progress.ToDisplayString(ctx.ParentModel, layerIndex, layerCount);
+    }
+
+    /// <summary>
+    /// #48: bridges <see cref="ModelOperations.PullModelAsync"/>'s
+    /// post-stream <c>onFinalize</c> callback into the VM's UI surface.
+    /// Flips the progress bar to indeterminate and swaps the in-place
+    /// label to a "Finalizing" message so the multi-second SHA-256
+    /// compute on a 12B blob no longer looks like a hang.
+    /// </summary>
+    private void OnPullFinalizing(string modelTag)
+    {
+        SetPullProgressLineSafe($"Finalizing {modelTag}… verifying integrity (this can take a minute on large models)");
+        if (_uiSyncContext is null || SynchronizationContext.Current == _uiSyncContext)
+        {
+            ProgressIsIndeterminate = true;
+        }
+        else
+        {
+            _uiSyncContext.Post(_ => ProgressIsIndeterminate = true, null);
+        }
     }
 
     /// <summary>

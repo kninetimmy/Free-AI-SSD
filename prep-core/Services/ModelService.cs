@@ -49,9 +49,10 @@ public sealed class ModelService : IModelService
         => ModelOperations.EstimatePartialProgress(modelsRoot, modelTag);
 
     public async Task<ModelPullResult> PullModelAsync(string ollamaExe, string modelsRoot, string modelTag,
-        Action<string> onLog, CancellationToken ct, string? ollamaHost = null, Action<OllamaPullProgress>? onProgress = null)
+        Action<string> onLog, CancellationToken ct, string? ollamaHost = null, Action<OllamaPullProgress>? onProgress = null,
+        Action? onFinalize = null)
     {
-        var result = await _modelOperations.PullModelAsync(ollamaExe, modelsRoot, modelTag, onLog, ct, ollamaHost, onProgress);
+        var result = await _modelOperations.PullModelAsync(ollamaExe, modelsRoot, modelTag, onLog, ct, ollamaHost, onProgress, onFinalize);
         return new ModelPullResult(result.Sha256, result.SizeBytes);
     }
 
