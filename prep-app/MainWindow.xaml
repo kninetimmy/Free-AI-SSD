@@ -661,7 +661,7 @@
                                     <ToggleButton x:Name="MostPopularToggle"
                                                   Grid.Column="0"
                                                   Content="Most popular"
-                                                  Padding="10,4" MinHeight="0"
+                                                  Style="{StaticResource ChipToggleButton}"
                                                   VerticalAlignment="Center"
                                                   IsChecked="{Binding ShowOnlyMostPopular, Mode=TwoWay}"
                                                   ToolTip="Show only the top-N recommended models by ollama.com pull count. Click Refresh from Ollama first to populate pull counts on the bundled list."/>
@@ -729,16 +729,20 @@
                                                    Style="{StaticResource CaptionText}"
                                                    VerticalAlignment="Center"
                                                    Margin="0,0,6,0"/>
-                                        <ToggleButton Content="tools" Padding="8,3" MinHeight="0" Margin="2,0"
+                                        <ToggleButton Content="tools" Margin="2,0"
+                                                      Style="{StaticResource ChipToggleButton}"
                                                       IsChecked="{Binding FilterCapabilityTools, Mode=TwoWay}"
                                                       ToolTip="Show only models that advertise tool/function-calling support."/>
-                                        <ToggleButton Content="vision" Padding="8,3" MinHeight="0" Margin="2,0"
+                                        <ToggleButton Content="vision" Margin="2,0"
+                                                      Style="{StaticResource ChipToggleButton}"
                                                       IsChecked="{Binding FilterCapabilityVision, Mode=TwoWay}"
                                                       ToolTip="Show only models that accept image input."/>
-                                        <ToggleButton Content="thinking" Padding="8,3" MinHeight="0" Margin="2,0"
+                                        <ToggleButton Content="thinking" Margin="2,0"
+                                                      Style="{StaticResource ChipToggleButton}"
                                                       IsChecked="{Binding FilterCapabilityThinking, Mode=TwoWay}"
                                                       ToolTip="Show only models with extended thinking / chain-of-thought support."/>
-                                        <ToggleButton Content="audio" Padding="8,3" MinHeight="0" Margin="2,0"
+                                        <ToggleButton Content="audio" Margin="2,0"
+                                                      Style="{StaticResource ChipToggleButton}"
                                                       IsChecked="{Binding FilterCapabilityAudio, Mode=TwoWay}"
                                                       ToolTip="Show only models that accept audio input."/>
                                     </StackPanel>

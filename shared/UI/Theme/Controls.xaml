@@ -300,6 +300,77 @@
     </Style>
 
     <!--  ────────────────────────────────────────────────────────────
+          4b. ChipToggleButton
+          Themed pill-shaped ToggleButton for filter chips
+          (capability chips, "Most popular" toggle). Without this, an
+          unstyled ToggleButton renders default WPF chrome (light
+          system background) while the implicit TextBlock style paints
+          its content TextPrimaryBrush — i.e. white text on a light
+          surface (the 1.3.31 'white-on-white' regression). Off =
+          sunken raised surface, secondary text. On = AccentCyan
+          border + sunken background + primary text.
+          ────────────────────────────────────────────────────────────  -->
+    <Style x:Key="ChipToggleButton" TargetType="{x:Type ToggleButton}">
+        <Setter Property="FontFamily" Value="{StaticResource PrimaryFontFamily}"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+        <Setter Property="Background" Value="{StaticResource BgRaisedBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource SurfaceBorderBrush}"/>
+        <Setter Property="Padding" Value="10,4"/>
+        <Setter Property="MinHeight" Value="0"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="{x:Type ToggleButton}">
+                    <Border x:Name="Surface"
+                            CornerRadius="12"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="1">
+                        <ContentPresenter Margin="{TemplateBinding Padding}"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          RecognizesAccessKey="True"
+                                          TextElement.Foreground="{TemplateBinding Foreground}"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Surface" Property="BorderBrush"
+                                    Value="{StaticResource FocusBorderGradientBrush}"/>
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource TextPrimaryBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Surface" Property="BorderBrush"
+                                    Value="{StaticResource FocusBorderGradientBrush}"/>
+                            <Setter TargetName="Surface" Property="Effect"
+                                    Value="{StaticResource FocusGlowCyan}"/>
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource TextPrimaryBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Surface" Property="Background"
+                                    Value="{StaticResource BgSunkenBrush}"/>
+                            <Setter TargetName="Surface" Property="BorderBrush"
+                                    Value="{StaticResource AccentCyanBrush}"/>
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource TextPrimaryBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground"
+                                    Value="{StaticResource TextDisabledBrush}"/>
+                            <Setter TargetName="Surface" Property="Opacity" Value="0.55"/>
+                            <Setter Property="Cursor" Value="Arrow"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!--  ────────────────────────────────────────────────────────────
           5a-implicit. Default TextBox = GlowFocusTextBox
           Any <TextBox/> that does not opt out via explicit Style gets
           the themed sunken surface + focus glow. Required so dialog
