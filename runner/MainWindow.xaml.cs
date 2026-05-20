@@ -272,6 +272,7 @@ public partial class MainWindow : System.Windows.Window
         RefreshLibraryUi();
         InitializeTts();
         InitializePtt();
+        InitializeVoiceUi();
         RefreshProfileVisibility();
         StatusText.Text = "Ready (not running)";
         AppendLog($"Loaded config from {configPath}");
@@ -284,12 +285,12 @@ public partial class MainWindow : System.Windows.Window
         BindingsImportCard.Visibility = vis;
         PttCard.Visibility = vis;
 
-        // Mac-parity #44 stage 1: also gate the Voice/Sim tab buttons
-        // — empty tabs look broken. Bounce back to Chat if the user is
-        // currently sitting on a tab that just disappeared.
-        TabVoiceButton.Visibility = vis;
+        // Voice tab carries universal Speech-output (TTS) and Speech-input
+        // (STT) cards (Mac-parity #44 stage 4) so the button stays visible
+        // in both profiles; only the PTT card inside it is Sim-only. The
+        // Sim tab is still HOTAS-only, so its button still gates on profile.
         TabSimButton.Visibility = vis;
-        if (!isFlightSim && (_currentTab == RunnerTab.Voice || _currentTab == RunnerTab.Sim))
+        if (!isFlightSim && _currentTab == RunnerTab.Sim)
         {
             GoToTab(RunnerTab.Chat);
         }
@@ -410,6 +411,7 @@ public partial class MainWindow : System.Windows.Window
             RefreshLibraryUi();
             InitializeTts();
             InitializePtt();
+            InitializeVoiceUi();
             StatusText.Text = "Unlocked and ready";
             AppendLog("SSD unlocked successfully.");
             _ = SaveEncryptionUnlockStateAsync();
@@ -2387,6 +2389,315 @@ public partial class MainWindow : System.Windows.Window
                 }
             });
         }, TaskScheduler.Default);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Voice tab UI — TTS + STT settings (Mac-parity #44 stage 4)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // Suppresses change handlers while we're populating Voice-tab controls from
+    // config so SelectionChanged / ValueChanged / Click don't write the loaded
+    // value back to disk. Same pattern as _suppressPillEvents (profile pills).
+    private bool _suppressVoiceUiEvents;
+
+    /// <summary>
+    /// Populates the Voice-tab TTS and STT controls from the current config.
+    /// Called after config load or unlock, alongside <see cref="InitializeTts"/>
+    /// and <see cref="InitializePtt"/>. Does not start any background work —
+    /// the actual TTS service has already been built by InitializeTts.
+    /// </summary>
+    private void InitializeVoiceUi()
+    {
+        if (_config is null) return;
+
+        _suppressVoiceUiEvents = true;
+        try
+        {
+            // ── TTS ────────────────────────────────────────────────────────
+            TtsEnabledCheck.IsChecked = _config.TtsEnabled;
+
+            var isPiper = string.Equals(_config.TtsEngine, "piper", StringComparison.OrdinalIgnoreCase);
+            TtsEngineSystemPill.IsChecked = !isPiper;
+            TtsEnginePiperPill.IsChecked = isPiper;
+
+            // Piper requires piper.exe staged on the SSD; surface a hint and
+            // block the radio when it's not available so the user isn't
+            // confused by silent fall-through to System.
+            var piperAvailable = File.Exists(Path.Combine(_ssdRoot, "windows", "tools", "piper", "piper.exe"));
+            TtsEnginePiperPill.IsEnabled = piperAvailable;
+            PiperUnavailableHint.Visibility = piperAvailable
+                ? System.Windows.Visibility.Collapsed
+                : System.Windows.Visibility.Visible;
+
+            RefreshTtsVoiceList();
+            RefreshTtsOutputDeviceList();
+
+            TtsRateSlider.Value = _config.TtsRate;
+            TtsRateLabel.Text = _config.TtsRate.ToString();
+            TtsVolumeSlider.Value = _config.TtsVolume;
+            TtsVolumeLabel.Text = _config.TtsVolume.ToString();
+
+            // ── STT ────────────────────────────────────────────────────────
+            RefreshMicDeviceList();
+
+            WhisperTinyPill.IsChecked = _config.WhisperModelSize == WhisperModelSize.Tiny;
+            WhisperBasePill.IsChecked = _config.WhisperModelSize == WhisperModelSize.Base;
+            WhisperSmallPill.IsChecked = _config.WhisperModelSize == WhisperModelSize.Small;
+            WhisperMediumPill.IsChecked = _config.WhisperModelSize == WhisperModelSize.Medium;
+
+            AutoSendVoiceCheck.IsChecked = _config.AutoSendVoiceInput;
+        }
+        finally
+        {
+            _suppressVoiceUiEvents = false;
+        }
+    }
+
+    /// <summary>
+    /// Re-populates the TTS voice dropdown from the currently active engine
+    /// and selects the configured voice (if any). Called after engine switch.
+    /// </summary>
+    private void RefreshTtsVoiceList()
+    {
+        if (_config is null) return;
+
+        var voices = _ttsService?.GetAvailableVoices() ?? Array.Empty<string>();
+        TtsVoiceCombo.ItemsSource = voices;
+
+        if (!string.IsNullOrWhiteSpace(_config.TtsVoiceName) && voices.Contains(_config.TtsVoiceName))
+        {
+            TtsVoiceCombo.SelectedItem = _config.TtsVoiceName;
+        }
+        else if (voices.Count > 0)
+        {
+            TtsVoiceCombo.SelectedIndex = 0;
+        }
+    }
+
+    /// <summary>
+    /// Re-populates the TTS output device dropdown from the system mixer.
+    /// Adds a "(System default)" entry at the top so the user can clear an
+    /// override without editing config manually.
+    /// </summary>
+    private void RefreshTtsOutputDeviceList()
+    {
+        if (_config is null) return;
+
+        const string defaultLabel = "(System default)";
+        var items = new List<string> { defaultLabel };
+        items.AddRange(SystemTextToSpeechService.GetAvailableOutputDevices());
+        TtsOutputDeviceCombo.ItemsSource = items;
+
+        if (!string.IsNullOrWhiteSpace(_config.TtsOutputDevice) && items.Contains(_config.TtsOutputDevice))
+        {
+            TtsOutputDeviceCombo.SelectedItem = _config.TtsOutputDevice;
+        }
+        else
+        {
+            TtsOutputDeviceCombo.SelectedIndex = 0;
+        }
+    }
+
+    /// <summary>
+    /// Re-populates the microphone dropdown. Adds "(System default)" so the
+    /// user can clear an override.
+    /// </summary>
+    private void RefreshMicDeviceList()
+    {
+        if (_config is null) return;
+
+        const string defaultLabel = "(System default)";
+        var items = new List<string> { defaultLabel };
+        items.AddRange(_audioCaptureService.GetAvailableDevices());
+        MicDeviceCombo.ItemsSource = items;
+
+        if (!string.IsNullOrWhiteSpace(_config.SelectedMicrophoneDevice) && items.Contains(_config.SelectedMicrophoneDevice))
+        {
+            MicDeviceCombo.SelectedItem = _config.SelectedMicrophoneDevice;
+        }
+        else
+        {
+            MicDeviceCombo.SelectedIndex = 0;
+        }
+    }
+
+    // ── TTS event handlers ──────────────────────────────────────────────────
+
+    private void TtsEnabled_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_suppressVoiceUiEvents || _config is null) return;
+        _config.TtsEnabled = TtsEnabledCheck.IsChecked == true;
+        SaveConfigAsync();
+    }
+
+    private void TtsEngine_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_suppressVoiceUiEvents || _config is null) return;
+
+        var newEngine = TtsEnginePiperPill.IsChecked == true ? "piper" : "system";
+        if (string.Equals(_config.TtsEngine, newEngine, StringComparison.OrdinalIgnoreCase)) return;
+
+        _config.TtsEngine = newEngine;
+        // Voice names don't carry across engines — clear the selection so the
+        // dropdown re-defaults to the first voice on the new engine.
+        _config.TtsVoiceName = null;
+        SaveConfigAsync();
+
+        // Recreate the TTS service so the engine actually changes. Then refresh
+        // the voice list — System voices and Piper voices have different names.
+        InitializeTts();
+        _suppressVoiceUiEvents = true;
+        try { RefreshTtsVoiceList(); } finally { _suppressVoiceUiEvents = false; }
+    }
+
+    private void TtsVoice_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_suppressVoiceUiEvents || _config is null) return;
+        if (TtsVoiceCombo.SelectedItem is not string voice) return;
+
+        _config.TtsVoiceName = voice;
+        _ttsService?.SetVoice(voice);
+        SaveConfigAsync();
+    }
+
+    private void TtsRateSlider_ValueChanged(object sender, System.Windows.RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_suppressVoiceUiEvents || _config is null) return;
+
+        var rate = (int)Math.Round(e.NewValue);
+        if (rate == _config.TtsRate) return;
+
+        _config.TtsRate = rate;
+        TtsRateLabel.Text = rate.ToString();
+        _ttsService?.SetRate(rate);
+        SaveConfigAsync();
+    }
+
+    private void TtsVolumeSlider_ValueChanged(object sender, System.Windows.RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_suppressVoiceUiEvents || _config is null) return;
+
+        var vol = (int)Math.Round(e.NewValue);
+        if (vol == _config.TtsVolume) return;
+
+        _config.TtsVolume = vol;
+        TtsVolumeLabel.Text = vol.ToString();
+        _ttsService?.SetVolume(vol);
+        SaveConfigAsync();
+    }
+
+    private void TtsOutputDevice_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_suppressVoiceUiEvents || _config is null) return;
+        if (TtsOutputDeviceCombo.SelectedItem is not string label) return;
+
+        // First item is the synthetic "(System default)" — store null in config.
+        var deviceName = TtsOutputDeviceCombo.SelectedIndex == 0 ? null : label;
+        if (string.Equals(_config.TtsOutputDevice ?? string.Empty, deviceName ?? string.Empty, StringComparison.Ordinal)) return;
+
+        _config.TtsOutputDevice = deviceName;
+        SaveConfigAsync();
+
+        // OutputDeviceName is captured by the service at construction time,
+        // so recreate to pick up the new device. Cheap — no model load.
+        InitializeTts();
+    }
+
+    private void TtsOutputRefresh_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        _suppressVoiceUiEvents = true;
+        try { RefreshTtsOutputDeviceList(); } finally { _suppressVoiceUiEvents = false; }
+    }
+
+    private void TtsTest_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_ttsService is null)
+        {
+            AppendLog("TTS service not initialized.");
+            return;
+        }
+        _ = _ttsService.SpeakAsync("This is a test of the assistant voice.");
+    }
+
+    // ── STT event handlers ──────────────────────────────────────────────────
+
+    private void MicDevice_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_suppressVoiceUiEvents || _config is null) return;
+        if (MicDeviceCombo.SelectedItem is not string label) return;
+
+        var deviceName = MicDeviceCombo.SelectedIndex == 0 ? null : label;
+        if (string.Equals(_config.SelectedMicrophoneDevice ?? string.Empty, deviceName ?? string.Empty, StringComparison.Ordinal)) return;
+
+        _config.SelectedMicrophoneDevice = deviceName;
+        SaveConfigAsync();
+    }
+
+    private void MicRefresh_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        _suppressVoiceUiEvents = true;
+        try { RefreshMicDeviceList(); } finally { _suppressVoiceUiEvents = false; }
+    }
+
+    private void WhisperSize_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_suppressVoiceUiEvents || _config is null) return;
+
+        WhisperModelSize size;
+        if (WhisperTinyPill.IsChecked == true) size = WhisperModelSize.Tiny;
+        else if (WhisperSmallPill.IsChecked == true) size = WhisperModelSize.Small;
+        else if (WhisperMediumPill.IsChecked == true) size = WhisperModelSize.Medium;
+        else size = WhisperModelSize.Base;
+
+        if (_config.WhisperModelSize == size) return;
+
+        _config.WhisperModelSize = size;
+        SaveConfigAsync();
+
+        // The loaded Whisper model is held until the process exits or a new
+        // InitializeAsync is called. If the new size's .bin is on the SSD we
+        // reload immediately so the next voice press uses it; otherwise we
+        // surface a hint and let the lazy-load path in OnVoiceClick handle
+        // the download.
+        var modelPath = WhisperModelManager.GetModelPath(_ssdRoot, size);
+        if (File.Exists(modelPath))
+        {
+            WhisperReloadHint.Text = "Reloading…";
+            WhisperReloadHint.Visibility = System.Windows.Visibility.Visible;
+            _ = ReloadWhisperModelAsync();
+        }
+        else
+        {
+            WhisperReloadHint.Text = $"{size} not on SSD — will download on next voice input.";
+            WhisperReloadHint.Visibility = System.Windows.Visibility.Visible;
+        }
+    }
+
+    private async Task ReloadWhisperModelAsync()
+    {
+        try
+        {
+            await _sttService.InitializeAsync(_ssdRoot, _config!);
+            await Dispatcher.InvokeAsync(() =>
+            {
+                WhisperReloadHint.Visibility = System.Windows.Visibility.Collapsed;
+            });
+        }
+        catch (Exception ex)
+        {
+            await Dispatcher.InvokeAsync(() =>
+            {
+                WhisperReloadHint.Text = $"Reload failed: {ex.Message}";
+                WhisperReloadHint.Visibility = System.Windows.Visibility.Visible;
+            });
+        }
+    }
+
+    private void AutoSendVoice_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_suppressVoiceUiEvents || _config is null) return;
+        _config.AutoSendVoiceInput = AutoSendVoiceCheck.IsChecked == true;
+        SaveConfigAsync();
     }
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)

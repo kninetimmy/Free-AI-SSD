@@ -266,7 +266,7 @@
                         Content="Voice"
                         Style="{StaticResource SegmentedGameButton}"
                         Click="TabVoice_Click"
-                        ToolTip="Push-to-Talk and voice I/O. Available with the Flight Sim profile."/>
+                        ToolTip="Speech output (TTS) and input (STT) settings; Push-to-Talk in the Flight Sim profile."/>
                 <Button x:Name="TabSimButton"
                         Content="Sim"
                         Style="{StaticResource SegmentedGameButton}"
@@ -650,11 +650,240 @@
             </Grid>
 
             <!-- ────────────────────── Voice tab ─────────────────────── -->
-            <!-- Push-to-Talk / HOTAS voice input. Gated by the Flight
-                 Sim profile (RefreshProfileVisibility in code-behind
-                 also hides this card AND the Voice tab button when the
-                 General profile is active). -->
+            <!-- Three stacked cards, top→bottom — Mac-parity #44 stage 4:
+                 Speech output (TTS) and Speech input (STT) are universal
+                 (visible in both profiles); Push-to-Talk is Flight-Sim-only
+                 and is hidden by RefreshProfileVisibility in General. -->
             <Grid x:Name="VoiceTab" Visibility="Collapsed">
+                <StackPanel>
+
+                <!-- Voice / Card 1: Speech output (TTS) -->
+                <Border x:Name="VoiceOutputCard" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
+                    <StackPanel>
+                        <TextBlock Text="Speech output"
+                                   Style="{StaticResource H2Text}"/>
+                        <TextBlock Text="Read the assistant's replies aloud through your speakers."
+                                   Style="{StaticResource CaptionText}"
+                                   TextWrapping="Wrap" Margin="0,4,0,10"/>
+
+                        <!-- Master enable toggle -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <ToggleButton x:Name="TtsEnabledCheck"
+                                          Style="{StaticResource NeonToggleSwitch}"
+                                          Click="TtsEnabled_Click"
+                                          ToolTip="Turn voice readback of AI responses on or off."/>
+                            <TextBlock Text="Read AI responses aloud"
+                                       Margin="8,0,0,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="{StaticResource TextPrimaryBrush}"/>
+                        </StackPanel>
+
+                        <!-- Engine / voice / rate / volume / device — revealed only when enabled. -->
+                        <StackPanel x:Name="TtsSettingsPanel"
+                                    Visibility="{Binding ElementName=TtsEnabledCheck, Path=IsChecked, Converter={StaticResource BoolToVisibilityConverter}}">
+
+                            <!-- Engine pill segmented -->
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <TextBlock Text="Engine:"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                <Border CornerRadius="14"
+                                        Background="{StaticResource BgSunkenBrush}"
+                                        BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                        BorderThickness="1"
+                                        Padding="3"
+                                        Effect="{StaticResource SunkenDarkShadow}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <RadioButton x:Name="TtsEngineSystemPill"
+                                                     Content="System (Windows)"
+                                                     Style="{StaticResource PillRadioButton}"
+                                                     GroupName="TtsEngine"
+                                                     IsChecked="True"
+                                                     Click="TtsEngine_Click"
+                                                     ToolTip="Built-in Windows SAPI voices — always available."/>
+                                        <RadioButton x:Name="TtsEnginePiperPill"
+                                                     Content="Piper (neural)"
+                                                     Style="{StaticResource PillRadioButton}"
+                                                     GroupName="TtsEngine"
+                                                     Click="TtsEngine_Click"
+                                                     ToolTip="Local neural TTS — requires piper.exe plus a voice model staged on the SSD."/>
+                                    </StackPanel>
+                                </Border>
+                                <TextBlock x:Name="PiperUnavailableHint"
+                                           Text="Piper not staged on SSD"
+                                           Foreground="{StaticResource TextDisabledBrush}"
+                                           FontSize="11"
+                                           VerticalAlignment="Center"
+                                           Margin="10,0,0,0"
+                                           Visibility="Collapsed"/>
+                            </StackPanel>
+
+                            <!-- Voice dropdown -->
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <TextBlock Text="Voice:"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           VerticalAlignment="Center" Width="80"/>
+                                <ComboBox x:Name="TtsVoiceCombo"
+                                          Style="{StaticResource GlowFocusComboBox}"
+                                          Width="320"
+                                          SelectionChanged="TtsVoice_SelectionChanged"
+                                          ToolTip="Pick which installed voice to use."/>
+                            </StackPanel>
+
+                            <!-- Rate slider -->
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                <TextBlock Text="Rate:"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           VerticalAlignment="Center" Width="80"/>
+                                <Slider x:Name="TtsRateSlider"
+                                        Minimum="-10" Maximum="10"
+                                        TickFrequency="1"
+                                        IsSnapToTickEnabled="True"
+                                        Width="240"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="TtsRateSlider_ValueChanged"
+                                        ToolTip="Speech rate, -10 (slowest) to +10 (fastest). 0 is the default pace."/>
+                                <TextBlock x:Name="TtsRateLabel" Text="0"
+                                           Foreground="{StaticResource AccentCyanBrush}"
+                                           Margin="10,0,0,0"
+                                           VerticalAlignment="Center"
+                                           MinWidth="30"/>
+                            </StackPanel>
+
+                            <!-- Volume slider -->
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <TextBlock Text="Volume:"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           VerticalAlignment="Center" Width="80"/>
+                                <Slider x:Name="TtsVolumeSlider"
+                                        Minimum="0" Maximum="100"
+                                        TickFrequency="10"
+                                        Width="240"
+                                        VerticalAlignment="Center"
+                                        ValueChanged="TtsVolumeSlider_ValueChanged"
+                                        ToolTip="Output volume, 0 to 100%."/>
+                                <TextBlock x:Name="TtsVolumeLabel" Text="100"
+                                           Foreground="{StaticResource AccentCyanBrush}"
+                                           Margin="10,0,0,0"
+                                           VerticalAlignment="Center"
+                                           MinWidth="30"/>
+                            </StackPanel>
+
+                            <!-- Output device dropdown -->
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <TextBlock Text="Output:"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           VerticalAlignment="Center" Width="80"/>
+                                <ComboBox x:Name="TtsOutputDeviceCombo"
+                                          Style="{StaticResource GlowFocusComboBox}"
+                                          Width="320"
+                                          SelectionChanged="TtsOutputDevice_SelectionChanged"
+                                          ToolTip="Where to play the voice. Leave on default unless you want it on a specific output (e.g. a VR headset)."/>
+                                <Button Content="Refresh"
+                                        Style="{StaticResource GhostSecondaryButton}"
+                                        Margin="10,0,0,0"
+                                        Click="TtsOutputRefresh_Click"
+                                        ToolTip="Re-scan audio output devices."/>
+                            </StackPanel>
+
+                            <!-- Test voice -->
+                            <Button Content="Test voice"
+                                    Style="{StaticResource GhostSecondaryButton}"
+                                    HorizontalAlignment="Left"
+                                    Click="TtsTest_Click"
+                                    ToolTip="Speak a short sample using the current voice + rate + volume + output device."/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- Voice / Card 2: Speech input (STT) -->
+                <Border x:Name="VoiceInputCard" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
+                    <StackPanel>
+                        <TextBlock Text="Speech input"
+                                   Style="{StaticResource H2Text}"/>
+                        <TextBlock Text="Microphone and Whisper model used when you talk to the assistant."
+                                   Style="{StaticResource CaptionText}"
+                                   TextWrapping="Wrap" Margin="0,4,0,10"/>
+
+                        <!-- Mic dropdown -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <TextBlock Text="Microphone:"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       VerticalAlignment="Center" Width="100"/>
+                            <ComboBox x:Name="MicDeviceCombo"
+                                      Style="{StaticResource GlowFocusComboBox}"
+                                      Width="320"
+                                      SelectionChanged="MicDevice_SelectionChanged"
+                                      ToolTip="Pick which connected microphone to use for voice input."/>
+                            <Button Content="Refresh"
+                                    Style="{StaticResource GhostSecondaryButton}"
+                                    Margin="10,0,0,0"
+                                    Click="MicRefresh_Click"
+                                    ToolTip="Re-scan recording devices."/>
+                        </StackPanel>
+
+                        <!-- Whisper size pill segmented -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <TextBlock Text="Whisper model:"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       VerticalAlignment="Center" Margin="0,0,10,0"/>
+                            <Border CornerRadius="14"
+                                    Background="{StaticResource BgSunkenBrush}"
+                                    BorderBrush="{StaticResource SurfaceBorderBrush}"
+                                    BorderThickness="1"
+                                    Padding="3"
+                                    Effect="{StaticResource SunkenDarkShadow}">
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton x:Name="WhisperTinyPill"
+                                                 Content="Tiny"
+                                                 Style="{StaticResource PillRadioButton}"
+                                                 GroupName="WhisperSize"
+                                                 Click="WhisperSize_Click"
+                                                 ToolTip="~75 MB — fastest, least accurate."/>
+                                    <RadioButton x:Name="WhisperBasePill"
+                                                 Content="Base"
+                                                 Style="{StaticResource PillRadioButton}"
+                                                 GroupName="WhisperSize"
+                                                 IsChecked="True"
+                                                 Click="WhisperSize_Click"
+                                                 ToolTip="~142 MB — good balance (default)."/>
+                                    <RadioButton x:Name="WhisperSmallPill"
+                                                 Content="Small"
+                                                 Style="{StaticResource PillRadioButton}"
+                                                 GroupName="WhisperSize"
+                                                 Click="WhisperSize_Click"
+                                                 ToolTip="~466 MB — more accurate."/>
+                                    <RadioButton x:Name="WhisperMediumPill"
+                                                 Content="Medium"
+                                                 Style="{StaticResource PillRadioButton}"
+                                                 GroupName="WhisperSize"
+                                                 Click="WhisperSize_Click"
+                                                 ToolTip="~1.5 GB — best accuracy, slowest."/>
+                                </StackPanel>
+                            </Border>
+                            <TextBlock x:Name="WhisperReloadHint"
+                                       Foreground="{StaticResource TextDisabledBrush}"
+                                       FontSize="11"
+                                       VerticalAlignment="Center"
+                                       Margin="10,0,0,0"
+                                       Visibility="Collapsed"/>
+                        </StackPanel>
+
+                        <!-- Auto-send toggle -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <ToggleButton x:Name="AutoSendVoiceCheck"
+                                          Style="{StaticResource NeonToggleSwitch}"
+                                          Click="AutoSendVoice_Click"
+                                          ToolTip="When on, your spoken prompt is sent immediately. When off, the transcription drops into the prompt box for review first."/>
+                            <TextBlock Text="Auto-send transcribed voice"
+                                       Margin="8,0,0,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="{StaticResource TextPrimaryBrush}"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- Voice / Card 3: Push-to-Talk (HOTAS) — Sim-only -->
                 <Border x:Name="PttCard" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
                     <StackPanel>
                         <TextBlock Text="Push-to-Talk (HOTAS Voice Input)"
@@ -773,6 +1002,7 @@
                                    Margin="0,8,0,0"/>
                     </StackPanel>
                 </Border>
+                </StackPanel>
             </Grid>
 
             <!-- ─────────────────────── Sim tab ──────────────────────── -->
