@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using FreeAiSsd.Runner.Services;
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Documents;
@@ -97,6 +98,75 @@ public sealed class ChatServiceTests : IDisposable
             _ => Task.CompletedTask);
 
         Assert.IsType<ChatResult.Failure>(result);
+    }
+
+    // ─── #58: model-parameter slider wiring ───────────────────────────────
+
+    [Fact]
+    public async Task SendPromptAsync_WithDefaultConfig_DoesNotSendOptionsBlock()
+    {
+        var capturedBody = await CaptureGenerateRequestBodyAsync(new PortableConfig { ActiveDocumentLibraryId = null });
+
+        using var doc = JsonDocument.Parse(capturedBody);
+        Assert.False(doc.RootElement.TryGetProperty("options", out _),
+            "Default config must not send an 'options' block so each model keeps its compiled-in defaults.");
+    }
+
+    [Fact]
+    public async Task SendPromptAsync_WithAllOverrides_SendsEveryOllamaOptionKey()
+    {
+        var config = new PortableConfig
+        {
+            ActiveDocumentLibraryId = null,
+            ModelContextWindow = 8192,
+            ModelTemperature = 0.4,
+            ModelTopP = 0.85,
+            ModelMaxOutputTokens = 1024
+        };
+        var capturedBody = await CaptureGenerateRequestBodyAsync(config);
+
+        using var doc = JsonDocument.Parse(capturedBody);
+        var options = doc.RootElement.GetProperty("options");
+        Assert.Equal(8192, options.GetProperty("num_ctx").GetInt32());
+        Assert.Equal(0.4, options.GetProperty("temperature").GetDouble(), 3);
+        Assert.Equal(0.85, options.GetProperty("top_p").GetDouble(), 3);
+        Assert.Equal(1024, options.GetProperty("num_predict").GetInt32());
+    }
+
+    [Fact]
+    public async Task SendPromptAsync_WithOnlyTemperatureOverridden_OmitsOtherKeys()
+    {
+        var config = new PortableConfig
+        {
+            ActiveDocumentLibraryId = null,
+            ModelTemperature = 0.2 // others stay at sentinel defaults
+        };
+        var capturedBody = await CaptureGenerateRequestBodyAsync(config);
+
+        using var doc = JsonDocument.Parse(capturedBody);
+        var options = doc.RootElement.GetProperty("options");
+        Assert.Equal(0.2, options.GetProperty("temperature").GetDouble(), 3);
+        Assert.False(options.TryGetProperty("num_ctx", out _));
+        Assert.False(options.TryGetProperty("top_p", out _));
+        Assert.False(options.TryGetProperty("num_predict", out _));
+    }
+
+    private async Task<string> CaptureGenerateRequestBodyAsync(PortableConfig config)
+    {
+        string? captured = null;
+        var handler = new StubHandler((req, _) =>
+        {
+            captured = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return MakeJsonResponse("""{"response":"ok","done":true}""");
+        });
+        using var http = new HttpClient(handler);
+        var libraryManager = new DocumentLibraryManager(_tempRoot);
+        var service = new ChatService(http, libraryManager, logger: null);
+
+        await service.SendPromptAsync("phi3", "hi", "127.0.0.1:11434", config);
+
+        Assert.NotNull(captured);
+        return captured!;
     }
 
     private static HttpResponseMessage MakeJsonResponse(string json) => new(HttpStatusCode.OK)

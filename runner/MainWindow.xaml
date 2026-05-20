@@ -1164,8 +1164,9 @@
             <!-- System Compatibility probe + (stage 2) Dependencies. -->
             <Grid x:Name="SystemTab" Visibility="Collapsed">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/> <!-- 0: compatibility info -->
-                    <RowDefinition Height="Auto"/> <!-- 1: dependencies card  -->
+                    <RowDefinition Height="Auto"/> <!-- 0: compatibility info  -->
+                    <RowDefinition Height="Auto"/> <!-- 1: dependencies card   -->
+                    <RowDefinition Height="Auto"/> <!-- 2: model parameters    -->
                 </Grid.RowDefinitions>
                 <Border Grid.Row="0" x:Name="SystemCompatibilityCard" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
                     <StackPanel>
@@ -1256,6 +1257,109 @@
                                     Click="OpenPrereqsFolder_Click"
                                     ToolTip="Open the offline installer bundle on the SSD."/>
                         </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- #58 Model parameters: per-request overrides for Ollama's
+                     core sampling knobs. Each slider has a "use model default"
+                     sentinel at its low end; when at that position the option
+                     is omitted from the request so the model's compiled-in
+                     default is preserved. Reset returns every slider to that
+                     sentinel. Defaults shown in the value label as "default". -->
+                <Border Grid.Row="2" x:Name="ModelParametersCard" Style="{StaticResource NeumorphicCard}" Margin="0,10,0,0">
+                    <StackPanel>
+                        <TextBlock Text="Model parameters"
+                                   Style="{StaticResource H2Text}"
+                                   Margin="0,0,0,4"/>
+                        <TextBlock Text="Tune how the model responds. Sliders at the leftmost position use the model's built-in default."
+                                   Style="{StaticResource CaptionText}"
+                                   TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+                        <!-- Context window (num_ctx) -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Text="Context:"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       VerticalAlignment="Center" Width="110"/>
+                            <Slider x:Name="ModelContextSlider"
+                                    Minimum="0" Maximum="32768"
+                                    SmallChange="512" LargeChange="2048"
+                                    TickFrequency="2048"
+                                    Width="320"
+                                    VerticalAlignment="Center"
+                                    ValueChanged="ModelContextSlider_ValueChanged"
+                                    ToolTip="num_ctx: how many tokens of conversation + RAG context the model sees. Larger = more memory and slower. 0 uses the model default."/>
+                            <TextBlock x:Name="ModelContextLabel" Text="default"
+                                       Foreground="{StaticResource AccentCyanBrush}"
+                                       Margin="10,0,0,0"
+                                       VerticalAlignment="Center"
+                                       MinWidth="60"/>
+                        </StackPanel>
+
+                        <!-- Temperature -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Text="Temperature:"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       VerticalAlignment="Center" Width="110"/>
+                            <Slider x:Name="ModelTemperatureSlider"
+                                    Minimum="-0.05" Maximum="2.0"
+                                    SmallChange="0.05" LargeChange="0.1"
+                                    TickFrequency="0.1"
+                                    Width="320"
+                                    VerticalAlignment="Center"
+                                    ValueChanged="ModelTemperatureSlider_ValueChanged"
+                                    ToolTip="temperature: randomness of token sampling. 0 = deterministic, 2 = very creative. Far-left uses the model default."/>
+                            <TextBlock x:Name="ModelTemperatureLabel" Text="default"
+                                       Foreground="{StaticResource AccentCyanBrush}"
+                                       Margin="10,0,0,0"
+                                       VerticalAlignment="Center"
+                                       MinWidth="60"/>
+                        </StackPanel>
+
+                        <!-- Top P -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                            <TextBlock Text="Top P:"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       VerticalAlignment="Center" Width="110"/>
+                            <Slider x:Name="ModelTopPSlider"
+                                    Minimum="-0.05" Maximum="1.0"
+                                    SmallChange="0.05" LargeChange="0.1"
+                                    TickFrequency="0.05"
+                                    Width="320"
+                                    VerticalAlignment="Center"
+                                    ValueChanged="ModelTopPSlider_ValueChanged"
+                                    ToolTip="top_p: nucleus sampling cutoff. Lower = more focused, higher = broader vocabulary. Far-left uses the model default."/>
+                            <TextBlock x:Name="ModelTopPLabel" Text="default"
+                                       Foreground="{StaticResource AccentCyanBrush}"
+                                       Margin="10,0,0,0"
+                                       VerticalAlignment="Center"
+                                       MinWidth="60"/>
+                        </StackPanel>
+
+                        <!-- Max output (num_predict) -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <TextBlock Text="Max output:"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       VerticalAlignment="Center" Width="110"/>
+                            <Slider x:Name="ModelMaxOutputSlider"
+                                    Minimum="-128" Maximum="8192"
+                                    SmallChange="128" LargeChange="512"
+                                    TickFrequency="512"
+                                    Width="320"
+                                    VerticalAlignment="Center"
+                                    ValueChanged="ModelMaxOutputSlider_ValueChanged"
+                                    ToolTip="num_predict: hard cap on tokens generated per response. Useful for reasoning models that can loop. Far-left = unlimited (model default)."/>
+                            <TextBlock x:Name="ModelMaxOutputLabel" Text="unlimited"
+                                       Foreground="{StaticResource AccentCyanBrush}"
+                                       Margin="10,0,0,0"
+                                       VerticalAlignment="Center"
+                                       MinWidth="60"/>
+                        </StackPanel>
+
+                        <Button Content="Reset to model defaults"
+                                Style="{StaticResource GhostSecondaryButton}"
+                                HorizontalAlignment="Left"
+                                Click="ResetModelParameters_Click"
+                                ToolTip="Clear every override; all four values fall back to whatever the active model ships with."/>
                     </StackPanel>
                 </Border>
             </Grid>
