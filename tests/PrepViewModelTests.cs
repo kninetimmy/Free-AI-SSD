@@ -2582,6 +2582,53 @@ public class PrepViewModelTests
     }
 
     [Fact]
+    public void SelectingPreconfiguredDrive_RaisesCanExecuteChanged_OnBannerCommands()
+    {
+        // Regression: 1.3.31 bug #51 — switching the SelectedDrive to a
+        // preconfigured SSD made the banner appear (visibility binds to
+        // ShowAlreadyConfiguredBanner) but Manage / Start over / Unlock
+        // stayed disabled because RaiseAllCommandsCanExecuteChanged
+        // omitted the three banner commands. Our RelayCommand does not
+        // hook CommandManager.RequerySuggested, so a stale CanExecute=false
+        // snapshot persisted until the next focus change. Verify each
+        // banner command fires CanExecuteChanged when SelectedDrive
+        // changes to a preconfigured drive.
+        var (unconfRoot, unconfCleanup) = MakeTempDriveRoot();
+        var (confRoot, confCleanup) = MakeTempDriveRoot(hasPlaintextConfig: true, manifestCount: 1);
+        try
+        {
+            var unconf = MakeDrive(unconfRoot, "Blank");
+            var conf = MakeDrive(confRoot, "Configured");
+            SetupDefaultMocks(new List<DriveTarget> { unconf, conf });
+
+            var vm = CreateViewModel();
+            vm.Initialize();
+            Assert.False(vm.ShowAlreadyConfiguredBanner);
+
+            var manageFired = 0;
+            var startOverFired = 0;
+            var unlockFired = 0;
+            vm.ManageModelsCommand.CanExecuteChanged += (_, _) => manageFired++;
+            vm.StartOverCommand.CanExecuteChanged += (_, _) => startOverFired++;
+            vm.UnlockCommand.CanExecuteChanged += (_, _) => unlockFired++;
+
+            vm.SelectedDrive = conf;
+
+            Assert.True(vm.ShowAlreadyConfiguredBanner);
+            Assert.True(vm.ManageModelsCommand.CanExecute(null));
+            Assert.True(vm.StartOverCommand.CanExecute(null));
+            Assert.True(manageFired > 0);
+            Assert.True(startOverFired > 0);
+            Assert.True(unlockFired > 0);
+        }
+        finally
+        {
+            confCleanup();
+            unconfCleanup();
+        }
+    }
+
+    [Fact]
     public void ManageModelsCommand_RaisesModelsTabRequestedEvent()
     {
         var (root, cleanup) = MakeTempDriveRoot(hasPlaintextConfig: true, manifestCount: 1);

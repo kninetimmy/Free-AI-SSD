@@ -2879,6 +2879,15 @@ public class PrepViewModel : BaseViewModel
         FinalizeCommand.RaiseCanExecuteChanged();
         CheckPrereqUpdatesCommand.RaiseCanExecuteChanged();
         CheckReadinessCommand.RaiseCanExecuteChanged();
+        // C6/C7: banner commands gate on ShowManageModelsButton /
+        // ShowStartOverButton / drive-encryption state — all of which
+        // change with the selected drive. Our RelayCommand does not
+        // subscribe to CommandManager.RequerySuggested, so without an
+        // explicit requery the banner buttons render visible-but-
+        // disabled when a preconfigured drive is selected.
+        ManageModelsCommand.RaiseCanExecuteChanged();
+        StartOverCommand.RaiseCanExecuteChanged();
+        UnlockCommand.RaiseCanExecuteChanged();
     }
 
     private static string GetConfigPath(string root) => Path.Combine(root, new PortableConfig().ConfigRelativePath);
