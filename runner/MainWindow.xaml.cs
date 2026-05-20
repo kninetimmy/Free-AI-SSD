@@ -1938,6 +1938,20 @@ public partial class MainWindow : System.Windows.Window
     private void BindingsStep1Back_Click(object sender, System.Windows.RoutedEventArgs e) =>
         ShowBindingsStep(0);
 
+    /// <summary>Step 2: Whole-row click toggles IsSelected (task #56).</summary>
+    private void AircraftRow_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is System.Windows.FrameworkElement el &&
+            el.DataContext is DcsAircraftImportItem item &&
+            item.CanImport)
+        {
+            item.IsSelected = !item.IsSelected;
+            // DcsAircraftImportItem is a POCO with no INPC, so the CheckBox
+            // visual won't update on its own — same pattern as Select/Deselect All.
+            AircraftList.Items.Refresh();
+        }
+    }
+
     /// <summary>Step 2: Select All aircraft that have bindings.</summary>
     private void BindingsSelectAll_Click(object sender, System.Windows.RoutedEventArgs e)
     {
