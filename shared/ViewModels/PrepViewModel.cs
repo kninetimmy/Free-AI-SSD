@@ -233,6 +233,12 @@ public class PrepViewModel : BaseViewModel
         RemoveCommand = new AsyncRelayCommand(RemoveAsync, () => CanMutateDrive && HasDriveSelected);
         CancelOperationCommand = new RelayCommand(CancelOperation, () => _isModelOperationRunning);
         FormatPrepareCommand = new AsyncRelayCommand(FormatPrepareAsync, () => CanMutateDrive && HasDriveSelected);
+        // Task #47: Drive-step shortcut that forces NTFS prep targets and
+        // funnels through the existing FormatPrepareAsync gates. Visible only
+        // when the selected drive isn't NTFS and isn't already a
+        // Free-AI-SSD-prepared drive.
+        ReformatToNtfsCommand = new AsyncRelayCommand(ReformatToNtfsAsync,
+            () => ShowReformatHint && CanMutateDrive);
         FinalizeCommand = new AsyncRelayCommand(FinalizeAsync, () => CanMutateDrive && HasDriveSelected);
         CheckPrereqUpdatesCommand = new AsyncRelayCommand(CheckPrereqUpdatesAsync, () => CanMutateDrive && HasDriveSelected);
         CheckReadinessCommand = new AsyncRelayCommand(CheckReadinessAsync, () => CanMutateDrive && HasDriveSelected);
@@ -260,7 +266,11 @@ public class PrepViewModel : BaseViewModel
     public IReadOnlyList<DriveTarget> Drives
     {
         get => _drives;
-        private set => SetProperty(ref _drives, value);
+        private set
+        {
+            if (SetProperty(ref _drives, value))
+                OnPropertyChanged(nameof(ShowEmptyDriveHint));
+        }
     }
 
     public DriveTarget? SelectedDrive
@@ -848,6 +858,7 @@ public class PrepViewModel : BaseViewModel
     public AsyncRelayCommand RemoveCommand { get; }
     public RelayCommand CancelOperationCommand { get; }
     public AsyncRelayCommand FormatPrepareCommand { get; }
+    public AsyncRelayCommand ReformatToNtfsCommand { get; }
     public AsyncRelayCommand FinalizeCommand { get; }
     public AsyncRelayCommand CheckPrereqUpdatesCommand { get; }
     public AsyncRelayCommand CheckReadinessCommand { get; }
@@ -939,6 +950,41 @@ public class PrepViewModel : BaseViewModel
     /// not in those controls.
     /// </summary>
     public bool CanInitiateFreshFormat => !ShowAlreadyConfiguredBanner && CanMutateDrive;
+
+    /// <summary>
+    /// Task #47: drives the Drive-step "Reformat to NTFS" CTA. True when the
+    /// user has selected a non-NTFS drive that isn't already a Free-AI-SSD
+    /// prepped drive. exFAT-from-Mac is the canonical case — the user wants
+    /// a one-click route to NTFS without hunting through the wizard.
+    /// </summary>
+    public bool ShowReformatHint =>
+        _selectedDrive is not null &&
+        !ShowAlreadyConfiguredBanner &&
+        !string.Equals(_selectedDrive.DriveFormat, "NTFS", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Task #47: human-readable explanation paired with the Reformat-to-NTFS
+    /// button. Empty string when <see cref="ShowReformatHint"/> is false so
+    /// the XAML binding collapses the banner.
+    /// </summary>
+    public string ReformatHintText
+    {
+        get
+        {
+            if (!ShowReformatHint || _selectedDrive is null) return string.Empty;
+            return $"This drive is formatted as {_selectedDrive.DriveFormat}. " +
+                   "Free-AI-SSD's Windows runner expects NTFS. Click Reformat to NTFS " +
+                   "to erase and prepare it now — you'll be asked to confirm before anything is wiped.";
+        }
+    }
+
+    /// <summary>
+    /// Task #47: drives the empty-state hint on the Drive step. When no
+    /// drives are enumerable, surface the "Show all drives" toggle as the
+    /// suggested next step so the user can find an enclosure that escaped
+    /// both USB-attribution paths.
+    /// </summary>
+    public bool ShowEmptyDriveHint => _drives.Count == 0;
 
     /// <summary>
     /// C6: contextual banner text. FullyConfigured includes a count of
@@ -1075,6 +1121,10 @@ public class PrepViewModel : BaseViewModel
         OnPropertyChanged(nameof(HasDriveSelected));
         OnPropertyChanged(nameof(ShowUnlockButton));
         OnPropertyChanged(nameof(ShowSessionUnlockedBanner));
+        // Task #47: Reformat-to-NTFS visibility tracks the selected drive's
+        // filesystem + already-configured state.
+        OnPropertyChanged(nameof(ShowReformatHint));
+        OnPropertyChanged(nameof(ReformatHintText));
         RaiseAllCommandsCanExecuteChanged();
         _ = RefreshModelStatusesAsync();
         _ = CheckAndPromptLibraryReindexAsync();
@@ -1164,6 +1214,11 @@ public class PrepViewModel : BaseViewModel
         OnPropertyChanged(nameof(ShowSessionUnlockedBanner));
         OnPropertyChanged(nameof(CanInitiateFreshFormat));
         OnPropertyChanged(nameof(AlreadyConfiguredBannerText));
+        // Task #47: ShowReformatHint folds in ShowAlreadyConfiguredBanner —
+        // an already-prepped drive shouldn't get the reformat CTA, the
+        // existing Start-over button is the destructive path there.
+        OnPropertyChanged(nameof(ShowReformatHint));
+        OnPropertyChanged(nameof(ReformatHintText));
     }
 
     /// <summary>
@@ -2379,6 +2434,26 @@ public class PrepViewModel : BaseViewModel
         }
     }
 
+    /// <summary>
+    /// Task #47: Drive-step shortcut that forces NTFS / Windows-only prep and
+    /// delegates to <see cref="FormatPrepareAsync"/>. The user clicks
+    /// "Reformat to NTFS" on a non-NTFS drive (typically exFAT from a
+    /// previous Mac trial) instead of hunting for the Format step. All
+    /// existing safety gates — ConfirmErase, ConfirmFixedDrive, UAC
+    /// relaunch — fire normally through FormatPrepareAsync.
+    /// </summary>
+    private async Task ReformatToNtfsAsync()
+    {
+        // Force NTFS by overriding any prior cross-platform selection. The
+        // user can switch back to a Mac-inclusive prep on a later run; this
+        // button is the one-click "I just want Windows-NTFS, now" path.
+        PrepareWindows = true;
+        PrepareMac = false;
+        if (string.IsNullOrWhiteSpace(_volumeLabel))
+            VolumeLabel = "Portable AI";
+        await FormatPrepareAsync();
+    }
+
     private async Task FinalizeAsync()
     {
         if (_isModelOperationRunning)
@@ -2961,6 +3036,7 @@ public class PrepViewModel : BaseViewModel
         RemoveCommand.RaiseCanExecuteChanged();
         CancelOperationCommand.RaiseCanExecuteChanged();
         FormatPrepareCommand.RaiseCanExecuteChanged();
+        ReformatToNtfsCommand.RaiseCanExecuteChanged();
         FinalizeCommand.RaiseCanExecuteChanged();
         CheckPrereqUpdatesCommand.RaiseCanExecuteChanged();
         CheckReadinessCommand.RaiseCanExecuteChanged();
