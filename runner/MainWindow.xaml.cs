@@ -746,6 +746,11 @@ public partial class MainWindow : System.Windows.Window
         await EnsureDependenciesReadyAsync(forcePrompt: true, userTriggered: true);
     }
 
+    private async void InstallMissing_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        await EnsureDependenciesReadyAsync(forcePrompt: true, userTriggered: true);
+    }
+
     private void OpenPrereqsFolder_Click(object sender, System.Windows.RoutedEventArgs e)
     {
         var folder = Path.Combine(_ssdRoot, SsdLayout.Prereqs);
@@ -946,20 +951,44 @@ public partial class MainWindow : System.Windows.Window
         CompatibilityGpuText.Text = $"GPU: {snapshot.BestGpuSummary}";
         CompatibilityCpuText.Text = $"CPU Architecture: {snapshot.CpuArchitecture}";
         CompatibilityOsText.Text = $"OS: {snapshot.OsVersion}";
-        CompatibilityDepsText.Text = _lastDependencyCheck.IsSatisfied
-            ? "Dependency status: OK"
-            : $"Dependency status: Missing ({string.Join(", ", _lastDependencyCheck.MissingItems.Select(m => m.DisplayName))})";
 
-        // Collapsed-view summary: single LED + one-line status.
-        if (_lastDependencyCheck.IsSatisfied)
+        SetDependenciesOutcome(_lastDependencyCheck);
+    }
+
+    private enum DependenciesOutcome { Ok, Missing }
+
+    /// <summary>
+    /// Single chokepoint that updates the System-tab Dependencies card.
+    /// Guarantees structural mutual exclusion between the Success and Danger
+    /// banners and keeps the missing-items list + Install button visibility
+    /// in lockstep with the check result. Mirrors the SetChatOutcome pattern
+    /// from the Chat-tab stage-2 work so a future agent can't silently let
+    /// the two banners co-exist or surface the Install button when nothing
+    /// is missing.
+    /// </summary>
+    private void SetDependenciesOutcome(DependencyCheckResult check)
+    {
+        var outcome = check.IsSatisfied ? DependenciesOutcome.Ok : DependenciesOutcome.Missing;
+        switch (outcome)
         {
-            ReadinessLed.State = LedState.Ok;
-            ReadinessSummaryText.Text = "Ready";
-        }
-        else
-        {
-            ReadinessLed.State = LedState.Error;
-            ReadinessSummaryText.Text = "Not ready";
+            case DependenciesOutcome.Ok:
+                DependenciesSuccessBanner.Visibility = System.Windows.Visibility.Visible;
+                DependenciesDangerBanner.Visibility = System.Windows.Visibility.Collapsed;
+                DependenciesMissingList.ItemsSource = null;
+                DependenciesMissingList.Visibility = System.Windows.Visibility.Collapsed;
+                InstallMissingButton.Visibility = System.Windows.Visibility.Collapsed;
+                break;
+            case DependenciesOutcome.Missing:
+            default:
+                var count = check.MissingItems.Count;
+                var noun = count == 1 ? "component" : "components";
+                DependenciesDangerBannerText.Text = $"{count} required {noun} missing — install to enable offline use.";
+                DependenciesDangerBanner.Visibility = System.Windows.Visibility.Visible;
+                DependenciesSuccessBanner.Visibility = System.Windows.Visibility.Collapsed;
+                DependenciesMissingList.ItemsSource = check.MissingItems;
+                DependenciesMissingList.Visibility = System.Windows.Visibility.Visible;
+                InstallMissingButton.Visibility = System.Windows.Visibility.Visible;
+                break;
         }
     }
 

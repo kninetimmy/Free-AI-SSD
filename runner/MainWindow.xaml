@@ -923,75 +923,101 @@
             <!-- ────────────────────── System tab ────────────────────── -->
             <!-- System Compatibility probe + (stage 2) Dependencies. -->
             <Grid x:Name="SystemTab" Visibility="Collapsed">
-                <Border x:Name="SystemCompatibilityCard" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/> <!-- 0: compatibility info -->
+                    <RowDefinition Height="Auto"/> <!-- 1: dependencies card  -->
+                </Grid.RowDefinitions>
+                <Border Grid.Row="0" x:Name="SystemCompatibilityCard" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
                     <StackPanel>
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="System Compatibility"
-                                       Style="{StaticResource H2Text}"
-                                       VerticalAlignment="Center"
-                                       Margin="0,0,12,0"/>
-                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                <theme:LedStatusIndicator x:Name="ReadinessLed"
-                                                          State="Idle"
-                                                          VerticalAlignment="Center"
-                                                          Margin="0,0,8,0"
-                                                          ToolTip="Overall readiness: green when all prerequisites are satisfied."/>
-                                <TextBlock x:Name="ReadinessSummaryText"
-                                           Text="Checking..."
-                                           VerticalAlignment="Center"
-                                           Foreground="{StaticResource TextSecondaryBrush}"/>
-                            </StackPanel>
-                        </Grid>
+                        <TextBlock Text="System info"
+                                   Style="{StaticResource H2Text}"
+                                   Margin="0,0,0,8"/>
 
-                        <Expander x:Name="SystemDetailsExpander"
-                                  Header="System details"
-                                  Style="{StaticResource NeumorphicExpander}"
-                                  IsExpanded="False"
-                                  Margin="0,8,0,0"
-                                  ToolTip="Show GPU, CPU, OS, and per-dependency status.">
-                            <StackPanel>
-                                <TextBlock x:Name="CompatibilityGpuText"
-                                           Foreground="{StaticResource TextPrimaryBrush}"
-                                           ToolTip="Best GPU detected on this machine."/>
-                                <TextBlock x:Name="CompatibilityCpuText"
-                                           Foreground="{StaticResource TextPrimaryBrush}"
-                                           Margin="0,2,0,0"
-                                           ToolTip="CPU instruction set / architecture."/>
-                                <TextBlock x:Name="CompatibilityOsText"
-                                           Foreground="{StaticResource TextPrimaryBrush}"
-                                           Margin="0,2,0,0"
-                                           ToolTip="Detected operating system version."/>
-                                <TextBlock x:Name="CompatibilityDepsText"
-                                           Foreground="{StaticResource TextPrimaryBrush}"
-                                           Margin="0,2,0,0"
-                                           ToolTip="Whether all required runtimes / drivers are installed."/>
-                                <TextBlock Text="Ollama typically auto-selects best available backend. This app detects hardware for visibility."
-                                           Style="{StaticResource CaptionText}"
-                                           TextWrapping="Wrap" Margin="0,8,0,0"/>
-                                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                                    <Button Content="Re-run dependency check"
-                                            Style="{StaticResource GhostSecondaryButton}"
-                                            Click="RerunDependencyCheck_Click"
-                                            ToolTip="Re-scan the machine and re-show the install prompt for anything missing."/>
-                                    <Button Content="Open prerequisites folder"
-                                            Style="{StaticResource GhostSecondaryButton}"
-                                            Margin="8,0,0,0"
-                                            Click="OpenPrereqsFolder_Click"
-                                            ToolTip="Open the offline installer bundle on the SSD."/>
-                                </StackPanel>
-                            </StackPanel>
-                        </Expander>
+                        <TextBlock x:Name="CompatibilityGpuText"
+                                   Foreground="{StaticResource TextPrimaryBrush}"
+                                   ToolTip="Best GPU detected on this machine."/>
+                        <TextBlock x:Name="CompatibilityCpuText"
+                                   Foreground="{StaticResource TextPrimaryBrush}"
+                                   Margin="0,2,0,0"
+                                   ToolTip="CPU instruction set / architecture."/>
+                        <TextBlock x:Name="CompatibilityOsText"
+                                   Foreground="{StaticResource TextPrimaryBrush}"
+                                   Margin="0,2,0,0"
+                                   ToolTip="Detected operating system version."/>
+                        <TextBlock Text="Ollama typically auto-selects best available backend. This app detects hardware for visibility."
+                                   Style="{StaticResource CaptionText}"
+                                   TextWrapping="Wrap" Margin="0,8,0,0"/>
                     </StackPanel>
                 </Border>
 
-                <!-- Stage 2 placeholder: the modal DependencyInstallDialog
-                     stays as today; a future slice gives Dependencies a
-                     persistent surface here for re-install / re-verify. -->
+                <!-- Stage 3 (Mac-parity §B2): Dependencies surface. Banner
+                     outcome (Success → green, Error → red, Collapsed when
+                     neither resolved yet) is driven by SetDependenciesOutcome
+                     so mutual exclusion is structural. Missing items render
+                     as a per-item list; the primary "Install" button reuses
+                     the existing modal DependencyInstallDialog via
+                     EnsureDependenciesReadyAsync(forcePrompt:true). -->
+                <Border Grid.Row="1" x:Name="DependenciesCard" Style="{StaticResource NeumorphicCard}">
+                    <StackPanel>
+                        <TextBlock Text="Dependencies"
+                                   Style="{StaticResource H2Text}"
+                                   Margin="0,0,0,10"/>
+
+                        <Border x:Name="DependenciesSuccessBanner"
+                                Style="{StaticResource SuccessBanner}"
+                                Visibility="Collapsed"
+                                Margin="0,0,0,10">
+                            <TextBlock x:Name="DependenciesSuccessBannerText"
+                                       Text="All required components installed."
+                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                       TextWrapping="Wrap"/>
+                        </Border>
+                        <Border x:Name="DependenciesDangerBanner"
+                                Style="{StaticResource DangerBanner}"
+                                Visibility="Collapsed"
+                                Margin="0,0,0,10">
+                            <TextBlock x:Name="DependenciesDangerBannerText"
+                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                       TextWrapping="Wrap"/>
+                        </Border>
+
+                        <ItemsControl x:Name="DependenciesMissingList"
+                                      Visibility="Collapsed"
+                                      Margin="0,0,0,10">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" Margin="0,2,0,2">
+                                        <theme:LedStatusIndicator State="Error"
+                                                                  VerticalAlignment="Center"
+                                                                  Margin="0,0,8,0"/>
+                                        <TextBlock Text="{Binding DisplayName}"
+                                                   Foreground="{StaticResource TextPrimaryBrush}"
+                                                   VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="InstallMissingButton"
+                                    Content="Install missing components"
+                                    Style="{StaticResource TactilePrimaryButton}"
+                                    Visibility="Collapsed"
+                                    Click="InstallMissing_Click"
+                                    ToolTip="Open the offline install picker for the missing prerequisites."/>
+                            <Button Content="Re-check"
+                                    Style="{StaticResource GhostSecondaryButton}"
+                                    Margin="8,0,0,0"
+                                    Click="RerunDependencyCheck_Click"
+                                    ToolTip="Re-scan the machine for required components."/>
+                            <Button Content="Open prerequisites folder"
+                                    Style="{StaticResource GhostSecondaryButton}"
+                                    Margin="8,0,0,0"
+                                    Click="OpenPrereqsFolder_Click"
+                                    ToolTip="Open the offline installer bundle on the SSD."/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
             </Grid>
 
         </Grid>
