@@ -286,13 +286,20 @@
         <Grid Grid.Row="1" x:Name="TabHost">
 
             <!-- ─────────────────────── Chat tab ─────────────────────── -->
+            <!-- Row order (top→bottom) is intentional — Mac-parity §B1:
+                 top controls → model+prompt → reference docs →
+                 outcome banners → response → sources → log.
+                 Banners and sources are conditional (Collapsed unless the
+                 most recent Send produced that signal). -->
             <Grid x:Name="ChatTab">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/> <!-- 0: top controls    -->
+                    <RowDefinition Height="Auto"/> <!-- 1: model + prompt  -->
+                    <RowDefinition Height="Auto"/> <!-- 2: reference docs  -->
+                    <RowDefinition Height="Auto"/> <!-- 3: outcome banners -->
+                    <RowDefinition Height="Auto"/> <!-- 4: response        -->
+                    <RowDefinition Height="Auto"/> <!-- 5: sources         -->
+                    <RowDefinition Height="Auto"/> <!-- 6: log + advanced  -->
                 </Grid.RowDefinitions>
 
                 <!-- Chat / Row 0: Top Controls -->
@@ -446,90 +453,105 @@
                                     Click="CreateLibrary_Click"
                                     ToolTip="Create a new empty document library with the typed name."/>
                         </StackPanel>
-                        <WrapPanel Margin="0,10,0,0">
-                            <Button x:Name="AddFilesButton" Content="Add files"
-                                    Style="{StaticResource GhostSecondaryButton}"
-                                    Margin="0,0,8,8" Click="AddFiles_Click"
-                                    ToolTipService.ShowOnDisabled="True"
-                                    ToolTip="Create or select a library first."/>
-                            <Button x:Name="AddFolderButton" Content="Add folder"
-                                    Style="{StaticResource GhostSecondaryButton}"
-                                    Margin="0,0,8,8" Click="AddFolder_Click"
-                                    ToolTip="Watch a folder; new and changed files are swept on demand."/>
-                            <Button Content="Remove selected file"
-                                    Style="{StaticResource GhostSecondaryButton}"
-                                    Margin="0,0,0,8" Click="RemoveFile_Click"
-                                    ToolTip="Remove the highlighted file from the active library."/>
-                        </WrapPanel>
-
-                        <Expander x:Name="IndexToolsExpander"
-                                  Header="Index tools"
-                                  Style="{StaticResource NeumorphicExpander}"
-                                  IsExpanded="False"
-                                  Margin="0,2,0,0"
-                                  ToolTip="Maintenance actions for the embedding index.">
-                            <WrapPanel>
-                                <Button Content="Rebuild index"
+                        <!-- Library management surface — Mac-parity §B2:
+                             gate the whole block behind "library is selected".
+                             When nothing is active, show one hint line instead
+                             of six disabled buttons, a collapsed Index-tools
+                             expander, and an empty files list. Visibility of
+                             this section vs NoLibraryEmptyState is owned by
+                             UpdateNoLibraryEmptyState() in code-behind. -->
+                        <StackPanel x:Name="LibraryManagementSection" Visibility="Collapsed">
+                            <WrapPanel Margin="0,10,0,0">
+                                <Button x:Name="AddFilesButton" Content="Add files"
                                         Style="{StaticResource GhostSecondaryButton}"
-                                        Margin="0,0,8,8" Click="RebuildIndex_Click"
-                                        ToolTip="Re-embed every file in the active library from scratch."/>
-                                <Button Content="Pull embedding model"
+                                        Margin="0,0,8,8" Click="AddFiles_Click"
+                                        ToolTip="Add one or more files to the active library."/>
+                                <Button x:Name="AddFolderButton" Content="Add folder"
                                         Style="{StaticResource GhostSecondaryButton}"
-                                        Margin="0,0,8,8" Click="PullEmbeddingModel_Click"
-                                        ToolTip="Download the configured embedding model via the running Ollama server."/>
-                                <Button Content="Sweep folders now"
+                                        Margin="0,0,8,8" Click="AddFolder_Click"
+                                        ToolTip="Watch a folder; new and changed files are swept on demand."/>
+                                <Button Content="Remove selected file"
                                         Style="{StaticResource GhostSecondaryButton}"
-                                        Margin="0,0,0,8" Click="SweepFolders_Click"
-                                        ToolTip="Re-scan all watched folders and ingest any new or changed files."/>
+                                        Margin="0,0,0,8" Click="RemoveFile_Click"
+                                        ToolTip="Remove the highlighted file from the active library."/>
                             </WrapPanel>
-                        </Expander>
 
-                        <TextBlock x:Name="IndexingStatusText"
-                                   Foreground="{StaticResource TextSecondaryBrush}"
-                                   Margin="0,8,0,0"/>
-                        <Grid Margin="0,10,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
+                            <Expander x:Name="IndexToolsExpander"
+                                      Header="Index tools"
+                                      Style="{StaticResource NeumorphicExpander}"
+                                      IsExpanded="False"
+                                      Margin="0,2,0,0"
+                                      ToolTip="Maintenance actions for the embedding index.">
+                                <WrapPanel>
+                                    <Button Content="Rebuild index"
+                                            Style="{StaticResource GhostSecondaryButton}"
+                                            Margin="0,0,8,8" Click="RebuildIndex_Click"
+                                            ToolTip="Re-embed every file in the active library from scratch."/>
+                                    <Button Content="Pull embedding model"
+                                            Style="{StaticResource GhostSecondaryButton}"
+                                            Margin="0,0,8,8" Click="PullEmbeddingModel_Click"
+                                            ToolTip="Download the configured embedding model via the running Ollama server."/>
+                                    <Button Content="Sweep folders now"
+                                            Style="{StaticResource GhostSecondaryButton}"
+                                            Margin="0,0,0,8" Click="SweepFolders_Click"
+                                            ToolTip="Re-scan all watched folders and ingest any new or changed files."/>
+                                </WrapPanel>
+                            </Expander>
+
+                            <TextBlock x:Name="IndexingStatusText"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       Margin="0,8,0,0"/>
+                            <!-- Files indexed in the active library. Sources cited by the
+                                 most recent answer live in their own headlined block at
+                                 Row 5 of ChatTab (Mac §B1). -->
                             <ListBox x:Name="LibraryFilesList"
                                      Style="{StaticResource ThemedListBox}"
                                      Height="90"
-                                     Margin="0,0,4,0"
+                                     Margin="0,10,0,0"
                                      DisplayMemberPath="FileName"
                                      ToolTip="Files currently indexed in the active library."/>
-                            <ListBox Grid.Column="1" x:Name="SourcesList"
-                                     Style="{StaticResource ThemedListBox}"
-                                     Height="90"
-                                     Margin="4,0,0,0"
-                                     ToolTip="Document chunks the model cited in its most recent answer."/>
+                        </StackPanel>
 
-                            <!-- Empty state: no library selected yet. Overlays both lists. -->
-                            <Border x:Name="NoLibraryEmptyState"
-                                    Grid.ColumnSpan="2"
-                                    Background="{StaticResource BgBaseBrush}"
-                                    Visibility="Collapsed">
-                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="360">
-                                    <TextBlock Text="Create or select a library to begin"
-                                               Style="{StaticResource BodyText}"
-                                               Foreground="{StaticResource TextSecondaryBrush}"
-                                               TextAlignment="Center"
-                                               TextWrapping="Wrap"
-                                               Margin="0,0,0,10"/>
-                                    <Button Content="Create library"
-                                            Style="{StaticResource GhostSecondaryButton}"
-                                            Tag="{StaticResource AccentCyanBrush}"
-                                            HorizontalAlignment="Center"
-                                            Click="CreateLibrary_Click"
-                                            ToolTip="Create a new empty document library with the typed name."/>
-                                </StackPanel>
-                            </Border>
-                        </Grid>
+                        <!-- Empty state shown in place of LibraryManagementSection
+                             when no library is selected. One hint line — the
+                             Create row above already exposes the action. -->
+                        <Border x:Name="NoLibraryEmptyState"
+                                Margin="0,12,0,4"
+                                Visibility="Collapsed">
+                            <TextBlock Text="Create or select a library to begin."
+                                       Style="{StaticResource CaptionText}"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       TextAlignment="Left"
+                                       TextWrapping="Wrap"/>
+                        </Border>
                     </StackPanel>
                 </Border>
 
-                <!-- Chat / Row 3: Response TextBox (model output) -->
-                <TextBox Grid.Row="3" x:Name="ResponseText"
+                <!-- Chat / Row 3: Outcome banners (mutually exclusive).
+                     One signal per Send: Failure → red, RagRetrievalFailed
+                     → orange, Success → both Collapsed. Driven by
+                     SetChatOutcome() in code-behind so mutual exclusion is
+                     structural, not by convention. Log entries still write
+                     to LogText for scrollback. -->
+                <StackPanel Grid.Row="3" x:Name="ChatOutcomeBanners" Margin="0,0,0,10">
+                    <Border x:Name="ChatErrorBanner"
+                            Style="{StaticResource DangerBanner}"
+                            Visibility="Collapsed">
+                        <TextBlock x:Name="ChatErrorBannerText"
+                                   Foreground="{StaticResource TextPrimaryBrush}"
+                                   TextWrapping="Wrap"/>
+                    </Border>
+                    <Border x:Name="RagWarningBanner"
+                            Style="{StaticResource WarningBanner}"
+                            Visibility="Collapsed">
+                        <TextBlock x:Name="RagWarningBannerText"
+                                   Foreground="{StaticResource TextPrimaryBrush}"
+                                   TextWrapping="Wrap"/>
+                    </Border>
+                </StackPanel>
+
+                <!-- Chat / Row 4: Response TextBox (model output) -->
+                <TextBox Grid.Row="4" x:Name="ResponseText"
                          Style="{StaticResource GlowFocusTextBox}"
                          AcceptsReturn="True"
                          VerticalScrollBarVisibility="Auto"
@@ -538,8 +560,27 @@
                          MaxHeight="500"
                          ToolTip="The model's most recent answer. Streaming output appears here token-by-token."/>
 
-                <!-- Chat / Row 4: Bottom Log + Advanced expander (Replay tour) -->
-                <Border Grid.Row="4" Style="{StaticResource NeumorphicCard}"
+                <!-- Chat / Row 5: Sources from the most recent answer.
+                     Collapsed unless ShowSources() found at least one
+                     citation on the last result. Lives directly under the
+                     response so the user reads answer → citations
+                     top-to-bottom, matching Mac §B1. -->
+                <Border Grid.Row="5" x:Name="SourcesGroup"
+                        Style="{StaticResource NeumorphicCard}"
+                        Margin="0,10,0,0"
+                        Visibility="Collapsed">
+                    <StackPanel>
+                        <TextBlock Text="Sources" Style="{StaticResource H2Text}"/>
+                        <ListBox x:Name="SourcesList"
+                                 Style="{StaticResource ThemedListBox}"
+                                 Height="110"
+                                 Margin="0,8,0,0"
+                                 ToolTip="Document chunks the model cited in its most recent answer."/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Chat / Row 6: Bottom Log + Advanced expander (Replay tour). -->
+                <Border Grid.Row="6" Style="{StaticResource NeumorphicCard}"
                         Margin="0,10,0,0" Padding="10">
                     <Grid>
                         <Grid.RowDefinitions>
