@@ -1508,11 +1508,17 @@ public partial class MainWindow : System.Windows.Window
     }
 
     /// <summary>
-    /// Toggles the "no library selected" overlay on the reference docs panels.
+    /// Toggles the Reference Documents card between its management surface
+    /// (buttons + index tools + files list) and a single hint line, as a
+    /// mutually-exclusive pair driven by whether a library is selected.
+    /// Mac-parity §B2: one clear hint, not per-button failures.
     /// </summary>
     private void UpdateNoLibraryEmptyState()
     {
         var hasLibrary = _activeLibrary is not null;
+        LibraryManagementSection.Visibility = hasLibrary
+            ? System.Windows.Visibility.Visible
+            : System.Windows.Visibility.Collapsed;
         NoLibraryEmptyState.Visibility = hasLibrary
             ? System.Windows.Visibility.Collapsed
             : System.Windows.Visibility.Visible;
