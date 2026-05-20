@@ -268,6 +268,7 @@ public partial class MainWindow : System.Windows.Window
         InitializeTts();
         InitializePtt();
         InitializeVoiceUi();
+        InitializeModelParametersUi();
         RefreshProfileVisibility();
         StatusText.Text = "Ready (not running)";
         AppendLog($"Loaded config from {configPath}");
@@ -2720,6 +2721,161 @@ public partial class MainWindow : System.Windows.Window
     {
         if (_suppressVoiceUiEvents || _config is null) return;
         _config.AutoSendVoiceInput = AutoSendVoiceCheck.IsChecked == true;
+        SaveConfigAsync();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // System tab — Model parameters card (#58)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private bool _suppressModelParamEvents;
+
+    // Each slider's leftmost step is the "use model default" sentinel zone.
+    // Above that step the user is actively overriding; below it (or equal),
+    // we treat the value as "unset" and omit the matching Ollama option.
+    private const double ModelTemperatureSentinel = 0.0;   // first real step is 0.05
+    private const double ModelTopPSentinel = 0.0;          // first real step is 0.05
+    private const int ModelMaxOutputSentinel = 0;          // first real step is 128
+
+    private void InitializeModelParametersUi()
+    {
+        if (_config is null) return;
+
+        _suppressModelParamEvents = true;
+        try
+        {
+            // Context window: 0 = default; otherwise display the token count.
+            ModelContextSlider.Value = _config.ModelContextWindow;
+            ModelContextLabel.Text = _config.ModelContextWindow > 0
+                ? _config.ModelContextWindow.ToString()
+                : "default";
+
+            // Temperature: -1 sentinel maps to the slider's leftmost position (<0).
+            ModelTemperatureSlider.Value = _config.ModelTemperature >= 0
+                ? _config.ModelTemperature
+                : ModelTemperatureSlider.Minimum;
+            ModelTemperatureLabel.Text = _config.ModelTemperature >= 0
+                ? _config.ModelTemperature.ToString("0.00")
+                : "default";
+
+            ModelTopPSlider.Value = _config.ModelTopP >= 0
+                ? _config.ModelTopP
+                : ModelTopPSlider.Minimum;
+            ModelTopPLabel.Text = _config.ModelTopP >= 0
+                ? _config.ModelTopP.ToString("0.00")
+                : "default";
+
+            ModelMaxOutputSlider.Value = _config.ModelMaxOutputTokens >= 0
+                ? _config.ModelMaxOutputTokens
+                : ModelMaxOutputSlider.Minimum;
+            ModelMaxOutputLabel.Text = _config.ModelMaxOutputTokens > 0
+                ? _config.ModelMaxOutputTokens.ToString()
+                : "unlimited";
+        }
+        finally
+        {
+            _suppressModelParamEvents = false;
+        }
+    }
+
+    private void ModelContextSlider_ValueChanged(object sender, System.Windows.RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_suppressModelParamEvents || _config is null) return;
+
+        // Snap to 512-token increments, with 0 reserved as "use model default".
+        var raw = (int)Math.Round(e.NewValue / 512.0) * 512;
+        if (raw < 0) raw = 0;
+
+        if (raw == _config.ModelContextWindow) return;
+
+        _config.ModelContextWindow = raw;
+        ModelContextLabel.Text = raw > 0 ? raw.ToString() : "default";
+        SaveConfigAsync();
+    }
+
+    private void ModelTemperatureSlider_ValueChanged(object sender, System.Windows.RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_suppressModelParamEvents || _config is null) return;
+
+        double newValue;
+        string label;
+        if (e.NewValue < ModelTemperatureSentinel)
+        {
+            newValue = -1;
+            label = "default";
+        }
+        else
+        {
+            newValue = Math.Round(e.NewValue * 20.0) / 20.0; // snap to 0.05
+            label = newValue.ToString("0.00");
+        }
+
+        if (Math.Abs(newValue - _config.ModelTemperature) < 0.0001) return;
+
+        _config.ModelTemperature = newValue;
+        ModelTemperatureLabel.Text = label;
+        SaveConfigAsync();
+    }
+
+    private void ModelTopPSlider_ValueChanged(object sender, System.Windows.RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_suppressModelParamEvents || _config is null) return;
+
+        double newValue;
+        string label;
+        if (e.NewValue < ModelTopPSentinel)
+        {
+            newValue = -1;
+            label = "default";
+        }
+        else
+        {
+            newValue = Math.Round(e.NewValue * 20.0) / 20.0; // snap to 0.05
+            label = newValue.ToString("0.00");
+        }
+
+        if (Math.Abs(newValue - _config.ModelTopP) < 0.0001) return;
+
+        _config.ModelTopP = newValue;
+        ModelTopPLabel.Text = label;
+        SaveConfigAsync();
+    }
+
+    private void ModelMaxOutputSlider_ValueChanged(object sender, System.Windows.RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_suppressModelParamEvents || _config is null) return;
+
+        int newValue;
+        string label;
+        if (e.NewValue < ModelMaxOutputSentinel)
+        {
+            newValue = -1;
+            label = "unlimited";
+        }
+        else
+        {
+            newValue = (int)Math.Round(e.NewValue / 128.0) * 128;
+            label = newValue > 0 ? newValue.ToString() : "unlimited";
+            if (newValue == 0) newValue = -1; // 0 + sentinel collapse onto "unlimited"
+        }
+
+        if (newValue == _config.ModelMaxOutputTokens) return;
+
+        _config.ModelMaxOutputTokens = newValue;
+        ModelMaxOutputLabel.Text = label;
+        SaveConfigAsync();
+    }
+
+    private void ResetModelParameters_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_config is null) return;
+
+        _config.ModelContextWindow = 0;
+        _config.ModelTemperature = -1;
+        _config.ModelTopP = -1;
+        _config.ModelMaxOutputTokens = -1;
+
+        InitializeModelParametersUi(); // re-snap sliders + labels under suppression
         SaveConfigAsync();
     }
 

@@ -108,6 +108,33 @@ public sealed class PortableConfig
     /// </summary>
     public bool UseStreamingChat { get; set; } = true;
 
+    /// <summary>
+    /// Override for Ollama's <c>num_ctx</c> (context window in tokens) on chat requests.
+    /// Sentinel <c>0</c> = omit the option and let Ollama use the model's compiled-in default.
+    /// </summary>
+    public int ModelContextWindow { get; set; }
+
+    /// <summary>
+    /// Override for Ollama's <c>temperature</c> on chat requests.
+    /// Sentinel <c>-1</c> = omit the option and let Ollama use the model's default.
+    /// Valid user range: 0.0–2.0.
+    /// </summary>
+    public double ModelTemperature { get; set; } = -1;
+
+    /// <summary>
+    /// Override for Ollama's <c>top_p</c> (nucleus sampling cutoff) on chat requests.
+    /// Sentinel <c>-1</c> = omit the option and let Ollama use the model's default.
+    /// Valid user range: 0.0–1.0.
+    /// </summary>
+    public double ModelTopP { get; set; } = -1;
+
+    /// <summary>
+    /// Override for Ollama's <c>num_predict</c> (max generated tokens per response) on chat requests.
+    /// Sentinel <c>-1</c> = omit the option (Ollama default = unbounded until stop / EOS).
+    /// Doubles as a thinking-budget cap for reasoning models (see task #35).
+    /// </summary>
+    public int ModelMaxOutputTokens { get; set; } = -1;
+
     // ── Network Mode (Runner LAN API) ────────────────────────────────────
 
     /// <summary>Enables Runner-hosted LAN API for remote clients on the local network.</summary>

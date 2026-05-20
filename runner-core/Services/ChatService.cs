@@ -35,12 +35,7 @@ public sealed class ChatService : IChatService
     {
         var (promptToSend, sources, usedContext, ragError) = await PrepareRagContextAsync(userPrompt, host, config);
 
-        var request = new
-        {
-            model,
-            prompt = promptToSend,
-            stream = false
-        };
+        var request = BuildGenerateRequest(model, promptToSend, stream: false, config);
 
         try
         {
@@ -67,12 +62,7 @@ public sealed class ChatService : IChatService
     {
         var (promptToSend, sources, usedContext, ragError) = await PrepareRagContextAsync(userPrompt, host, config);
 
-        var request = new
-        {
-            model,
-            prompt = promptToSend,
-            stream = true
-        };
+        var request = BuildGenerateRequest(model, promptToSend, stream: true, config);
 
         var assembled = new StringBuilder();
         var requestStart = DateTimeOffset.UtcNow;
@@ -225,6 +215,54 @@ public sealed class ChatService : IChatService
         }
 
         return (promptToSend, sources, usedContext, null);
+    }
+
+    /// <summary>
+    /// Builds the Ollama <c>/api/generate</c> request body. The <c>options</c>
+    /// sub-object is only included when the user has overridden at least one
+    /// model-parameter slider away from its sentinel. Keys are only emitted for
+    /// non-sentinel values, so untouched sliders preserve each model's compiled-in
+    /// defaults rather than forcing them to a single global value.
+    /// </summary>
+    internal static Dictionary<string, object?> BuildGenerateRequest(
+        string model, string prompt, bool stream, PortableConfig config)
+    {
+        var request = new Dictionary<string, object?>
+        {
+            ["model"] = model,
+            ["prompt"] = prompt,
+            ["stream"] = stream
+        };
+
+        var options = BuildOllamaOptions(config);
+        if (options.Count > 0)
+        {
+            request["options"] = options;
+        }
+
+        return request;
+    }
+
+    internal static Dictionary<string, object?> BuildOllamaOptions(PortableConfig config)
+    {
+        var options = new Dictionary<string, object?>();
+        if (config.ModelContextWindow > 0)
+        {
+            options["num_ctx"] = config.ModelContextWindow;
+        }
+        if (config.ModelTemperature >= 0)
+        {
+            options["temperature"] = config.ModelTemperature;
+        }
+        if (config.ModelTopP >= 0)
+        {
+            options["top_p"] = config.ModelTopP;
+        }
+        if (config.ModelMaxOutputTokens >= 0)
+        {
+            options["num_predict"] = config.ModelMaxOutputTokens;
+        }
+        return options;
     }
 
     private static string SanitizeError(Exception ex) => ex switch
