@@ -923,7 +923,11 @@
             <!-- ────────────────────── System tab ────────────────────── -->
             <!-- System Compatibility probe + (stage 2) Dependencies. -->
             <Grid x:Name="SystemTab" Visibility="Collapsed">
-                <Border x:Name="SystemCompatibilityCard" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/> <!-- 0: compatibility info -->
+                    <RowDefinition Height="Auto"/> <!-- 1: dependencies card  -->
+                </Grid.RowDefinitions>
+                <Border Grid.Row="0" x:Name="SystemCompatibilityCard" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
                     <StackPanel>
                         <Grid>
                             <Grid.ColumnDefinitions>
@@ -989,9 +993,74 @@
                     </StackPanel>
                 </Border>
 
-                <!-- Stage 2 placeholder: the modal DependencyInstallDialog
-                     stays as today; a future slice gives Dependencies a
-                     persistent surface here for re-install / re-verify. -->
+                <!-- Stage 3 (Mac-parity §B2): Dependencies surface. Banner
+                     outcome (Success → green, Error → red, Collapsed when
+                     neither resolved yet) is driven by SetDependenciesOutcome
+                     so mutual exclusion is structural. Missing items render
+                     as a per-item list; the primary "Install" button reuses
+                     the existing modal DependencyInstallDialog via
+                     EnsureDependenciesReadyAsync(forcePrompt:true). -->
+                <Border Grid.Row="1" x:Name="DependenciesCard" Style="{StaticResource NeumorphicCard}">
+                    <StackPanel>
+                        <TextBlock Text="Dependencies"
+                                   Style="{StaticResource H2Text}"
+                                   Margin="0,0,0,10"/>
+
+                        <Border x:Name="DependenciesSuccessBanner"
+                                Style="{StaticResource SuccessBanner}"
+                                Visibility="Collapsed"
+                                Margin="0,0,0,10">
+                            <TextBlock x:Name="DependenciesSuccessBannerText"
+                                       Text="All required components installed."
+                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                       TextWrapping="Wrap"/>
+                        </Border>
+                        <Border x:Name="DependenciesDangerBanner"
+                                Style="{StaticResource DangerBanner}"
+                                Visibility="Collapsed"
+                                Margin="0,0,0,10">
+                            <TextBlock x:Name="DependenciesDangerBannerText"
+                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                       TextWrapping="Wrap"/>
+                        </Border>
+
+                        <ItemsControl x:Name="DependenciesMissingList"
+                                      Visibility="Collapsed"
+                                      Margin="0,0,0,10">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" Margin="0,2,0,2">
+                                        <theme:LedStatusIndicator State="Error"
+                                                                  VerticalAlignment="Center"
+                                                                  Margin="0,0,8,0"/>
+                                        <TextBlock Text="{Binding DisplayName}"
+                                                   Foreground="{StaticResource TextPrimaryBrush}"
+                                                   VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <StackPanel Orientation="Horizontal">
+                            <Button x:Name="InstallMissingButton"
+                                    Content="Install missing components"
+                                    Style="{StaticResource TactilePrimaryButton}"
+                                    Visibility="Collapsed"
+                                    Click="InstallMissing_Click"
+                                    ToolTip="Open the offline install picker for the missing prerequisites."/>
+                            <Button Content="Re-check"
+                                    Style="{StaticResource GhostSecondaryButton}"
+                                    Margin="8,0,0,0"
+                                    Click="RerunDependencyCheck_Click"
+                                    ToolTip="Re-scan the machine for required components."/>
+                            <Button Content="Open prerequisites folder"
+                                    Style="{StaticResource GhostSecondaryButton}"
+                                    Margin="8,0,0,0"
+                                    Click="OpenPrereqsFolder_Click"
+                                    ToolTip="Open the offline installer bundle on the SSD."/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
             </Grid>
 
         </Grid>
