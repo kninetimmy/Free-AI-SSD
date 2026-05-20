@@ -115,7 +115,7 @@ public partial class MainWindow : System.Windows.Window
 
         // Wire service events to UI
         _ollamaService.LogMessage += msg => AppendLog(msg);
-        _ollamaService.ProcessExited += () => Dispatcher.Invoke(async () =>
+        _ollamaService.ProcessExited += () => Dispatcher.InvokeAsync(async () =>
         {
             await _localApiService.StopAsync();
             StatusText.Text = "Stopped";
@@ -458,17 +458,28 @@ public partial class MainWindow : System.Windows.Window
         await Task.Delay(1000);
     }
 
-    private void Stop_Click(object sender, System.Windows.RoutedEventArgs e)
+    private async void Stop_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        if (_ollamaService.IsRunning)
+        if (!_ollamaService.IsRunning) return;
+
+        // Run the blocking Kill+Dispose off the UI thread. Process.Dispose
+        // waits for the stdout/stderr reader pumps to drain, and those pumps
+        // can emit a final LogMessage that needs to marshal back to this
+        // dispatcher. Holding the UI thread here would deadlock.
+        try
         {
-            _ = _localApiService.StopAsync();
-            _ollamaService.Stop();
-            StatusText.Text = "Stopped";
-            OllamaStatusLed.State = LedState.Idle;
-            UpdateOllamaOfflineEmptyState();
-            UpdateOllamaRunStopButtonStyles();
+            await _localApiService.StopAsync();
+            await Task.Run(() => _ollamaService.Stop());
         }
+        catch (Exception ex)
+        {
+            AppendLog($"Stop failed: {ex.Message}");
+        }
+
+        StatusText.Text = "Stopped";
+        OllamaStatusLed.State = LedState.Idle;
+        UpdateOllamaOfflineEmptyState();
+        UpdateOllamaRunStopButtonStyles();
     }
 
     // Swap Start/Stop style emphasis so only the applicable action wears the
@@ -1504,7 +1515,10 @@ public partial class MainWindow : System.Windows.Window
 
     private void AppendLog(string line)
     {
-        Dispatcher.Invoke(() =>
+        // InvokeAsync (not Invoke): LogMessage fires from ThreadPool reader
+        // pumps inside Process.Dispose. A synchronous Invoke here deadlocks
+        // when Stop_Click is also waiting on Dispose from the UI thread.
+        Dispatcher.InvokeAsync(() =>
         {
             LogText.AppendText(line + Environment.NewLine);
             LogText.ScrollToEnd();
