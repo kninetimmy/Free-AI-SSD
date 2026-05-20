@@ -387,6 +387,65 @@
                                         ToolTip="Re-scan connected drives and update the list."/>
                             </StackPanel>
 
+                            <!-- Task #47: empty-state hint when no candidate drives
+                                 are enumerated. Surfaces the "Show all drives"
+                                 escape hatch right next to the failure mode
+                                 instead of leaving it buried in the Advanced
+                                 expander on the System tab. -->
+                            <Border Margin="0,0,0,10" Padding="10,8"
+                                    Background="{StaticResource BgRaisedBrush}"
+                                    BorderBrush="{StaticResource StatusWarningBrush}"
+                                    BorderThickness="1" CornerRadius="6"
+                                    Visibility="{Binding ShowEmptyDriveHint, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <theme:LedStatusIndicator State="Warning" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <TextBlock Text="No drives detected."
+                                                   Foreground="{StaticResource StatusWarningBrush}"
+                                                   VerticalAlignment="Center"
+                                                   FontWeight="SemiBold"/>
+                                    </StackPanel>
+                                    <TextBlock Margin="0,6,0,0"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               TextWrapping="Wrap"
+                                               Text="Some external SSD enclosures aren't auto-detected (especially Thunderbolt and UAS adapters). Try enabling 'Show all drives' below — internal drives will appear too, so verify the target carefully before continuing."/>
+                                    <CheckBox Margin="0,8,0,0"
+                                              VerticalAlignment="Center"
+                                              Foreground="{StaticResource TextSecondaryBrush}"
+                                              Content="Show all drives (includes the OS drive — use with care)"
+                                              IsChecked="{Binding ShowFixedDrives, Mode=TwoWay}"
+                                              ToolTip="Includes the OS drive and this app's host drive in the list. The format flow will still refuse to wipe the running app."/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Task #47: reformat-to-NTFS shortcut. Visible
+                                 when the selected drive isn't NTFS and isn't
+                                 already a Free-AI-SSD-prepped drive. Funnels
+                                 through FormatPrepareAsync, which preserves
+                                 ConfirmErase / ConfirmFixedDrive / UAC gates. -->
+                            <Border Margin="0,0,0,10" Padding="10,8"
+                                    Background="{StaticResource BgRaisedBrush}"
+                                    BorderBrush="{StaticResource AccentCyanBrush}"
+                                    BorderThickness="1" CornerRadius="6"
+                                    Visibility="{Binding ShowReformatHint, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <theme:LedStatusIndicator State="Warning" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <TextBlock Text="{Binding ReformatHintText}"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                                   VerticalAlignment="Center"
+                                                   TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                    <Button Content="Reformat to NTFS"
+                                            HorizontalAlignment="Left"
+                                            Margin="0,8,0,0"
+                                            Padding="14,4" MinHeight="0"
+                                            Style="{StaticResource TactilePrimaryButton}"
+                                            Command="{Binding ReformatToNtfsCommand}"
+                                            ToolTip="Erase the selected drive and reformat to NTFS for Windows prep. You'll be asked to confirm before anything is wiped."/>
+                                </StackPanel>
+                            </Border>
+
                             <!-- Selected-drive warning strip. -->
                             <Border Margin="0,0,0,10" Padding="8,5"
                                     Background="{StaticResource BgRaisedBrush}"

@@ -23,8 +23,9 @@ public class PrepViewModelTests
 
     private static DriveTarget MakeDrive(string rootPath, string label = "SSD",
         long freeBytes = 64_000_000_000, long totalBytes = 128_000_000_000,
-        bool isRemovable = true, bool isFixed = false, string warning = "")
-        => new(label, rootPath, label, freeBytes, totalBytes, "NTFS", true, isRemovable, isFixed, warning);
+        bool isRemovable = true, bool isFixed = false, string warning = "",
+        string driveFormat = "NTFS")
+        => new(label, rootPath, label, freeBytes, totalBytes, driveFormat, true, isRemovable, isFixed, warning);
 
     private PrepViewModel CreateViewModel()
     {
@@ -193,6 +194,90 @@ public class PrepViewModelTests
         vm.Initialize();
 
         Assert.Contains(PrepDriveWriteGuard.ReadOnlyReason, vm.SelectedDriveWarning);
+    }
+
+    // ───── Task #47: Reformat-to-NTFS shortcut + empty-state hint ─────
+
+    [Fact]
+    public void ShowReformatHint_FalseForNtfsSelectedDrive()
+    {
+        SetupDefaultMocks(new List<DriveTarget> { MakeDrive("E:\\", driveFormat: "NTFS") });
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+
+        Assert.False(vm.ShowReformatHint);
+        Assert.Equal(string.Empty, vm.ReformatHintText);
+        Assert.False(vm.ReformatToNtfsCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void ShowReformatHint_TrueForExFatSelectedDrive()
+    {
+        SetupDefaultMocks(new List<DriveTarget> { MakeDrive("E:\\", driveFormat: "exFAT") });
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+
+        Assert.True(vm.ShowReformatHint);
+        Assert.Contains("exFAT", vm.ReformatHintText);
+        Assert.Contains("NTFS", vm.ReformatHintText);
+        Assert.True(vm.ReformatToNtfsCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void ShowReformatHint_FalseWhenNoDriveSelected()
+    {
+        SetupDefaultMocks(new List<DriveTarget>());
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+
+        Assert.False(vm.ShowReformatHint);
+        Assert.False(vm.ReformatToNtfsCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void ShowEmptyDriveHint_TrueWhenNoDrivesEnumerated()
+    {
+        SetupDefaultMocks(new List<DriveTarget>());
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+
+        Assert.True(vm.ShowEmptyDriveHint);
+    }
+
+    [Fact]
+    public void ShowEmptyDriveHint_FalseWhenAtLeastOneDrivePresent()
+    {
+        SetupDefaultMocks(new List<DriveTarget> { MakeDrive("E:\\") });
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+
+        Assert.False(vm.ShowEmptyDriveHint);
+    }
+
+    [Fact]
+    public void ShowReformatHint_RaisesPropertyChanged_WhenSelectionFlipsBetweenNtfsAndExfat()
+    {
+        var ntfs = MakeDrive("E:\\", driveFormat: "NTFS");
+        var exfat = MakeDrive("F:\\", driveFormat: "exFAT");
+        SetupDefaultMocks(new List<DriveTarget> { ntfs, exfat });
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+
+        Assert.False(vm.ShowReformatHint); // E:\ NTFS selected by default
+
+        var raised = new List<string>();
+        vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName ?? string.Empty);
+        vm.SelectedDrive = exfat;
+
+        Assert.True(vm.ShowReformatHint);
+        Assert.Contains(nameof(PrepViewModel.ShowReformatHint), raised);
+        Assert.Contains(nameof(PrepViewModel.ReformatHintText), raised);
     }
 
     [Fact]
