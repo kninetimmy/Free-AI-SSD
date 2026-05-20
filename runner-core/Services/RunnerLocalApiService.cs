@@ -936,8 +936,10 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
 
         try
         {
-            await _app.StopAsync(cancellationToken);
-            await _app.DisposeAsync();
+            // ConfigureAwait(false) so a sync-blocking caller on the UI thread
+            // (Runner OnClosing) can't deadlock waiting for these continuations.
+            await _app.StopAsync(cancellationToken).ConfigureAwait(false);
+            await _app.DisposeAsync().ConfigureAwait(false);
             _logger?.Info("Network API stopped.");
             LogMessage?.Invoke("Network API stopped.");
         }
