@@ -494,26 +494,20 @@
                         <TextBlock x:Name="IndexingStatusText"
                                    Foreground="{StaticResource TextSecondaryBrush}"
                                    Margin="0,8,0,0"/>
+                        <!-- Files indexed in the active library. Sources cited by the
+                             most recent answer used to share this row as a side-by-side
+                             grid; per Mac-parity §B1 they now sit in their own
+                             headlined block (Row 5 of ChatTab) and only appear after
+                             a sourced answer. -->
                         <Grid Margin="0,10,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
                             <ListBox x:Name="LibraryFilesList"
                                      Style="{StaticResource ThemedListBox}"
                                      Height="90"
-                                     Margin="0,0,4,0"
                                      DisplayMemberPath="FileName"
                                      ToolTip="Files currently indexed in the active library."/>
-                            <ListBox Grid.Column="1" x:Name="SourcesList"
-                                     Style="{StaticResource ThemedListBox}"
-                                     Height="90"
-                                     Margin="4,0,0,0"
-                                     ToolTip="Document chunks the model cited in its most recent answer."/>
 
-                            <!-- Empty state: no library selected yet. Overlays both lists. -->
+                            <!-- Empty state: no library selected yet. Overlays the list. -->
                             <Border x:Name="NoLibraryEmptyState"
-                                    Grid.ColumnSpan="2"
                                     Background="{StaticResource BgBaseBrush}"
                                     Visibility="Collapsed">
                                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="360">
@@ -568,9 +562,26 @@
                          MaxHeight="500"
                          ToolTip="The model's most recent answer. Streaming output appears here token-by-token."/>
 
-                <!-- Chat / Row 6: Bottom Log + Advanced expander (Replay tour).
-                     Row 5 is reserved for the conditional Sources group
-                     added in the same stage-2 slice. -->
+                <!-- Chat / Row 5: Sources from the most recent answer.
+                     Collapsed unless ShowSources() found at least one
+                     citation on the last result. Lives directly under the
+                     response so the user reads answer → citations
+                     top-to-bottom, matching Mac §B1. -->
+                <Border Grid.Row="5" x:Name="SourcesGroup"
+                        Style="{StaticResource NeumorphicCard}"
+                        Margin="0,10,0,0"
+                        Visibility="Collapsed">
+                    <StackPanel>
+                        <TextBlock Text="Sources" Style="{StaticResource H2Text}"/>
+                        <ListBox x:Name="SourcesList"
+                                 Style="{StaticResource ThemedListBox}"
+                                 Height="110"
+                                 Margin="0,8,0,0"
+                                 ToolTip="Document chunks the model cited in its most recent answer."/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Chat / Row 6: Bottom Log + Advanced expander (Replay tour). -->
                 <Border Grid.Row="6" Style="{StaticResource NeumorphicCard}"
                         Margin="0,10,0,0" Padding="10">
                     <Grid>

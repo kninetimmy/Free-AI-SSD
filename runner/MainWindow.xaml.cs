@@ -518,6 +518,27 @@ public partial class MainWindow : System.Windows.Window
     private enum ChatOutcome { None, Error, RagWarning }
 
     /// <summary>
+    /// Single chokepoint that updates the Chat-tab Sources group.
+    /// Reveals the headlined block only when the most recent answer
+    /// cited at least one chunk; otherwise collapses it. Stage-2
+    /// Mac-parity §B1: sources are an as-needed signal, not a
+    /// permanent panel.
+    /// </summary>
+    private void ShowSources(System.Collections.Generic.List<string>? sources)
+    {
+        if (sources is { Count: > 0 })
+        {
+            SourcesList.ItemsSource = sources;
+            SourcesGroup.Visibility = System.Windows.Visibility.Visible;
+        }
+        else
+        {
+            SourcesList.ItemsSource = null;
+            SourcesGroup.Visibility = System.Windows.Visibility.Collapsed;
+        }
+    }
+
+    /// <summary>
     /// Single chokepoint that updates the Chat-tab outcome banners.
     /// Guarantees structural mutual exclusion — every Send path resets to
     /// <see cref="ChatOutcome.None"/> before re-sending, then promotes to
@@ -555,7 +576,7 @@ public partial class MainWindow : System.Windows.Window
         // Interrupt any ongoing TTS from the previous response
         StopTts();
 
-        SourcesList.ItemsSource = null;
+        ShowSources(null);
         SetChatOutcome(ChatOutcome.None);
 
         if (_config.UseStreamingChat)
@@ -572,7 +593,7 @@ public partial class MainWindow : System.Windows.Window
                 {
                     case ChatResult.Success s:
                         ResponseText.Text = s.Response.ResponseText;
-                        if (s.Response.Sources is not null) SourcesList.ItemsSource = s.Response.Sources;
+                        ShowSources(s.Response.Sources);
                         SpeakResponseAsync(s.Response.ResponseText);
                         break;
                     case ChatResult.RagRetrievalFailed r:
@@ -580,6 +601,7 @@ public partial class MainWindow : System.Windows.Window
                         var ragMsg = $"Answered without document context — {r.RagError}";
                         AppendLog($"Warning: {ragMsg}");
                         SetChatOutcome(ChatOutcome.RagWarning, ragMsg);
+                        ShowSources(r.Response.Sources);
                         SpeakResponseAsync(r.Response.ResponseText);
                         break;
                     case ChatResult.Failure f:
@@ -639,14 +661,14 @@ public partial class MainWindow : System.Windows.Window
             {
                 case ChatResult.Success s:
                     ResponseText.Text = s.Response.ResponseText;
-                    if (s.Response.Sources is not null) SourcesList.ItemsSource = s.Response.Sources;
+                    ShowSources(s.Response.Sources);
                     break;
                 case ChatResult.RagRetrievalFailed r:
                     ResponseText.Text = r.Response.ResponseText;
                     var ragMsg = $"Answered without document context — {r.RagError}";
                     AppendLog($"Warning: {ragMsg}");
                     SetChatOutcome(ChatOutcome.RagWarning, ragMsg);
-                    if (r.Response.Sources is not null) SourcesList.ItemsSource = r.Response.Sources;
+                    ShowSources(r.Response.Sources);
                     break;
                 case ChatResult.Failure f:
                     ttsSpeaker?.Cancel();
@@ -661,7 +683,7 @@ public partial class MainWindow : System.Windows.Window
                             {
                                 case ChatResult.Success fs:
                                     ResponseText.Text = fs.Response.ResponseText;
-                                    if (fs.Response.Sources is not null) SourcesList.ItemsSource = fs.Response.Sources;
+                                    ShowSources(fs.Response.Sources);
                                     SpeakResponseAsync(fs.Response.ResponseText);
                                     break;
                                 case ChatResult.RagRetrievalFailed fr:
@@ -669,6 +691,7 @@ public partial class MainWindow : System.Windows.Window
                                     var fragMsg = $"Answered without document context — {fr.RagError}";
                                     AppendLog($"Warning: {fragMsg}");
                                     SetChatOutcome(ChatOutcome.RagWarning, fragMsg);
+                                    ShowSources(fr.Response.Sources);
                                     SpeakResponseAsync(fr.Response.ResponseText);
                                     break;
                                 case ChatResult.Failure ff:
