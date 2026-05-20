@@ -39,7 +39,7 @@ public sealed class ModelOperations
     /// <see cref="OllamaServerHandle.Host"/> (e.g. <c>127.0.0.1:11434</c>).</param>
     /// <param name="onProgress">Optional structured progress sink. Every
     /// NDJSON frame from the pull stream is forwarded.</param>
-    public async Task<PullModelResult> PullModelAsync(string ollamaExe, string modelRoot, string modelTag, Action<string> onLog, CancellationToken ct, string? ollamaHost = null, Action<OllamaPullProgress>? onProgress = null)
+    public async Task<PullModelResult> PullModelAsync(string ollamaExe, string modelRoot, string modelTag, Action<string> onLog, CancellationToken ct, string? ollamaHost = null, Action<OllamaPullProgress>? onProgress = null, Action? onFinalize = null)
     {
         if (string.IsNullOrWhiteSpace(ollamaHost))
         {
@@ -52,6 +52,17 @@ public sealed class ModelOperations
             modelTag,
             onProgress ?? (_ => { }),
             ct);
+
+        // #48: signal the caller that the NDJSON stream is done and the
+        // multi-second SHA-256 compute is about to start. Without this
+        // gap-filler the UI sat at 100% with no feedback for ~30–60s on
+        // large blobs and read as a hang. A throwing onFinalize must not
+        // abort the verification — mirror the onProgress containment
+        // upstream in OllamaPullClient.
+        if (onFinalize is not null)
+        {
+            try { onFinalize(); } catch { /* misbehaving UI callback must not block verification */ }
+        }
 
         // After successful pull, locate the model blob to compute its integrity hash.
         var modelFile = FindModelBlobForModel(modelRoot, modelTag)

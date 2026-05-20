@@ -397,9 +397,34 @@ internal sealed class HostLifetime : IAsyncDisposable
             // and emitted on the dedicated `progress: ...` stdout channel
             // (the Swift side routes it to a single Text view that
             // overwrites in place rather than scrolling the log surface).
+            //
+            // #49: per-pull layer order so the opaque blob-hash labels
+            // become "pulling <model> (layer N of M)" — same fix surface
+            // as the Windows PrepViewModel takes for the in-place line.
+            var layerOrder = new List<string>();
             var result = await _modelService.PullModelAsync(
                 ollamaExe, stagingRoot, modelTag, EmitLog, pullCts.Token, _ollamaServer.Host,
-                onProgress: progress => EmitProgress(progress.ToDisplayString()));
+                onProgress: progress =>
+                {
+                    int? layerIndex = null;
+                    int? layerCount = null;
+                    if (!string.IsNullOrEmpty(progress.Digest))
+                    {
+                        var idx = layerOrder.IndexOf(progress.Digest);
+                        if (idx < 0)
+                        {
+                            layerOrder.Add(progress.Digest);
+                            idx = layerOrder.Count - 1;
+                        }
+                        layerIndex = idx + 1;
+                        layerCount = layerOrder.Count;
+                    }
+                    EmitProgress(progress.ToDisplayString(modelTag, layerIndex, layerCount));
+                },
+                // #48: surface the SHA-compute gap explicitly so a 12B
+                // model doesn't read as a hang at 100%. Same purpose as
+                // the Windows path's OnPullFinalizing.
+                onFinalize: () => EmitProgress($"Finalizing {modelTag}… verifying integrity"));
 
             // MAC35: sequential merge under the same pull CTS so a
             // user cancel between pull-finish and merge-finish still

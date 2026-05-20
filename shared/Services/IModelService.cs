@@ -9,7 +9,16 @@ public interface IModelService
     void UpsertModel(List<ModelConfigEntry> models, string name, ModelInstallStatus status);
     Task UpdateModelStatusAsync(string configPath, string modelName, ModelInstallStatus status, string? sha256 = null, long? sizeBytes = null, DateTime? lastVerifiedUtc = null);
     IReadOnlyCollection<string> DiscoverModelsOnDisk(string modelsRoot);
-    Task<ModelPullResult> PullModelAsync(string ollamaExe, string modelsRoot, string modelTag, Action<string> onLog, CancellationToken ct, string? ollamaHost = null, Action<OllamaPullProgress>? onProgress = null);
+    /// <summary>
+    /// Pulls <paramref name="modelTag"/> via the running Ollama server at
+    /// <paramref name="ollamaHost"/>, then computes the model blob's
+    /// SHA-256 for integrity verification.
+    /// <paramref name="onFinalize"/> (task #48) fires once the NDJSON
+    /// stream completes but before the multi-second SHA compute, giving
+    /// the UI a hook to swap into an explicit "Finalizing…" state so the
+    /// hash gap doesn't read as a hang on large (12B+) models.
+    /// </summary>
+    Task<ModelPullResult> PullModelAsync(string ollamaExe, string modelsRoot, string modelTag, Action<string> onLog, CancellationToken ct, string? ollamaHost = null, Action<OllamaPullProgress>? onProgress = null, Action? onFinalize = null);
     /// <summary>
     /// MAC31: estimates the fraction (0.0–1.0) of <paramref name="modelTag"/>'s
     /// expected blob payload already on disk under <paramref name="modelsRoot"/>.
