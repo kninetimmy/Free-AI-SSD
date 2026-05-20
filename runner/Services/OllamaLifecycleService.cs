@@ -64,6 +64,14 @@ public sealed class OllamaLifecycleService : IOllamaLifecycleService
         startInfo.Environment["OLLAMA_HOST"] = $"127.0.0.1:{port}";
         startInfo.Environment["OLLAMA_ORIGINS"] = "http://127.0.0.1,http://localhost";
 
+        var gpuDecision = GpuAccelerationPolicy.ResolveFor(SystemResources.GetGpuVendor());
+        foreach (var kvp in gpuDecision.EnvironmentVariables)
+        {
+            startInfo.Environment[kvp.Key] = kvp.Value;
+        }
+        _logger?.Info($"Ollama acceleration backend: {gpuDecision.BackendDescription}");
+        LogMessage?.Invoke($"GPU backend: {gpuDecision.BackendDescription}");
+
         _ollama = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         _ollama.OutputDataReceived += (_, args) =>
         {
