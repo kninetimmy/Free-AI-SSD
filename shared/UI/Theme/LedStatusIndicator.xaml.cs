@@ -16,6 +16,9 @@ public enum LedState
     /// <summary>Healthy / completed; lamp glows green.</summary>
     Ok,
 
+    /// <summary>Non-fatal advisory; lamp glows amber.</summary>
+    Warning,
+
     /// <summary>Failed / alert; lamp glows magenta.</summary>
     Error
 }

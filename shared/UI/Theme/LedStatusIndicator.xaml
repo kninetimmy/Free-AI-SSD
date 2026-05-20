@@ -83,6 +83,19 @@
                             </Setter>
                         </DataTrigger>
 
+                        <DataTrigger Binding="{Binding State, ElementName=Root}" Value="Warning">
+                            <Setter Property="Fill" Value="{DynamicResource StatusWarningBrush}"/>
+                            <Setter Property="Opacity" Value="1.0"/>
+                            <Setter Property="Effect">
+                                <Setter.Value>
+                                    <DropShadowEffect Color="#FFB454"
+                                                      ShadowDepth="0"
+                                                      BlurRadius="12"
+                                                      Opacity="0.95"/>
+                                </Setter.Value>
+                            </Setter>
+                        </DataTrigger>
+
                         <DataTrigger Binding="{Binding State, ElementName=Root}" Value="Error">
                             <Setter Property="Fill" Value="{DynamicResource AccentMagentaBrush}"/>
                             <Setter Property="Opacity" Value="1.0"/>

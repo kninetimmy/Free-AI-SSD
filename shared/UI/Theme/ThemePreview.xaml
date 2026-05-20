@@ -217,7 +217,7 @@
                             <TextBlock Text="Busy (pulsing)" Style="{DynamicResource BodyText}"
                                        VerticalAlignment="Center"/>
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal">
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                             <theme:LedStatusIndicator State="Ok"
                                                       VerticalAlignment="Center"
                                                       Margin="0,0,10,0"/>
@@ -227,6 +227,13 @@
                                                       VerticalAlignment="Center"
                                                       Margin="16,0,10,0"/>
                             <TextBlock Text="Error" Style="{DynamicResource BodyText}"
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <theme:LedStatusIndicator State="Warning"
+                                                      VerticalAlignment="Center"
+                                                      Margin="0,0,10,0"/>
+                            <TextBlock Text="Warning" Style="{DynamicResource BodyText}"
                                        VerticalAlignment="Center"/>
                         </StackPanel>
                     </StackPanel>
