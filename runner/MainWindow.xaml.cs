@@ -166,12 +166,7 @@ public partial class MainWindow : System.Windows.Window
         _hotasService.PttButtonPressed += () => Dispatcher.Invoke(() => OnPttButtonPressed());
         _hotasService.PttButtonReleased += () => Dispatcher.Invoke(() => OnPttButtonReleased());
 
-        Closed += async (_, _) =>
-        {
-            CleanupPtt();
-            await _localApiService.StopAsync();
-            _sttService.Dispose();
-        };
+        // Shutdown is fully synchronous in OnClosing — see comments there.
 
         LoadConfig();
         _ = ShowModelSizingWarningsOnStartupAsync();
@@ -1943,6 +1938,20 @@ public partial class MainWindow : System.Windows.Window
     private void BindingsStep1Back_Click(object sender, System.Windows.RoutedEventArgs e) =>
         ShowBindingsStep(0);
 
+    /// <summary>Step 2: Whole-row click toggles IsSelected (task #56).</summary>
+    private void AircraftRow_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is System.Windows.FrameworkElement el &&
+            el.DataContext is DcsAircraftImportItem item &&
+            item.CanImport)
+        {
+            item.IsSelected = !item.IsSelected;
+            // DcsAircraftImportItem is a POCO with no INPC, so the CheckBox
+            // visual won't update on its own — same pattern as Select/Deselect All.
+            AircraftList.Items.Refresh();
+        }
+    }
+
     /// <summary>Step 2: Select All aircraft that have bindings.</summary>
     private void BindingsSelectAll_Click(object sender, System.Windows.RoutedEventArgs e)
     {
@@ -2702,11 +2711,46 @@ public partial class MainWindow : System.Windows.Window
 
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
-        // Drain any queued saves before zeroing the key. Bounded at 5s so a stuck
-        // save can't hang app close — FlushAsync logs the timeout and returns.
-        _configStore.FlushAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
-        _configStore.LockSession();
+        // All shutdown work runs synchronously here, each step bounded.
+        //
+        // Why not the async-void Closed handler we used to register?
+        // 1) Closed fires AFTER OnClosing returns and AFTER the dispatcher
+        //    has begun unwinding — async continuations that capture the
+        //    dispatcher context can fail to resume, leaving the process
+        //    alive with a leaked Kestrel host.
+        // 2) WebApplication.StopAsync has no default cap on graceful drain;
+        //    an in-flight Companion request can keep it parked indefinitely.
+        //
+        // Each step swallows exceptions: we are tearing the window down and
+        // a noisy stop must never block exit. See task #55.
+
+        // 1. Stop HOTAS / PTT polling — synchronous, fast.
+        TrySafe(CleanupPtt, "CleanupPtt");
+
+        // 2. Stop the LAN API with a hard 5s budget. ConfigureAwait(false) is
+        //    set inside StopAsync so .GetAwaiter().GetResult() can't deadlock
+        //    the UI thread on a continuation that wants the dispatcher back.
+        TrySafe(() =>
+        {
+            using var stopCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            _localApiService.StopAsync(stopCts.Token).GetAwaiter().GetResult();
+        }, "LocalApi.StopAsync");
+
+        // 3. Dispose the STT service (releases the Whisper context handle).
+        TrySafe(() => _sttService.Dispose(), "Stt.Dispose");
+
+        // 4. Drain queued config saves, then zero the in-memory key.
+        TrySafe(() => _configStore.FlushAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult(),
+            "ConfigStore.FlushAsync");
+        TrySafe(_configStore.LockSession, "ConfigStore.LockSession");
+
         base.OnClosing(e);
+    }
+
+    private void TrySafe(Action step, string name)
+    {
+        try { step(); }
+        catch (Exception ex) { AppendLog($"Shutdown step '{name}' failed: {ex.Message}"); }
     }
 
     // TODO (phase-a-default-hardening, Task 1 UI confirmation):

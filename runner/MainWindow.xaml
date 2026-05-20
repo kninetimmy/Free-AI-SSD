@@ -1094,18 +1094,28 @@
                                 </ListView.ItemContainerStyle>
                                 <ListView.ItemTemplate>
                                     <DataTemplate>
-                                        <StackPanel Orientation="Horizontal">
-                                            <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
-                                                      IsEnabled="{Binding CanImport}"
-                                                      VerticalAlignment="Center"/>
-                                            <TextBlock Text="{Binding DisplayLabel}"
-                                                       Foreground="{StaticResource TextPrimaryBrush}"
-                                                       VerticalAlignment="Center" Margin="6,0,0,0"/>
-                                            <TextBlock Text=" (already imported)" VerticalAlignment="Center"
-                                                       Foreground="{StaticResource StatusWarningBrush}"
-                                                       FontStyle="Italic"
-                                                       Visibility="{Binding AlreadyImportedVisibility}"/>
-                                        </StackPanel>
+                                        <!-- The whole row is the click target so users don't have
+                                             to land on the 14×14 CheckBox (task #56). CheckBox is
+                                             hit-test-invisible — AircraftRow_Click toggles IsSelected
+                                             and refreshes the list to reflect the change visually. -->
+                                        <Border Background="Transparent"
+                                                Cursor="Hand"
+                                                MouseLeftButtonUp="AircraftRow_Click">
+                                            <StackPanel Orientation="Horizontal">
+                                                <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                          IsEnabled="{Binding CanImport}"
+                                                          IsHitTestVisible="False"
+                                                          Focusable="False"
+                                                          VerticalAlignment="Center"/>
+                                                <TextBlock Text="{Binding DisplayLabel}"
+                                                           Foreground="{StaticResource TextPrimaryBrush}"
+                                                           VerticalAlignment="Center" Margin="6,0,0,0"/>
+                                                <TextBlock Text=" (already imported)" VerticalAlignment="Center"
+                                                           Foreground="{StaticResource StatusWarningBrush}"
+                                                           FontStyle="Italic"
+                                                           Visibility="{Binding AlreadyImportedVisibility}"/>
+                                            </StackPanel>
+                                        </Border>
                                     </DataTemplate>
                                 </ListView.ItemTemplate>
                             </ListView>
