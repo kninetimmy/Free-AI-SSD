@@ -511,6 +511,42 @@ public partial class MainWindow : System.Windows.Window
         }
     }
 
+    /// <summary>
+    /// Mutually-exclusive outcome states for the Chat-tab banner pair.
+    /// Stage-2 Mac-parity §B1 — one signal per Send.
+    /// </summary>
+    private enum ChatOutcome { None, Error, RagWarning }
+
+    /// <summary>
+    /// Single chokepoint that updates the Chat-tab outcome banners.
+    /// Guarantees structural mutual exclusion — every Send path resets to
+    /// <see cref="ChatOutcome.None"/> before re-sending, then promotes to
+    /// Error or RagWarning if that's the result. Log entries still fire
+    /// from the original call sites so the scrollback in LogText is
+    /// unchanged.
+    /// </summary>
+    private void SetChatOutcome(ChatOutcome outcome, string? message = null)
+    {
+        switch (outcome)
+        {
+            case ChatOutcome.Error:
+                ChatErrorBannerText.Text = message ?? string.Empty;
+                ChatErrorBanner.Visibility = System.Windows.Visibility.Visible;
+                RagWarningBanner.Visibility = System.Windows.Visibility.Collapsed;
+                break;
+            case ChatOutcome.RagWarning:
+                RagWarningBannerText.Text = message ?? string.Empty;
+                RagWarningBanner.Visibility = System.Windows.Visibility.Visible;
+                ChatErrorBanner.Visibility = System.Windows.Visibility.Collapsed;
+                break;
+            case ChatOutcome.None:
+            default:
+                ChatErrorBanner.Visibility = System.Windows.Visibility.Collapsed;
+                RagWarningBanner.Visibility = System.Windows.Visibility.Collapsed;
+                break;
+        }
+    }
+
     private async void Send_Click(object sender, System.Windows.RoutedEventArgs e)
     {
         if (_config is null || ModelCombo.SelectedItem is not string model) return;
@@ -520,6 +556,7 @@ public partial class MainWindow : System.Windows.Window
         StopTts();
 
         SourcesList.ItemsSource = null;
+        SetChatOutcome(ChatOutcome.None);
 
         if (_config.UseStreamingChat)
         {
@@ -540,11 +577,14 @@ public partial class MainWindow : System.Windows.Window
                         break;
                     case ChatResult.RagRetrievalFailed r:
                         ResponseText.Text = r.Response.ResponseText;
-                        AppendLog($"Warning: answered without document context — {r.RagError}");
+                        var ragMsg = $"Answered without document context — {r.RagError}";
+                        AppendLog($"Warning: {ragMsg}");
+                        SetChatOutcome(ChatOutcome.RagWarning, ragMsg);
                         SpeakResponseAsync(r.Response.ResponseText);
                         break;
                     case ChatResult.Failure f:
                         AppendLog($"Error: {f.ErrorMessage}");
+                        SetChatOutcome(ChatOutcome.Error, f.ErrorMessage);
                         break;
                 }
             }
@@ -603,7 +643,9 @@ public partial class MainWindow : System.Windows.Window
                     break;
                 case ChatResult.RagRetrievalFailed r:
                     ResponseText.Text = r.Response.ResponseText;
-                    AppendLog($"Warning: answered without document context — {r.RagError}");
+                    var ragMsg = $"Answered without document context — {r.RagError}";
+                    AppendLog($"Warning: {ragMsg}");
+                    SetChatOutcome(ChatOutcome.RagWarning, ragMsg);
                     if (r.Response.Sources is not null) SourcesList.ItemsSource = r.Response.Sources;
                     break;
                 case ChatResult.Failure f:
@@ -624,18 +666,28 @@ public partial class MainWindow : System.Windows.Window
                                     break;
                                 case ChatResult.RagRetrievalFailed fr:
                                     ResponseText.Text = fr.Response.ResponseText;
-                                    AppendLog($"Warning: answered without document context — {fr.RagError}");
+                                    var fragMsg = $"Answered without document context — {fr.RagError}";
+                                    AppendLog($"Warning: {fragMsg}");
+                                    SetChatOutcome(ChatOutcome.RagWarning, fragMsg);
                                     SpeakResponseAsync(fr.Response.ResponseText);
                                     break;
                                 case ChatResult.Failure ff:
                                     AppendLog($"Fallback also failed: {ff.ErrorMessage}");
+                                    SetChatOutcome(ChatOutcome.Error, ff.ErrorMessage);
                                     break;
                             }
                         }
                         catch (Exception fallbackEx)
                         {
                             AppendLog($"Fallback also failed: {fallbackEx.Message}");
+                            SetChatOutcome(ChatOutcome.Error, fallbackEx.Message);
                         }
+                    }
+                    else
+                    {
+                        // Streaming gave a partial response then failed — surface the
+                        // failure on the banner so the user knows the answer is truncated.
+                        SetChatOutcome(ChatOutcome.Error, f.ErrorMessage);
                     }
                     break;
             }
@@ -644,6 +696,7 @@ public partial class MainWindow : System.Windows.Window
         {
             ttsSpeaker?.Cancel();
             AppendLog($"Streaming error: {ex.Message}");
+            SetChatOutcome(ChatOutcome.Error, ex.Message);
         }
         finally
         {

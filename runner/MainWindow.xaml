@@ -286,13 +286,20 @@
         <Grid Grid.Row="1" x:Name="TabHost">
 
             <!-- ─────────────────────── Chat tab ─────────────────────── -->
+            <!-- Row order (top→bottom) is intentional — Mac-parity §B1:
+                 top controls → model+prompt → reference docs →
+                 outcome banners → response → sources → log.
+                 Banners and sources are conditional (Collapsed unless the
+                 most recent Send produced that signal). -->
             <Grid x:Name="ChatTab">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/> <!-- 0: top controls    -->
+                    <RowDefinition Height="Auto"/> <!-- 1: model + prompt  -->
+                    <RowDefinition Height="Auto"/> <!-- 2: reference docs  -->
+                    <RowDefinition Height="Auto"/> <!-- 3: outcome banners -->
+                    <RowDefinition Height="Auto"/> <!-- 4: response        -->
+                    <RowDefinition Height="Auto"/> <!-- 5: sources         -->
+                    <RowDefinition Height="Auto"/> <!-- 6: log + advanced  -->
                 </Grid.RowDefinitions>
 
                 <!-- Chat / Row 0: Top Controls -->
@@ -528,8 +535,31 @@
                     </StackPanel>
                 </Border>
 
-                <!-- Chat / Row 3: Response TextBox (model output) -->
-                <TextBox Grid.Row="3" x:Name="ResponseText"
+                <!-- Chat / Row 3: Outcome banners (mutually exclusive).
+                     One signal per Send: Failure → red, RagRetrievalFailed
+                     → orange, Success → both Collapsed. Driven by
+                     SetChatOutcome() in code-behind so mutual exclusion is
+                     structural, not by convention. Log entries still write
+                     to LogText for scrollback. -->
+                <StackPanel Grid.Row="3" x:Name="ChatOutcomeBanners" Margin="0,0,0,10">
+                    <Border x:Name="ChatErrorBanner"
+                            Style="{StaticResource DangerBanner}"
+                            Visibility="Collapsed">
+                        <TextBlock x:Name="ChatErrorBannerText"
+                                   Foreground="{StaticResource TextPrimaryBrush}"
+                                   TextWrapping="Wrap"/>
+                    </Border>
+                    <Border x:Name="RagWarningBanner"
+                            Style="{StaticResource WarningBanner}"
+                            Visibility="Collapsed">
+                        <TextBlock x:Name="RagWarningBannerText"
+                                   Foreground="{StaticResource TextPrimaryBrush}"
+                                   TextWrapping="Wrap"/>
+                    </Border>
+                </StackPanel>
+
+                <!-- Chat / Row 4: Response TextBox (model output) -->
+                <TextBox Grid.Row="4" x:Name="ResponseText"
                          Style="{StaticResource GlowFocusTextBox}"
                          AcceptsReturn="True"
                          VerticalScrollBarVisibility="Auto"
@@ -538,8 +568,10 @@
                          MaxHeight="500"
                          ToolTip="The model's most recent answer. Streaming output appears here token-by-token."/>
 
-                <!-- Chat / Row 4: Bottom Log + Advanced expander (Replay tour) -->
-                <Border Grid.Row="4" Style="{StaticResource NeumorphicCard}"
+                <!-- Chat / Row 6: Bottom Log + Advanced expander (Replay tour).
+                     Row 5 is reserved for the conditional Sources group
+                     added in the same stage-2 slice. -->
+                <Border Grid.Row="6" Style="{StaticResource NeumorphicCard}"
                         Margin="0,10,0,0" Padding="10">
                     <Grid>
                         <Grid.RowDefinitions>
