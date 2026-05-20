@@ -951,21 +951,6 @@ public partial class MainWindow : System.Windows.Window
         CompatibilityGpuText.Text = $"GPU: {snapshot.BestGpuSummary}";
         CompatibilityCpuText.Text = $"CPU Architecture: {snapshot.CpuArchitecture}";
         CompatibilityOsText.Text = $"OS: {snapshot.OsVersion}";
-        CompatibilityDepsText.Text = _lastDependencyCheck.IsSatisfied
-            ? "Dependency status: OK"
-            : $"Dependency status: Missing ({string.Join(", ", _lastDependencyCheck.MissingItems.Select(m => m.DisplayName))})";
-
-        // Collapsed-view summary: single LED + one-line status.
-        if (_lastDependencyCheck.IsSatisfied)
-        {
-            ReadinessLed.State = LedState.Ok;
-            ReadinessSummaryText.Text = "Ready";
-        }
-        else
-        {
-            ReadinessLed.State = LedState.Error;
-            ReadinessSummaryText.Text = "Not ready";
-        }
 
         SetDependenciesOutcome(_lastDependencyCheck);
     }
