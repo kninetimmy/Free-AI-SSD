@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using FreeAiSsd.Shared.Documents;
 using FreeAiSsd.Shared.Models;
 using FreeAiSsd.Shared.Mvvm;
+using FreeAiSsd.Shared.Prereqs;
 using FreeAiSsd.Shared.Services;
 
 namespace FreeAiSsd.Shared.ViewModels;
@@ -14,6 +15,7 @@ public class PrepViewModel : BaseViewModel
     private readonly IModelService _modelService;
     private readonly IOllamaPackageService _ollamaPackageService;
     private readonly IPrereqService _prereqService;
+    private readonly IPiperStagingService? _piperStagingService;
     private readonly IArtifactStagingService _artifactStagingService;
     private readonly IReadinessService _readinessService;
     private readonly IEncryptionService _encryptionService;
@@ -94,6 +96,7 @@ public class PrepViewModel : BaseViewModel
     private int? _systemRamGb;
     private int? _gpuVramGb;
     private bool _installVrCompanion;
+    private bool _installPiper;
     private string _companionHostAddress = string.Empty;
     private int _companionHostPort = 41555;
     private UserProfile? _selectedProfile;
@@ -198,12 +201,14 @@ public class PrepViewModel : BaseViewModel
         IEncryptionService encryptionService,
         IDialogService dialogService,
         ILogService logService,
-        IElevationService elevationService)
+        IElevationService elevationService,
+        IPiperStagingService? piperStagingService = null)
     {
         _driveService = driveService;
         _modelService = modelService;
         _ollamaPackageService = ollamaPackageService;
         _prereqService = prereqService;
+        _piperStagingService = piperStagingService;
         _artifactStagingService = artifactStagingService;
         _readinessService = readinessService;
         _encryptionService = encryptionService;
@@ -483,6 +488,23 @@ public class PrepViewModel : BaseViewModel
         set
         {
             if (SetProperty(ref _installVrCompanion, value))
+                OnPreferenceStateChanged?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Opt-in to staging the Piper neural TTS engine + default voice during
+    /// finalize. Off by default — Piper adds ~80 MB to the SSD payload and
+    /// the system TTS fallback works for everyone. When false, the Runner's
+    /// Voice tab will fall back to system TTS even if the user later picks
+    /// "Piper" because the files won't be on disk.
+    /// </summary>
+    public bool InstallPiper
+    {
+        get => _installPiper;
+        set
+        {
+            if (SetProperty(ref _installPiper, value))
                 OnPreferenceStateChanged?.Invoke();
         }
     }
@@ -2561,6 +2583,24 @@ public class PrepViewModel : BaseViewModel
 
                 StatusText = "Staging Windows runner payload...";
                 await _artifactStagingService.StageRunnerAsync(root, AppendLog);
+
+                if (InstallPiper && _piperStagingService is not null)
+                {
+                    StatusText = "Staging Piper neural TTS...";
+                    try
+                    {
+                        await _piperStagingService.StagePiperAsync(
+                            root, PiperPlatform.WindowsAmd64, AppendLog, CancellationToken.None);
+                    }
+                    catch (Exception ex)
+                    {
+                        // Optional payload: a Piper download failure (offline, HF
+                        // outage) must not block the rest of finalize. Log and
+                        // continue; Runner will fall back to system TTS until the
+                        // user retries via "Manage models" or re-runs prep online.
+                        AppendLog($"Piper staging failed — continuing without it. {ex.Message}");
+                    }
+                }
 
                 if (InstallVrCompanion)
                 {
