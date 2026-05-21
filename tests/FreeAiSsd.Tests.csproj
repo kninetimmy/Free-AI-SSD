@@ -47,4 +47,15 @@
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      RAG eval harness fixtures. Copied to the test output dir so
+      RetrievalEvalHarness can resolve them at runtime under
+      AppContext.BaseDirectory. Stays opt-in via FREEAI_TEST_OLLAMA_HOST
+      env var (OllamaIntegrationFactAttribute).
+    -->
+    <None Include="Fixtures\RagCorpus\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Retrieval\baseline.json" CopyToOutputDirectory="PreserveNewest" Condition="Exists('Retrieval\baseline.json')" />
+  </ItemGroup>
 </Project>
