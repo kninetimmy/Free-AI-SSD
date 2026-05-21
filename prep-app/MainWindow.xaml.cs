@@ -70,6 +70,7 @@ public partial class MainWindow : Window
         var readinessService = new ReadinessService(modelService);
         var encryptionService = new EncryptionService();
         var elevationService = new WindowsElevationService();
+        var piperStagingService = new PiperStagingService();
 
         _viewModel = new PrepViewModel(
             driveService,
@@ -81,7 +82,8 @@ public partial class MainWindow : Window
             encryptionService,
             dialogService,
             logService,
-            elevationService);
+            elevationService,
+            piperStagingService);
 
         InitializeComponent();
 

@@ -449,7 +449,7 @@ In the Windows Runner, speak your questions and hear the answers. The entire pip
 
 **AI voice response:** Enable TTS in settings. Two engines available:
 - **System** — Windows SAPI, built-in, no download required
-- **Piper** — neural TTS, better quality; download `piper.exe` and a voice model into `windows/tools/piper/`
+- **Piper** — neural TTS, better quality. Opt in on the PrepApp **Format setup** step (Windows) or the **Drive** step (Mac); PrepApp downloads `piper.exe` (~22 MB) plus the default `en_US-amy-medium` voice (~60 MB) into `windows/tools/piper/` or `mac/tools/piper/`, both SHA-256 verified.
 
 You can route TTS to a specific audio output device — useful for sending AI voice to your VR headset while system audio goes elsewhere.
 

@@ -592,6 +592,28 @@
                                 </StackPanel>
                             </GroupBox>
 
+                            <!-- Piper neural TTS (optional, ~80 MB). Off by default
+                                 — system TTS works for everyone and Piper is an
+                                 upgrade for users who want a more natural voice. -->
+                            <Expander Header="Piper neural TTS (optional, ~80 MB)"
+                                      Style="{StaticResource NeumorphicExpander}"
+                                      IsExpanded="False"
+                                      Margin="0,0,0,10"
+                                      ToolTip="Download and stage the Piper neural TTS engine plus an English voice. Optional — the Runner uses the system TTS by default.">
+                                <StackPanel Margin="8">
+                                    <CheckBox Foreground="{StaticResource TextSecondaryBrush}"
+                                              Content="Install Piper neural TTS engine + English voice (Amy, ~80 MB)"
+                                              IsChecked="{Binding InstallPiper, Mode=TwoWay}"
+                                              IsEnabled="{Binding CanMutateDrive}"
+                                              ToolTip="Downloads the archived rhasspy/piper binary and the en_US-amy-medium voice from Hugging Face, both SHA-256 verified."/>
+                                    <TextBlock Margin="22,4,0,0"
+                                               FontSize="11"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               TextWrapping="Wrap"
+                                               Text="Requires internet at finalize. If the download fails, finalize continues without it and the Runner uses system TTS."/>
+                                </StackPanel>
+                            </Expander>
+
                             <!-- VR companion folded into a collapsed disclosure
                                  (split-PC setups only). -->
                             <Expander Header="VR companion (split-PC, optional)"

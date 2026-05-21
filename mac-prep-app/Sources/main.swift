@@ -178,6 +178,10 @@ struct DriveSelectionStepView: View {
             Form {
                 TextField("Volume label", text: $vm.volumeLabel)
                 Toggle("Also prepare for Windows (cross-platform)", isOn: $vm.prepareForWindowsToo)
+                Toggle("Install Piper neural TTS (optional, ~80 MB)", isOn: $vm.installPiper)
+                Text("Optional upgrade over system TTS. Downloads the Piper binary plus the en_US-amy-medium voice; needs internet during staging. Skip if you're happy with the macOS default voice.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
             .disabled(!vm.canInitiateFreshFormat)
 

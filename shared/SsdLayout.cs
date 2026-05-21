@@ -9,11 +9,13 @@ namespace FreeAiSsd.Shared;
 ///   ├── windows/
 ///   │   ├── tools/
 ///   │   │   ├── ollama/       → Windows Ollama binary + trust attestation
+///   │   │   ├── piper/        → Optional Piper neural TTS binary + voices
 ///   │   │   └── prereqs/      → Bundled prerequisite installers (VC++, .NET)
 ///   │   └── runner/           → Published Windows Runner WPF application
 ///   ├── mac/
 ///   │   └── tools/
-///   │       └── ollama/       → macOS Ollama universal binary
+///   │       ├── ollama/       → macOS Ollama universal binary
+///   │       └── piper/        → Optional Piper neural TTS binary + voices
 ///   ├── Runner.app/           → macOS Runner application bundle (root-level,
 ///   │                           launchable directly; the mac-runner-host
 ///   │                           sidecar ships inside Contents/Resources/)
@@ -32,9 +34,13 @@ public static class SsdLayout
     public const string WindowsOllama = "windows/tools/ollama";
     public const string WindowsPrereqs = "windows/tools/prereqs";
     public const string WindowsRunner = "windows/runner";
+    public const string WindowsPiper = "windows/tools/piper";
+    public const string WindowsPiperVoices = "windows/tools/piper/voices";
 
     public const string MacTools = "mac/tools";
     public const string MacOllama = "mac/tools/ollama";
+    public const string MacPiper = "mac/tools/piper";
+    public const string MacPiperVoices = "mac/tools/piper/voices";
 
     /// <summary>
     /// macOS Runner bundle, staged at the SSD <b>root</b> (not under mac/)
@@ -78,9 +84,13 @@ public static class SsdLayout
                      WindowsOllama,
                      WindowsPrereqs,
                      WindowsRunner,
+                     WindowsPiper,
+                     WindowsPiperVoices,
                      Mac,
                      MacTools,
                      MacOllama,
+                     MacPiper,
+                     MacPiperVoices,
                      Models,
                      Blobs,
                      WhisperModels,
