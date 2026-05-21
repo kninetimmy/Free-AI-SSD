@@ -1,0 +1,122 @@
+[
+  {
+    "id": "ac0046f-01",
+    "fixture": "faa_ac_00-46f.pdf",
+    "question": "What is the purpose of the Aviation Safety Reporting Program?",
+    "correct_pages": [1]
+  },
+  {
+    "id": "ac0046f-02",
+    "fixture": "faa_ac_00-46f.pdf",
+    "question": "Why does NASA receive and process Aviation Safety Reports instead of the FAA?",
+    "correct_pages": [1, 2]
+  },
+  {
+    "id": "ac0046f-03",
+    "fixture": "faa_ac_00-46f.pdf",
+    "question": "Can the FAA use ASRS reports for enforcement action against pilots?",
+    "correct_pages": [2]
+  },
+  {
+    "id": "ac0046f-04",
+    "fixture": "faa_ac_00-46f.pdf",
+    "question": "What form number do air traffic controllers use to file an ASRS report?",
+    "correct_pages": [3]
+  },
+  {
+    "id": "ac0046f-05",
+    "fixture": "faa_ac_00-46f.pdf",
+    "question": "What happens to ASRS reports that contain information about criminal offenses?",
+    "correct_pages": [3]
+  },
+  {
+    "id": "ac9066c-01",
+    "fixture": "faa_ac_90-66c.pdf",
+    "question": "What does AC 90-66C cover for non-towered airports?",
+    "correct_pages": [1]
+  },
+  {
+    "id": "ac9066c-02",
+    "fixture": "faa_ac_90-66c.pdf",
+    "question": "How many miles out should pilots broadcast intentions when arriving at a non-towered airport?",
+    "correct_pages": [6]
+  },
+  {
+    "id": "ac9066c-03",
+    "fixture": "faa_ac_90-66c.pdf",
+    "question": "Does the FAA recommend VFR straight-in approaches at non-towered airports?",
+    "correct_pages": [8]
+  },
+  {
+    "id": "ac9066c-04",
+    "fixture": "faa_ac_90-66c.pdf",
+    "question": "Do drones have to yield right of way to manned aircraft near non-towered airports?",
+    "correct_pages": [8]
+  },
+  {
+    "id": "ac9066c-05",
+    "fixture": "faa_ac_90-66c.pdf",
+    "question": "What is an overhead approach maneuver?",
+    "correct_pages": [12]
+  },
+  {
+    "id": "ac9066c-06",
+    "fixture": "faa_ac_90-66c.pdf",
+    "question": "What MULTICOM frequency should pilots use when no tower or CTAF frequency is published?",
+    "correct_pages": [6]
+  },
+  {
+    "id": "sir1801-01",
+    "fixture": "ntsb_special_investigation.pdf",
+    "question": "Where did the end-of-track terminal accidents investigated in this NTSB report occur?",
+    "correct_pages": [1]
+  },
+  {
+    "id": "sir1801-02",
+    "fixture": "ntsb_special_investigation.pdf",
+    "question": "What date was the Hoboken New Jersey train terminal collision?",
+    "correct_pages": [1]
+  },
+  {
+    "id": "sir1801-03",
+    "fixture": "ntsb_special_investigation.pdf",
+    "question": "Do bumping posts alone provide adequate protection at the end of a railroad track?",
+    "correct_pages": [30]
+  },
+  {
+    "id": "sir1801-04",
+    "fixture": "ntsb_special_investigation.pdf",
+    "question": "What General Notice did LIRR issue after the Atlantic Terminal accident requiring an extra crewmember?",
+    "correct_pages": [40]
+  },
+  {
+    "id": "sir1801-05",
+    "fixture": "ntsb_special_investigation.pdf",
+    "question": "How were the Hoboken and Atlantic Terminal collisions classified in the risk matrix?",
+    "correct_pages": [42]
+  },
+  {
+    "id": "sir1801-06",
+    "fixture": "ntsb_special_investigation.pdf",
+    "question": "Did NJT and LIRR have a formal hazard analysis for trains operating into terminal tracks?",
+    "correct_pages": [42]
+  },
+  {
+    "id": "md-01",
+    "fixture": "markdown_sample.md",
+    "question": "What are the four stages of a RAG pipeline?",
+    "correct_pages": []
+  },
+  {
+    "id": "md-02",
+    "fixture": "markdown_sample.md",
+    "question": "Why did Free-AI-SSD reject approximate nearest neighbor indexes for retrieval?",
+    "correct_pages": []
+  },
+  {
+    "id": "md-03",
+    "fixture": "markdown_sample.md",
+    "question": "What is reciprocal rank fusion used for in hybrid retrieval?",
+    "correct_pages": []
+  }
+]
