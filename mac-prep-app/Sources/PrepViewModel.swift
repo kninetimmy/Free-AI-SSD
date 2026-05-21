@@ -41,6 +41,12 @@ final class PrepViewModel: ObservableObject {
     @Published var prepareForWindowsToo: Bool = true   // default cross-platform
     @Published var volumeLabel: String = "FREEAI"
 
+    /// Opt-in to staging Piper neural TTS during the staging step. Off by
+    /// default — system TTS works for everyone and Piper adds ~80 MB. When
+    /// true, the staging block runs a `stage-piper` arm after `stage-ollama`;
+    /// a download failure logs but does not block the rest of the flow.
+    @Published var installPiper: Bool = false
+
     // C6 Stage 3: detection snapshot for the selected candidate's drive.
     // Updated by `refreshDriveConfigurationState()` whenever
     // `selectedCandidate` changes. Drives the contextual banner on
@@ -825,6 +831,15 @@ final class PrepViewModel: ObservableObject {
             _ = try await hostController.send("stage-runner")
             _ = try await hostController.send("stage-ollama")
             _ = try await hostController.send("stage-prereqs")
+
+            // Optional Piper TTS staging. Sidecar handles its own failure
+            // path (catches exceptions internally and returns ok=false), so
+            // we don't need a separate do/catch here — the result lands in
+            // the log either way and finalize is not blocked.
+            if installPiper {
+                _ = try? await hostController.send("stage-piper")
+            }
+
             appendLog("Staging complete.")
 
             // F2: pull bundled catalog before showing the picker so

@@ -4,6 +4,7 @@ using FreeAiSsd.PrepApp;
 using FreeAiSsd.PrepApp.Services;
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Models;
+using FreeAiSsd.Shared.Prereqs;
 using FreeAiSsd.Shared.Services;
 
 namespace FreeAiSsd.MacPrepHost;
@@ -35,6 +36,7 @@ internal sealed class HostLifetime : IAsyncDisposable
     private readonly IOllamaPackageService _ollamaPackage;
     private readonly IModelService _modelService;
     private readonly PrereqService _prereqService;
+    private readonly PiperStagingService _piperStaging = new();
     private readonly ReadinessService _readinessService;
     private readonly ILiveModelCatalogService _liveCatalogService;
     private readonly IHuggingFaceCatalogService _hfCatalogService;
@@ -147,6 +149,9 @@ internal sealed class HostLifetime : IAsyncDisposable
                 break;
             case "stage-prereqs":
                 await StagePrereqsAsync(ct);
+                break;
+            case "stage-piper":
+                await StagePiperAsync(ct);
                 break;
             case "discover-models":
                 DiscoverModels();
@@ -275,6 +280,35 @@ internal sealed class HostLifetime : IAsyncDisposable
 
         await _prereqService.StagePrerequisitesAsync(_ssdRoot, EmitLog, ct);
         EmitResult("stage-prereqs", new { ok = true });
+    }
+
+    /// <summary>
+    /// Stages Piper for the local Mac arch. Optional payload — failures are
+    /// caught and reported as <c>ok=false</c> rather than thrown, mirroring
+    /// the Windows PrepViewModel posture: a Piper download failure should not
+    /// block the rest of finalize. The Swift UI surfaces the failure to the
+    /// user and the Runner falls back to system TTS.
+    /// </summary>
+    private async Task StagePiperAsync(CancellationToken ct)
+    {
+        if (_testMode)
+        {
+            EmitLog("test-mode: skipping StagePiperAsync");
+            EmitResult("stage-piper", new { ok = true, testMode = true });
+            return;
+        }
+
+        try
+        {
+            var platform = PiperStagingService.DetectCurrentPlatform();
+            await _piperStaging.StagePiperAsync(_ssdRoot, platform, EmitLog, ct);
+            EmitResult("stage-piper", new { ok = true, platform = platform.ToString() });
+        }
+        catch (Exception ex)
+        {
+            EmitLog($"Piper staging failed: {ex.Message}");
+            EmitResult("stage-piper", new { ok = false, reason = "stage-exception", message = ex.Message });
+        }
     }
 
     private void DiscoverModels()
