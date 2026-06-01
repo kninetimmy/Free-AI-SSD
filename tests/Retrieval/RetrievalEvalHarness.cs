@@ -190,16 +190,34 @@ public sealed class RetrievalEvalHarness : IDisposable
             var queryEmbedding = await embeddingClient.EmbedAsync(ollamaHost, model, entry.Question, CancellationToken.None);
             var results = vectorIndex.Search(manifest.Id, queryEmbedding, topK);
             // Empty CorrectPages → filename-only match (for non-paginated formats like .md/.txt
-            // where DocumentParser produces a single segment with Page=null).
+            // where DocumentParser produces a single segment with Page=null). A non-empty
+            // expected_section further requires the retrieved chunk to land in that section.
             bool hit = results.Any(r =>
                 string.Equals(r.Chunk.SourceFileName, entry.Fixture, StringComparison.OrdinalIgnoreCase) &&
                 (entry.CorrectPages.Count == 0
-                 || (r.Chunk.Page.HasValue && entry.CorrectPages.Contains(r.Chunk.Page.Value))));
+                 || (r.Chunk.Page.HasValue && entry.CorrectPages.Contains(r.Chunk.Page.Value))) &&
+                SectionMatches(entry.ExpectedSection, r.Chunk));
             hits[entry.Id] = hit;
         }
 
         var recall = hits.Count == 0 ? 0.0 : (double)hits.Values.Count(v => v) / hits.Count;
         return (recall, hits);
+    }
+
+    /// <summary>
+    /// True when a golden entry's optional <c>expected_section</c> constraint is satisfied by a
+    /// retrieved chunk. An empty/absent constraint always passes (back-compat with Stage 1
+    /// entries that predate section metadata). The match is a case-insensitive substring test
+    /// against the chunk's heading breadcrumb — which ends with the leaf section — and, as a
+    /// fallback, the leaf section alone, so an author can name either a parent heading or the
+    /// leaf section.
+    /// </summary>
+    internal static bool SectionMatches(string? expectedSection, DocumentChunk chunk)
+    {
+        if (string.IsNullOrWhiteSpace(expectedSection)) return true;
+        var needle = expectedSection.Trim();
+        return chunk.HeadingPath.Contains(needle, StringComparison.OrdinalIgnoreCase)
+            || chunk.Section.Contains(needle, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string RequireOllamaHost()
@@ -272,6 +290,12 @@ public sealed class RetrievalEvalHarness : IDisposable
         [JsonPropertyName("fixture")] public string Fixture { get; set; } = string.Empty;
         [JsonPropertyName("question")] public string Question { get; set; } = string.Empty;
         [JsonPropertyName("correct_pages")] public List<int> CorrectPages { get; set; } = new();
+        /// <summary>
+        /// Optional Stage 2 section constraint. When set, a retrieved chunk only counts as a hit
+        /// if its section attribution also satisfies <see cref="SectionMatches"/>. Absent/empty
+        /// means no section constraint (Stage 1 entries behave exactly as before).
+        /// </summary>
+        [JsonPropertyName("expected_section")] public string? ExpectedSection { get; set; }
     }
 
     private sealed class BaselineRecord

@@ -51,7 +51,8 @@ private third-party material.
   "id": "ac0046f-01",
   "fixture": "faa_ac_00-46f.pdf",
   "question": "What is the purpose of the Aviation Safety Reporting Program?",
-  "correct_pages": [1]
+  "correct_pages": [1],
+  "expected_section": "Purpose"
 }
 ```
 
@@ -62,6 +63,15 @@ private third-party material.
   the answer. A retrieved chunk counts as a hit if its
   `(source_file_name, page)` matches. Empty `correct_pages` (used for
   markdown and other non-paginated files) means filename-only match.
+- `expected_section` — *optional* (Stage 2). When present and non-empty, a
+  retrieved chunk only counts as a hit if it also lands in that section.
+  The match is a case-insensitive substring test against the chunk's
+  heading breadcrumb (e.g. `Engines > Start`) and, as a fallback, the leaf
+  section title — so the value can name either a parent heading or the leaf
+  section. Omit it (or leave it empty) for a filename/page-only hit, exactly
+  as Stage 1 behaved. **The committed golden set leaves this unset** so the
+  committed baseline stays comparable across stages; it is intended for the
+  local corpus below, where section-aware retrieval is the thing under test.
 
 ## Local corpus extension
 
@@ -76,3 +86,8 @@ containing:
 The harness will write a `local_baseline.json` next to your fixtures on
 first run, then assert against it on subsequent runs. Nothing under
 `FREEAI_TEST_LOCAL_CORPUS_PATH` is committed to the repo.
+
+This is the right place to use `expected_section`: for a large structured
+manual (a Chuck's Guide, an aircraft FCOM) where the same term recurs across
+many sections, pinning the section turns a vague filename/page hit into a
+test that the retriever actually surfaced the *right* part of the document.
