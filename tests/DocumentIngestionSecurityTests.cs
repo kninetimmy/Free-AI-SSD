@@ -21,10 +21,10 @@ public sealed class DocumentIngestionSecurityTests : IDisposable
     // --- File size validation ---
 
     [Fact]
-    public void FileSizeLimit_DefaultIs50MB()
+    public void FileSizeLimit_DefaultIs512MB()
     {
         var config = new PortableConfig();
-        Assert.Equal(50, config.MaxDocumentSizeMB);
+        Assert.Equal(512, config.MaxDocumentSizeMB);
     }
 
     // --- DocumentParser.ValidateBeforeParse ---

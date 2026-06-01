@@ -4,7 +4,7 @@ namespace FreeAiSsd.Tests;
 
 public class CitationBuilderTests
 {
-    private static DocumentChunk MakeChunk(string fileName, int? page = null)
+    private static DocumentChunk MakeChunk(string fileName, int? page = null, string section = "")
     {
         return new DocumentChunk
         {
@@ -14,7 +14,8 @@ public class CitationBuilderTests
             Text = "sample text",
             TextLength = 11,
             Sha256 = "abc",
-            Page = page
+            Page = page,
+            Section = section
         };
     }
 
@@ -110,5 +111,44 @@ public class CitationBuilderTests
     {
         var citations = CitationBuilder.BuildDistinct(new List<DocumentChunk>());
         Assert.Empty(citations);
+    }
+
+    [Fact]
+    public void Build_WithSectionAndPage_FormatsWithSectionAndPage()
+    {
+        var chunk = MakeChunk("guide.pdf", page: 412, section: "Engine Start");
+        Assert.Equal("[guide.pdf §Engine Start p.412]", CitationBuilder.Build(chunk));
+    }
+
+    [Fact]
+    public void Build_WithSectionNoPage_FormatsWithSection()
+    {
+        var chunk = MakeChunk("guide.md", section: "Introduction");
+        Assert.Equal("[guide.md §Introduction]", CitationBuilder.Build(chunk));
+    }
+
+    [Fact]
+    public void Build_EmptySection_RendersExactlyLikeBeforeStage2()
+    {
+        Assert.Equal("[report.pdf p.5]", CitationBuilder.Build(MakeChunk("report.pdf", page: 5)));
+        Assert.Equal("[notes.txt]", CitationBuilder.Build(MakeChunk("notes.txt")));
+    }
+
+    [Fact]
+    public void BuildDistinct_SameFileAndPageDifferentSections_RetainsAll()
+    {
+        // The point of section metadata: two chunks on the same page no longer collapse
+        // to one citation when they belong to different sections.
+        var chunks = new List<DocumentChunk>
+        {
+            MakeChunk("guide.pdf", page: 5, section: "Engine Start"),
+            MakeChunk("guide.pdf", page: 5, section: "Engine Shutdown"),
+        };
+
+        var citations = CitationBuilder.BuildDistinct(chunks);
+
+        Assert.Equal(2, citations.Count);
+        Assert.Contains("[guide.pdf §Engine Start p.5]", citations);
+        Assert.Contains("[guide.pdf §Engine Shutdown p.5]", citations);
     }
 }
