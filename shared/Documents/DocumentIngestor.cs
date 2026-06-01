@@ -114,16 +114,10 @@ public sealed class DocumentIngestor
 
             try
             {
-                // Flatten all text chunks with their segment metadata, preserving document order.
-                var textItems = new List<(string Text, int? Page)>();
-                foreach (var segment in parsed.Segments)
-                {
-                    var texts = DocumentChunker.ChunkText(segment.Text, config.ChunkSize, config.ChunkOverlap);
-                    foreach (var text in texts)
-                        textItems.Add((text, segment.Page));
-                }
+                // Section-aware chunking, preserving document order.
+                var spans = BuildChunkSpans(parsed, config);
 
-                var totalChunks = textItems.Count;
+                var totalChunks = spans.Count;
                 if (totalChunks == 0)
                 {
                     var error = $"Ingestion failed for '{fileName}': no chunks were generated after parsing and chunking.";
@@ -144,27 +138,32 @@ public sealed class DocumentIngestor
                 var maxConcurrency = Math.Max(1, config.MaxEmbeddingConcurrency);
                 using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
 
-                var tasks = textItems.Select(async (item, i) =>
+                var tasks = spans.Select(async (span, i) =>
                 {
                     await semaphore.WaitAsync(cancellationToken);
                     try
                     {
-                        var embedding = await _embeddingClient.EmbedAsync(host, config.EmbeddingModelName, item.Text, cancellationToken);
+                        var embedding = await _embeddingClient.EmbedAsync(host, config.EmbeddingModelName, span.Text, cancellationToken);
                         results[i] = new DocumentChunk
                         {
                             LibraryId = manifest.Id,
                             SourceFileName = fileName,
                             StoredRelativePath = storedRelativePath,
-                            Page = item.Page,
+                            Page = span.Page,
                             ChunkIndex = i,
-                            Text = item.Text,
-                            TextLength = item.Text.Length,
+                            Text = span.Text,
+                            TextLength = span.Text.Length,
                             Sha256 = sha,
                             Embedding = embedding,
                             EmbeddingModel = config.EmbeddingModelName,
                             EmbeddingDimension = embedding.Length,
                             ParserVersion = DocumentParser.Version,
                             ChunkerVersion = DocumentChunker.Version,
+                            Section = span.Section,
+                            HeadingPath = span.HeadingPath,
+                            CharOffsetStart = span.CharOffsetStart,
+                            CharOffsetEnd = span.CharOffsetEnd,
+                            ContentType = span.ContentType,
                         };
                         var completed = Interlocked.Increment(ref embeddedChunks);
                         progress?.Invoke(new IndexingProgress
@@ -288,6 +287,14 @@ public sealed class DocumentIngestor
         }
     }
 
+    /// <summary>
+    /// Single chokepoint turning a parsed document into ordered, section-aware chunk spans.
+    /// Both the fresh-ingest and rebuild-from-stored-copy paths go through here so they stay
+    /// in lockstep on chunking behavior.
+    /// </summary>
+    private static List<DocumentChunkSpan> BuildChunkSpans(ParsedDocument parsed, PortableConfig config)
+        => DocumentChunker.ChunkBlocks(parsed.Blocks, config.ChunkSize, config.ChunkOverlap);
+
     private static void TryDeleteStoredFile(string path)
     {
         try
@@ -407,15 +414,9 @@ public sealed class DocumentIngestor
         CancellationToken cancellationToken)
     {
         var parsed = DocumentParser.Parse(parsePath);
-        var textItems = new List<(string Text, int? Page)>();
-        foreach (var segment in parsed.Segments)
-        {
-            var texts = DocumentChunker.ChunkText(segment.Text, config.ChunkSize, config.ChunkOverlap);
-            foreach (var text in texts)
-                textItems.Add((text, segment.Page));
-        }
+        var spans = BuildChunkSpans(parsed, config);
 
-        if (textItems.Count == 0)
+        if (spans.Count == 0)
         {
             _logger?.Warn($"Stored copy for '{entry.FileName}' yielded no chunks during rebuild — skipping.");
             return;
@@ -423,33 +424,38 @@ public sealed class DocumentIngestor
 
         var maxConcurrency = Math.Max(1, config.MaxEmbeddingConcurrency);
         using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
-        var results = new DocumentChunk?[textItems.Count];
+        var results = new DocumentChunk?[spans.Count];
         var failedCount = 0;
         // C2: same first-failure capture as IngestFilesAsync — see the
         // comment there for rationale.
         Exception? firstFailure = null;
 
-        var tasks = textItems.Select(async (item, i) =>
+        var tasks = spans.Select(async (span, i) =>
         {
             await semaphore.WaitAsync(cancellationToken);
             try
             {
-                var embedding = await _embeddingClient.EmbedAsync(host, config.EmbeddingModelName, item.Text, cancellationToken);
+                var embedding = await _embeddingClient.EmbedAsync(host, config.EmbeddingModelName, span.Text, cancellationToken);
                 results[i] = new DocumentChunk
                 {
                     LibraryId = manifest.Id,
                     SourceFileName = entry.FileName,
                     StoredRelativePath = entry.StoredRelativePath,
-                    Page = item.Page,
+                    Page = span.Page,
                     ChunkIndex = i,
-                    Text = item.Text,
-                    TextLength = item.Text.Length,
+                    Text = span.Text,
+                    TextLength = span.Text.Length,
                     Sha256 = entry.Sha256,
                     Embedding = embedding,
                     EmbeddingModel = config.EmbeddingModelName,
                     EmbeddingDimension = embedding.Length,
                     ParserVersion = DocumentParser.Version,
                     ChunkerVersion = DocumentChunker.Version,
+                    Section = span.Section,
+                    HeadingPath = span.HeadingPath,
+                    CharOffsetStart = span.CharOffsetStart,
+                    CharOffsetEnd = span.CharOffsetEnd,
+                    ContentType = span.ContentType,
                 };
             }
             catch (OperationCanceledException)
@@ -469,7 +475,7 @@ public sealed class DocumentIngestor
 
         await Task.WhenAll(tasks);
 
-        var totalChunks = textItems.Count;
+        var totalChunks = spans.Count;
         var failureRatio = totalChunks == 0 ? 0d : (double)failedCount / totalChunks;
         if (failureRatio > MaxEmbeddingFailureRatioBeforeAbort)
         {

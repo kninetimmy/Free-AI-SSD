@@ -191,4 +191,153 @@ public class DocumentParserTests : IDisposable
     }
 
     #endregion
+
+    #region Block extraction — markdown
+
+    [Fact]
+    public void Parse_Markdown_DetectsAtxHeadingLevels()
+    {
+        var content = "# Title\n\nIntro paragraph.\n\n## Subsection\n\nDetail text.\n\n### Deeper\n\nMore.";
+        var path = CreateFile("doc.md", content);
+
+        var blocks = DocumentParser.Parse(path).Blocks;
+
+        Assert.Collection(blocks,
+            b => { Assert.Equal(BlockKind.Heading, b.Kind); Assert.Equal(1, b.HeadingLevel); Assert.Equal("Title", b.Text); },
+            b => { Assert.Equal(BlockKind.Body, b.Kind); Assert.Equal("Intro paragraph.", b.Text); },
+            b => { Assert.Equal(BlockKind.Heading, b.Kind); Assert.Equal(2, b.HeadingLevel); Assert.Equal("Subsection", b.Text); },
+            b => { Assert.Equal(BlockKind.Body, b.Kind); Assert.Equal("Detail text.", b.Text); },
+            b => { Assert.Equal(BlockKind.Heading, b.Kind); Assert.Equal(3, b.HeadingLevel); Assert.Equal("Deeper", b.Text); },
+            b => { Assert.Equal(BlockKind.Body, b.Kind); Assert.Equal("More.", b.Text); });
+    }
+
+    [Fact]
+    public void Parse_Markdown_HashWithoutSpace_IsNotAHeading()
+    {
+        // CommonMark requires a space after the hash run; "#NotAHeading" is body text.
+        var path = CreateFile("doc.md", "#NotAHeading\n\nbody");
+
+        var blocks = DocumentParser.Parse(path).Blocks;
+
+        Assert.All(blocks, b => Assert.Equal(BlockKind.Body, b.Kind));
+        Assert.Contains(blocks, b => b.Text.Contains("#NotAHeading"));
+    }
+
+    [Fact]
+    public void Parse_PlainText_ProducesSingleBodyBlock()
+    {
+        var path = CreateFile("notes.txt", "Just plain text, no structure.");
+
+        var blocks = DocumentParser.Parse(path).Blocks;
+
+        var block = Assert.Single(blocks);
+        Assert.Equal(BlockKind.Body, block.Kind);
+        Assert.Equal("Just plain text, no structure.", block.Text);
+        Assert.Null(block.Page);
+    }
+
+    #endregion
+
+    #region Block extraction — font-tier classifier (pure function)
+
+    [Fact]
+    public void ClassifyLinesIntoBlocks_FontTiers_AssignsDescendingLevels()
+    {
+        var lines = new List<LineRecord>
+        {
+            new() { Page = 1, Text = "Chapter One", FontSize = 24 },
+            new() { Page = 1, Text = "Section A", FontSize = 18 },
+            new() { Page = 1, Text = "Body text line one here.", FontSize = 12 },
+            new() { Page = 1, Text = "Body text line two here.", FontSize = 12 },
+        };
+
+        var blocks = DocumentParser.ClassifyLinesIntoBlocks(lines);
+
+        Assert.Collection(blocks,
+            b => { Assert.Equal(BlockKind.Heading, b.Kind); Assert.Equal(1, b.HeadingLevel); Assert.Equal("Chapter One", b.Text); },
+            b => { Assert.Equal(BlockKind.Heading, b.Kind); Assert.Equal(2, b.HeadingLevel); Assert.Equal("Section A", b.Text); },
+            b =>
+            {
+                Assert.Equal(BlockKind.Body, b.Kind);
+                Assert.Contains("line one", b.Text);
+                Assert.Contains("line two", b.Text);
+            });
+    }
+
+    [Fact]
+    public void ClassifyLinesIntoBlocks_UniformFont_YieldsAllBody()
+    {
+        var lines = new List<LineRecord>
+        {
+            new() { Page = 1, Text = "All the same size, line one.", FontSize = 12 },
+            new() { Page = 1, Text = "All the same size, line two.", FontSize = 12 },
+            new() { Page = 1, Text = "All the same size, line three.", FontSize = 12 },
+        };
+
+        var blocks = DocumentParser.ClassifyLinesIntoBlocks(lines);
+
+        var block = Assert.Single(blocks);
+        Assert.Equal(BlockKind.Body, block.Kind);
+    }
+
+    [Fact]
+    public void ClassifyLinesIntoBlocks_BoldShortLine_NoSizeTier_IsHeading()
+    {
+        var lines = new List<LineRecord>
+        {
+            new() { Page = 1, Text = "WARNING", FontSize = 12, IsBold = true },
+            new() { Page = 1, Text = "Do not exceed the limit shown on the gauge.", FontSize = 12 },
+        };
+
+        var blocks = DocumentParser.ClassifyLinesIntoBlocks(lines);
+
+        Assert.Collection(blocks,
+            b => { Assert.Equal(BlockKind.Heading, b.Kind); Assert.Equal("WARNING", b.Text); },
+            b => Assert.Equal(BlockKind.Body, b.Kind));
+    }
+
+    [Fact]
+    public void ClassifyLinesIntoBlocks_Body_FlushesOnPageChange()
+    {
+        var lines = new List<LineRecord>
+        {
+            new() { Page = 1, Text = "Body on page one.", FontSize = 12 },
+            new() { Page = 2, Text = "Body on page two.", FontSize = 12 },
+        };
+
+        var blocks = DocumentParser.ClassifyLinesIntoBlocks(lines);
+
+        Assert.Collection(blocks,
+            b => { Assert.Equal(BlockKind.Body, b.Kind); Assert.Equal(1, b.Page); },
+            b => { Assert.Equal(BlockKind.Body, b.Kind); Assert.Equal(2, b.Page); });
+    }
+
+    [Fact]
+    public void ClassifyLinesIntoBlocks_EmptyInput_ReturnsEmpty()
+    {
+        Assert.Empty(DocumentParser.ClassifyLinesIntoBlocks(new List<LineRecord>()));
+    }
+
+    #endregion
+
+    #region Block extraction — real PDF (PdfPig word-extraction path)
+
+    [Fact]
+    public void Parse_RealPdfFixture_ProducesPagedBlocksWithBodyText()
+    {
+        // Exercises the impure ExtractPdfLines + classifier path against an actual text-layer
+        // PDF — the half the synthetic LineRecord tests can't reach.
+        var fixture = Path.Combine(AppContext.BaseDirectory, "Fixtures", "RagCorpus", "faa_ac_90-66c.pdf");
+        Assert.True(File.Exists(fixture), $"Fixture missing: {fixture}");
+
+        var parsed = DocumentParser.Parse(fixture);
+
+        Assert.NotEmpty(parsed.Blocks);
+        // Body text survived word reconstruction (not collapsed to nothing).
+        Assert.Contains(parsed.Blocks, b => b.Kind == BlockKind.Body && b.Text.Length > 100);
+        // Every block from a paginated source carries its page.
+        Assert.All(parsed.Blocks, b => Assert.NotNull(b.Page));
+    }
+
+    #endregion
 }
