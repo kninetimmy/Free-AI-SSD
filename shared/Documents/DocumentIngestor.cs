@@ -28,11 +28,21 @@ public sealed class DocumentIngestor
     {
         _libraryManager.EnsureLibraryFolders(manifest.Id);
         var vectorIndex = new VectorIndex(_libraryManager.GetIndexPath(manifest.Id));
-        var candidates = sourcePaths.Where(DocumentParser.IsSupported).Distinct().ToList();
+        // Materialize the distinct request set first so unsupported-extension files
+        // (dropped before the loop) can be counted toward the terminal skip total.
+        var requested = sourcePaths.Distinct().ToList();
+        var candidates = requested.Where(DocumentParser.IsSupported).ToList();
         var total = candidates.Count;
         var done = 0;
         var maxSizeBytes = (long)config.MaxDocumentSizeMB * 1024 * 1024;
         var perFileErrors = new List<Exception>();
+        // Terminal-frame summary counters: unsupported-extension files are skipped before
+        // the loop; in-loop skips (non-existent, symlink, oversize, content-validation) are
+        // tallied below. Batch chunk totals accumulate across successfully embedded files.
+        var unsupportedSkipped = requested.Count - total;
+        var inLoopSkipped = 0;
+        var batchEmbedded = 0;
+        var batchTotalChunks = 0;
 
         foreach (var sourcePath in candidates)
         {
@@ -42,6 +52,7 @@ public sealed class DocumentIngestor
 
             if (!File.Exists(sourcePath))
             {
+                inLoopSkipped++;
                 continue;
             }
 
@@ -50,6 +61,7 @@ public sealed class DocumentIngestor
             if ((fileAttributes & FileAttributes.ReparsePoint) != 0)
             {
                 _logger?.Warn($"Rejected symlink/reparse point: {sourcePath}");
+                inLoopSkipped++;
                 continue;
             }
 
@@ -58,6 +70,7 @@ public sealed class DocumentIngestor
             if (fileSize > maxSizeBytes)
             {
                 _logger?.Warn($"Rejected oversized file ({fileSize / (1024.0 * 1024.0):F1} MB exceeds {config.MaxDocumentSizeMB} MB limit): {sourcePath}");
+                inLoopSkipped++;
                 continue;
             }
 
@@ -109,6 +122,7 @@ public sealed class DocumentIngestor
                 {
                     File.Delete(storedAbsPath);
                 }
+                inLoopSkipped++;
                 continue;
             }
 
@@ -256,6 +270,9 @@ public sealed class DocumentIngestor
                 // (UpsertFileChunks above) do not become orphaned if a later file in the
                 // batch fails or the operation is cancelled before the final save below.
                 await _libraryManager.SaveManifestAsync(manifest);
+
+                batchEmbedded += embeddedChunks;
+                batchTotalChunks += totalChunks;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -271,7 +288,18 @@ public sealed class DocumentIngestor
 
         manifest.LastIndexedUtc = DateTime.UtcNow;
         await _libraryManager.SaveManifestAsync(manifest);
-        progress?.Invoke(new IndexingProgress { TotalFiles = total, CompletedFiles = total, CurrentFile = string.Empty });
+        // Terminal frame (CurrentFile empty): CompletedFiles is the indexed/updated count
+        // (in-loop skips excluded), SkippedFiles is every skipped file, and the chunk fields
+        // carry the batch totals so the UI can render an honest completion summary.
+        progress?.Invoke(new IndexingProgress
+        {
+            TotalFiles = total,
+            CompletedFiles = total - inLoopSkipped,
+            CurrentFile = string.Empty,
+            EmbeddedChunks = batchEmbedded,
+            TotalChunks = batchTotalChunks,
+            SkippedFiles = unsupportedSkipped + inLoopSkipped
+        });
 
         if (perFileErrors.Count == 1)
         {
