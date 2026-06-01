@@ -175,7 +175,10 @@ public sealed class RetrievalEvalHarness : IDisposable
             EmbeddingModelName = model,
             ChunkSize = 1000,
             ChunkOverlap = 100,
-            MaxDocumentSizeMB = 50,
+            // Match the product default (Stage 2C raised it 50 -> 512) so a large
+            // local corpus — e.g. a 140 MB Chuck's Guide — actually ingests instead
+            // of being silently rejected as oversized.
+            MaxDocumentSizeMB = 512,
         };
 
         var ollamaHost = StripHttpPrefix(host);

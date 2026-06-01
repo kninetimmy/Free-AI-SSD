@@ -1,9 +1,12 @@
-// Manual tool: dumps per-page text of each fixture under
-// tests/Fixtures/RagCorpus/ to %TEMP%/rag-fixture-dump/<fixture>/page-NN.txt.
-// Used to author or re-author retrieval_golden.json — handy when later
+// Manual tool: dumps per-page text + a heading outline of each fixture to
+// %TEMP%/rag-fixture-dump/<fixture>/. Used to author or re-author golden
+// sets (retrieval_golden.json and local_golden.json) — handy when later
 // stages change chunker behavior and existing Q/A pairs need refreshing.
 // Off by default; pass FREEAI_TEST_DUMP_FIXTURES=1 to enable:
 //   dotnet test --filter "FullyQualifiedName~_FixtureDumper" --logger "console;verbosity=detailed"
+// Dumps the committed corpus under tests/Fixtures/RagCorpus/ and, when
+// FREEAI_TEST_LOCAL_CORPUS_PATH is set, the local corpus too (for authoring
+// local_golden.json against private material like a Chuck's Guide).
 // Underscore prefix marks this as a manual tool, not part of the
 // regular test suite.
 
@@ -31,18 +34,30 @@ public sealed class _FixtureDumper
             return;
         }
 
-        var fixtureDir = Path.Combine(AppContext.BaseDirectory, "Fixtures", "RagCorpus");
-        Assert.True(Directory.Exists(fixtureDir), $"Fixture dir missing: {fixtureDir}");
-
         var dumpRoot = Path.Combine(Path.GetTempPath(), "rag-fixture-dump");
         if (Directory.Exists(dumpRoot)) Directory.Delete(dumpRoot, recursive: true);
         Directory.CreateDirectory(dumpRoot);
 
-        foreach (var path in Directory.EnumerateFiles(fixtureDir, "*.*").OrderBy(p => p))
+        var committedDir = Path.Combine(AppContext.BaseDirectory, "Fixtures", "RagCorpus");
+        Assert.True(Directory.Exists(committedDir), $"Fixture dir missing: {committedDir}");
+        DumpDirectory(committedDir, dumpRoot, "retrieval_golden.json", "README.md");
+
+        var localDir = Environment.GetEnvironmentVariable("FREEAI_TEST_LOCAL_CORPUS_PATH");
+        if (!string.IsNullOrWhiteSpace(localDir) && Directory.Exists(localDir))
+        {
+            _output.WriteLine($"Local corpus: {localDir}");
+            DumpDirectory(localDir, dumpRoot, "local_golden.json", "local_baseline.json");
+        }
+
+        _output.WriteLine($"Dumps written under: {dumpRoot}");
+    }
+
+    private void DumpDirectory(string sourceDir, string dumpRoot, params string[] skipNames)
+    {
+        foreach (var path in Directory.EnumerateFiles(sourceDir, "*.*").OrderBy(p => p))
         {
             var name = Path.GetFileName(path);
-            if (name.Equals("retrieval_golden.json", StringComparison.OrdinalIgnoreCase)) continue;
-            if (name.Equals("README.md", StringComparison.OrdinalIgnoreCase)) continue;
+            if (skipNames.Any(s => name.Equals(s, StringComparison.OrdinalIgnoreCase))) continue;
             if (!DocumentParser.IsSupported(path))
             {
                 _output.WriteLine($"  skip (unsupported): {name}");
@@ -53,17 +68,21 @@ public sealed class _FixtureDumper
             Directory.CreateDirectory(fixtureDump);
 
             var parsed = DocumentParser.Parse(path);
-            _output.WriteLine($"{name}: {parsed.Segments.Count} segments");
+            _output.WriteLine($"{name}: {parsed.Segments.Count} segments, {parsed.Blocks.Count} blocks");
 
             int pageless = 0;
             foreach (var seg in parsed.Segments)
             {
-                var label = seg.Page.HasValue ? $"page-{seg.Page.Value:D3}" : $"nopage-{pageless++:D3}";
-                var outPath = Path.Combine(fixtureDump, $"{label}.txt");
-                File.WriteAllText(outPath, seg.Text);
+                var label = seg.Page.HasValue ? $"page-{seg.Page.Value:D4}" : $"nopage-{pageless++:D3}";
+                File.WriteAllText(Path.Combine(fixtureDump, $"{label}.txt"), seg.Text);
             }
-        }
 
-        _output.WriteLine($"Dumps written under: {dumpRoot}");
+            // Heading outline: the detected section structure, one heading per line.
+            // This is the map for choosing questions and authoring expected_section.
+            var outline = parsed.Blocks
+                .Where(b => b.Kind == BlockKind.Heading)
+                .Select(b => $"[p{(b.Page?.ToString() ?? "-")}] {new string(' ', Math.Max(0, (b.HeadingLevel - 1) * 2))}{b.Text}");
+            File.WriteAllText(Path.Combine(fixtureDump, "_outline.txt"), string.Join(Environment.NewLine, outline));
+        }
     }
 }
