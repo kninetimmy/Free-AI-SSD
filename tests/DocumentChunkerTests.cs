@@ -110,4 +110,107 @@ public class DocumentChunkerTests
         var totalLen = chunks.Sum(c => c.Length);
         Assert.True(totalLen <= text.Length + chunks.Count, "No-overlap chunks shouldn't exceed original length significantly");
     }
+
+    #region ChunkBlocks — section-aware chunking
+
+    [Fact]
+    public void ChunkBlocks_HeadingThenBody_AttributesSectionAndBreadcrumb()
+    {
+        var blocks = new List<DocumentBlock>
+        {
+            new() { Page = 5, Kind = BlockKind.Heading, HeadingLevel = 1, Text = "Engines" },
+            new() { Page = 5, Kind = BlockKind.Heading, HeadingLevel = 2, Text = "Start" },
+            new() { Page = 5, Kind = BlockKind.Body, Text = "Set throttle to idle and press start." },
+        };
+
+        var span = Assert.Single(DocumentChunker.ChunkBlocks(blocks, 500, 50));
+
+        Assert.Equal("Start", span.Section);
+        Assert.Equal("Engines > Start", span.HeadingPath);
+        Assert.Equal(5, span.Page);
+        Assert.Equal("text", span.ContentType);
+    }
+
+    [Fact]
+    public void ChunkBlocks_SiblingHeading_FlushesPreviousSection_AndResetsBreadcrumb()
+    {
+        var blocks = new List<DocumentBlock>
+        {
+            new() { Kind = BlockKind.Heading, HeadingLevel = 1, Text = "A" },
+            new() { Kind = BlockKind.Body, Text = "Alpha body content here." },
+            new() { Kind = BlockKind.Heading, HeadingLevel = 1, Text = "B" },
+            new() { Kind = BlockKind.Body, Text = "Bravo body content here." },
+        };
+
+        var spans = DocumentChunker.ChunkBlocks(blocks, 500, 50);
+
+        Assert.Equal(2, spans.Count);
+        Assert.Equal("A", spans[0].Section);
+        Assert.Equal("A", spans[0].HeadingPath);
+        Assert.Contains("Alpha", spans[0].Text);
+        Assert.DoesNotContain("Bravo", spans[0].Text);
+        Assert.Equal("B", spans[1].Section);
+        Assert.Contains("Bravo", spans[1].Text);
+        Assert.DoesNotContain("Alpha", spans[1].Text);
+    }
+
+    [Fact]
+    public void ChunkBlocks_PageChange_FlushesButKeepsSectionBreadcrumb()
+    {
+        var blocks = new List<DocumentBlock>
+        {
+            new() { Page = 1, Kind = BlockKind.Heading, HeadingLevel = 1, Text = "Procedure" },
+            new() { Page = 1, Kind = BlockKind.Body, Text = "First half on page one." },
+            new() { Page = 2, Kind = BlockKind.Body, Text = "Second half on page two." },
+        };
+
+        var spans = DocumentChunker.ChunkBlocks(blocks, 500, 50);
+
+        Assert.Equal(2, spans.Count);
+        Assert.Equal(1, spans[0].Page);
+        Assert.Equal(2, spans[1].Page);
+        // The heading stack persists across the page boundary.
+        Assert.Equal("Procedure", spans[0].Section);
+        Assert.Equal("Procedure", spans[1].Section);
+    }
+
+    [Fact]
+    public void ChunkBlocks_AllBody_DegeneratesToChunkTextOutput()
+    {
+        var text = string.Join(' ', Enumerable.Repeat("alpha beta gamma delta", 120));
+        var blocks = new List<DocumentBlock> { new() { Page = 1, Kind = BlockKind.Body, Text = text } };
+
+        var spans = DocumentChunker.ChunkBlocks(blocks, 300, 50);
+
+        Assert.Equal(DocumentChunker.ChunkText(text, 300, 50), spans.Select(s => s.Text).ToList());
+        Assert.All(spans, s => Assert.Equal(string.Empty, s.Section));
+        Assert.All(spans, s => Assert.Equal(string.Empty, s.HeadingPath));
+        Assert.All(spans, s => Assert.Equal(1, s.Page));
+    }
+
+    [Fact]
+    public void ChunkBlocks_CharOffsets_AreMonotonicAndMatchTextLength()
+    {
+        var text = string.Join(' ', Enumerable.Repeat("word", 400));
+        var blocks = new List<DocumentBlock> { new() { Page = 1, Kind = BlockKind.Body, Text = text } };
+
+        var spans = DocumentChunker.ChunkBlocks(blocks, 300, 50);
+
+        Assert.True(spans.Count >= 2);
+        Assert.Equal(0, spans[0].CharOffsetStart);
+        for (var i = 0; i < spans.Count; i++)
+        {
+            Assert.Equal(spans[i].Text.Length, spans[i].CharOffsetEnd - spans[i].CharOffsetStart);
+            if (i > 0)
+                Assert.True(spans[i].CharOffsetStart >= spans[i - 1].CharOffsetStart);
+        }
+    }
+
+    [Fact]
+    public void ChunkBlocks_EmptyInput_ReturnsEmpty()
+    {
+        Assert.Empty(DocumentChunker.ChunkBlocks(new List<DocumentBlock>(), 300, 50));
+    }
+
+    #endregion
 }

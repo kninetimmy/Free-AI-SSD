@@ -99,8 +99,10 @@ public sealed class PortableConfig
     /// <summary>
     /// Maximum allowed document file size in megabytes for RAG ingestion.
     /// Files exceeding this limit are rejected before copying or parsing.
+    /// Defaults high enough to admit large structured guides (e.g. a 150 MB
+    /// multi-hundred-page DCS PDF) out of the box.
     /// </summary>
-    public int MaxDocumentSizeMB { get; set; } = 50;
+    public int MaxDocumentSizeMB { get; set; } = 512;
 
     /// <summary>
     /// When true, chat responses are streamed token-by-token from Ollama.

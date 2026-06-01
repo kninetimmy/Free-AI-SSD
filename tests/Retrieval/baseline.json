@@ -1,8 +1,8 @@
 {
-  "recall_at_5": 0.7,
+  "recall_at_5": 0.85,
   "recall_at_20": 0.85,
   "tolerance": 0.02,
-  "generated_at_utc": "2026-05-21T10:22:02.1633636Z",
+  "generated_at_utc": "2026-06-01T22:07:12.584366Z",
   "embedding_model": "nomic-embed-text",
   "fixture_count": 4,
   "question_count": 20

@@ -99,7 +99,12 @@ CREATE TABLE IF NOT EXISTS chunks (
     embedding_model TEXT NOT NULL DEFAULT 'unknown',
     embedding_dimension INTEGER NOT NULL DEFAULT 0,
     parser_version TEXT NOT NULL DEFAULT 'unknown',
-    chunker_version TEXT NOT NULL DEFAULT 'unknown'
+    chunker_version TEXT NOT NULL DEFAULT 'unknown',
+    section TEXT NULL,
+    heading_path TEXT NULL,
+    char_offset_start INTEGER NULL,
+    char_offset_end INTEGER NULL,
+    content_type TEXT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_library ON chunks(library_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_sha ON chunks(sha256);
@@ -108,7 +113,7 @@ CREATE INDEX IF NOT EXISTS idx_chunks_sha ON chunks(sha256);
 
             // Fresh database — mark embeddings as normalized and schema current.
             SetMeta(conn, "embeddings_normalized", "1");
-            SetMeta(conn, "schema_version", "2");
+            SetMeta(conn, "schema_version", "3");
             return;
         }
 
@@ -123,10 +128,17 @@ CREATE INDEX IF NOT EXISTS idx_chunks_sha ON chunks(sha256);
             NormalizeExistingEmbeddings(conn, logger);
         }
 
-        // Add provenance columns if not yet present (M2 migration).
-        if (GetMeta(conn, "schema_version") != "2")
+        // Migration ladder: walk each pre-3 database up to the current schema version.
+        // A null/legacy version first gets the M2 provenance columns, then M3 section metadata.
+        var schemaVersion = GetMeta(conn, "schema_version");
+        if (schemaVersion != "2" && schemaVersion != "3")
         {
             MigrateAddProvenance(conn, logger);
+            schemaVersion = "2";
+        }
+        if (schemaVersion != "3")
+        {
+            MigrateAddSectionMetadata(conn, logger);
         }
     }
 
@@ -169,6 +181,45 @@ CREATE INDEX IF NOT EXISTS idx_chunks_sha ON chunks(sha256);
 
         SetMeta(conn, "schema_version", "2");
         logger?.Info("VectorIndex: M2 migration complete.");
+    }
+
+    /// <summary>
+    /// Adds section-metadata columns (M3 migration). No backfill — legacy rows keep NULL
+    /// section/heading_path/offsets/content_type because they were chunked by chunker v1,
+    /// which had no structural awareness. New ingests populate these going forward.
+    /// </summary>
+    private static void MigrateAddSectionMetadata(SqliteConnection conn, SsdLogger? logger)
+    {
+        logger?.Info("VectorIndex: applying M3 migration — adding section metadata columns...");
+
+        using (var alter = conn.CreateCommand())
+        {
+            alter.CommandText = "ALTER TABLE chunks ADD COLUMN section TEXT NULL";
+            alter.ExecuteNonQuery();
+        }
+        using (var alter = conn.CreateCommand())
+        {
+            alter.CommandText = "ALTER TABLE chunks ADD COLUMN heading_path TEXT NULL";
+            alter.ExecuteNonQuery();
+        }
+        using (var alter = conn.CreateCommand())
+        {
+            alter.CommandText = "ALTER TABLE chunks ADD COLUMN char_offset_start INTEGER NULL";
+            alter.ExecuteNonQuery();
+        }
+        using (var alter = conn.CreateCommand())
+        {
+            alter.CommandText = "ALTER TABLE chunks ADD COLUMN char_offset_end INTEGER NULL";
+            alter.ExecuteNonQuery();
+        }
+        using (var alter = conn.CreateCommand())
+        {
+            alter.CommandText = "ALTER TABLE chunks ADD COLUMN content_type TEXT NULL";
+            alter.ExecuteNonQuery();
+        }
+
+        SetMeta(conn, "schema_version", "3");
+        logger?.Info("VectorIndex: M3 migration complete.");
     }
 
     #region Meta helpers
@@ -388,8 +439,10 @@ CREATE INDEX IF NOT EXISTS idx_chunks_sha ON chunks(sha256);
             ins.Transaction = tx;
             ins.CommandText = @"INSERT INTO chunks
 (library_id, source_file_name, stored_relative_path, page, chunk_index, text, text_length, sha256, embedding,
- embedding_model, embedding_dimension, parser_version, chunker_version)
-VALUES ($libraryId,$source,$stored,$page,$idx,$text,$len,$sha,$emb,$model,$dim,$pv,$cv)";
+ embedding_model, embedding_dimension, parser_version, chunker_version,
+ section, heading_path, char_offset_start, char_offset_end, content_type)
+VALUES ($libraryId,$source,$stored,$page,$idx,$text,$len,$sha,$emb,$model,$dim,$pv,$cv,
+ $section,$headingPath,$offStart,$offEnd,$contentType)";
             ins.Parameters.AddWithValue("$libraryId", c.LibraryId);
             ins.Parameters.AddWithValue("$source", c.SourceFileName);
             ins.Parameters.AddWithValue("$stored", c.StoredRelativePath);
@@ -403,6 +456,12 @@ VALUES ($libraryId,$source,$stored,$page,$idx,$text,$len,$sha,$emb,$model,$dim,$
             ins.Parameters.AddWithValue("$dim", c.EmbeddingDimension > 0 ? c.EmbeddingDimension : normalized.Length);
             ins.Parameters.AddWithValue("$pv", string.IsNullOrEmpty(c.ParserVersion) ? "unknown" : c.ParserVersion);
             ins.Parameters.AddWithValue("$cv", string.IsNullOrEmpty(c.ChunkerVersion) ? "unknown" : c.ChunkerVersion);
+            // Section/heading absent → store NULL (not "") so legacy and structureless chunks read alike.
+            ins.Parameters.AddWithValue("$section", string.IsNullOrEmpty(c.Section) ? DBNull.Value : c.Section);
+            ins.Parameters.AddWithValue("$headingPath", string.IsNullOrEmpty(c.HeadingPath) ? DBNull.Value : c.HeadingPath);
+            ins.Parameters.AddWithValue("$offStart", c.CharOffsetStart);
+            ins.Parameters.AddWithValue("$offEnd", c.CharOffsetEnd);
+            ins.Parameters.AddWithValue("$contentType", string.IsNullOrEmpty(c.ContentType) ? "text" : c.ContentType);
             ins.ExecuteNonQuery();
         }
 
@@ -482,7 +541,7 @@ VALUES ($libraryId,$source,$stored,$page,$idx,$text,$len,$sha,$emb,$model,$dim,$
 
         using var conn = OpenConnection();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT source_file_name,stored_relative_path,page,chunk_index,text,text_length,sha256,embedding FROM chunks WHERE library_id=$libraryId";
+        cmd.CommandText = "SELECT source_file_name,stored_relative_path,page,chunk_index,text,text_length,sha256,embedding,section,heading_path,char_offset_start,char_offset_end,content_type FROM chunks WHERE library_id=$libraryId";
         cmd.Parameters.AddWithValue("$libraryId", libraryId);
 
         // Min-heap keeps the top K results; the root is the lowest-scoring entry.
@@ -518,7 +577,12 @@ VALUES ($libraryId,$source,$stored,$page,$idx,$text,$len,$sha,$emb,$model,$dim,$
                     ChunkIndex = reader.GetInt32(3),
                     Text = reader.GetString(4),
                     TextLength = reader.GetInt32(5),
-                    Sha256 = reader.GetString(6)
+                    Sha256 = reader.GetString(6),
+                    Section = reader.IsDBNull(8) ? string.Empty : reader.GetString(8),
+                    HeadingPath = reader.IsDBNull(9) ? string.Empty : reader.GetString(9),
+                    CharOffsetStart = reader.IsDBNull(10) ? 0 : reader.GetInt32(10),
+                    CharOffsetEnd = reader.IsDBNull(11) ? 0 : reader.GetInt32(11),
+                    ContentType = reader.IsDBNull(12) ? string.Empty : reader.GetString(12)
                 }
             };
 
