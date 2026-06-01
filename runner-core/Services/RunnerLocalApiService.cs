@@ -914,7 +914,8 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
                 currentFile = progress.CurrentFile,
                 totalChunks = progress.TotalChunks,
                 embeddedChunks = progress.EmbeddedChunks,
-                failedChunks = progress.FailedChunks
+                failedChunks = progress.FailedChunks,
+                skippedFiles = progress.SkippedFiles
             }, ct);
         }
 

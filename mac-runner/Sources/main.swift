@@ -1343,6 +1343,8 @@ final class RunnerViewModel: ObservableObject {
         }
 
         var rejectedCount = 0
+        var skippedFiles = 0
+        var failedChunks = 0
         var completedDetail: LibraryDetail? = nil
         var errorMessage: String? = nil
 
@@ -1359,6 +1361,13 @@ final class RunnerViewModel: ObservableObject {
                    let reason = frame["reason"] as? String {
                     log("[library] rejected '\(fileName)': \(reason)")
                 }
+            case "progress":
+                // skippedFiles is set only on the terminal frame; failedChunks
+                // accrues across per-file failure frames. The response is buffered
+                // and replayed at once (see comment above), so by completion we've
+                // seen the terminal totals.
+                if let s = frame["skippedFiles"] as? Int, s > 0 { skippedFiles = s }
+                if let f = frame["failedChunks"] as? Int { failedChunks += f }
             case "complete":
                 completedDetail = self.decodeActiveLibrary(frame["library"] as? [String: Any])
             case "error":
@@ -1375,9 +1384,11 @@ final class RunnerViewModel: ObservableObject {
             }
             if let completedDetail {
                 self.activeLibrary = completedDetail
-                let parts = ["\(completionVerb) complete: \(completedDetail.fileCount) file(s)"]
-                let suffix = rejectedCount > 0 ? " (\(rejectedCount) rejected — see logs)" : ""
-                self.libraryStatus = parts.joined() + suffix
+                var status = "\(completionVerb) complete: \(completedDetail.fileCount) file(s)"
+                if skippedFiles > 0 { status += ", \(skippedFiles) skipped" }
+                if failedChunks > 0 { status += " (\(failedChunks) chunk(s) failed)" }
+                if rejectedCount > 0 { status += " (\(rejectedCount) rejected — see logs)" }
+                self.libraryStatus = status
             } else {
                 self.libraryStatus = "\(completionVerb) finished."
             }
