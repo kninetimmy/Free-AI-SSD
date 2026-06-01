@@ -319,9 +319,12 @@ unlock sheet. Successful unlock → status `Unlocked`, chat host auto-spawns.
 
 ### B2 — Documents section — `runner-02-documents.png`
 - "Documents" headline + `libraryStatus` caption.
-- If Network Mode off: just the line "Turn on Network Mode to manage document
-  libraries." (one clear hint, not per-button failures).
-- If on: `Library` picker (None + libraries) + `Create`; a button row
+- If the local sidecar isn't reachable yet (`networkApiBaseUrl == nil`): a
+  single hint reflecting the real cause — "Unlock the SSD to manage documents."
+  when locked, otherwise the current `networkApiStatus` (e.g. starting/crashed).
+  Post-MAC34 the sidecar runs at unlock regardless of the Network Mode toggle,
+  so this is not a "turn on Network Mode" prompt.
+- If reachable: `Library` picker (None + libraries) + `Create`; a button row
   `Add Files` · `Add Folder` · `Sweep` · `Rebuild` · `Pull embedding model`
   (all gated on an active library except the last); then a `Files (N)` list,
   each row filename + borderless `Remove`.

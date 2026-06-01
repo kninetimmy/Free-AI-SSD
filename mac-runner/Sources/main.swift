@@ -1622,9 +1622,13 @@ struct ContentView: View {
             }
 
             // MAC8: Documents (library management). All ops go through the
-            // sidecar's /api/library/* endpoints; gate the UI on Network Mode
-            // so users see one clear "turn it on" hint instead of per-button
-            // failures.
+            // sidecar's /api/library/* endpoints. Post-MAC34 the sidecar is
+            // always running once the SSD is unlocked (loopback even when LAN
+            // exposure is off), so this section is usable at unlock — the
+            // Network Mode toggle only changes the sidecar's bind address. The
+            // `apiUp` check below just confirms the sidecar has reported ready;
+            // when it hasn't, surface the real reason (locked / starting /
+            // crashed) rather than telling the user to flip a toggle.
             Divider()
             DocumentsSection(vm: vm)
         }
@@ -1640,6 +1644,20 @@ struct DocumentsSection: View {
 
     private var apiUp: Bool { vm.networkApiBaseUrl != nil }
 
+    /// Message for the state where the library UI can't be shown yet. Post-MAC34
+    /// the sidecar comes up at unlock regardless of the Network Mode toggle, so
+    /// the only legitimate reasons `apiUp` is false are: the session is locked,
+    /// or the sidecar hasn't reported ready (still starting, or crashed). Word
+    /// the hint to the actual cause instead of the stale "turn on Network Mode".
+    private var documentsUnavailableHint: String {
+        if vm.isEncryptedLocked {
+            return "Unlock the SSD to manage documents."
+        }
+        return vm.networkApiStatus.isEmpty
+            ? "Starting local services…"
+            : vm.networkApiStatus
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -1653,7 +1671,7 @@ struct DocumentsSection: View {
             }
 
             if !apiUp {
-                Text("Turn on Network Mode to manage document libraries.")
+                Text(documentsUnavailableHint)
                     .font(.callout)
                     .foregroundColor(.secondary)
             } else {
