@@ -58,6 +58,16 @@ public sealed class DocumentChunk
     public int EmbeddingDimension { get; set; }
     public string ParserVersion { get; set; } = string.Empty;
     public string ChunkerVersion { get; set; } = string.Empty;
+    /// <summary>Title of the section this chunk belongs to (deepest heading). Empty when unknown.</summary>
+    public string Section { get; set; } = string.Empty;
+    /// <summary>Breadcrumb of headings down to <see cref="Section"/>, e.g. "Engines &gt; Start". Empty when unknown.</summary>
+    public string HeadingPath { get; set; } = string.Empty;
+    /// <summary>Start offset of this chunk within its page text (or whole-file text for non-paginated formats).</summary>
+    public int CharOffsetStart { get; set; }
+    /// <summary>End offset (exclusive) of this chunk within its page text (or whole-file text for non-paginated formats).</summary>
+    public int CharOffsetEnd { get; set; }
+    /// <summary>Content kind. "text" for all Stage 2 chunks; "table"/"image_ref" reserved for future work.</summary>
+    public string ContentType { get; set; } = "text";
 }
 
 public sealed class RetrievalResult
