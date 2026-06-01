@@ -1169,16 +1169,23 @@ public partial class MainWindow : System.Windows.Window
         try
         {
             IndexingStatusText.Text = "Indexing...";
+            IndexingProgress? last = null;
             await _docService.IngestFilesAsync(_activeLibrary, dlg.FileNames, host, _config, p =>
             {
-                Dispatcher.Invoke(() => IndexingStatusText.Text = $"Indexing {p.CompletedFiles}/{p.TotalFiles}: {p.CurrentFile}");
+                last = p;
+                Dispatcher.Invoke(() => IndexingStatusText.Text = FormatProgressLine("Indexing", p));
             });
             RefreshLibraryUi();
+            if (last is not null)
+            {
+                IndexingStatusText.Text = IndexingSummary.Format(last);
+            }
         }
         catch (Exception ex)
         {
-            AppendLog($"Indexing failed: {ex.Message}");
-            IndexingStatusText.Text = "Indexing failed. Missing embedding model?";
+            var cause = IndexingSummary.DescribeFailure(ex);
+            AppendLog($"Indexing failed: {cause}");
+            IndexingStatusText.Text = $"Indexing failed: {cause}";
         }
     }
 
@@ -1212,15 +1219,23 @@ public partial class MainWindow : System.Windows.Window
 
         try
         {
+            IndexingProgress? last = null;
             await _docService.SweepFoldersAsync(_activeLibrary, host, _config, p =>
             {
-                Dispatcher.Invoke(() => IndexingStatusText.Text = $"Sweep {p.CompletedFiles}/{p.TotalFiles}: {p.CurrentFile}");
+                last = p;
+                Dispatcher.Invoke(() => IndexingStatusText.Text = FormatProgressLine("Sweep", p));
             });
             RefreshLibraryUi();
+            if (last is not null)
+            {
+                IndexingStatusText.Text = IndexingSummary.Format(last);
+            }
         }
         catch (Exception ex)
         {
-            AppendLog($"Sweep failed: {ex.Message}");
+            var cause = IndexingSummary.DescribeFailure(ex);
+            AppendLog($"Sweep failed: {cause}");
+            IndexingStatusText.Text = $"Sweep failed: {cause}";
         }
     }
 
@@ -1236,16 +1251,49 @@ public partial class MainWindow : System.Windows.Window
 
         try
         {
+            IndexingProgress? last = null;
             await _docService.RebuildIndexAsync(_activeLibrary, host, _config, p =>
             {
-                Dispatcher.Invoke(() => IndexingStatusText.Text = $"Rebuild {p.CompletedFiles}/{p.TotalFiles}: {p.CurrentFile}");
+                last = p;
+                Dispatcher.Invoke(() => IndexingStatusText.Text = FormatProgressLine("Rebuild", p));
             });
             RefreshLibraryUi();
+            if (last is not null)
+            {
+                IndexingStatusText.Text = IndexingSummary.Format(last);
+            }
         }
         catch (Exception ex)
         {
-            AppendLog($"Rebuild failed: {ex.Message}");
+            var cause = IndexingSummary.DescribeFailure(ex);
+            AppendLog($"Rebuild failed: {cause}");
+            IndexingStatusText.Text = $"Rebuild failed: {cause}";
         }
+    }
+
+    /// <summary>
+    /// Live one-line ingest status: "Indexing 2/5: foo.pdf (chunk 40/120)", with a trailing
+    /// "— N failed" when chunk embeds fail. Returns "Finishing…" for the terminal frame
+    /// (empty CurrentFile); callers replace it with <see cref="IndexingSummary.Format"/> on success.
+    /// </summary>
+    private static string FormatProgressLine(string verb, IndexingProgress p)
+    {
+        if (string.IsNullOrEmpty(p.CurrentFile))
+        {
+            return "Finishing…";
+        }
+
+        var line = $"{verb} {p.CompletedFiles + 1}/{p.TotalFiles}: {p.CurrentFile}";
+        if (p.TotalChunks > 0)
+        {
+            line += $" (chunk {p.EmbeddedChunks}/{p.TotalChunks})";
+        }
+        if (p.FailedChunks > 0)
+        {
+            line += $" — {p.FailedChunks} failed";
+        }
+
+        return line;
     }
 
     private async void PullEmbeddingModel_Click(object sender, System.Windows.RoutedEventArgs e)

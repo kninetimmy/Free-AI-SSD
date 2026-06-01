@@ -149,6 +149,11 @@ public sealed class IndexingProgress
     public int TotalChunks { get; set; }
     /// <summary>Chunks that failed to embed for the current file (non-zero only on error).</summary>
     public int FailedChunks { get; set; }
+    /// <summary>
+    /// Files skipped during the batch (unsupported extension, oversize, symlink, or failed content
+    /// validation). Set only on the terminal frame (CurrentFile empty); null on per-file progress ticks.
+    /// </summary>
+    public int? SkippedFiles { get; set; }
 }
 
 public sealed class RagPromptBuildResult

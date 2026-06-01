@@ -90,6 +90,60 @@ public sealed class DocumentIngestorFailureHandlingTests : IDisposable
         Assert.Contains("model 'nomic-embed-text' not found", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// Workstream B: the terminal progress frame (empty CurrentFile) reports the
+    /// indexed count and the total skipped count — unsupported-extension files
+    /// (dropped before the loop) plus in-loop skips (oversize/symlink/validation).
+    [Fact]
+    public async Task IngestFilesAsync_TerminalFrame_ReportsIndexedAndSkippedCounts()
+    {
+        var (_, manifest, ingestor) = await CreateIngestorAsync(new FailFirstEmbeddingHandler(failFirstRequests: 0));
+
+        var goodPath = Path.Combine(_tempRoot, "good.txt");
+        File.WriteAllText(goodPath, CreateLongText(1600));
+        // .docx is genuinely unsupported (.csv/.json are accepted as text by
+        // DocumentParser.IsSupported), so it is dropped by the pre-loop filter.
+        var unsupportedPath = Path.Combine(_tempRoot, "notes.docx");
+        File.WriteAllText(unsupportedPath, "not really a docx");
+        var oversizePath = Path.Combine(_tempRoot, "oversize.txt");
+        File.WriteAllText(oversizePath, new string('a', 2 * 1024 * 1024));
+
+        // 1 MB cap → the 2 MB .txt trips the in-loop oversize gate.
+        var config = CreateConfig();
+        config.MaxDocumentSizeMB = 1;
+
+        var frames = new List<IndexingProgress>();
+        await ingestor.IngestFilesAsync(
+            manifest,
+            new[] { goodPath, oversizePath, unsupportedPath },
+            "localhost:11434",
+            config,
+            frames.Add);
+
+        var terminal = frames.Last();
+        Assert.Equal(string.Empty, terminal.CurrentFile);
+        Assert.Equal(1, terminal.CompletedFiles);   // only good.txt indexed
+        Assert.Equal(2, terminal.SkippedFiles);      // oversize + unsupported
+        Assert.Single(manifest.Files);
+    }
+
+    /// Workstream B: a tolerated partial-failure run still surfaces FailedChunks
+    /// on a progress frame so the UI can show "— N failed" without the whole
+    /// ingest aborting.
+    [Fact]
+    public async Task IngestFilesAsync_PartialChunkFailure_EmitsFailedChunksFrame()
+    {
+        var (_, manifest, ingestor) = await CreateIngestorAsync(new FailFirstEmbeddingHandler(failFirstRequests: 1));
+        var sourcePath = Path.Combine(_tempRoot, "partial.txt");
+        File.WriteAllText(sourcePath, CreateLongText(1600));
+        var config = CreateConfig();
+
+        var frames = new List<IndexingProgress>();
+        await ingestor.IngestFilesAsync(manifest, new[] { sourcePath }, "localhost:11434", config, frames.Add);
+
+        Assert.Contains(frames, f => f.FailedChunks > 0);
+        Assert.Single(manifest.Files);
+    }
+
     [Fact]
     public async Task IngestFilesAsync_AcceptableFailureRatio_PersistsSuccessfulChunksOnly()
     {
