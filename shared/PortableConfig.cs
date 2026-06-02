@@ -86,6 +86,13 @@ public sealed class PortableConfig
     /// is dense-only. No reindex required — the lexical index is built from stored chunk text.
     /// </summary>
     public bool HybridRetrievalEnabled { get; set; } = true;
+    /// <summary>
+    /// How many chunks on each side of a retrieval hit to pull in for contiguous context
+    /// (neighbor expansion), bounded to the hit's section (or page when the section is
+    /// unknown). Neighbors don't count toward <see cref="RetrievalTopK"/> but do consume
+    /// the context budget. Default 1; set 0 to disable. No reindex required.
+    /// </summary>
+    public int RetrievalNeighborRadius { get; set; } = 1;
     /// <summary>Chunk size (characters) used during indexing.</summary>
     public int ChunkSize { get; set; } = 1200;
     /// <summary>Chunk overlap (characters) used during indexing.</summary>
