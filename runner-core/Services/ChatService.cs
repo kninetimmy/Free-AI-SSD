@@ -195,7 +195,14 @@ public sealed class ChatService : IChatService
                 {
                     results = index.ExpandNeighbors(manifest.Id, results, config.RetrievalNeighborRadius);
                 }
-                var rag = RagPromptBuilder.Build(userPrompt, results, maxContextChars: 4500, librarySearched: true);
+                // Token-aware budget: size the reference context to the active model's
+                // context window (minus reserved output) instead of a fixed char count.
+                // TokenBudget converts back to a char budget for the char-based packer —
+                // equivalent under a constant chars/token ratio. See TokenBudget for why
+                // we estimate rather than tokenize.
+                var contextTokens = TokenBudget.ContextTokenBudget(config.ModelContextWindow, config.ModelMaxOutputTokens);
+                var rag = RagPromptBuilder.Build(userPrompt, results,
+                    maxContextChars: TokenBudget.CharsForTokens(contextTokens), librarySearched: true);
 
                 if (rag.UsedContext)
                 {
