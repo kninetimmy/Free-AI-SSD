@@ -4,9 +4,11 @@ using Microsoft.Data.Sqlite;
 namespace FreeAiSsd.Tests;
 
 /// <summary>
-/// Covers the M3 schema migration (section metadata, schema_version 2 → 3) added in
-/// RAG overhaul Stage 2 sub-stage A: column addition, no-backfill of legacy rows, the
-/// full migration ladder from a pre-provenance DB, and persist/hydrate round-tripping.
+/// Covers the M3 schema migration (section metadata) added in RAG overhaul Stage 2
+/// sub-stage A: column addition, no-backfill of legacy rows, the full migration ladder
+/// from a pre-provenance DB, and persist/hydrate round-tripping. The current
+/// schema_version is "4" — the X19 M4 (FTS lexical index) rung runs after M3, so a
+/// fully-migrated DB lands on 4 even though these tests only assert the M3 columns.
 /// </summary>
 public sealed class VectorIndexSectionMetadataTests : IDisposable
 {
@@ -44,7 +46,7 @@ public sealed class VectorIndexSectionMetadataTests : IDisposable
     }
 
     [Fact]
-    public void FreshDatabase_HasSectionColumnsAndSchemaVersion3()
+    public void FreshDatabase_HasSectionColumnsAndSchemaVersion4()
     {
         _ = new VectorIndex(_root);
 
@@ -57,7 +59,7 @@ public sealed class VectorIndexSectionMetadataTests : IDisposable
         Assert.Contains("char_offset_start", cols);
         Assert.Contains("char_offset_end", cols);
         Assert.Contains("content_type", cols);
-        Assert.Equal("3", SchemaVersion(conn));
+        Assert.Equal("4", SchemaVersion(conn));
     }
 
     [Fact]
@@ -117,7 +119,7 @@ VALUES ('lib1','a.txt','files/a.txt',NULL,0,'hello',5,'abc',$emb,'nomic-embed-te
         Assert.Contains("char_offset_start", cols);
         Assert.Contains("char_offset_end", cols);
         Assert.Contains("content_type", cols);
-        Assert.Equal("3", SchemaVersion(verify));
+        Assert.Equal("4", SchemaVersion(verify));
 
         // No backfill — the pre-existing row keeps NULL section metadata.
         using var cmd = verify.CreateCommand();
@@ -170,7 +172,8 @@ VALUES ('lib1','a.txt','files/a.txt',NULL,0,'hello',5,'abc',$emb)";
 
         SqliteConnection.ClearAllPools();
 
-        // One construction must walk the full ladder: provenance (M2) then section metadata (M3).
+        // One construction must walk the full ladder: provenance (M2), section metadata
+        // (M3), then the FTS lexical index (M4) — landing on schema_version 4.
         _ = new VectorIndex(_root);
 
         using var verify = new SqliteConnection($"Data Source={dbPath}");
@@ -183,7 +186,7 @@ VALUES ('lib1','a.txt','files/a.txt',NULL,0,'hello',5,'abc',$emb)";
         // M3 columns.
         Assert.Contains("section", cols);
         Assert.Contains("content_type", cols);
-        Assert.Equal("3", SchemaVersion(verify));
+        Assert.Equal("4", SchemaVersion(verify));
 
         // M2 backfill still ran (dimension from blob length); M3 left section NULL.
         using var cmd = verify.CreateCommand();

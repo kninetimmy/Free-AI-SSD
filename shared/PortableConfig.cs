@@ -79,6 +79,13 @@ public sealed class PortableConfig
     public string? ActiveDocumentLibraryId { get; set; }
     /// <summary>Number of chunks to retrieve per query.</summary>
     public int RetrievalTopK { get; set; } = 5;
+    /// <summary>
+    /// When true (default), retrieval fuses the dense-vector arm with a BM25 lexical arm
+    /// (reciprocal rank fusion) so exact-token facts the embedder rates below
+    /// <see cref="MinimumSimilarityThreshold"/> are still surfaced. When false, retrieval
+    /// is dense-only. No reindex required — the lexical index is built from stored chunk text.
+    /// </summary>
+    public bool HybridRetrievalEnabled { get; set; } = true;
     /// <summary>Chunk size (characters) used during indexing.</summary>
     public int ChunkSize { get; set; } = 1200;
     /// <summary>Chunk overlap (characters) used during indexing.</summary>

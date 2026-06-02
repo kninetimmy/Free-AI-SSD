@@ -98,24 +98,27 @@ public class RagPromptBuilderTests
     }
 
     [Fact]
-    public void Build_ResultsOrderedByScore_HighestFirst()
+    public void Build_PreservesRetrievalOrder()
     {
+        // The retriever owns ranking (dense Search returns score-descending; hybrid
+        // SearchHybrid returns fused-rank order), so Build must emit context in the
+        // supplied order and must NOT re-sort by Score. Scores here are deliberately
+        // non-monotonic — a re-sort would reorder them and fail this test.
         var results = new List<RetrievalResult>
         {
-            MakeResult("Low relevance.", 0.3, "low.txt"),
-            MakeResult("High relevance.", 0.95, "high.txt"),
-            MakeResult("Medium relevance.", 0.6, "med.txt")
+            MakeResult("First by rank.", 0.30, "first.txt"),
+            MakeResult("Second by rank.", 0.95, "second.txt"),
+            MakeResult("Third by rank.", 0.60, "third.txt")
         };
 
         var output = RagPromptBuilder.Build("query", results);
 
-        // The prompt should have high relevance content before low relevance content
-        var highIdx = output.Prompt.IndexOf("High relevance.");
-        var medIdx = output.Prompt.IndexOf("Medium relevance.");
-        var lowIdx = output.Prompt.IndexOf("Low relevance.");
+        var firstIdx = output.Prompt.IndexOf("First by rank.");
+        var secondIdx = output.Prompt.IndexOf("Second by rank.");
+        var thirdIdx = output.Prompt.IndexOf("Third by rank.");
 
-        Assert.True(highIdx < medIdx, "High-score content should appear before medium-score content");
-        Assert.True(medIdx < lowIdx, "Medium-score content should appear before low-score content");
+        Assert.True(firstIdx < secondIdx, "Context must follow the supplied retrieval order, not re-sort by score");
+        Assert.True(secondIdx < thirdIdx, "Context must follow the supplied retrieval order, not re-sort by score");
     }
 
     [Fact]

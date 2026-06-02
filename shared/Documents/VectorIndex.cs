@@ -31,6 +31,14 @@ public sealed class VectorIndex
     /// </summary>
     public const int RecommendedMaxChunks = 10_000;
 
+    /// <summary>
+    /// How many candidates each retrieval arm (dense, lexical) contributes to rank
+    /// fusion before the fused list is truncated to the caller's topK. Larger than a
+    /// typical topK so a chunk ranked modestly by one arm but highly by the other can
+    /// still surface; bounded so fusion stays cheap.
+    /// </summary>
+    private const int HybridCandidatePool = 50;
+
     public VectorIndex(string indexFolderPath, SsdLogger? logger = null)
     {
         Directory.CreateDirectory(indexFolderPath);
@@ -111,9 +119,11 @@ CREATE INDEX IF NOT EXISTS idx_chunks_sha ON chunks(sha256);
 ";
             cmd.ExecuteNonQuery();
 
-            // Fresh database — mark embeddings as normalized and schema current.
+            // Fresh database — create the FTS lexical index, mark embeddings
+            // normalized, and stamp the current schema version.
+            CreateFtsObjects(conn);
             SetMeta(conn, "embeddings_normalized", "1");
-            SetMeta(conn, "schema_version", "3");
+            SetMeta(conn, "schema_version", "4");
             return;
         }
 
@@ -128,17 +138,24 @@ CREATE INDEX IF NOT EXISTS idx_chunks_sha ON chunks(sha256);
             NormalizeExistingEmbeddings(conn, logger);
         }
 
-        // Migration ladder: walk each pre-3 database up to the current schema version.
-        // A null/legacy version first gets the M2 provenance columns, then M3 section metadata.
+        // Migration ladder: walk each pre-current database up one rung at a time.
+        // A null/legacy version gets M2 provenance, then M3 section metadata, then
+        // the M4 lexical (FTS5) index — each step stamps its own schema_version.
         var schemaVersion = GetMeta(conn, "schema_version");
-        if (schemaVersion != "2" && schemaVersion != "3")
+        if (schemaVersion != "2" && schemaVersion != "3" && schemaVersion != "4")
         {
             MigrateAddProvenance(conn, logger);
             schemaVersion = "2";
         }
-        if (schemaVersion != "3")
+        if (schemaVersion == "2")
         {
             MigrateAddSectionMetadata(conn, logger);
+            schemaVersion = "3";
+        }
+        if (schemaVersion == "3")
+        {
+            MigrateAddFts(conn, logger);
+            schemaVersion = "4";
         }
     }
 
@@ -220,6 +237,64 @@ CREATE INDEX IF NOT EXISTS idx_chunks_sha ON chunks(sha256);
 
         SetMeta(conn, "schema_version", "3");
         logger?.Info("VectorIndex: M3 migration complete.");
+    }
+
+    /// <summary>
+    /// Adds the FTS5 lexical index (M4 migration). Creates a contentless-external
+    /// <c>chunks_fts</c> table mirroring <c>chunks.text</c>, the sync triggers, and
+    /// backfills the index from the text already stored in <c>chunks</c>. No
+    /// re-embedding and no document re-ingest — the lexical arm is built purely from
+    /// persisted chunk text, so existing libraries gain hybrid retrieval transparently.
+    /// </summary>
+    private static void MigrateAddFts(SqliteConnection conn, SsdLogger? logger)
+    {
+        logger?.Info("VectorIndex: applying M4 migration — building FTS5 lexical index...");
+        CreateFtsObjects(conn);
+        RebuildFts(conn);
+        SetMeta(conn, "schema_version", "4");
+        logger?.Info("VectorIndex: M4 migration complete (lexical index built from stored chunk text).");
+    }
+
+    /// <summary>
+    /// Creates the external-content FTS5 table and the triggers that keep it in sync
+    /// with <c>chunks</c>. Uses the <c>porter unicode61</c> tokenizer: porter stemming
+    /// helps natural-language queries match manual prose ("start" ↔ "starting"), while
+    /// acronyms and codes (AN/APG-79, CCIP) are left un-stemmed so exact-token matches
+    /// still land. Idempotent (IF NOT EXISTS) so it is safe on both the fresh-DB and
+    /// migration paths.
+    /// </summary>
+    private static void CreateFtsObjects(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+    text,
+    content='chunks',
+    content_rowid='id',
+    tokenize='porter unicode61'
+);
+CREATE TRIGGER IF NOT EXISTS chunks_fts_ai AFTER INSERT ON chunks BEGIN
+    INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
+END;
+CREATE TRIGGER IF NOT EXISTS chunks_fts_ad AFTER DELETE ON chunks BEGIN
+    INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+END;
+CREATE TRIGGER IF NOT EXISTS chunks_fts_au AFTER UPDATE OF text ON chunks BEGIN
+    INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+    INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
+END;";
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Rebuilds the FTS index from the content table. Used at migration time to
+    /// backfill the index for chunks that predate the FTS table.
+    /// </summary>
+    private static void RebuildFts(SqliteConnection conn)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild')";
+        cmd.ExecuteNonQuery();
     }
 
     #region Meta helpers
@@ -626,6 +701,124 @@ VALUES ($libraryId,$source,$stored,$page,$idx,$text,$len,$sha,$emb,$model,$dim,$
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// Hybrid retrieval: fuses the dense (semantic) arm with a BM25 lexical arm via
+    /// reciprocal rank fusion, so exact-token facts the embedder rates below
+    /// <paramref name="minimumSimilarity"/> are still surfaced. The dense arm reuses
+    /// <see cref="Search"/> (the cosine threshold gates it); the lexical arm is bounded
+    /// by its own BM25 ranking, not the cosine floor — that is the point. Returns at
+    /// most <paramref name="topK"/> results in fused-rank order; empty only when
+    /// <em>both</em> arms come back empty, preserving the dense-only "no relevant
+    /// documents" behavior.
+    /// </summary>
+    public List<RetrievalResult> SearchHybrid(
+        string libraryId, float[] queryEmbedding, string queryText, int topK,
+        double minimumSimilarity, SsdLogger? logger)
+    {
+        var effectiveTopK = Math.Max(1, topK);
+        var candidatePool = Math.Max(effectiveTopK, HybridCandidatePool);
+
+        // Dense arm: existing threshold-filtered SIMD scan.
+        var dense = Search(libraryId, queryEmbedding, candidatePool, minimumSimilarity, logger);
+
+        // Lexical arm: BM25 over the stored chunk text.
+        var match = BuildFtsMatchQuery(queryText);
+        var lexical = string.IsNullOrEmpty(match)
+            ? new List<RetrievalResult>()
+            : LexicalSearch(libraryId, match, candidatePool);
+
+        if (dense.Count == 0 && lexical.Count == 0)
+        {
+            return new List<RetrievalResult>();
+        }
+
+        var fused = RrfFusion.Fuse(dense, lexical);
+        if (fused.Count > effectiveTopK)
+        {
+            fused = fused.GetRange(0, effectiveTopK);
+        }
+
+        logger?.Debug($"VectorIndex: hybrid fused {dense.Count} dense + {lexical.Count} lexical -> top {fused.Count} (topK={effectiveTopK}).");
+        return fused;
+    }
+
+    /// <summary>
+    /// BM25 lexical search over the FTS5 index. Returns up to <paramref name="limit"/>
+    /// matches for <paramref name="matchQuery"/> (an FTS5 MATCH expression — build it
+    /// with <see cref="BuildFtsMatchQuery"/>), best match first. Results carry no cosine
+    /// score (<see cref="RetrievalResult.Score"/> is 0); rank fusion uses position, not
+    /// score, so the raw BM25 value is not propagated.
+    /// </summary>
+    internal List<RetrievalResult> LexicalSearch(string libraryId, string matchQuery, int limit)
+    {
+        using var conn = OpenConnection();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+SELECT c.source_file_name, c.stored_relative_path, c.page, c.chunk_index, c.text,
+       c.text_length, c.sha256, c.section, c.heading_path, c.char_offset_start,
+       c.char_offset_end, c.content_type
+FROM chunks_fts
+JOIN chunks c ON c.id = chunks_fts.rowid
+WHERE chunks_fts MATCH $q AND c.library_id = $libraryId
+ORDER BY bm25(chunks_fts)
+LIMIT $limit";
+        cmd.Parameters.AddWithValue("$q", matchQuery);
+        cmd.Parameters.AddWithValue("$libraryId", libraryId);
+        cmd.Parameters.AddWithValue("$limit", limit);
+
+        var results = new List<RetrievalResult>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            results.Add(new RetrievalResult
+            {
+                Score = 0,
+                Chunk = new DocumentChunk
+                {
+                    LibraryId = libraryId,
+                    SourceFileName = reader.GetString(0),
+                    StoredRelativePath = reader.GetString(1),
+                    Page = reader.IsDBNull(2) ? null : reader.GetInt32(2),
+                    ChunkIndex = reader.GetInt32(3),
+                    Text = reader.GetString(4),
+                    TextLength = reader.GetInt32(5),
+                    Sha256 = reader.GetString(6),
+                    Section = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
+                    HeadingPath = reader.IsDBNull(8) ? string.Empty : reader.GetString(8),
+                    CharOffsetStart = reader.IsDBNull(9) ? 0 : reader.GetInt32(9),
+                    CharOffsetEnd = reader.IsDBNull(10) ? 0 : reader.GetInt32(10),
+                    ContentType = reader.IsDBNull(11) ? string.Empty : reader.GetString(11)
+                }
+            });
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Turns free-text user input into a safe FTS5 MATCH expression. Raw input is an
+    /// FTS query language (AND/OR/NEAR/quotes/*/-/parens), so an unescaped question like
+    /// "what's the F/A-18?" would raise a MATCH syntax error. Each whitespace token is
+    /// wrapped as a quoted phrase (internal quotes doubled) and the phrases are OR-ed,
+    /// so punctuation is neutralized and any term may match. Tokens with no
+    /// letter/digit (bare punctuation) are dropped. Returns empty when nothing usable
+    /// remains, signalling the caller to skip the lexical arm.
+    /// </summary>
+    internal static string BuildFtsMatchQuery(string queryText)
+    {
+        if (string.IsNullOrWhiteSpace(queryText))
+        {
+            return string.Empty;
+        }
+
+        var phrases = queryText
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .Where(token => token.Any(char.IsLetterOrDigit))
+            .Select(token => "\"" + token.Replace("\"", "\"\"") + "\"");
+
+        return string.Join(" OR ", phrases);
     }
 
     /// <summary>
