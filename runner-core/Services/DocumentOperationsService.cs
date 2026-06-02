@@ -114,6 +114,43 @@ public sealed class DocumentOperationsService : IDocumentOperationsService
         return true;
     }
 
+    public async Task<bool> RemoveWatchedFolderAsync(
+        DocumentLibraryManifest library, string folderPath)
+    {
+        var removed = library.WatchedFolders.RemoveAll(f =>
+            string.Equals(f, folderPath, StringComparison.OrdinalIgnoreCase)) > 0;
+        if (!removed)
+        {
+            return false;
+        }
+
+        await _libraryManager.SaveManifestAsync(library);
+        return true;
+    }
+
+    public async Task<DocumentLibraryManifest> RenameLibraryAsync(string libraryId, string newName)
+    {
+        LogMessage?.Invoke($"Rename library requested: '{libraryId}' -> '{newName}'");
+        var manifest = await _libraryManager.RenameLibraryAsync(libraryId, newName);
+        LogMessage?.Invoke($"Renamed library: id='{manifest.Id}', name='{manifest.Name}'");
+        return manifest;
+    }
+
+    public async Task DeleteLibraryAsync(
+        PortableConfig config, string ssdRoot, string libraryId)
+    {
+        LogMessage?.Invoke($"Delete library requested: '{libraryId}'");
+        if (string.Equals(config.ActiveDocumentLibraryId, libraryId, StringComparison.OrdinalIgnoreCase))
+        {
+            // Clearing the active library persists config + registry; do it before the
+            // delete so the active selection never dangles at a purged library id.
+            await SetActiveLibraryAsync(config, ssdRoot, null);
+        }
+
+        await _libraryManager.DeleteLibraryAsync(libraryId);
+        LogMessage?.Invoke($"Deleted library: '{libraryId}'");
+    }
+
     public async Task SweepFoldersAsync(
         DocumentLibraryManifest library, string host,
         PortableConfig config, Action<IndexingProgress>? progress = null)

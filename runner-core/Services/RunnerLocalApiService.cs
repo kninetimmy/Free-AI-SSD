@@ -6,6 +6,7 @@ using FreeAiSsd.Shared.Documents;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.DependencyInjection;
@@ -527,25 +528,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         var libraryManager = _libraryManager!;
         var library = api.MapGroup("/library");
 
-        library.MapGet("", () =>
-        {
-            var registry = libraryManager.LoadRegistry();
-            var libraries = registry.Libraries
-                .Select(l => new LibrarySummary(l.Id, string.IsNullOrWhiteSpace(l.Name) ? l.Id : l.Name))
-                .ToList();
-
-            LibraryDetail? activeDetail = null;
-            string? activeId = null;
-            if (!string.IsNullOrWhiteSpace(config.ActiveDocumentLibraryId) &&
-                libraries.Any(l => l.Id == config.ActiveDocumentLibraryId))
-            {
-                activeId = config.ActiveDocumentLibraryId;
-                var manifest = libraryManager.LoadManifest(activeId!);
-                activeDetail = BuildLibraryDetail(manifest);
-            }
-
-            return Results.Ok(new LibraryListResponse(libraries, activeId, activeDetail));
-        });
+        library.MapGet("", () => Results.Ok(BuildLibraryListResponse(config)));
 
         library.MapPost("", async (CreateLibraryRequest request) =>
         {
@@ -654,6 +637,65 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             return Results.Ok(new AddWatchedFolderResponse(added, refreshed.WatchedFolders.ToList(), BuildLibraryDetail(refreshed)));
         });
 
+        // DELETE carries the folder path in the body; [FromBody] is required because
+        // minimal APIs refuse to *infer* a body parameter on DELETE (doing so throws
+        // at endpoint-datasource build time and 500s every route in the group).
+        library.MapDelete("/{libraryId}/folders", async (string libraryId, [FromBody] RemoveWatchedFolderRequest? request) =>
+        {
+            if (request is null || string.IsNullOrWhiteSpace(request.Path))
+            {
+                return Results.BadRequest(new ErrorResponse("'path' is required."));
+            }
+
+            var manifest = LoadManifestIfExists(libraryId);
+            if (manifest is null)
+            {
+                return Results.NotFound(new ErrorResponse($"Library '{libraryId}' not found."));
+            }
+
+            var removed = await docOps.RemoveWatchedFolderAsync(manifest, request.Path.Trim());
+            var refreshed = libraryManager.LoadManifest(libraryId);
+            return Results.Ok(new RemoveWatchedFolderResponse(removed, refreshed.WatchedFolders.ToList(), BuildLibraryDetail(refreshed)));
+        });
+
+        library.MapPatch("/{libraryId}", async (string libraryId, RenameLibraryRequest? request) =>
+        {
+            if (request is null || string.IsNullOrWhiteSpace(request.Name))
+            {
+                return Results.BadRequest(new ErrorResponse("'name' is required."));
+            }
+
+            if (LoadManifestIfExists(libraryId) is null)
+            {
+                return Results.NotFound(new ErrorResponse($"Library '{libraryId}' not found."));
+            }
+
+            try
+            {
+                var manifest = await docOps.RenameLibraryAsync(libraryId, request.Name.Trim());
+                return Results.Ok(new { library = BuildLibraryDetail(manifest) });
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new ErrorResponse(ex.Message));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(new ErrorResponse(ex.Message));
+            }
+        });
+
+        library.MapDelete("/{libraryId}", async (string libraryId) =>
+        {
+            if (LoadManifestIfExists(libraryId) is null)
+            {
+                return Results.NotFound(new ErrorResponse($"Library '{libraryId}' not found."));
+            }
+
+            await docOps.DeleteLibraryAsync(config, _ssdRoot, libraryId);
+            return Results.Ok(BuildLibraryListResponse(config));
+        });
+
         library.MapPost("/{libraryId}/sweep", async (HttpContext context, string libraryId, CancellationToken ct) =>
         {
             await HandleProgressedOpAsync(context, libraryId, ollamaHost, config, ct,
@@ -675,6 +717,26 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             return null;
         }
         return _libraryManager.LoadManifest(libraryId);
+    }
+
+    private LibraryListResponse BuildLibraryListResponse(PortableConfig config)
+    {
+        var registry = _libraryManager!.LoadRegistry();
+        var libraries = registry.Libraries
+            .Select(l => new LibrarySummary(l.Id, string.IsNullOrWhiteSpace(l.Name) ? l.Id : l.Name))
+            .ToList();
+
+        LibraryDetail? activeDetail = null;
+        string? activeId = null;
+        if (!string.IsNullOrWhiteSpace(config.ActiveDocumentLibraryId) &&
+            libraries.Any(l => l.Id == config.ActiveDocumentLibraryId))
+        {
+            activeId = config.ActiveDocumentLibraryId;
+            var manifest = _libraryManager.LoadManifest(activeId!);
+            activeDetail = BuildLibraryDetail(manifest);
+        }
+
+        return new LibraryListResponse(libraries, activeId, activeDetail);
     }
 
     private static LibraryDetail BuildLibraryDetail(DocumentLibraryManifest manifest)
@@ -1548,6 +1610,14 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         bool Added,
         IReadOnlyList<string> WatchedFolders,
         LibraryDetail Library);
+
+    public sealed record RemoveWatchedFolderRequest(string Path);
+    public sealed record RemoveWatchedFolderResponse(
+        bool Removed,
+        IReadOnlyList<string> WatchedFolders,
+        LibraryDetail Library);
+
+    public sealed record RenameLibraryRequest(string Name);
 
     private sealed record VoiceQueryOptions(bool SendToChat, bool SpeakResponse, string? Model, bool ReturnAudio);
 

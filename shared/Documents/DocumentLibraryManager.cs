@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FreeAiSsd.Shared.Io;
+using Microsoft.Data.Sqlite;
 
 namespace FreeAiSsd.Shared.Documents;
 
@@ -92,6 +93,66 @@ public sealed class DocumentLibraryManager
         await SaveManifestAsync(manifest);
         EnsureLibraryFolders(id);
         return manifest;
+    }
+
+    public async Task<DocumentLibraryManifest> RenameLibraryAsync(string libraryId, string newName)
+    {
+        var trimmedName = newName?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(trimmedName))
+        {
+            throw new ArgumentException("Library name cannot be empty.");
+        }
+
+        var registry = LoadRegistry();
+        if (!registry.Libraries.Any(l => l.Id == libraryId))
+        {
+            throw new InvalidOperationException($"Library '{libraryId}' not found.");
+        }
+
+        var duplicate = registry.Libraries.Any(l =>
+            l.Id != libraryId &&
+            string.Equals(l.Name?.Trim(), trimmedName, StringComparison.OrdinalIgnoreCase));
+        if (duplicate)
+        {
+            throw new InvalidOperationException($"A library named '{trimmedName}' already exists. Choose a different name.");
+        }
+
+        var manifest = LoadManifest(libraryId);
+        manifest.Name = trimmedName;
+        await SaveManifestAsync(manifest); // also syncs the registry entry's name
+        return manifest;
+    }
+
+    public async Task DeleteLibraryAsync(string libraryId)
+    {
+        if (string.IsNullOrWhiteSpace(libraryId))
+        {
+            throw new ArgumentException("Library id cannot be empty.");
+        }
+
+        // Purge the on-disk folder first. Disk is the source of truth — LoadRegistry
+        // re-adds any library whose folder still exists (ReconcileRegistryWithDisk), so
+        // deleting the folder before saving the registry keeps both consistent even if
+        // the delete throws partway.
+        var libraryPath = GetLibraryPath(libraryId);
+        var librariesRoot = Path.Combine(_ssdRoot, SsdLayout.DocLibraries);
+        PathGuards.EnsureUnderRoot(librariesRoot, libraryPath);
+        if (Directory.Exists(libraryPath))
+        {
+            // The index vectors.db is held open by a pooled SQLite connection; flush the
+            // pool before deleting or the recursive delete fails with "file is being used
+            // by another process" (same lock issue handled in RebuildIndexAsync).
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(libraryPath, recursive: true);
+        }
+
+        var registry = LoadRegistry();
+        registry.Libraries.RemoveAll(l => l.Id == libraryId);
+        if (string.Equals(registry.ActiveLibraryId, libraryId, StringComparison.OrdinalIgnoreCase))
+        {
+            registry.ActiveLibraryId = null;
+        }
+        await SaveRegistryAsync(registry);
     }
 
     public void EnsureLibraryFolders(string libraryId)

@@ -1161,6 +1161,8 @@ public partial class MainWindow : System.Windows.Window
         var enabled = _activeLibrary is not null;
         AddFilesButton.IsEnabled = enabled;
         AddFolderButton.IsEnabled = enabled;
+        RenameLibraryButton.IsEnabled = enabled;
+        DeleteLibraryButton.IsEnabled = enabled;
     }
 
     private async void AddFiles_Click(object sender, System.Windows.RoutedEventArgs e)
@@ -1220,6 +1222,88 @@ public partial class MainWindow : System.Windows.Window
             IndexingStatusText.Text = $"Added sweep folder: {dialog.SelectedPath}";
             // D1: surface the newly added folder in the read-only watched-folders list.
             UpdateWatchedFolders();
+        }
+    }
+
+    // D2: each watched-folder row carries its path as DataContext; stop watching it.
+    private async void RemoveWatchedFolder_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_activeLibrary is null) return;
+        if (sender is not System.Windows.FrameworkElement { DataContext: string folder } ||
+            string.IsNullOrWhiteSpace(folder))
+        {
+            return;
+        }
+
+        var removed = await _docService.RemoveWatchedFolderAsync(_activeLibrary, folder);
+        if (removed)
+        {
+            IndexingStatusText.Text = $"Removed watched folder: {folder}";
+            UpdateWatchedFolders();
+        }
+    }
+
+    // D2: rename the active library via a small modal input dialog.
+    private async void RenameLibrary_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_config is null || _activeLibrary is null)
+        {
+            AppendLog("Select a document library first.");
+            return;
+        }
+
+        var dialog = new RenameLibraryDialog(_activeLibrary.Name) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+
+        try
+        {
+            var renamed = await _docService.RenameLibraryAsync(_activeLibrary.Id, dialog.NewName);
+            RefreshLibraryUi();
+            IndexingStatusText.Text = $"Renamed library to: {renamed.Name}";
+            AppendLog($"Renamed library to: {renamed.Name}");
+        }
+        catch (ArgumentException ex)
+        {
+            AppendLog(ex.Message);
+            IndexingStatusText.Text = ex.Message;
+        }
+        catch (InvalidOperationException ex)
+        {
+            AppendLog(ex.Message);
+            IndexingStatusText.Text = ex.Message;
+        }
+    }
+
+    // D2: delete the active library (folder + index) after confirmation.
+    private async void DeleteLibrary_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_config is null || _activeLibrary is null)
+        {
+            AppendLog("Select a document library first.");
+            return;
+        }
+
+        var name = _activeLibrary.Name;
+        var id = _activeLibrary.Id;
+        var result = System.Windows.MessageBox.Show(
+            $"Delete '{name}' and all its indexed files? This cannot be undone.",
+            "Delete library",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Warning,
+            System.Windows.MessageBoxResult.No);
+        if (result != System.Windows.MessageBoxResult.Yes) return;
+
+        try
+        {
+            await _docService.DeleteLibraryAsync(_config, _ssdRoot, id);
+            RefreshLibraryUi();
+            IndexingStatusText.Text = $"Deleted library: {name}";
+            AppendLog($"Deleted library: {name}");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Delete failed: {ex.Message}");
+            IndexingStatusText.Text = $"Delete failed: {ex.Message}";
         }
     }
 
