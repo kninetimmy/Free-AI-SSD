@@ -70,7 +70,8 @@ watch CI, report results, and wait for explicit confirmation before
 merging. On CI failure, investigate and push a fix to the same
 branch.
 
-**Known-supported formats:** PDF, TXT, Markdown only. DOCX is out
+**Known-supported formats:** PDF, TXT, Markdown, JSON, CSV (JSON and
+CSV are ingested as plain text — no structural parsing). DOCX is out
 of scope. DCS bindings only — no IL-2 / War Thunder parsers.
 
 ## Releasing
