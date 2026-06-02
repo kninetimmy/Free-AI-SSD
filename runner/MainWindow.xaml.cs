@@ -2941,11 +2941,30 @@ public partial class MainWindow : System.Windows.Window
             ModelMaxOutputLabel.Text = _config.ModelMaxOutputTokens > 0
                 ? _config.ModelMaxOutputTokens.ToString()
                 : "unlimited";
+
+            // Thinking: select the item whose Tag matches the stored mode
+            // (empty Tag = "Default"). Falls back to Default for unknown values.
+            SelectThinkModeItem(_config.ModelThinkMode);
         }
         finally
         {
             _suppressModelParamEvents = false;
         }
+    }
+
+    private void SelectThinkModeItem(string? mode)
+    {
+        var target = (mode ?? string.Empty).Trim().ToLowerInvariant();
+        foreach (var obj in ModelThinkModeCombo.Items)
+        {
+            if (obj is System.Windows.Controls.ComboBoxItem item
+                && string.Equals((item.Tag as string) ?? string.Empty, target, StringComparison.OrdinalIgnoreCase))
+            {
+                ModelThinkModeCombo.SelectedItem = item;
+                return;
+            }
+        }
+        ModelThinkModeCombo.SelectedIndex = 0; // Default
     }
 
     private void ModelContextSlider_ValueChanged(object sender, System.Windows.RoutedPropertyChangedEventArgs<double> e)
@@ -3036,6 +3055,17 @@ public partial class MainWindow : System.Windows.Window
         SaveConfigAsync();
     }
 
+    private void ModelThinkModeCombo_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_suppressModelParamEvents || _config is null) return;
+
+        var mode = (ModelThinkModeCombo.SelectedItem as System.Windows.Controls.ComboBoxItem)?.Tag as string ?? string.Empty;
+        if (string.Equals(mode, _config.ModelThinkMode, StringComparison.Ordinal)) return;
+
+        _config.ModelThinkMode = mode;
+        SaveConfigAsync();
+    }
+
     private void ResetModelParameters_Click(object sender, System.Windows.RoutedEventArgs e)
     {
         if (_config is null) return;
@@ -3044,6 +3074,7 @@ public partial class MainWindow : System.Windows.Window
         _config.ModelTemperature = -1;
         _config.ModelTopP = -1;
         _config.ModelMaxOutputTokens = -1;
+        _config.ModelThinkMode = "";
 
         InitializeModelParametersUi(); // re-snap sliders + labels under suppression
         SaveConfigAsync();

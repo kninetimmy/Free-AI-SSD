@@ -1472,11 +1472,30 @@
                                        MinWidth="60"/>
                         </StackPanel>
 
+                        <!-- Thinking (top-level `think`) -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <TextBlock Text="Thinking:"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       VerticalAlignment="Center" Width="110"/>
+                            <ComboBox x:Name="ModelThinkModeCombo"
+                                      Style="{StaticResource GlowFocusComboBox}"
+                                      Width="320"
+                                      VerticalAlignment="Center"
+                                      SelectionChanged="ModelThinkModeCombo_SelectionChanged"
+                                      ToolTip="think: control reasoning for thinking models. Default = the model's built-in behavior. Off disables reasoning (fixes runaway/looping reasoners). Low/Medium/High set reasoning effort on models that support it. Only works on models that declare thinking support — others use Max output instead.">
+                                <ComboBoxItem Content="Default" Tag=""/>
+                                <ComboBoxItem Content="Off (no reasoning)" Tag="off"/>
+                                <ComboBoxItem Content="Low" Tag="low"/>
+                                <ComboBoxItem Content="Medium" Tag="medium"/>
+                                <ComboBoxItem Content="High" Tag="high"/>
+                            </ComboBox>
+                        </StackPanel>
+
                         <Button Content="Reset to model defaults"
                                 Style="{StaticResource GhostSecondaryButton}"
                                 HorizontalAlignment="Left"
                                 Click="ResetModelParameters_Click"
-                                ToolTip="Clear every override; all four values fall back to whatever the active model ships with."/>
+                                ToolTip="Clear every override; all five values (including Thinking) fall back to whatever the active model ships with."/>
                     </StackPanel>
                 </Border>
             </Grid>

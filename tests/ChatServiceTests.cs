@@ -151,6 +151,85 @@ public sealed class ChatServiceTests : IDisposable
         Assert.False(options.TryGetProperty("num_predict", out _));
     }
 
+    // ─── #35: thinking control (top-level `think`) ────────────────────────
+
+    [Fact]
+    public async Task SendPromptAsync_WithDefaultConfig_DoesNotSendThinkField()
+    {
+        var capturedBody = await CaptureGenerateRequestBodyAsync(new PortableConfig { ActiveDocumentLibraryId = null });
+
+        using var doc = JsonDocument.Parse(capturedBody);
+        Assert.False(doc.RootElement.TryGetProperty("think", out _),
+            "Default config must omit 'think' so non-thinking models aren't rejected with a 400.");
+    }
+
+    [Fact]
+    public async Task SendPromptAsync_WithThinkOff_SendsTopLevelThinkFalse()
+    {
+        var config = new PortableConfig { ActiveDocumentLibraryId = null, ModelThinkMode = "off" };
+        var capturedBody = await CaptureGenerateRequestBodyAsync(config);
+
+        using var doc = JsonDocument.Parse(capturedBody);
+        var think = doc.RootElement.GetProperty("think");
+        Assert.Equal(JsonValueKind.False, think.ValueKind);
+
+        // `think` is a top-level field, never an Ollama option.
+        if (doc.RootElement.TryGetProperty("options", out var options))
+            Assert.False(options.TryGetProperty("think", out _));
+    }
+
+    [Fact]
+    public async Task SendPromptAsync_WithThinkLevel_SendsTopLevelThinkString()
+    {
+        var config = new PortableConfig { ActiveDocumentLibraryId = null, ModelThinkMode = "high" };
+        var capturedBody = await CaptureGenerateRequestBodyAsync(config);
+
+        using var doc = JsonDocument.Parse(capturedBody);
+        var think = doc.RootElement.GetProperty("think");
+        Assert.Equal(JsonValueKind.String, think.ValueKind);
+        Assert.Equal("high", think.GetString());
+    }
+
+    [Fact]
+    public async Task SendPromptAsync_WhenModelRejectsThink_ReturnsActionableFailure()
+    {
+        var handler = new StubHandler((_, _) => new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent(
+                """{"error":"model \"phi3\" does not support thinking"}""",
+                Encoding.UTF8, "application/json"),
+        });
+        using var http = new HttpClient(handler);
+        var libraryManager = new DocumentLibraryManager(_tempRoot);
+        var service = new ChatService(http, libraryManager, logger: null);
+        var config = new PortableConfig { ActiveDocumentLibraryId = null, ModelThinkMode = "off" };
+
+        var result = await service.SendPromptAsync("phi3", "hello", "127.0.0.1:11434", config);
+
+        var failure = Assert.IsType<ChatResult.Failure>(result);
+        Assert.Contains("Thinking", failure.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SendPromptAsync_When400AndThinkUnset_UsesGenericFailureNotThinkMessage()
+    {
+        // A 400 unrelated to thinking, with `think` not set, must not be
+        // misattributed to the Thinking control.
+        var handler = new StubHandler((_, _) => new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent("""{"error":"some other problem"}""", Encoding.UTF8, "application/json"),
+        });
+        using var http = new HttpClient(handler);
+        var libraryManager = new DocumentLibraryManager(_tempRoot);
+        var service = new ChatService(http, libraryManager, logger: null);
+        var config = new PortableConfig { ActiveDocumentLibraryId = null };
+
+        var result = await service.SendPromptAsync("phi3", "hello", "127.0.0.1:11434", config);
+
+        var failure = Assert.IsType<ChatResult.Failure>(result);
+        Assert.DoesNotContain("Thinking", failure.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task<string> CaptureGenerateRequestBodyAsync(PortableConfig config)
     {
         string? captured = null;

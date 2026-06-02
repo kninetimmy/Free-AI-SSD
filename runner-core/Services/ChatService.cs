@@ -40,6 +40,8 @@ public sealed class ChatService : IChatService
         try
         {
             using var response = await _http.PostAsJsonAsync($"http://{host}/api/generate", request);
+            var thinkError = await DetectThinkUnsupportedAsync(response, config);
+            if (thinkError is not null) return new ChatResult.Failure(thinkError);
             response.EnsureSuccessStatusCode();
 
             var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -104,6 +106,8 @@ public sealed class ChatService : IChatService
             };
 
             using var response = await _http.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            var thinkError = await DetectThinkUnsupportedAsync(response, config, cancellationToken);
+            if (thinkError is not null) return new ChatResult.Failure(thinkError);
             response.EnsureSuccessStatusCode();
 
             using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -254,7 +258,38 @@ public sealed class ChatService : IChatService
             request["options"] = options;
         }
 
+        // `think` is a top-level field, NOT an Ollama option. Only emitted when
+        // the user has set it away from the default sentinel — omitting it lets
+        // every model (thinking or not) behave exactly as it always has.
+        if (TryGetThinkValue(config, out var think))
+        {
+            request["think"] = think;
+        }
+
         return request;
+    }
+
+    /// <summary>
+    /// Maps <see cref="PortableConfig.ModelThinkMode"/> to Ollama's top-level
+    /// <c>think</c> value. <c>"off"</c> → <c>false</c>; <c>"low"/"medium"/"high"</c> →
+    /// the level string. Empty/unrecognized → not set (omit the field).
+    /// </summary>
+    internal static bool TryGetThinkValue(PortableConfig config, out object? value)
+    {
+        switch (config.ModelThinkMode?.Trim().ToLowerInvariant())
+        {
+            case "off":
+                value = false;
+                return true;
+            case "low":
+            case "medium":
+            case "high":
+                value = config.ModelThinkMode!.Trim().ToLowerInvariant();
+                return true;
+            default:
+                value = null;
+                return false;
+        }
     }
 
     internal static Dictionary<string, object?> BuildOllamaOptions(PortableConfig config)
@@ -277,6 +312,33 @@ public sealed class ChatService : IChatService
             options["num_predict"] = config.ModelMaxOutputTokens;
         }
         return options;
+    }
+
+    /// <summary>
+    /// When a <c>think</c> value was sent and Ollama rejected the request,
+    /// returns an actionable message telling the user the model can't honor the
+    /// Thinking control. Returns null otherwise (success, or a failure unrelated
+    /// to thinking) so the normal error path runs. Ollama 400s on <c>think</c>
+    /// for any model that does not declare thinking support — including
+    /// <c>think: false</c> — so this also catches the "Off" case.
+    /// </summary>
+    private async Task<string?> DetectThinkUnsupportedAsync(
+        HttpResponseMessage response, PortableConfig config, CancellationToken cancellationToken = default)
+    {
+        if (response.IsSuccessStatusCode) return null;
+        if (!TryGetThinkValue(config, out _)) return null;
+
+        string body;
+        try { body = await response.Content.ReadAsStringAsync(cancellationToken); }
+        catch { return null; }
+
+        if (body.Contains("think", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger?.Warn($"chat rejected think='{config.ModelThinkMode}' ({(int)response.StatusCode}): {body.Trim()}");
+            return "This model doesn't support the Thinking control. Set Thinking to Default, " +
+                   "or use Max output to cap a runaway reasoning model.";
+        }
+        return null;
     }
 
     private static string SanitizeError(Exception ex) => ex switch
