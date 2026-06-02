@@ -655,6 +655,53 @@
                 <Grid x:Name="StepModels" Visibility="Collapsed">
                     <Border Style="{StaticResource NeumorphicCard}" Padding="10">
                         <DockPanel>
+                            <!-- #66: surface the unlock affordance + session indicator on the
+                                 Manage-models view so an encrypted SSD can be unlocked here
+                                 without bouncing back to the Drive step. Reuses the Drive-step
+                                 banner's VM bindings (ShowUnlockButton / UnlockCommand /
+                                 ShowSessionUnlockedBanner) — no shared-VM change. -->
+                            <StackPanel DockPanel.Dock="Top">
+                                <!-- Encrypted + not-yet-unlocked: prompt to unlock. -->
+                                <Border Margin="0,0,0,10" Padding="10,8"
+                                        Background="{StaticResource BgRaisedBrush}"
+                                        BorderBrush="{StaticResource AccentCyanBrush}"
+                                        BorderThickness="1" CornerRadius="6"
+                                        Visibility="{Binding ShowUnlockButton, Converter={StaticResource BoolToVisibilityConverter}}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <theme:LedStatusIndicator Grid.Column="0" State="Warning"
+                                                                  VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <TextBlock Grid.Column="1"
+                                                   Text="This SSD is encrypted. Unlock to enable Add and Remove."
+                                                   Foreground="{StaticResource AccentCyanBrush}"
+                                                   VerticalAlignment="Center"
+                                                   TextWrapping="Wrap"/>
+                                        <Button Grid.Column="2" Content="Unlock…" Margin="12,0,0,0"
+                                                Padding="14,4" MinHeight="0"
+                                                Style="{StaticResource TactilePrimaryButton}"
+                                                Command="{Binding UnlockCommand}"
+                                                ToolTip="Prompt for the SSD passphrase so Add and Remove become enabled for this session."/>
+                                    </Grid>
+                                </Border>
+                                <!-- Unlocked: green confirmation that matches the Drive-step banner. -->
+                                <Border Margin="0,0,0,10" Padding="10,6"
+                                        Background="{StaticResource BgRaisedBrush}"
+                                        BorderBrush="{StaticResource StatusSuccessBrush}"
+                                        BorderThickness="1" CornerRadius="6"
+                                        Visibility="{Binding ShowSessionUnlockedBanner, Converter={StaticResource BoolToVisibilityConverter}}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <theme:LedStatusIndicator State="Ok" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <TextBlock Text="Unlocked for this session. Add and Remove enabled."
+                                                   Foreground="{StaticResource StatusSuccessBrush}"
+                                                   VerticalAlignment="Center"
+                                                   TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
                             <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
