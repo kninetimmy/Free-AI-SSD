@@ -1093,6 +1093,7 @@ public partial class MainWindow : System.Windows.Window
             : $"Last indexed: {_activeLibrary.LastIndexedUtc:u}";
         UpdateLibraryActionButtons();
         UpdateNoLibraryEmptyState();
+        UpdateEmbeddingModelHint();
     }
 
     private async Task<bool> EnsureActiveLibraryAsync()
@@ -1310,6 +1311,7 @@ public partial class MainWindow : System.Windows.Window
         IndexingStatusText.Text = success
             ? $"Embedding model ready: {_config.EmbeddingModelName}"
             : "Unable to pull embedding model while offline. Connect temporarily and retry.";
+        UpdateEmbeddingModelHint();
     }
 
     private async void RemoveFile_Click(object sender, System.Windows.RoutedEventArgs e)
@@ -1611,6 +1613,27 @@ public partial class MainWindow : System.Windows.Window
         NoLibraryEmptyState.Visibility = hasLibrary
             ? System.Windows.Visibility.Collapsed
             : System.Windows.Visibility.Visible;
+    }
+
+    /// <summary>
+    /// Workstream C: proactive embedding-model readiness. Shows an inline hint with a
+    /// Pull action inside the active-library surface when the configured embedder isn't
+    /// installed, so the user fixes it before an ingest throws "model not found". The
+    /// hint lives inside LibraryManagementSection, so it only renders when a library is
+    /// active. Readiness is disk-truth, so this is meaningful even before Ollama starts.
+    /// </summary>
+    private void UpdateEmbeddingModelHint()
+    {
+        var missing = _config is not null && !_modelService.IsEmbeddingModelInstalled(_config);
+        if (missing)
+        {
+            EmbeddingModelHintText.Text =
+                $"The embedding model “{_config!.EmbeddingModelName}” isn't installed yet — " +
+                "documents can't be indexed until it's pulled.";
+        }
+        EmbeddingModelHint.Visibility = missing
+            ? System.Windows.Visibility.Visible
+            : System.Windows.Visibility.Collapsed;
     }
 
     /// <summary>

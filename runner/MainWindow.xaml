@@ -501,6 +501,27 @@
                             <TextBlock x:Name="IndexingStatusText"
                                        Foreground="{StaticResource TextSecondaryBrush}"
                                        Margin="0,8,0,0"/>
+                            <!-- Workstream C: proactive embedding-model readiness.
+                                 UpdateEmbeddingModelHint() shows this when a library
+                                 is active but the configured embedder isn't installed,
+                                 so the user pulls it before an ingest fails. The Pull
+                                 action reuses the Index-tools handler. -->
+                            <Border x:Name="EmbeddingModelHint"
+                                    Style="{StaticResource WarningBanner}"
+                                    Margin="0,8,0,0"
+                                    Visibility="Collapsed">
+                                <StackPanel>
+                                    <TextBlock x:Name="EmbeddingModelHintText"
+                                               Foreground="{StaticResource TextPrimaryBrush}"
+                                               TextWrapping="Wrap"/>
+                                    <Button Content="Pull embedding model"
+                                            Style="{StaticResource GhostSecondaryButton}"
+                                            HorizontalAlignment="Left"
+                                            Margin="0,8,0,0"
+                                            Click="PullEmbeddingModel_Click"
+                                            ToolTip="Download the configured embedding model via the running Ollama server."/>
+                                </StackPanel>
+                            </Border>
                             <!-- Files indexed in the active library. Sources cited by the
                                  most recent answer live in their own headlined block at
                                  Row 5 of ChatTab (Mac §B1). -->
@@ -513,16 +534,35 @@
                         </StackPanel>
 
                         <!-- Empty state shown in place of LibraryManagementSection
-                             when no library is selected. One hint line — the
-                             Create row above already exposes the action. -->
+                             when no library is selected. Workstream C: a short
+                             numbered first-run flow instead of one bare line. The
+                             Create action lives in the accent-tagged Create row
+                             above; step 1 points the user at it. -->
                         <Border x:Name="NoLibraryEmptyState"
                                 Margin="0,12,0,4"
                                 Visibility="Collapsed">
-                            <TextBlock Text="Create or select a library to begin."
-                                       Style="{StaticResource CaptionText}"
-                                       Foreground="{StaticResource TextSecondaryBrush}"
-                                       TextAlignment="Left"
-                                       TextWrapping="Wrap"/>
+                            <StackPanel>
+                                <TextBlock Text="Get started:"
+                                           Style="{StaticResource CaptionText}"
+                                           Foreground="{StaticResource TextPrimaryBrush}"
+                                           FontWeight="SemiBold"
+                                           TextWrapping="Wrap"/>
+                                <TextBlock Text="1. Create a library (name it above, then click Create library)"
+                                           Style="{StaticResource CaptionText}"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           Margin="0,4,0,0"
+                                           TextWrapping="Wrap"/>
+                                <TextBlock Text="2. Add files (PDF, TXT, Markdown, JSON, CSV)"
+                                           Style="{StaticResource CaptionText}"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           Margin="0,2,0,0"
+                                           TextWrapping="Wrap"/>
+                                <TextBlock Text="3. Ask grounded questions in chat"
+                                           Style="{StaticResource CaptionText}"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           Margin="0,2,0,0"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
                         </Border>
                     </StackPanel>
                 </Border>
