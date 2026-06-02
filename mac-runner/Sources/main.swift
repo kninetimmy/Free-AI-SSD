@@ -63,6 +63,21 @@ struct LibraryDetail: Codable {
     let lastIndexedUtc: String?
 }
 
+/// Workstream D1: file-list metadata formatting, parity with the WPF runner's
+/// FileSizeConverter + `yyyy-MM-dd` date.
+enum LibraryFileFormatting {
+    static func size(_ bytes: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(max(bytes, 0)), countStyle: .file)
+    }
+
+    /// The API emits an ISO 8601 UTC timestamp; show just the date portion to
+    /// match WPF (no time, no timezone conversion). Falls back to the raw value.
+    static func shortDate(_ iso: String) -> String {
+        let datePart = iso.prefix(10)
+        return datePart.count == 10 ? String(datePart) : iso
+    }
+}
+
 final class RunnerViewModel: ObservableObject {
     @Published var ssdRoot: URL?
     @Published var modelNames: [String] = []
@@ -1791,7 +1806,14 @@ struct DocumentsSection: View {
                         VStack(alignment: .leading, spacing: 2) {
                             ForEach(detail.files, id: \.storedRelativePath) { file in
                                 HStack {
-                                    Text(file.fileName).font(.callout)
+                                    // Workstream D1: size + imported date beneath the name,
+                                    // parity with the WPF runner's file rows.
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(file.fileName).font(.callout)
+                                        Text("\(LibraryFileFormatting.size(file.sizeBytes)) · \(LibraryFileFormatting.shortDate(file.importedAtUtc))")
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
                                     Spacer()
                                     Button("Remove") { vm.removeFile(storedRelativePath: file.storedRelativePath) }
                                         .buttonStyle(.borderless)
@@ -1802,6 +1824,25 @@ struct DocumentsSection: View {
                         }
                     }
                     .frame(maxHeight: 120)
+                }
+
+                // Workstream D1: watched folders (read-only), parity with the WPF
+                // runner. manifest.WatchedFolders was surfaced in neither UI before;
+                // removal lands in D2.
+                if let detail = vm.activeLibrary, !detail.watchedFolders.isEmpty {
+                    Text("Watched folders")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 1) {
+                        ForEach(detail.watchedFolders, id: \.self) { folder in
+                            Text(folder)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .help(folder)
+                        }
+                    }
                 }
             }
         }

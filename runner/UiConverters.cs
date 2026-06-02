@@ -42,3 +42,42 @@ public sealed class EmptyToVisibilityConverter : IValueConverter
         }
     }
 }
+
+/// <summary>
+/// Formats a byte count (<see cref="DocumentFileEntry.SizeBytes"/>) as a
+/// human-readable size, e.g. <c>1.2 MB</c>. One-way; the file list is read-only.
+/// </summary>
+public sealed class FileSizeConverter : IValueConverter
+{
+    private static readonly string[] Units = { "B", "KB", "MB", "GB", "TB" };
+
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        var bytes = value switch
+        {
+            long l => l,
+            int i => i,
+            _ => 0L
+        };
+
+        if (bytes < 0)
+        {
+            bytes = 0;
+        }
+
+        double size = bytes;
+        var unit = 0;
+        while (size >= 1024 && unit < Units.Length - 1)
+        {
+            size /= 1024;
+            unit++;
+        }
+
+        // Whole bytes show no decimal; KB and up show one.
+        var format = unit == 0 ? "0" : "0.0";
+        return $"{size.ToString(format, culture)} {Units[unit]}";
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+        => throw new NotSupportedException();
+}

@@ -1088,12 +1088,24 @@ public partial class MainWindow : System.Windows.Window
         }
 
         LibraryFilesList.ItemsSource = _activeLibrary?.Files ?? new List<DocumentFileEntry>();
+        UpdateWatchedFolders();
         IndexingStatusText.Text = _activeLibrary?.LastIndexedUtc is null
             ? "No indexing run yet."
             : $"Last indexed: {_activeLibrary.LastIndexedUtc:u}";
         UpdateLibraryActionButtons();
         UpdateNoLibraryEmptyState();
         UpdateEmbeddingModelHint();
+    }
+
+    // Workstream D1: render the active library's watched folders read-only,
+    // hiding the section entirely when there are none.
+    private void UpdateWatchedFolders()
+    {
+        var folders = _activeLibrary?.WatchedFolders ?? new List<string>();
+        WatchedFoldersList.ItemsSource = folders;
+        WatchedFoldersSection.Visibility = folders.Count > 0
+            ? System.Windows.Visibility.Visible
+            : System.Windows.Visibility.Collapsed;
     }
 
     private async Task<bool> EnsureActiveLibraryAsync()
@@ -1107,6 +1119,7 @@ public partial class MainWindow : System.Windows.Window
 
         _activeLibrary = await _docService.SetActiveLibraryAsync(_config, _ssdRoot, selectedId);
         LibraryFilesList.ItemsSource = _activeLibrary?.Files ?? new List<DocumentFileEntry>();
+        UpdateWatchedFolders();
         UpdateLibraryActionButtons();
         UpdateNoLibraryEmptyState();
         return _activeLibrary is not null;
@@ -1205,6 +1218,8 @@ public partial class MainWindow : System.Windows.Window
         if (added)
         {
             IndexingStatusText.Text = $"Added sweep folder: {dialog.SelectedPath}";
+            // D1: surface the newly added folder in the read-only watched-folders list.
+            UpdateWatchedFolders();
         }
     }
 
