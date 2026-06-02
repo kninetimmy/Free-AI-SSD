@@ -149,6 +149,23 @@ final class RunnerViewModel: ObservableObject {
     /// first fetch completes.
     @Published var embeddingModelInstalled: Bool = true
 
+    // ── Model parameters (task #35) ──────────────────────────────────────
+    // Slider-facing doubles mirror the WPF runner: the far-left position is a
+    // "use model default" sentinel zone. `commitModelParams` converts these to
+    // the config's -1/0 sentinels before persisting under the camelCase keys
+    // the C# PortableConfig uses (modelContextWindow, modelTemperature,
+    // modelTopP, modelMaxOutputTokens, modelThinkMode). The Mac sidecar honors
+    // these the same as the Windows in-process runner.
+    @Published var modelContextWindow: Double = 0                              // 0 = model default
+    @Published var modelTemperature: Double = RunnerViewModel.temperatureSliderMin  // <0 = default
+    @Published var modelTopP: Double = RunnerViewModel.topPSliderMin                // <0 = default
+    @Published var modelMaxOutputTokens: Double = RunnerViewModel.maxOutputSliderMin // <0 = unlimited
+    @Published var modelThinkMode: String = ""                                 // "" = model default
+
+    static let temperatureSliderMin = -0.05
+    static let topPSliderMin = -0.05
+    static let maxOutputSliderMin = -128.0
+
     private var process: Process?
     private var hostPort = 11434
 
@@ -676,6 +693,66 @@ final class RunnerViewModel: ObservableObject {
         let installed = discoverInstalledModelsOnDisk()
         modelNames = installed
         selectedModel = installed.first ?? ""
+        hydrateModelParams(config)
+    }
+
+    /// Mirror the persisted model knobs into the slider/picker state. Setting
+    /// the `@Published` values directly (rather than through the Picker/Slider
+    /// bindings) intentionally does NOT trigger a commit — only user interaction
+    /// does, via `commitModelParams` / `setThinkMode`.
+    private func hydrateModelParams(_ config: [String: Any]) {
+        modelContextWindow = Double((config["modelContextWindow"] as? NSNumber)?.intValue ?? 0)
+        let t = (config["modelTemperature"] as? NSNumber)?.doubleValue ?? -1
+        modelTemperature = t >= 0 ? t : RunnerViewModel.temperatureSliderMin
+        let p = (config["modelTopP"] as? NSNumber)?.doubleValue ?? -1
+        modelTopP = p >= 0 ? p : RunnerViewModel.topPSliderMin
+        let m = (config["modelMaxOutputTokens"] as? NSNumber)?.intValue ?? -1
+        modelMaxOutputTokens = m >= 0 ? Double(m) : RunnerViewModel.maxOutputSliderMin
+        modelThinkMode = (config["modelThinkMode"] as? String) ?? ""
+    }
+
+    /// Picker setter — discrete, so it commits immediately on selection.
+    func setThinkMode(_ mode: String) {
+        modelThinkMode = mode
+        commitModelParams()
+    }
+
+    func resetModelParams() {
+        modelContextWindow = 0
+        modelTemperature = RunnerViewModel.temperatureSliderMin
+        modelTopP = RunnerViewModel.topPSliderMin
+        modelMaxOutputTokens = RunnerViewModel.maxOutputSliderMin
+        modelThinkMode = ""
+        commitModelParams()
+    }
+
+    /// Persist the five model knobs (converting slider positions to the config's
+    /// sentinel encoding, matching the WPF ValueChanged handlers) and push them
+    /// to a running sidecar. The sidecar captures config at StartAsync, so it
+    /// needs a restart to pick up new params; we skip the restart mid-stream so
+    /// a live chat isn't torn down — the change still persists and lands on the
+    /// next host start. `saveConfig` itself refuses to write while locked.
+    func commitModelParams() {
+        let ctx = max(0, Int((modelContextWindow / 512).rounded()) * 512)
+        let temp = modelTemperature < 0 ? -1.0 : (modelTemperature * 20).rounded() / 20
+        let topP = modelTopP < 0 ? -1.0 : (modelTopP * 20).rounded() / 20
+        let snappedMax = Int((modelMaxOutputTokens / 128).rounded()) * 128
+        let maxOut = (modelMaxOutputTokens < 0 || snappedMax <= 0) ? -1 : snappedMax
+        let think = modelThinkMode
+
+        saveConfig { current in
+            var next = current
+            next["modelContextWindow"] = ctx
+            next["modelTemperature"] = temp
+            next["modelTopP"] = topP
+            next["modelMaxOutputTokens"] = maxOut
+            next["modelThinkMode"] = think
+            return next
+        }
+
+        if networkApiBaseUrl != nil && !isSending {
+            restartHostSidecar()
+        }
     }
 
     /// MAC33: Walks `<ssdRoot>/models/manifests/` and reconstructs model tags.
@@ -1807,6 +1884,11 @@ struct ContentView: View {
                     .foregroundColor(.secondary)
             }
 
+            // Task #35: model-parameter controls (parity with the WPF runner's
+            // System-tab "Model parameters" card), including the Thinking control.
+            Divider()
+            ModelParametersSection(vm: vm)
+
             // MAC8: Documents (library management). All ops go through the
             // sidecar's /api/library/* endpoints. Post-MAC34 the sidecar is
             // always running once the SSD is unlocked (loopback even when LAN
@@ -1832,6 +1914,87 @@ struct ContentView: View {
                 primaryButton: .destructive(Text("Delete")) { vm.deleteActiveLibrary() },
                 secondaryButton: .cancel()
             )
+        }
+    }
+}
+
+struct ModelParametersSection: View {
+    @ObservedObject var vm: RunnerViewModel
+
+    private var contextLabel: String {
+        vm.modelContextWindow > 0 ? "\(Int(vm.modelContextWindow))" : "default"
+    }
+    private var temperatureLabel: String {
+        vm.modelTemperature >= 0 ? String(format: "%.2f", vm.modelTemperature) : "default"
+    }
+    private var topPLabel: String {
+        vm.modelTopP >= 0 ? String(format: "%.2f", vm.modelTopP) : "default"
+    }
+    private var maxOutputLabel: String {
+        vm.modelMaxOutputTokens > 0 ? "\(Int(vm.modelMaxOutputTokens))" : "unlimited"
+    }
+
+    var body: some View {
+        DisclosureGroup("Model parameters") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Tune how the model responds. Far-left slider positions use the model's built-in default.")
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+
+                paramRow(title: "Context", label: contextLabel) {
+                    Slider(value: $vm.modelContextWindow, in: 0...32768, step: 512,
+                           onEditingChanged: { editing in if !editing { vm.commitModelParams() } })
+                }
+                paramRow(title: "Temperature", label: temperatureLabel) {
+                    Slider(value: $vm.modelTemperature, in: RunnerViewModel.temperatureSliderMin...2.0, step: 0.05,
+                           onEditingChanged: { editing in if !editing { vm.commitModelParams() } })
+                }
+                paramRow(title: "Top P", label: topPLabel) {
+                    Slider(value: $vm.modelTopP, in: RunnerViewModel.topPSliderMin...1.0, step: 0.05,
+                           onEditingChanged: { editing in if !editing { vm.commitModelParams() } })
+                }
+                paramRow(title: "Max output", label: maxOutputLabel) {
+                    Slider(value: $vm.modelMaxOutputTokens, in: RunnerViewModel.maxOutputSliderMin...8192, step: 128,
+                           onEditingChanged: { editing in if !editing { vm.commitModelParams() } })
+                }
+
+                HStack {
+                    Text("Thinking").frame(width: 90, alignment: .leading)
+                    Picker("", selection: Binding(
+                        get: { vm.modelThinkMode },
+                        set: { vm.setThinkMode($0) }
+                    )) {
+                        Text("Default").tag("")
+                        Text("Off (no reasoning)").tag("off")
+                        Text("Low").tag("low")
+                        Text("Medium").tag("medium")
+                        Text("High").tag("high")
+                    }
+                    .pickerStyle(MenuPickerStyle())
+                    .labelsHidden()
+                    Spacer()
+                }
+                Text("Off disables reasoning for thinking models that loop; only works on models that declare thinking support — others use Max output.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                Button("Reset to model defaults") { vm.resetModelParams() }
+                    .padding(.top, 2)
+            }
+            .padding(.top, 6)
+            .disabled(vm.isEncryptedLocked)
+        }
+    }
+
+    @ViewBuilder
+    private func paramRow<Content: View>(
+        title: String, label: String, @ViewBuilder slider: () -> Content
+    ) -> some View {
+        HStack {
+            Text(title).frame(width: 90, alignment: .leading)
+            slider()
+            Text(label).frame(width: 70, alignment: .trailing)
+                .foregroundColor(.secondary)
         }
     }
 }
