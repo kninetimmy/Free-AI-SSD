@@ -11,6 +11,7 @@
 
     <Window.Resources>
         <local:EmptyToVisibilityConverter x:Key="EmptyToVisibilityConverter"/>
+        <local:FileSizeConverter x:Key="FileSizeConverter"/>
         <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
 
         <!--  ────────────────────────────────────────────────────────
@@ -524,13 +525,63 @@
                             </Border>
                             <!-- Files indexed in the active library. Sources cited by the
                                  most recent answer live in their own headlined block at
-                                 Row 5 of ChatTab (Mac §B1). -->
+                                 Row 5 of ChatTab (Mac §B1). Workstream D1: each row now
+                                 shows size + imported date (already on DocumentFileEntry).
+                                 ItemsSource stays a List<DocumentFileEntry> so the Remove
+                                 handler's SelectedItem cast keeps working. -->
                             <ListBox x:Name="LibraryFilesList"
                                      Style="{StaticResource ThemedListBox}"
                                      Height="90"
                                      Margin="0,10,0,0"
-                                     DisplayMemberPath="FileName"
-                                     ToolTip="Files currently indexed in the active library."/>
+                                     ToolTip="Files currently indexed in the active library.">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0"
+                                                       Text="{Binding FileName}"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       Foreground="{StaticResource TextPrimaryBrush}"/>
+                                            <TextBlock Grid.Column="1"
+                                                       Margin="12,0,0,0"
+                                                       Style="{StaticResource CaptionText}"
+                                                       Foreground="{StaticResource TextSecondaryBrush}">
+                                                <Run Text="{Binding SizeBytes, Converter={StaticResource FileSizeConverter}, Mode=OneWay}"/>
+                                                <Run Text=" · "/>
+                                                <Run Text="{Binding ImportedAtUtc, StringFormat='yyyy-MM-dd', Mode=OneWay}"/>
+                                            </TextBlock>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+
+                            <!-- Workstream D1: watched folders (read-only). manifest.WatchedFolders
+                                 was previously surfaced in neither UI. Removal lands in D2.
+                                 The whole block hides when there are no watched folders. -->
+                            <StackPanel x:Name="WatchedFoldersSection"
+                                        Margin="0,10,0,0"
+                                        Visibility="Collapsed">
+                                <TextBlock Text="Watched folders"
+                                           Style="{StaticResource CaptionText}"
+                                           Foreground="{StaticResource TextPrimaryBrush}"
+                                           FontWeight="SemiBold"/>
+                                <ItemsControl x:Name="WatchedFoldersList"
+                                              Margin="0,4,0,0">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       ToolTip="{Binding}"
+                                                       Style="{StaticResource CaptionText}"
+                                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                                       Margin="0,1,0,0"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
                         </StackPanel>
 
                         <!-- Empty state shown in place of LibraryManagementSection
