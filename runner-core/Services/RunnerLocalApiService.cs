@@ -199,7 +199,13 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
                     .ToList();
             }
 
-            return Results.Ok(new { models });
+            // Workstream C: proactive embedding-model readiness for the Mac sidecar UI,
+            // which can't call ModelManagementService in-process the way the WPF runner
+            // does. Additive field — the models array is unchanged. False when no model
+            // service is wired (older test harnesses); they don't surface the hint.
+            var embeddingModelInstalled = _modelService?.IsEmbeddingModelInstalled(config) ?? false;
+
+            return Results.Ok(new { models, embeddingModelInstalled });
         });
 
         // M14: defense-in-depth recovery path for the embedding model. C2 made

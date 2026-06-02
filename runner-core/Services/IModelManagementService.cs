@@ -12,6 +12,13 @@ public interface IModelManagementService
     List<string> GetInstalledModelNames(PortableConfig config);
 
     /// <summary>
+    /// Returns true if the configured embedding model (<see cref="PortableConfig.EmbeddingModelName"/>)
+    /// is present in the installed-model set. Disk-truth based, so it is meaningful even before
+    /// Ollama is running. Tag-aware: a bare name matches its <c>:latest</c> tag and vice versa.
+    /// </summary>
+    bool IsEmbeddingModelInstalled(PortableConfig config);
+
+    /// <summary>
     /// Computes sizing warnings for installed models vs. current hardware.
     /// Returns human-readable warning strings (empty if no issues).
     /// </summary>

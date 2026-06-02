@@ -38,6 +38,29 @@ public sealed class ModelManagementService : IModelManagementService
             .ToList();
     }
 
+    public bool IsEmbeddingModelInstalled(PortableConfig config)
+    {
+        var wanted = NormalizeOllamaTag(config.EmbeddingModelName);
+        if (string.IsNullOrEmpty(wanted))
+        {
+            return false;
+        }
+
+        return GetInstalledModelNames(config)
+            .Any(name => string.Equals(NormalizeOllamaTag(name), wanted, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // Ollama treats "name" and "name:latest" as the same model on disk and on the wire.
+    // DiscoverModelsOnDisk emits "name:latest"; the user-facing PortableConfig default is the
+    // bare "nomic-embed-text". Normalize both sides before comparing so the readiness check
+    // doesn't read a present embedder as missing. (Mirrors PrepViewModel.NormalizeOllamaTag.)
+    private static string NormalizeOllamaTag(string? tag)
+    {
+        if (string.IsNullOrWhiteSpace(tag)) return string.Empty;
+        var trimmed = tag.Trim();
+        return trimmed.Contains(':', StringComparison.Ordinal) ? trimmed : $"{trimmed}:latest";
+    }
+
     public List<string> GetModelSizingWarnings(PortableConfig config)
     {
         var ramGb = _systemResources.GetTotalSystemRamGb();

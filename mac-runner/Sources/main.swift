@@ -122,6 +122,13 @@ final class RunnerViewModel: ObservableObject {
     @Published var createLibraryDialogPresented: Bool = false
     @Published var createLibraryName: String = ""
 
+    /// Workstream C: proactive embedding-model readiness, mirroring the WPF runner's
+    /// inline hint. Sourced from `GET /api/models` (`embeddingModelInstalled`) so the
+    /// readiness/tag-normalization logic stays server-side in ModelManagementService.
+    /// Defaults to `true` so the Documents UI doesn't flash a "missing" hint before the
+    /// first fetch completes.
+    @Published var embeddingModelInstalled: Bool = true
+
     private var process: Process?
     private var hostPort = 11434
 
@@ -579,6 +586,8 @@ final class RunnerViewModel: ObservableObject {
             // MAC8: pull the library list as soon as the sidecar is up so the
             // Documents section shows the active library without manual refresh.
             refreshLibraries()
+            // Workstream C: surface embedding-model readiness proactively at unlock.
+            refreshEmbeddingModelStatus()
         case .crashed(let message):
             networkApiBaseUrl = nil
             networkModeEnabled = false
@@ -1026,8 +1035,33 @@ final class RunnerViewModel: ObservableObject {
                 self.libraries = libs
                 self.activeLibraryId = activeId
                 self.activeLibrary = activeDetail
-                self.libraryStatus = libs.isEmpty ? "No libraries yet — Create one to ingest documents." : ""
+                // Zero-state guidance lives in the Documents body (DocumentsSection),
+                // not this transient caption — clear it on a successful refresh.
+                self.libraryStatus = ""
             }
+        }.resume()
+    }
+
+    /// Workstream C: fetch embedding-model readiness from the sidecar so the Documents
+    /// section can prompt a pull before an ingest fails. Mirrors the auth pattern of
+    /// `refreshLibraries()`; on any error it leaves the prior value (no false alarm).
+    func refreshEmbeddingModelStatus() {
+        guard let baseUrl = networkApiBaseUrl, let url = URL(string: "\(baseUrl)/api/models") else {
+            return
+        }
+        var req = URLRequest(url: url)
+        if let key = apiKeyForLocalApiRequest() {
+            req.addValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
+        URLSession.shared.dataTask(with: req) { [weak self] data, urlResponse, error in
+            guard let self, error == nil,
+                  let http = urlResponse as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                  let data,
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let installed = obj["embeddingModelInstalled"] as? Bool else {
+                return
+            }
+            DispatchQueue.main.async { self.embeddingModelInstalled = installed }
         }.resume()
     }
 
@@ -1261,6 +1295,8 @@ final class RunnerViewModel: ObservableObject {
                 self.libraryStatus = modelName.isEmpty
                     ? "Embedding model ready."
                     : "Embedding model ready: \(modelName)"
+                // Clear the readiness hint now that the embedder is present.
+                self.embeddingModelInstalled = true
             }
         }.resume()
     }
@@ -1722,6 +1758,29 @@ struct DocumentsSection: View {
                     Button("Pull embedding model") { vm.pullEmbeddingModel() }
                         .disabled(vm.libraryBusy)
                     Spacer()
+                }
+
+                // Workstream C: proactive embedding-model readiness, parity with the
+                // WPF runner. The "Pull embedding model" button above is the action.
+                if !vm.embeddingModelInstalled {
+                    Text("⚠ The embedding model isn't installed yet — use \u{201C}Pull embedding model\u{201D} above before adding files.")
+                        .font(.callout)
+                        .foregroundColor(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                // Workstream C: first-run zero-state guidance, parity with the WPF
+                // NoLibraryEmptyState numbered flow.
+                if vm.libraries.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Get started:").font(.callout).bold()
+                        Text("1. Create a library")
+                        Text("2. Add files (PDF, TXT, Markdown, JSON, CSV)")
+                        Text("3. Ask grounded questions")
+                    }
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+                    .padding(.top, 4)
                 }
 
                 if let detail = vm.activeLibrary, !detail.files.isEmpty {
