@@ -159,6 +159,17 @@ public sealed class PortableConfig
     /// </summary>
     public int ModelMaxOutputTokens { get; set; } = -1;
 
+    /// <summary>
+    /// Override for Ollama's top-level <c>think</c> control on chat requests (task #35).
+    /// Empty string = omit the field (the model's default behavior). <c>"off"</c> maps to
+    /// <c>think: false</c> (disable reasoning); <c>"low"</c> / <c>"medium"</c> / <c>"high"</c>
+    /// map to <c>think: "&lt;level&gt;"</c> reasoning effort (gpt-oss-style models). Omitted is
+    /// the only universally safe value — Ollama returns 400 if <c>think</c> is sent to a model
+    /// that does not declare thinking support. Unlike the other model knobs this is a top-level
+    /// request field, not an Ollama <c>option</c>.
+    /// </summary>
+    public string ModelThinkMode { get; set; } = "";
+
     // ── Network Mode (Runner LAN API) ────────────────────────────────────
 
     /// <summary>Enables Runner-hosted LAN API for remote clients on the local network.</summary>
