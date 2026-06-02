@@ -663,6 +663,35 @@ public sealed class RunnerLocalApiServiceTests
         await fixture.DisposeAsync();
     }
 
+    [Fact]
+    public async Task GetModels_ReportsEmbeddingModelInstalled_FromModelService()
+    {
+        var model = new FakeModelManagementService { EmbeddingModelInstalled = true };
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: false, modelService: model);
+        using var http = new HttpClient();
+
+        var json = await http.GetFromJsonAsync<JsonElement>($"{fixture.BaseUrl}/api/models");
+
+        Assert.True(json.TryGetProperty("models", out _));
+        Assert.True(json.GetProperty("embeddingModelInstalled").GetBoolean());
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task GetModels_ReportsEmbeddingModelMissing_WhenNotInstalled()
+    {
+        var model = new FakeModelManagementService { EmbeddingModelInstalled = false };
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: false, modelService: model);
+        using var http = new HttpClient();
+
+        var json = await http.GetFromJsonAsync<JsonElement>($"{fixture.BaseUrl}/api/models");
+
+        Assert.False(json.GetProperty("embeddingModelInstalled").GetBoolean());
+
+        await fixture.DisposeAsync();
+    }
+
     private sealed class RunnerLocalApiFixture : IAsyncDisposable
     {
         private readonly RunnerLocalApiService _service;
@@ -998,8 +1027,10 @@ public sealed class RunnerLocalApiServiceTests
         public int PullCallCount { get; private set; }
         public string? LastPulledHost { get; private set; }
         public string? LastPulledModelName { get; private set; }
+        public bool EmbeddingModelInstalled { get; set; }
 
         public List<string> GetInstalledModelNames(PortableConfig config) => new();
+        public bool IsEmbeddingModelInstalled(PortableConfig config) => EmbeddingModelInstalled;
         public List<string> GetModelSizingWarnings(PortableConfig config) => new();
         public bool IsSizingWarningDismissed(string ssdRoot) => true;
         public Task DismissSizingWarningAsync(string ssdRoot) => Task.CompletedTask;

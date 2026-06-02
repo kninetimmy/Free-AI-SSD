@@ -105,6 +105,59 @@ public sealed class ModelManagementServiceTests
         Assert.Contains(warnings, w => w.StartsWith("llama3:70b:", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void IsEmbeddingModelInstalled_BareConfigName_MatchesLatestTagOnDisk()
+    {
+        // Disk emits "nomic-embed-text:latest"; the PortableConfig default is the
+        // bare "nomic-embed-text". Tag normalization must treat them as equal.
+        using var tempRoot = new TempRoot();
+        WriteContentAddressedModelOnDisk(tempRoot.Path, "nomic-embed-text:latest", "embed-bytes");
+
+        using var http = new HttpClient(new StubHandler());
+        var service = new ModelManagementService(http, tempRoot.Path);
+
+        Assert.True(service.IsEmbeddingModelInstalled(new PortableConfig()));
+    }
+
+    [Fact]
+    public void IsEmbeddingModelInstalled_CaseInsensitiveMatch()
+    {
+        using var tempRoot = new TempRoot();
+        WriteContentAddressedModelOnDisk(tempRoot.Path, "nomic-embed-text:latest", "embed-bytes");
+
+        using var http = new HttpClient(new StubHandler());
+        var service = new ModelManagementService(http, tempRoot.Path);
+        var config = new PortableConfig { EmbeddingModelName = "Nomic-Embed-Text" };
+
+        Assert.True(service.IsEmbeddingModelInstalled(config));
+    }
+
+    [Fact]
+    public void IsEmbeddingModelInstalled_ModelAbsent_ReturnsFalse()
+    {
+        using var tempRoot = new TempRoot();
+        WriteContentAddressedModelOnDisk(tempRoot.Path, "llama3.2:1b", "chat-bytes");
+
+        using var http = new HttpClient(new StubHandler());
+        var service = new ModelManagementService(http, tempRoot.Path);
+
+        Assert.False(service.IsEmbeddingModelInstalled(new PortableConfig()));
+    }
+
+    [Fact]
+    public void IsEmbeddingModelInstalled_BlankConfigName_ReturnsFalse()
+    {
+        // A model is on disk, but no embedder is configured — nothing to match.
+        using var tempRoot = new TempRoot();
+        WriteContentAddressedModelOnDisk(tempRoot.Path, "nomic-embed-text:latest", "embed-bytes");
+
+        using var http = new HttpClient(new StubHandler());
+        var service = new ModelManagementService(http, tempRoot.Path);
+        var config = new PortableConfig { EmbeddingModelName = "  " };
+
+        Assert.False(service.IsEmbeddingModelInstalled(config));
+    }
+
     private static (string ModelTag, string ContentSha) WriteContentAddressedModelOnDisk(string root, string modelTag, string blobBody)
     {
         var modelsDir = Path.Combine(root, SsdLayout.Models);
