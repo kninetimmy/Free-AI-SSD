@@ -217,4 +217,37 @@ public class RagPromptBuilderTests
         Assert.Equal("query", output.Prompt);
         Assert.DoesNotContain("small neighbor", output.Prompt);
     }
+
+    [Fact]
+    public void Build_WithContext_RestrictsAnswerToProvidedContext()
+    {
+        var results = new List<RetrievalResult> { MakeResult("Plants use sunlight for energy.", 0.9) };
+
+        var output = RagPromptBuilder.Build("What is photosynthesis?", results);
+
+        Assert.True(output.UsedContext);
+        Assert.Contains("using ONLY the reference context", output.Prompt);
+    }
+
+    [Fact]
+    public void Build_WithContext_RequiresInlineCitations()
+    {
+        var results = new List<RetrievalResult> { MakeResult("Plants use sunlight for energy.", 0.9) };
+
+        var output = RagPromptBuilder.Build("What is photosynthesis?", results);
+
+        Assert.Contains("cite its source inline", output.Prompt);
+    }
+
+    [Fact]
+    public void Build_WithContext_InstructsExactRefusalWhenAnswerAbsent()
+    {
+        // The refusal phrase is asserted verbatim so it can't drift out of sync with
+        // the grounding contract (a future reword would fail this test deliberately).
+        var results = new List<RetrievalResult> { MakeResult("Plants use sunlight for energy.", 0.9) };
+
+        var output = RagPromptBuilder.Build("What is photosynthesis?", results);
+
+        Assert.Contains("That information is not in the provided context.", output.Prompt);
+    }
 }

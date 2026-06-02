@@ -59,7 +59,13 @@ public static class RagPromptBuilder
 
         // Pass 3 — emit in the supplied order so neighbors stay adjacent to their hit.
         var sb = new StringBuilder();
-        sb.AppendLine("Use the following reference context when answering. If context is insufficient, say so.");
+        // Grounding enforcement (X22): require the model to answer only from the
+        // supplied context, cite inline using the bracketed labels CitationBuilder
+        // already prepends to each block, and refuse with an exact phrase when the
+        // answer isn't present — rather than the prior soft "say so if insufficient".
+        sb.AppendLine("Answer the user's question using ONLY the reference context below.");
+        sb.AppendLine("After each factual claim, cite its source inline using the exact bracketed label shown with that context, e.g. [guide.pdf §Engine Start p.12].");
+        sb.AppendLine("If the reference context does not contain the answer, reply exactly: \"That information is not in the provided context.\" Do not use outside knowledge or guess.");
         sb.AppendLine();
         sb.AppendLine("Reference context:");
 
