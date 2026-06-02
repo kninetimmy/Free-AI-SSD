@@ -8,9 +8,10 @@ using Xunit;
 namespace FreeAiSsd.Tests.Retrieval;
 
 /// <summary>
-/// Stage 1 regression gate for the RAG pipeline overhaul. Measures
-/// recall@5 / recall@20 of the dense retriever against a hand-authored
-/// golden set over public-domain fixtures.
+/// Regression gate for the RAG pipeline overhaul. Measures recall@5 /
+/// recall@20 of the shipped hybrid retriever (dense + BM25 lexical, RRF-fused
+/// — the product default) against a hand-authored golden set over
+/// public-domain fixtures.
 ///
 /// Two gates land here:
 ///   - <c>RecallAt5_*</c> / <c>RecallAt20_*</c> — committed corpus +
@@ -191,7 +192,10 @@ public sealed class RetrievalEvalHarness : IDisposable
         foreach (var entry in golden)
         {
             var queryEmbedding = await embeddingClient.EmbedAsync(ollamaHost, model, entry.Question, CancellationToken.None);
-            var results = vectorIndex.Search(manifest.Id, queryEmbedding, topK);
+            // Measure the shipped retrieval path: hybrid (dense + BM25 lexical, RRF-fused)
+            // is the product default, so the recall gate evaluates what users actually get.
+            var results = vectorIndex.SearchHybrid(
+                manifest.Id, queryEmbedding, entry.Question, topK, config.MinimumSimilarityThreshold, null);
             // Empty CorrectPages → filename-only match (for non-paginated formats like .md/.txt
             // where DocumentParser produces a single segment with Page=null). A non-empty
             // expected_section further requires the retrieved chunk to land in that section.
