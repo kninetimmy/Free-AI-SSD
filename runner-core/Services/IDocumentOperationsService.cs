@@ -47,6 +47,22 @@ public interface IDocumentOperationsService
     Task<bool> AddWatchedFolderAsync(DocumentLibraryManifest library, string folderPath);
 
     /// <summary>
+    /// Removes a watched folder from the library manifest. Returns true if it was present.
+    /// </summary>
+    Task<bool> RemoveWatchedFolderAsync(DocumentLibraryManifest library, string folderPath);
+
+    /// <summary>
+    /// Renames a library (manifest + registry). Returns the updated manifest.
+    /// </summary>
+    Task<DocumentLibraryManifest> RenameLibraryAsync(string libraryId, string newName);
+
+    /// <summary>
+    /// Deletes a library, purging its folder and index. If it was the active library,
+    /// clears the active selection in config and registry.
+    /// </summary>
+    Task DeleteLibraryAsync(PortableConfig config, string ssdRoot, string libraryId);
+
+    /// <summary>
     /// Re-ingests all files found in the library's watched folders.
     /// </summary>
     Task SweepFoldersAsync(DocumentLibraryManifest library, string host,
