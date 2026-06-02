@@ -3,9 +3,12 @@ namespace FreeAiSsd.Shared.Documents;
 public static class RagPromptBuilder
 {
     /// <summary>
-    /// Builds the augmented prompt from retrieval results. When <paramref name="librarySearched"/>
-    /// is true and no results are provided, a "No relevant documents found" note is included
-    /// so the LLM knows the library was consulted but yielded nothing.
+    /// Builds the augmented prompt from retrieval results. Results are consumed in the
+    /// order supplied — the retriever owns ranking (dense Search returns score-descending;
+    /// hybrid SearchHybrid returns fused-rank order), so this builder must not re-sort.
+    /// When <paramref name="librarySearched"/> is true and no results are provided, a
+    /// "No relevant documents found" note is included so the LLM knows the library was
+    /// consulted but yielded nothing.
     /// </summary>
     public static RagPromptBuildResult Build(string userPrompt, IReadOnlyList<RetrievalResult> retrieval, int maxContextChars = 5000, bool librarySearched = false)
     {
@@ -27,7 +30,7 @@ public static class RagPromptBuilder
 
         var usedChunks = new List<DocumentChunk>();
         var currentChars = 0;
-        foreach (var result in retrieval.OrderByDescending(r => r.Score))
+        foreach (var result in retrieval)
         {
             var citation = CitationBuilder.Build(result.Chunk);
             var block = $"{citation}\n{result.Chunk.Text}\n\n";

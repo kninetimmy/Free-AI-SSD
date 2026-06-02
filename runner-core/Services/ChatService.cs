@@ -186,8 +186,11 @@ public sealed class ChatService : IChatService
                 var embedder = new EmbeddingClient(_http);
                 var queryEmbedding = await embedder.EmbedAsync(host, config.EmbeddingModelName, userPrompt);
                 index.CheckProvenance(manifest.Id, config.EmbeddingModelName, queryEmbedding.Length, _logger);
-                var results = index.Search(manifest.Id, queryEmbedding, config.RetrievalTopK,
-                    config.MinimumSimilarityThreshold, _logger);
+                var results = config.HybridRetrievalEnabled
+                    ? index.SearchHybrid(manifest.Id, queryEmbedding, userPrompt, config.RetrievalTopK,
+                        config.MinimumSimilarityThreshold, _logger)
+                    : index.Search(manifest.Id, queryEmbedding, config.RetrievalTopK,
+                        config.MinimumSimilarityThreshold, _logger);
                 var rag = RagPromptBuilder.Build(userPrompt, results, maxContextChars: 4500, librarySearched: true);
 
                 if (rag.UsedContext)
