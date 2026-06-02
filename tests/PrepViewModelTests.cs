@@ -437,6 +437,8 @@ public class PrepViewModelTests
         Assert.True(config.AutoSendVoiceInput);
         Assert.True(config.PttActivationSoundEnabled);
         Assert.True(config.PttOverlayEnabled);
+        // #67: the PrepApp view auto-advances Finalize → Done off this exact
+        // success status, so this assertion doubles as the sentinel guard.
         Assert.Equal("Complete", vm.StatusText);
         Assert.Equal(string.Empty, vm.ProfileSelectionWarning);
     }
@@ -944,6 +946,10 @@ public class PrepViewModelTests
         _driveService.Verify(d => d.FormatAsync("E:\\", It.IsAny<string>(), "NTFS", It.IsAny<Action<string>?>(), It.IsAny<CancellationToken>()), Times.Once);
         _driveService.Verify(d => d.EnsureSsdStructure("E:\\"), Times.Once);
         _modelService.Verify(m => m.SaveConfigAsync(It.IsAny<string>(), It.IsAny<PortableConfig>()), Times.AtLeastOnce);
+        // #67: the PrepApp view auto-advances FormatSetup → Models off this
+        // exact success status. Guard the sentinel so a VM-side rename breaks
+        // here rather than silently dropping the auto-advance.
+        Assert.Equal("Drive prepared", vm.StatusText);
     }
 
     // ───── MAC10a: PrepTargets → filesystem mapping ─────

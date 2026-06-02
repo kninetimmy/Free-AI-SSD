@@ -947,7 +947,43 @@ public partial class MainWindow : Window
             case nameof(PrepViewModel.CanInitiateFreshFormat):
                 UpdateFooterState();
                 break;
+            case nameof(PrepViewModel.StatusText):
+                MaybeAutoAdvanceAfterOperation();
+                break;
         }
+    }
+
+    /// <summary>
+    /// #67: auto-advance the wizard when a long-running operation reports
+    /// success. The shared <see cref="PrepViewModel"/> exposes no
+    /// "operation complete" event (frozen by #301), so the view keys off
+    /// the two terminal success values of <see cref="PrepViewModel.StatusText"/>,
+    /// each unique to one success path: "Drive prepared" (format) and
+    /// "Complete" (finalize). Every failure / blocked / cancel branch sets a
+    /// different StatusText, so a hop never fires on those. The
+    /// <see cref="_currentStep"/> gate excludes the other "Drive prepared"
+    /// producers — Start-over and Reformat-to-NTFS run from the Drive step —
+    /// and keeps Check-readiness and model pulls from advancing.
+    /// </summary>
+    private void MaybeAutoAdvanceAfterOperation()
+    {
+        (PrepFlowStep From, PrepFlowStep To)? hop = (_viewModel.StatusText, _currentStep) switch
+        {
+            ("Drive prepared", PrepFlowStep.FormatSetup) => (PrepFlowStep.FormatSetup, PrepFlowStep.Models),
+            ("Complete", PrepFlowStep.Finalize) => (PrepFlowStep.Finalize, PrepFlowStep.Done),
+            _ => null,
+        };
+        if (hop is null) return;
+
+        // Defer off the VM's synchronous property-set call stack (finalize
+        // sets "Complete" immediately before a modal info dialog), mirroring
+        // the UpdateFooterState dispatcher guard. Re-check the step at
+        // dispatch time in case a manual Back/Continue moved us first.
+        var (from, to) = hop.Value;
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (_currentStep == from) GoToStep(to);
+        }));
     }
 
     private void OnBackClick(object sender, RoutedEventArgs e)
