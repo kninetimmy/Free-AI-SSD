@@ -136,6 +136,11 @@ final class RunnerViewModel: ObservableObject {
     @Published var libraryBusy: Bool = false
     @Published var createLibraryDialogPresented: Bool = false
     @Published var createLibraryName: String = ""
+    // D2: rename input sheet + delete confirmation, parity with the WPF runner's
+    // rename dialog and delete-confirm MessageBox.
+    @Published var renameLibraryDialogPresented: Bool = false
+    @Published var renameLibraryName: String = ""
+    @Published var deleteLibraryConfirmPresented: Bool = false
 
     /// Workstream C: proactive embedding-model readiness, mirroring the WPF runner's
     /// inline hint. Sourced from `GET /api/models` (`embeddingModelInstalled`) so the
@@ -1377,6 +1382,123 @@ final class RunnerViewModel: ObservableObject {
         }.resume()
     }
 
+    // D2: stop watching a folder. Inverse of pickAndAddWatchedFolder — DELETE the
+    // folder by path on the active library, then refresh.
+    func removeWatchedFolder(path: String) {
+        guard let activeId = activeLibraryId else { return }
+        guard let baseUrl = networkApiBaseUrl,
+              let url = URL(string: "\(baseUrl)/api/library/\(activeId)/folders") else {
+            libraryStatus = "Start Network Mode first."
+            return
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let key = apiKeyForLocalApiRequest() { req.addValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["path": path])
+
+        libraryBusy = true
+        libraryStatus = "Removing watched folder…"
+        URLSession.shared.dataTask(with: req) { [weak self] data, urlResponse, error in
+            guard let self else { return }
+            DispatchQueue.main.async { self.libraryBusy = false }
+            if let http = urlResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                let msg = RunnerChatErrorMessage.decode(statusCode: http.statusCode, body: data)
+                DispatchQueue.main.async { self.libraryStatus = msg }
+                return
+            }
+            if error != nil {
+                DispatchQueue.main.async { self.libraryStatus = "Remove folder failed: \(error!.localizedDescription)" }
+                return
+            }
+            DispatchQueue.main.async {
+                self.libraryStatus = "Watched folder removed."
+                self.refreshLibraries()
+            }
+        }.resume()
+    }
+
+    // D2: rename the active library via PATCH /api/library/{id}.
+    func renameLibrary(name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard let activeId = activeLibraryId else {
+            libraryStatus = "Create or select a library first."
+            return
+        }
+        guard let baseUrl = networkApiBaseUrl,
+              let url = URL(string: "\(baseUrl)/api/library/\(activeId)") else {
+            libraryStatus = "Start Network Mode first."
+            return
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "PATCH"
+        req.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let key = apiKeyForLocalApiRequest() { req.addValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["name": trimmed])
+
+        libraryBusy = true
+        libraryStatus = "Renaming library…"
+        URLSession.shared.dataTask(with: req) { [weak self] data, urlResponse, error in
+            guard let self else { return }
+            DispatchQueue.main.async { self.libraryBusy = false }
+            if let http = urlResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                let msg = RunnerChatErrorMessage.decode(statusCode: http.statusCode, body: data)
+                DispatchQueue.main.async { self.libraryStatus = msg }
+                return
+            }
+            if error != nil {
+                DispatchQueue.main.async { self.libraryStatus = "Rename failed: \(error!.localizedDescription)" }
+                return
+            }
+            DispatchQueue.main.async {
+                self.libraryStatus = "Library renamed."
+                self.refreshLibraries()
+            }
+        }.resume()
+    }
+
+    // D2: delete the active library (folder + index) via DELETE /api/library/{id}.
+    // The response carries the refreshed list with the active selection cleared.
+    func deleteActiveLibrary() {
+        guard let activeId = activeLibraryId else {
+            libraryStatus = "Create or select a library first."
+            return
+        }
+        guard let baseUrl = networkApiBaseUrl,
+              let url = URL(string: "\(baseUrl)/api/library/\(activeId)") else {
+            libraryStatus = "Start Network Mode first."
+            return
+        }
+
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        if let key = apiKeyForLocalApiRequest() { req.addValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+
+        libraryBusy = true
+        libraryStatus = "Deleting library…"
+        URLSession.shared.dataTask(with: req) { [weak self] data, urlResponse, error in
+            guard let self else { return }
+            DispatchQueue.main.async { self.libraryBusy = false }
+            if let http = urlResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                let msg = RunnerChatErrorMessage.decode(statusCode: http.statusCode, body: data)
+                DispatchQueue.main.async { self.libraryStatus = msg }
+                return
+            }
+            if error != nil {
+                DispatchQueue.main.async { self.libraryStatus = "Delete failed: \(error!.localizedDescription)" }
+                return
+            }
+            DispatchQueue.main.async {
+                self.persistActiveLibraryId(nil)
+                self.refreshLibraries()
+                self.libraryStatus = "Library deleted."
+            }
+        }.resume()
+    }
+
     /// Buffered NDJSON parser for /api/library/{id}/files and sweep/rebuild
     /// responses. URLSession's streaming-bytes API is macOS 12+, but the
     /// MAC1 baseline pins macOS 11; buffer the full response and replay
@@ -1698,6 +1820,15 @@ struct ContentView: View {
         .frame(minWidth: 720, minHeight: 640)
         .sheet(isPresented: $vm.unlockDialogPresented) { UnlockSheet(vm: vm) }
         .sheet(isPresented: $vm.createLibraryDialogPresented) { CreateLibrarySheet(vm: vm) }
+        .sheet(isPresented: $vm.renameLibraryDialogPresented) { RenameLibrarySheet(vm: vm) }
+        .confirmationDialog(
+            "Delete this library and all its indexed files? This cannot be undone.",
+            isPresented: $vm.deleteLibraryConfirmPresented,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) { vm.deleteActiveLibrary() }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 }
 
@@ -1755,6 +1886,15 @@ struct DocumentsSection: View {
                         vm.createLibraryDialogPresented = true
                     }
                     .disabled(vm.libraryBusy)
+                    Button("Rename") {
+                        vm.renameLibraryName = vm.activeLibrary?.name ?? ""
+                        vm.renameLibraryDialogPresented = true
+                    }
+                    .disabled(vm.libraryBusy || vm.activeLibraryId == nil)
+                    Button("Delete") {
+                        vm.deleteLibraryConfirmPresented = true
+                    }
+                    .disabled(vm.libraryBusy || vm.activeLibraryId == nil)
                     Spacer()
                 }
                 HStack {
@@ -1826,21 +1966,27 @@ struct DocumentsSection: View {
                     .frame(maxHeight: 120)
                 }
 
-                // Workstream D1: watched folders (read-only), parity with the WPF
-                // runner. manifest.WatchedFolders was surfaced in neither UI before;
-                // removal lands in D2.
+                // Workstream D1: watched folders, parity with the WPF runner.
+                // D2: each row gains an inline Remove button.
                 if let detail = vm.activeLibrary, !detail.watchedFolders.isEmpty {
                     Text("Watched folders")
                         .font(.caption)
                         .foregroundColor(.secondary)
                     VStack(alignment: .leading, spacing: 1) {
                         ForEach(detail.watchedFolders, id: \.self) { folder in
-                            Text(folder)
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .help(folder)
+                            HStack {
+                                Text(folder)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .help(folder)
+                                Spacer()
+                                Button("Remove") { vm.removeWatchedFolder(path: folder) }
+                                    .buttonStyle(.borderless)
+                                    .font(.caption)
+                                    .disabled(vm.libraryBusy)
+                            }
                         }
                     }
                 }
@@ -1871,6 +2017,35 @@ struct CreateLibrarySheet: View {
                 }
                 .keyboardShortcut(.defaultAction)
                 .disabled(vm.createLibraryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 360)
+    }
+}
+
+struct RenameLibrarySheet: View {
+    @ObservedObject var vm: RunnerViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Rename library").font(.title3)
+            TextField("Library name", text: $vm.renameLibraryName)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    vm.renameLibraryDialogPresented = false
+                    vm.renameLibraryName = ""
+                }
+                Button("Rename") {
+                    let name = vm.renameLibraryName
+                    vm.renameLibraryDialogPresented = false
+                    vm.renameLibraryName = ""
+                    vm.renameLibrary(name: name)
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(vm.renameLibraryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(20)
