@@ -453,6 +453,18 @@
                                     Margin="10,0,0,0"
                                     Click="CreateLibrary_Click"
                                     ToolTip="Create a new empty document library with the typed name."/>
+                            <Button x:Name="RenameLibraryButton"
+                                    Content="Rename"
+                                    Style="{StaticResource GhostSecondaryButton}"
+                                    Margin="10,0,0,0"
+                                    Click="RenameLibrary_Click"
+                                    ToolTip="Rename the selected library."/>
+                            <Button x:Name="DeleteLibraryButton"
+                                    Content="Delete"
+                                    Style="{StaticResource GhostSecondaryButton}"
+                                    Margin="10,0,0,0"
+                                    Click="DeleteLibrary_Click"
+                                    ToolTip="Delete the selected library and all its indexed files."/>
                         </StackPanel>
                         <!-- Library management surface — Mac-parity §B2:
                              gate the whole block behind "library is selected".
@@ -572,12 +584,26 @@
                                               Margin="0,4,0,0">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <TextBlock Text="{Binding}"
-                                                       TextTrimming="CharacterEllipsis"
-                                                       ToolTip="{Binding}"
-                                                       Style="{StaticResource CaptionText}"
-                                                       Foreground="{StaticResource TextSecondaryBrush}"
-                                                       Margin="0,1,0,0"/>
+                                            <Grid Margin="0,1,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           ToolTip="{Binding}"
+                                                           VerticalAlignment="Center"
+                                                           Style="{StaticResource CaptionText}"
+                                                           Foreground="{StaticResource TextSecondaryBrush}"/>
+                                                <Button Grid.Column="1"
+                                                        Content="Remove"
+                                                        Margin="8,0,0,0"
+                                                        Padding="6,1"
+                                                        Style="{StaticResource GhostSecondaryButton}"
+                                                        Click="RemoveWatchedFolder_Click"
+                                                        ToolTip="Stop watching this folder."/>
+                                            </Grid>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
