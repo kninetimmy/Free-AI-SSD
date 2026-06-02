@@ -1821,13 +1821,15 @@ struct ContentView: View {
         .sheet(isPresented: $vm.unlockDialogPresented) { UnlockSheet(vm: vm) }
         .sheet(isPresented: $vm.createLibraryDialogPresented) { CreateLibrarySheet(vm: vm) }
         .sheet(isPresented: $vm.renameLibraryDialogPresented) { RenameLibrarySheet(vm: vm) }
-        .confirmationDialog(
-            "Delete this library and all its indexed files? This cannot be undone.",
-            isPresented: $vm.deleteLibraryConfirmPresented,
-            titleVisibility: .visible
-        ) {
-            Button("Delete", role: .destructive) { vm.deleteActiveLibrary() }
-            Button("Cancel", role: .cancel) {}
+        // Older Alert API, not confirmationDialog/Button(role:) — those are macOS 12+
+        // and the mac-runner targets the macOS 11 (MAC1) baseline.
+        .alert(isPresented: $vm.deleteLibraryConfirmPresented) {
+            Alert(
+                title: Text("Delete library"),
+                message: Text("Delete this library and all its indexed files? This cannot be undone."),
+                primaryButton: .destructive(Text("Delete")) { vm.deleteActiveLibrary() },
+                secondaryButton: .cancel()
+            )
         }
     }
 }
