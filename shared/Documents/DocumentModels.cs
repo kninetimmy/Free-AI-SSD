@@ -74,6 +74,13 @@ public sealed class RetrievalResult
 {
     public DocumentChunk Chunk { get; set; } = new();
     public double Score { get; set; }
+    /// <summary>
+    /// True when this chunk was pulled in by neighbor expansion for contiguous context
+    /// rather than matched by retrieval. Neighbors carry no score and don't count toward
+    /// topK; the prompt builder keeps them adjacent to their hit but lets matched chunks
+    /// claim the context budget first. False for retrieval matches.
+    /// </summary>
+    public bool IsNeighbor { get; set; }
 }
 
 public sealed class ParsedDocument

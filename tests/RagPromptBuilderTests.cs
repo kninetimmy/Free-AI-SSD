@@ -4,11 +4,14 @@ namespace FreeAiSsd.Tests;
 
 public class RagPromptBuilderTests
 {
-    private static RetrievalResult MakeResult(string text, double score, string fileName = "doc.txt", int? page = null)
+    private static RetrievalResult MakeResult(
+        string text, double score, string fileName = "doc.txt", int? page = null,
+        int chunkIndex = 0, bool isNeighbor = false)
     {
         return new RetrievalResult
         {
             Score = score,
+            IsNeighbor = isNeighbor,
             Chunk = new DocumentChunk
             {
                 LibraryId = "lib1",
@@ -17,7 +20,8 @@ public class RagPromptBuilderTests
                 Text = text,
                 TextLength = text.Length,
                 Sha256 = "abc",
-                Page = page
+                Page = page,
+                ChunkIndex = chunkIndex
             }
         };
     }
@@ -134,5 +138,83 @@ public class RagPromptBuilderTests
 
         Assert.False(output.UsedContext);
         Assert.Equal("query", output.Prompt);
+    }
+
+    [Fact]
+    public void Build_HitPriority_NeighborNeverDisplacesItsHit()
+    {
+        // Reading order puts a large preceding neighbor before the small matched chunk.
+        // The neighbor appears first, but matched chunks claim the budget first, so the
+        // hit must survive and the oversized neighbor must be dropped.
+        var results = new List<RetrievalResult>
+        {
+            MakeResult(new string('N', 3000), 0, "a.txt", chunkIndex: 0, isNeighbor: true),
+            MakeResult("THE ANSWER", 0.9, "a.txt", chunkIndex: 1, isNeighbor: false),
+        };
+
+        var output = RagPromptBuilder.Build("query", results, maxContextChars: 2000);
+
+        Assert.True(output.UsedContext);
+        Assert.Contains("THE ANSWER", output.Prompt);
+        Assert.DoesNotContain(new string('N', 3000), output.Prompt);
+        Assert.Single(output.Sources); // only the matched chunk is a source
+    }
+
+    [Fact]
+    public void Build_NeighborsStayAdjacentToHit_InReadingOrder()
+    {
+        var results = new List<RetrievalResult>
+        {
+            MakeResult("preceding context", 0, "a.txt", chunkIndex: 0, isNeighbor: true),
+            MakeResult("matched chunk", 0.9, "a.txt", chunkIndex: 1, isNeighbor: false),
+            MakeResult("following context", 0, "a.txt", chunkIndex: 2, isNeighbor: true),
+        };
+
+        var output = RagPromptBuilder.Build("query", results, maxContextChars: 5000);
+
+        var pre = output.Prompt.IndexOf("preceding context");
+        var hit = output.Prompt.IndexOf("matched chunk");
+        var post = output.Prompt.IndexOf("following context");
+        Assert.True(pre >= 0 && hit >= 0 && post >= 0);
+        Assert.True(pre < hit && hit < post, "neighbors must stay adjacent to their hit in reading order");
+        // Neighbors are context, not matches — only the hit is cited.
+        Assert.Single(output.Sources);
+    }
+
+    [Fact]
+    public void Build_NeighborsCountTowardBudget_DropOverflowNeighbors()
+    {
+        // The hit fits; one neighbor fits alongside it; the second overflows the budget.
+        var results = new List<RetrievalResult>
+        {
+            MakeResult("hit", 0.9, "a.txt", chunkIndex: 1, isNeighbor: false),
+            MakeResult(new string('A', 800), 0, "a.txt", chunkIndex: 2, isNeighbor: true),
+            MakeResult(new string('B', 800), 0, "a.txt", chunkIndex: 3, isNeighbor: true),
+        };
+
+        var output = RagPromptBuilder.Build("query", results, maxContextChars: 1100);
+
+        Assert.True(output.UsedContext);
+        Assert.Contains("hit", output.Prompt);
+        var hasA = output.Prompt.Contains(new string('A', 800));
+        var hasB = output.Prompt.Contains(new string('B', 800));
+        Assert.True(hasA ^ hasB, "exactly one neighbor should fit within the budget");
+    }
+
+    [Fact]
+    public void Build_NeighborWithoutAFittingHit_FallsBackToBarePrompt()
+    {
+        // The only matched chunk is too large; a neighbor must never be shown on its own.
+        var results = new List<RetrievalResult>
+        {
+            MakeResult(new string('H', 3000), 0.9, "a.txt", chunkIndex: 1, isNeighbor: false),
+            MakeResult("small neighbor", 0, "a.txt", chunkIndex: 2, isNeighbor: true),
+        };
+
+        var output = RagPromptBuilder.Build("query", results, maxContextChars: 100);
+
+        Assert.False(output.UsedContext);
+        Assert.Equal("query", output.Prompt);
+        Assert.DoesNotContain("small neighbor", output.Prompt);
     }
 }

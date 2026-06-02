@@ -191,6 +191,10 @@ public sealed class ChatService : IChatService
                         config.MinimumSimilarityThreshold, _logger)
                     : index.Search(manifest.Id, queryEmbedding, config.RetrievalTopK,
                         config.MinimumSimilarityThreshold, _logger);
+                if (config.RetrievalNeighborRadius > 0 && results.Count > 0)
+                {
+                    results = index.ExpandNeighbors(manifest.Id, results, config.RetrievalNeighborRadius);
+                }
                 var rag = RagPromptBuilder.Build(userPrompt, results, maxContextChars: 4500, librarySearched: true);
 
                 if (rag.UsedContext)

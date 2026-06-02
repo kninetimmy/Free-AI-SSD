@@ -822,6 +822,155 @@ LIMIT $limit";
     }
 
     /// <summary>
+    /// Expands a ranked hit list with neighboring chunks so the model reads contiguous
+    /// text. For each hit, pulls <c>chunk_index ± 1..radius</c> within the same file,
+    /// bounded to the hit's <c>section</c> when it has one (else the same <c>page</c>),
+    /// clamped at file edges. Overlapping windows merge into contiguous runs; runs are
+    /// ordered by their best (earliest-ranked) hit, read in ascending chunk order within
+    /// a run. Neighbors are flagged <see cref="RetrievalResult.IsNeighbor"/> and carry no
+    /// score — they're context, not matches, and topK was already applied upstream.
+    /// Returns the hits unchanged (as a fresh list) when <paramref name="radius"/> &lt;= 0.
+    /// </summary>
+    public List<RetrievalResult> ExpandNeighbors(string libraryId, IReadOnlyList<RetrievalResult> hits, int radius)
+    {
+        if (radius <= 0 || hits.Count == 0)
+            return hits.ToList();
+
+        // Rank each distinct hit by its position; keep the first (best-ranked) occurrence
+        // and its original result so the hit's score survives.
+        var rankByKey = new Dictionary<(string Path, int Index), int>();
+        var items = new Dictionary<(string Path, int Index), RetrievalResult>();
+        for (var i = 0; i < hits.Count; i++)
+        {
+            var key = (hits[i].Chunk.StoredRelativePath, hits[i].Chunk.ChunkIndex);
+            if (rankByKey.ContainsKey(key)) continue;
+            rankByKey[key] = i;
+            items[key] = hits[i];
+        }
+
+        using var conn = OpenConnection();
+
+        // One range fetch per file covers every hit's window in that file.
+        foreach (var fileGroup in hits.GroupBy(h => h.Chunk.StoredRelativePath))
+        {
+            var path = fileGroup.Key;
+            var indices = fileGroup.Select(h => h.Chunk.ChunkIndex).ToList();
+            var lo = Math.Max(0, indices.Min() - radius);
+            var hi = indices.Max() + radius;
+            var rangeChunks = LoadChunksInRange(conn, libraryId, path, lo, hi);
+
+            foreach (var hit in fileGroup)
+            {
+                var hc = hit.Chunk;
+                for (var delta = -radius; delta <= radius; delta++)
+                {
+                    if (delta == 0) continue;
+                    var j = hc.ChunkIndex + delta;
+                    if (j < 0) continue;
+                    var key = (path, j);
+                    if (items.ContainsKey(key)) continue;            // already a hit or added
+                    if (!rangeChunks.TryGetValue(j, out var nb)) continue; // file edge / gap
+                    // Bound to the hit's section when it has one, else to its page.
+                    var inBounds = hc.Section.Length > 0
+                        ? string.Equals(nb.Section, hc.Section, StringComparison.Ordinal)
+                        : nb.Page == hc.Page;
+                    if (!inBounds) continue;
+                    items[key] = new RetrievalResult { Chunk = nb, Score = 0, IsNeighbor = true };
+                }
+            }
+        }
+
+        // Split each file's included chunks into contiguous runs, then order runs by their
+        // best hit's rank so the strongest context leads.
+        var runs = new List<(int RunRank, string Path, int FirstIndex, List<RetrievalResult> Items)>();
+        foreach (var fileGroup in items.Values.GroupBy(r => r.Chunk.StoredRelativePath))
+        {
+            var sorted = fileGroup.OrderBy(r => r.Chunk.ChunkIndex).ToList();
+            var run = new List<RetrievalResult>();
+            foreach (var item in sorted)
+            {
+                if (run.Count > 0 && item.Chunk.ChunkIndex != run[^1].Chunk.ChunkIndex + 1)
+                {
+                    runs.Add(BuildRun(fileGroup.Key, run, rankByKey));
+                    run = new List<RetrievalResult>();
+                }
+                run.Add(item);
+            }
+            if (run.Count > 0)
+                runs.Add(BuildRun(fileGroup.Key, run, rankByKey));
+        }
+
+        var ordered = new List<RetrievalResult>(items.Count);
+        foreach (var run in runs
+            .OrderBy(r => r.RunRank)
+            .ThenBy(r => r.Path, StringComparer.Ordinal)
+            .ThenBy(r => r.FirstIndex))
+        {
+            ordered.AddRange(run.Items);
+        }
+
+        return ordered;
+    }
+
+    private static (int RunRank, string Path, int FirstIndex, List<RetrievalResult> Items) BuildRun(
+        string path, List<RetrievalResult> run, Dictionary<(string Path, int Index), int> rankByKey)
+    {
+        var runRank = int.MaxValue;
+        foreach (var item in run)
+        {
+            if (rankByKey.TryGetValue((path, item.Chunk.ChunkIndex), out var rank) && rank < runRank)
+                runRank = rank;
+        }
+        return (runRank, path, run[0].Chunk.ChunkIndex, run);
+    }
+
+    /// <summary>
+    /// Loads the chunks of a single file whose <c>chunk_index</c> falls in
+    /// [<paramref name="lo"/>, <paramref name="hi"/>], keyed by index. Used by neighbor
+    /// expansion to hydrate context chunks; no embedding is read (neighbors aren't scored).
+    /// </summary>
+    private static Dictionary<int, DocumentChunk> LoadChunksInRange(
+        SqliteConnection conn, string libraryId, string storedRelativePath, int lo, int hi)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+SELECT source_file_name, stored_relative_path, page, chunk_index, text, text_length, sha256,
+       section, heading_path, char_offset_start, char_offset_end, content_type
+FROM chunks
+WHERE library_id = $libraryId AND stored_relative_path = $path
+  AND chunk_index BETWEEN $lo AND $hi";
+        cmd.Parameters.AddWithValue("$libraryId", libraryId);
+        cmd.Parameters.AddWithValue("$path", storedRelativePath);
+        cmd.Parameters.AddWithValue("$lo", lo);
+        cmd.Parameters.AddWithValue("$hi", hi);
+
+        var byIndex = new Dictionary<int, DocumentChunk>();
+        using var reader = cmd.ExecuteReader();
+        while (reader.Read())
+        {
+            var chunk = new DocumentChunk
+            {
+                LibraryId = libraryId,
+                SourceFileName = reader.GetString(0),
+                StoredRelativePath = reader.GetString(1),
+                Page = reader.IsDBNull(2) ? null : reader.GetInt32(2),
+                ChunkIndex = reader.GetInt32(3),
+                Text = reader.GetString(4),
+                TextLength = reader.GetInt32(5),
+                Sha256 = reader.GetString(6),
+                Section = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
+                HeadingPath = reader.IsDBNull(8) ? string.Empty : reader.GetString(8),
+                CharOffsetStart = reader.IsDBNull(9) ? 0 : reader.GetInt32(9),
+                CharOffsetEnd = reader.IsDBNull(10) ? 0 : reader.GetInt32(10),
+                ContentType = reader.IsDBNull(11) ? string.Empty : reader.GetString(11)
+            };
+            byIndex[chunk.ChunkIndex] = chunk;
+        }
+
+        return byIndex;
+    }
+
+    /// <summary>
     /// Returns the total number of chunks stored for a given library.
     /// </summary>
     public int GetChunkCount(string libraryId)
