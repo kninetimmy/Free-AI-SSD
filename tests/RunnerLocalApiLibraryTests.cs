@@ -372,6 +372,135 @@ public sealed class RunnerLocalApiLibraryTests : IDisposable
         authed.EnsureSuccessStatusCode();
     }
 
+    // ---- D2: rename / delete library + remove watched folder ----
+
+    [Fact]
+    public async Task RenameLibrary_UpdatesName()
+    {
+        await using var fixture = await Fixture.StartAsync(_tempRoot);
+        var libraryId = await CreateLibraryAsync(fixture, "Before");
+
+        var resp = await fixture.Http.PatchAsJsonAsync(
+            $"{fixture.BaseUrl}/api/library/{libraryId}", new { name = "After" });
+
+        resp.EnsureSuccessStatusCode();
+        var body = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("After", body.GetProperty("library").GetProperty("name").GetString());
+
+        var list = await (await fixture.Http.GetAsync($"{fixture.BaseUrl}/api/library"))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        var names = list.GetProperty("libraries").EnumerateArray()
+            .Select(x => x.GetProperty("name").GetString()).ToList();
+        Assert.Contains("After", names);
+        Assert.DoesNotContain("Before", names);
+    }
+
+    [Fact]
+    public async Task RenameLibrary_DuplicateName_Returns409()
+    {
+        await using var fixture = await Fixture.StartAsync(_tempRoot);
+        await CreateLibraryAsync(fixture, "Alpha");
+        var betaId = await CreateLibraryAsync(fixture, "Beta");
+
+        var resp = await fixture.Http.PatchAsJsonAsync(
+            $"{fixture.BaseUrl}/api/library/{betaId}", new { name = "Alpha" });
+
+        Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task RenameLibrary_BlankName_Returns400()
+    {
+        await using var fixture = await Fixture.StartAsync(_tempRoot);
+        var libraryId = await CreateLibraryAsync(fixture, "Named");
+
+        var resp = await fixture.Http.PatchAsJsonAsync(
+            $"{fixture.BaseUrl}/api/library/{libraryId}", new { name = "   " });
+
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task RenameLibrary_UnknownId_Returns404()
+    {
+        await using var fixture = await Fixture.StartAsync(_tempRoot);
+
+        var resp = await fixture.Http.PatchAsJsonAsync(
+            $"{fixture.BaseUrl}/api/library/lib-does-not-exist", new { name = "X" });
+
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task RemoveWatchedFolder_RemovesAndReturnsManifest()
+    {
+        await using var fixture = await Fixture.StartAsync(_tempRoot);
+        var libraryId = await CreateLibraryAsync(fixture, "Unwatch");
+        var folder = Path.Combine(_tempRoot, "rmwf-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+
+        var add = await fixture.Http.PostAsJsonAsync(
+            $"{fixture.BaseUrl}/api/library/{libraryId}/folders", new { path = folder });
+        add.EnsureSuccessStatusCode();
+
+        using var req = new HttpRequestMessage(
+            HttpMethod.Delete, $"{fixture.BaseUrl}/api/library/{libraryId}/folders")
+        {
+            Content = JsonContent.Create(new { path = folder })
+        };
+        var resp = await fixture.Http.SendAsync(req);
+
+        resp.EnsureSuccessStatusCode();
+        var body = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(body.GetProperty("removed").GetBoolean());
+        Assert.Empty(body.GetProperty("watchedFolders").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task RemoveWatchedFolder_UnknownLibrary_Returns404()
+    {
+        await using var fixture = await Fixture.StartAsync(_tempRoot);
+
+        using var req = new HttpRequestMessage(
+            HttpMethod.Delete, $"{fixture.BaseUrl}/api/library/lib-does-not-exist/folders")
+        {
+            Content = JsonContent.Create(new { path = _tempRoot })
+        };
+        var resp = await fixture.Http.SendAsync(req);
+
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteLibrary_RemovesAndClearsActive()
+    {
+        await using var fixture = await Fixture.StartAsync(_tempRoot);
+        var libraryId = await CreateLibraryAsync(fixture, "Doomed");
+        Assert.Equal(libraryId, fixture.Config.ActiveDocumentLibraryId);
+
+        var resp = await fixture.Http.DeleteAsync($"{fixture.BaseUrl}/api/library/{libraryId}");
+
+        resp.EnsureSuccessStatusCode();
+        var body = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Empty(body.GetProperty("libraries").EnumerateArray());
+        Assert.Equal(JsonValueKind.Null, body.GetProperty("activeLibraryId").ValueKind);
+        Assert.Null(fixture.Config.ActiveDocumentLibraryId);
+
+        var list = await (await fixture.Http.GetAsync($"{fixture.BaseUrl}/api/library"))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Empty(list.GetProperty("libraries").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task DeleteLibrary_UnknownId_Returns404()
+    {
+        await using var fixture = await Fixture.StartAsync(_tempRoot);
+
+        var resp = await fixture.Http.DeleteAsync($"{fixture.BaseUrl}/api/library/lib-does-not-exist");
+
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+    }
+
     private static async Task<string> CreateLibraryAsync(Fixture fixture, string name)
     {
         var response = await fixture.Http.PostAsJsonAsync($"{fixture.BaseUrl}/api/library", new { name });
