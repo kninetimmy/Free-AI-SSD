@@ -680,6 +680,7 @@ The Companion tray app exposes the same two cues under identical key names (`ptt
 - ✅ Hugging Face model pulls (token auth, disk-budget warnings, per-quant expansion)
 - ✅ Ollama registry model pulls
 - ✅ Model picker (capability filters, parameter cap, Most-popular toggle, sort)
+- ✅ Model parameter controls — per-chat `num_ctx` / temperature / `top_p` / max-output (`num_predict`), plus a **Thinking** control (Ollama `think`: Off / Low / Medium / High) to disable or cap reasoning models that loop; live on both the Windows and Mac runners
 
 **macOS:**
 - ✅ Native SwiftUI PrepApp (arm64, exFAT, byte-identical SSD layout to Windows PrepApp)
@@ -697,7 +698,6 @@ The Companion tray app exposes the same two cues under identical key names (`ptt
 - 📋 **Mac voice / TTS / HOTAS / DCS import** — bring Mac Runner to feature parity with Windows
 - 📋 **IL-2 Sturmovik and War Thunder binding parsers** — pending example binding files
 - 📋 **Setup profiles / Copilot personas** — mode selection at prep time: general use vs. flight sim (light vs. full Whisper + bindings tools) with curated system prompts
-- 📋 **Thinking model parameter controls** — models with built-in chain-of-thought (e.g. Gemma Flash Thinking) can get stuck in infinite reasoning loops; need a way to cap or tune the thinking budget (token limit, timeout, or Ollama `num_predict` / `stop` parameter exposure) before a response is returned
 
 </details>
 
