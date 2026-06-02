@@ -163,6 +163,50 @@ public sealed class DocumentIngestorFailureHandlingTests : IDisposable
         Assert.Equal(handler.RequestCount - handler.FailedCount, vectorIndex.GetChunkCount(manifest.Id));
     }
 
+    /// X18 Stage 2: the abort threshold is now config-driven. A single dropped chunk is
+    /// tolerated at the 0.50 default (see AcceptableFailureRatio above), but a zero-tolerance
+    /// config aborts the same ingest — proving the knob changes behavior.
+    [Fact]
+    public async Task IngestFilesAsync_ZeroToleranceThreshold_AbortsOnSingleChunkFailure()
+    {
+        var handler = new FailFirstEmbeddingHandler(failFirstRequests: 1);
+        var (manager, manifest, ingestor) = await CreateIngestorAsync(handler);
+        var sourcePath = Path.Combine(_tempRoot, "zero-tolerance.txt");
+        File.WriteAllText(sourcePath, CreateLongText(1600));
+        var config = CreateConfig();
+        config.MaxEmbeddingFailureRatioBeforeAbort = 0.0;
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => ingestor.IngestFilesAsync(manifest, new[] { sourcePath }, "localhost:11434", config));
+
+        Assert.Contains("embedding failures exceeded threshold", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(manifest.Files);
+
+        var vectorIndex = new VectorIndex(manager.GetIndexPath(manifest.Id));
+        Assert.Equal(0, vectorIndex.GetChunkCount(manifest.Id));
+    }
+
+    /// X18 Stage 1: a tolerated partial failure still indexes the file, and the terminal
+    /// frame (empty CurrentFile) carries the batch dropped-chunk total so the completion
+    /// summary can surface it — not just the transient per-file frame.
+    [Fact]
+    public async Task IngestFilesAsync_ToleratedPartialFailure_TerminalFrameCarriesBatchFailedChunks()
+    {
+        var handler = new FailFirstEmbeddingHandler(failFirstRequests: 1);
+        var (_, manifest, ingestor) = await CreateIngestorAsync(handler);
+        var sourcePath = Path.Combine(_tempRoot, "partial-terminal.txt");
+        File.WriteAllText(sourcePath, CreateLongText(1600));
+        var config = CreateConfig();
+
+        var frames = new List<IndexingProgress>();
+        await ingestor.IngestFilesAsync(manifest, new[] { sourcePath }, "localhost:11434", config, frames.Add);
+
+        var terminal = frames.Last();
+        Assert.Equal(string.Empty, terminal.CurrentFile);
+        Assert.Equal(1, terminal.FailedChunks);
+        Assert.Single(manifest.Files);
+    }
+
     private async Task<(DocumentLibraryManager Manager, DocumentLibraryManifest Manifest, DocumentIngestor Ingestor)> CreateIngestorAsync(HttpMessageHandler handler)
     {
         var ssdRoot = Path.Combine(_tempRoot, Guid.NewGuid().ToString("N"));

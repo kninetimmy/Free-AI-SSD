@@ -111,6 +111,14 @@ public sealed class PortableConfig
     /// </summary>
     public int MaxEmbeddingConcurrency { get; set; } = 4;
     /// <summary>
+    /// Fraction (0.0–1.0) of a file's chunks that may fail to embed before the whole file
+    /// is aborted and rolled back. Below the threshold, the successfully embedded chunks are
+    /// kept and the dropped count is surfaced in the post-ingest summary. Default 0.50;
+    /// tighten (e.g. 0.0) for safety-critical libraries where any dropped chunk is unacceptable.
+    /// Config-file only — no UI control. Clamped to [0, 1] at use.
+    /// </summary>
+    public double MaxEmbeddingFailureRatioBeforeAbort { get; set; } = 0.50;
+    /// <summary>
     /// Maximum allowed document file size in megabytes for RAG ingestion.
     /// Files exceeding this limit are rejected before copying or parsing.
     /// Defaults high enough to admit large structured guides (e.g. a 150 MB
