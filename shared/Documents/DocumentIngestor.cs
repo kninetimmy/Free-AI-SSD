@@ -4,8 +4,6 @@ namespace FreeAiSsd.Shared.Documents;
 
 public sealed class DocumentIngestor
 {
-    private const double MaxEmbeddingFailureRatioBeforeAbort = 0.50d;
-
     private readonly DocumentLibraryManager _libraryManager;
     private readonly EmbeddingClient _embeddingClient;
     private readonly SsdLogger? _logger;
@@ -43,6 +41,8 @@ public sealed class DocumentIngestor
         var inLoopSkipped = 0;
         var batchEmbedded = 0;
         var batchTotalChunks = 0;
+        var batchFailedChunks = 0;
+        var failureThreshold = EffectiveFailureThreshold(config);
 
         foreach (var sourcePath in candidates)
         {
@@ -223,14 +223,29 @@ public sealed class DocumentIngestor
                     });
                 }
 
-                if (failureRatio > MaxEmbeddingFailureRatioBeforeAbort)
+                if (failureRatio > failureThreshold)
                 {
                     var causeSuffix = firstFailure is null
                         ? string.Empty
                         : $" First failure: {firstFailure.Message}";
                     var error =
                         $"Ingestion failed for '{fileName}': embedding failures exceeded threshold " +
-                        $"(total={totalChunks}, succeeded={embeddedChunks}, failed={failedChunkCount}, ratio={failureRatio:P1}, threshold={MaxEmbeddingFailureRatioBeforeAbort:P0}).{causeSuffix}";
+                        $"(total={totalChunks}, succeeded={embeddedChunks}, failed={failedChunkCount}, ratio={failureRatio:P1}, threshold={failureThreshold:P0}).{causeSuffix}";
+                    _logger?.Error(error);
+                    throw new InvalidOperationException(error);
+                }
+
+                // A loosened threshold (e.g. 1.0) can clear the check above with zero
+                // surviving chunks; fail loudly with the cause rather than letting the
+                // chunks[0] provenance read below throw an opaque IndexOutOfRange.
+                if (chunks.Count == 0)
+                {
+                    var causeSuffix = firstFailure is null
+                        ? string.Empty
+                        : $" First failure: {firstFailure.Message}";
+                    var error =
+                        $"Ingestion failed for '{fileName}': no chunks embedded successfully " +
+                        $"(total={totalChunks}, failed={failedChunkCount}).{causeSuffix}";
                     _logger?.Error(error);
                     throw new InvalidOperationException(error);
                 }
@@ -273,6 +288,7 @@ public sealed class DocumentIngestor
 
                 batchEmbedded += embeddedChunks;
                 batchTotalChunks += totalChunks;
+                batchFailedChunks += failedChunkCount;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -291,6 +307,8 @@ public sealed class DocumentIngestor
         // Terminal frame (CurrentFile empty): CompletedFiles is the indexed/updated count
         // (in-loop skips excluded), SkippedFiles is every skipped file, and the chunk fields
         // carry the batch totals so the UI can render an honest completion summary.
+        // FailedChunks is the authoritative batch total of tolerated dropped chunks; the
+        // summary renderers read it here rather than summing per-file frames.
         progress?.Invoke(new IndexingProgress
         {
             TotalFiles = total,
@@ -298,6 +316,7 @@ public sealed class DocumentIngestor
             CurrentFile = string.Empty,
             EmbeddedChunks = batchEmbedded,
             TotalChunks = batchTotalChunks,
+            FailedChunks = batchFailedChunks,
             SkippedFiles = unsupportedSkipped + inLoopSkipped
         });
 
@@ -322,6 +341,13 @@ public sealed class DocumentIngestor
     /// </summary>
     private static List<DocumentChunkSpan> BuildChunkSpans(ParsedDocument parsed, PortableConfig config)
         => DocumentChunker.ChunkBlocks(parsed.Blocks, config.ChunkSize, config.ChunkOverlap);
+
+    /// <summary>
+    /// The configured per-file embedding-failure abort threshold, clamped to [0, 1] so an
+    /// out-of-range config value can't invert the comparison or starve every ingest.
+    /// </summary>
+    private static double EffectiveFailureThreshold(PortableConfig config)
+        => Math.Clamp(config.MaxEmbeddingFailureRatioBeforeAbort, 0d, 1d);
 
     private static void TryDeleteStoredFile(string path)
     {
@@ -505,19 +531,34 @@ public sealed class DocumentIngestor
 
         var totalChunks = spans.Count;
         var failureRatio = totalChunks == 0 ? 0d : (double)failedCount / totalChunks;
-        if (failureRatio > MaxEmbeddingFailureRatioBeforeAbort)
+        var failureThreshold = EffectiveFailureThreshold(config);
+        if (failureRatio > failureThreshold)
         {
             var causeSuffix = firstFailure is null
                 ? string.Empty
                 : $" First failure: {firstFailure.Message}";
             var error =
                 $"Rebuild from stored copy failed for '{entry.FileName}': embedding failures exceeded threshold " +
-                $"(total={totalChunks}, failed={failedCount}, ratio={failureRatio:P1}, threshold={MaxEmbeddingFailureRatioBeforeAbort:P0}).{causeSuffix}";
+                $"(total={totalChunks}, failed={failedCount}, ratio={failureRatio:P1}, threshold={failureThreshold:P0}).{causeSuffix}";
             _logger?.Error(error);
             throw new InvalidOperationException(error);
         }
 
         var chunks = results.Where(r => r is not null).Select(r => r!).ToList();
+        if (chunks.Count == 0)
+        {
+            // See IngestFilesAsync: a loosened threshold can survive the ratio check with
+            // nothing embedded; fail with the cause instead of an opaque chunks[0] throw.
+            var causeSuffix = firstFailure is null
+                ? string.Empty
+                : $" First failure: {firstFailure.Message}";
+            var error =
+                $"Rebuild from stored copy failed for '{entry.FileName}': no chunks embedded successfully " +
+                $"(total={totalChunks}, failed={failedCount}).{causeSuffix}";
+            _logger?.Error(error);
+            throw new InvalidOperationException(error);
+        }
+
         vectorIndex.CheckProvenance(manifest.Id, config.EmbeddingModelName, chunks[0].EmbeddingDimension, _logger);
         vectorIndex.UpsertFileChunks(manifest.Id, entry.StoredRelativePath, chunks);
     }

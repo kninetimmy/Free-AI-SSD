@@ -57,6 +57,48 @@ public sealed class IndexingSummaryTests
     }
 
     [Fact]
+    public void Format_WithDroppedChunks_AppendsDroppedClause()
+    {
+        var summary = IndexingSummary.Format(new IndexingProgress
+        {
+            CompletedFiles = 3,
+            EmbeddedChunks = 410,
+            FailedChunks = 5,
+            SkippedFiles = 0
+        });
+
+        Assert.Equal("Indexed 3 files (410 chunks), 5 chunks dropped.", summary);
+    }
+
+    [Fact]
+    public void Format_SingleDroppedChunk_UsesSingular()
+    {
+        var summary = IndexingSummary.Format(new IndexingProgress
+        {
+            CompletedFiles = 1,
+            EmbeddedChunks = 7,
+            FailedChunks = 1,
+            SkippedFiles = 0
+        });
+
+        Assert.Equal("Indexed 1 file (7 chunks), 1 chunk dropped.", summary);
+    }
+
+    [Fact]
+    public void Format_DroppedAndSkipped_AppendsBothClausesInOrder()
+    {
+        var summary = IndexingSummary.Format(new IndexingProgress
+        {
+            CompletedFiles = 3,
+            EmbeddedChunks = 120,
+            FailedChunks = 4,
+            SkippedFiles = 2
+        });
+
+        Assert.Equal("Indexed 3 files (120 chunks), 4 chunks dropped, 2 skipped (unsupported/oversize).", summary);
+    }
+
+    [Fact]
     public void DescribeFailure_SingleException_ReturnsItsMessage()
     {
         var ex = new InvalidOperationException("model 'nomic-embed-text' not found");

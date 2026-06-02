@@ -1535,12 +1535,14 @@ final class RunnerViewModel: ObservableObject {
                     log("[library] rejected '\(fileName)': \(reason)")
                 }
             case "progress":
-                // skippedFiles is set only on the terminal frame; failedChunks
-                // accrues across per-file failure frames. The response is buffered
-                // and replayed at once (see comment above), so by completion we've
-                // seen the terminal totals.
+                // skippedFiles and the batch failedChunks total are both carried on the
+                // terminal frame (empty currentFile). Read failedChunks there rather than
+                // summing per-file frames, which would double-count now that the ingestor
+                // emits an authoritative batch total. The response is buffered and replayed
+                // at once (see comment above), so by completion we've seen the terminal frame.
                 if let s = frame["skippedFiles"] as? Int, s > 0 { skippedFiles = s }
-                if let f = frame["failedChunks"] as? Int { failedChunks += f }
+                let isTerminalFrame = (frame["currentFile"] as? String)?.isEmpty ?? false
+                if isTerminalFrame, let f = frame["failedChunks"] as? Int { failedChunks = f }
             case "complete":
                 completedDetail = self.decodeActiveLibrary(frame["library"] as? [String: Any])
             case "error":
