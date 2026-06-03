@@ -33,18 +33,23 @@ public class DcsAircraftScannerTests : IDisposable
         Path.Combine(_tempDir, $"sg-{Guid.NewGuid():N}");
 
     /// <summary>
-    /// Creates a device sub-folder with an optional diff.lua under a given aircraft folder.
-    /// Returns the path to diff.lua.
+    /// Writes a real-DCS-layout diff file for a device under an aircraft:
+    /// <c>{aircraft}/{deviceClass}/{deviceName} {GUID}.diff.lua</c>. DCS embeds the device
+    /// name and a brace-wrapped instance GUID in the file name — there is no literal
+    /// <c>diff.lua</c> on disk. Returns the path to the created file.
     /// </summary>
     private string AddDeviceFolder(
         string configInputRoot,
         string aircraftFolder,
-        string deviceFolder,
-        string? diffContent = null)
+        string deviceName,
+        string? diffContent = null,
+        string deviceClass = "joystick")
     {
-        var devicePath = Path.Combine(configInputRoot, aircraftFolder, deviceFolder);
-        Directory.CreateDirectory(devicePath);
-        var diffPath = Path.Combine(devicePath, "diff.lua");
+        var classPath = Path.Combine(configInputRoot, aircraftFolder, deviceClass);
+        Directory.CreateDirectory(classPath);
+
+        var guid     = "{" + Guid.NewGuid().ToString().ToUpperInvariant() + "}";
+        var diffPath = Path.Combine(classPath, $"{deviceName} {guid}.diff.lua");
 
         if (diffContent is not null)
         {
@@ -331,6 +336,79 @@ public class DcsAircraftScannerTests : IDisposable
         var result = DcsAircraftScanner.ScanAircraft(sgRoot);
 
         Assert.True(Path.IsPathRooted(result[0].Devices[0].DiffLuaPath));
+    }
+
+    [Fact]
+    public void ScanAircraft_RealDcsFileNaming_FindsDeviceAndExtractsName()
+    {
+        // Regression for the "9 aircraft found, 0 with custom bindings" bug: DCS names each
+        // file "<device>  {GUID}.diff.lua" directly inside the device-class folder, with leading
+        // and padded internal spaces and an uppercase GUID. The old scanner looked for a literal
+        // "diff.lua" and therefore found zero devices for every aircraft.
+        var sgRoot      = MakeSavedGamesRoot();
+        var configInput = Path.Combine(sgRoot, "Config", "Input");
+        var joystick    = Path.Combine(configInput, "FA-18C_hornet", "joystick");
+        Directory.CreateDirectory(joystick);
+
+        var fileName = " VKBsim Gladiator EVO R   {4C912ED0-C95D-11F0-8009-444553540000}.diff.lua";
+        File.WriteAllText(Path.Combine(joystick, fileName), MinimalDiff());
+
+        var result = DcsAircraftScanner.ScanAircraft(sgRoot);
+
+        Assert.Single(result);
+        Assert.True(result[0].HasBindings);
+        Assert.Single(result[0].Devices);
+        Assert.Equal("VKBsim Gladiator EVO R", result[0].Devices[0].DeviceFolderName);
+    }
+
+    [Theory]
+    [InlineData("Stick")]
+    [InlineData("VKBsim Gladiator EVO R")]
+    [InlineData("S-TECS MODERN THROTTLE STANDARD STEM")]
+    public void ScanAircraft_RecoversDeviceNameFromFileName(string deviceName)
+    {
+        var sgRoot      = MakeSavedGamesRoot();
+        var configInput = Path.Combine(sgRoot, "Config", "Input");
+        AddDeviceFolder(configInput, "FA-18C_hornet", deviceName, MinimalDiff());
+
+        var result = DcsAircraftScanner.ScanAircraft(sgRoot);
+
+        Assert.Equal(deviceName, result[0].Devices[0].DeviceFolderName);
+    }
+
+    [Fact]
+    public void ScanAircraft_FindsBindingsAcrossDeviceClasses()
+    {
+        var sgRoot      = MakeSavedGamesRoot();
+        var configInput = Path.Combine(sgRoot, "Config", "Input");
+        AddDeviceFolder(configInput, "FA-18C_hornet", "Gladiator Stick",
+            MinimalDiff("Pitch", "JOY_Y"), deviceClass: "joystick");
+        AddDeviceFolder(configInput, "FA-18C_hornet", "Main Keyboard",
+            MinimalDiff("Roll", "JOY_X"), deviceClass: "keyboard");
+
+        var result = DcsAircraftScanner.ScanAircraft(sgRoot);
+
+        Assert.Single(result);
+        Assert.Equal(2, result[0].Devices.Count);
+        Assert.True(result[0].HasBindings);
+    }
+
+    [Fact]
+    public void ScanAircraft_SkipsUiLayerFolder()
+    {
+        // UiLayer is the non-aircraft UI-layer key-bind folder that sits alongside the aircraft
+        // folders under Config/Input. It must not be reported as an importable module.
+        var sgRoot      = MakeSavedGamesRoot();
+        var configInput = Path.Combine(sgRoot, "Config", "Input");
+        AddDeviceFolder(configInput, "FA-18C_hornet", "Stick", MinimalDiff());
+        AddDeviceFolder(configInput, "UiLayer", "Keyboard", MinimalDiff(), deviceClass: "keyboard");
+
+        var result = DcsAircraftScanner.ScanAircraft(sgRoot);
+
+        Assert.Single(result);
+        Assert.Equal("FA-18C_hornet", result[0].FolderName);
+        Assert.DoesNotContain(result,
+            a => a.FolderName.Equals("UiLayer", StringComparison.OrdinalIgnoreCase));
     }
 
     #endregion
