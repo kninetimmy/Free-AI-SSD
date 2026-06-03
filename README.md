@@ -587,7 +587,7 @@ All settings live in `config/portable-config.json` on the SSD.
 | Property | Default | Description |
 |---|---|---|
 | `ollamaPort` | `11434` | TCP port for the local Ollama server |
-| `preferredCompute` | `"cpu"` | Compute mode: `"cpu"`, `"cuda"`, or `"rocm"` |
+| `preferredCompute` | `"auto"` | Compute mode: `"auto"` (detected GPU — AMD→Vulkan, NVIDIA→CUDA, Intel→Vulkan) or `"cpu"` (force CPU). Legacy `"cuda"`/`"rocm"` are treated as `"auto"` |
 | `useStreamingChat` | `true` | Stream tokens as they generate; falls back to non-streaming if streaming fails |
 
 ### Document Library & RAG

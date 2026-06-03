@@ -1409,7 +1409,7 @@ public partial class MainWindow : System.Windows.Window
         IndexingProgressBar.Value = 0;
         IndexingEtaText.Text = "estimating…";
         _embeddingBackendLabel ??= FreeAiSsd.Shared.GpuAccelerationPolicy
-            .ResolveFor(FreeAiSsd.Shared.SystemResources.GetGpuVendor())
+            .ResolveFor(FreeAiSsd.Shared.SystemResources.GetGpuVendor(), _config?.PreferredCompute)
             .BackendDescription;
         IndexingProgressPanel.ToolTip =
             $"Embedding acceleration: {_embeddingBackendLabel}. " +

@@ -2482,7 +2482,7 @@ public class PrepViewModel : BaseViewModel
             {
                 PreparedAtUtc = DateTime.UtcNow,
                 OllamaPort = 11434,
-                PreferredCompute = "cpu"
+                PreferredCompute = "auto"
             };
             await _modelService.SaveConfigAsync(configPath, config);
 
@@ -2595,7 +2595,7 @@ public class PrepViewModel : BaseViewModel
             var config = await _modelService.LoadConfigAsync(configPath);
             config.PreparedAtUtc = DateTime.UtcNow;
             config.OllamaPort = 11434;
-            config.PreferredCompute = "cpu";
+            config.PreferredCompute = "auto";
             config.IsEncrypted = false;
             config.EncryptionScheme = null;
             // MAC34: ensure NetworkApiKey is populated before any persist.

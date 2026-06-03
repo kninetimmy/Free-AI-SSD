@@ -66,8 +66,12 @@ public sealed class PortableConfig
     public string OllamaRelativePath { get; set; } = @"windows\tools\ollama\ollama.exe";
     /// <summary>List of model entries with their status and integrity data.</summary>
     public List<ModelConfigEntry> Models { get; set; } = new();
-    /// <summary>Preferred compute mode: "cpu", "cuda", or "rocm".</summary>
-    public string PreferredCompute { get; set; } = "cpu";
+    /// <summary>
+    /// Preferred compute mode. <c>"auto"</c> (default) uses the detected GPU — AMD→Vulkan,
+    /// NVIDIA→CUDA, Intel→Vulkan; <c>"cpu"</c> forces CPU-only inference as a stable fallback.
+    /// Legacy values <c>"cuda"/"rocm"</c> are treated as <c>"auto"</c>. See <see cref="GpuAccelerationPolicy"/>.
+    /// </summary>
+    public string PreferredCompute { get; set; } = "auto";
     /// <summary>UTC timestamp when the SSD was initially prepared.</summary>
     public DateTime PreparedAtUtc { get; set; } = DateTime.UtcNow;
     /// <summary>Whether the config has been encrypted with a user password.</summary>
