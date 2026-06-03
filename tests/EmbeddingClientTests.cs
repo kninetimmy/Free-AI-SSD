@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using FreeAiSsd.Shared.Documents;
 
 namespace FreeAiSsd.Tests;
@@ -54,6 +55,89 @@ public sealed class EmbeddingClientTests
         Assert.Equal(3, vector.Length);
         Assert.Equal(0.5f, vector[0]);
         Assert.Equal(-0.5f, vector[1]);
+    }
+
+    // --- Embed-context thrash fix: pin num_ctx + truncate, clip oversized input ---
+    // Regression guard for the freeze where token-dense chunks made Ollama reload the
+    // embed model 300+ times. Pinning options.num_ctx keeps the embed runner stable and
+    // truncate=true lets an over-long input fit instead of erroring.
+
+    [Fact]
+    public async Task EmbedAsync_PinsNumCtxAndTruncate_WhenNumCtxProvided()
+    {
+        var handler = new CapturingHandler();
+        var client = new EmbeddingClient(new HttpClient(handler));
+
+        await client.EmbedAsync("localhost:11434", "nomic-embed-text", "hello",
+            default, numCtx: 2048, maxInputChars: null);
+
+        using var doc = JsonDocument.Parse(handler.CapturedJson!);
+        var root = doc.RootElement;
+        Assert.True(root.GetProperty("truncate").GetBoolean());
+        Assert.Equal(2048, root.GetProperty("options").GetProperty("num_ctx").GetInt32());
+    }
+
+    [Fact]
+    public async Task EmbedAsync_OmitsOptions_ButKeepsTruncate_WhenNumCtxNull()
+    {
+        var handler = new CapturingHandler();
+        var client = new EmbeddingClient(new HttpClient(handler));
+
+        await client.EmbedAsync("localhost:11434", "nomic-embed-text", "hello");
+
+        using var doc = JsonDocument.Parse(handler.CapturedJson!);
+        Assert.False(doc.RootElement.TryGetProperty("options", out _));
+        Assert.True(doc.RootElement.GetProperty("truncate").GetBoolean());
+    }
+
+    [Fact]
+    public async Task EmbedAsync_ClipsInput_ToMaxInputChars()
+    {
+        var handler = new CapturingHandler();
+        var client = new EmbeddingClient(new HttpClient(handler));
+        var longInput = new string('x', 5000);
+
+        await client.EmbedAsync("localhost:11434", "nomic-embed-text", longInput,
+            default, numCtx: null, maxInputChars: 100);
+
+        using var doc = JsonDocument.Parse(handler.CapturedJson!);
+        Assert.Equal(100, doc.RootElement.GetProperty("input").GetString()!.Length);
+    }
+
+    [Fact]
+    public async Task EmbedBatchAsync_ClipsEachInput_AndPinsNumCtx()
+    {
+        var handler = new CapturingHandler(embeddingCount: 2);
+        var client = new EmbeddingClient(new HttpClient(handler));
+        var inputs = new[] { new string('a', 5000), "short" };
+
+        await client.EmbedBatchAsync("localhost:11434", "nomic-embed-text", inputs,
+            default, numCtx: 4096, maxInputChars: 100);
+
+        using var doc = JsonDocument.Parse(handler.CapturedJson!);
+        var sent = doc.RootElement.GetProperty("input").EnumerateArray()
+            .Select(e => e.GetString()!).ToArray();
+        Assert.Equal(100, sent[0].Length);   // long input clipped
+        Assert.Equal("short", sent[1]);      // short input untouched
+        Assert.Equal(4096, doc.RootElement.GetProperty("options").GetProperty("num_ctx").GetInt32());
+    }
+
+    private sealed class CapturingHandler : HttpMessageHandler
+    {
+        private readonly int _embeddingCount;
+        public CapturingHandler(int embeddingCount = 1) => _embeddingCount = embeddingCount;
+        public string? CapturedJson { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            CapturedJson = await request.Content!.ReadAsStringAsync(cancellationToken);
+            var embeddings = Enumerable.Range(0, _embeddingCount)
+                .Select(_ => new[] { 0.1f, 0.2f }).ToArray();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = JsonContent.Create(new { embeddings })
+            };
+        }
     }
 
     private sealed class StaticResponseHandler : HttpMessageHandler

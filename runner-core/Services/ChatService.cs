@@ -188,7 +188,12 @@ public sealed class ChatService : IChatService
                 var manifest = _libraryManager.LoadManifest(config.ActiveDocumentLibraryId);
                 var index = new VectorIndex(_libraryManager.GetIndexPath(manifest.Id));
                 var embedder = new EmbeddingClient(_http);
-                var queryEmbedding = await embedder.EmbedAsync(host, config.EmbeddingModelName, userPrompt);
+                // Pin num_ctx on the query embed too so switching between ingest and chat
+                // doesn't make Ollama reload the embed model to resize its context.
+                var embedNumCtx = config.EmbeddingContextTokens > 0 ? config.EmbeddingContextTokens : (int?)null;
+                var embedMaxChars = config.EmbeddingMaxInputChars > 0 ? config.EmbeddingMaxInputChars : (int?)null;
+                var queryEmbedding = await embedder.EmbedAsync(
+                    host, config.EmbeddingModelName, userPrompt, default, embedNumCtx, embedMaxChars);
                 index.CheckProvenance(manifest.Id, config.EmbeddingModelName, queryEmbedding.Length, _logger);
                 var results = config.HybridRetrievalEnabled
                     ? index.SearchHybrid(manifest.Id, queryEmbedding, userPrompt, config.RetrievalTopK,

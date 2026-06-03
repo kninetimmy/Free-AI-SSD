@@ -92,7 +92,7 @@ public sealed class DocumentIngestor
                     renamed.FileName = fileName;
                     renamed.LastModifiedUtc = File.GetLastWriteTimeUtc(sourcePath);
                     vectorIndex.UpdateFileName(manifest.Id, renamed.StoredRelativePath, fileName);
-                    await _libraryManager.SaveManifestAsync(manifest);
+                    await _libraryManager.SaveManifestAsync(manifest).ConfigureAwait(false);
                     continue;
                 }
             }
@@ -189,7 +189,7 @@ public sealed class DocumentIngestor
                         Interlocked.CompareExchange(ref firstFailure, ex, null);
                         Interlocked.Increment(ref failedChunkCount);
                     },
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(false);
 
                 // Collect successfully embedded chunks in original document order.
                 var chunks = results.Where(r => r is not null).Select(r => r!).ToList();
@@ -269,7 +269,7 @@ public sealed class DocumentIngestor
                 // Persist the manifest incrementally so that vectors committed per-file
                 // (UpsertFileChunks above) do not become orphaned if a later file in the
                 // batch fails or the operation is cancelled before the final save below.
-                await _libraryManager.SaveManifestAsync(manifest);
+                await _libraryManager.SaveManifestAsync(manifest).ConfigureAwait(false);
 
                 batchEmbedded += embeddedChunks;
                 batchTotalChunks += totalChunks;
@@ -288,7 +288,7 @@ public sealed class DocumentIngestor
         }
 
         manifest.LastIndexedUtc = DateTime.UtcNow;
-        await _libraryManager.SaveManifestAsync(manifest);
+        await _libraryManager.SaveManifestAsync(manifest).ConfigureAwait(false);
         // Terminal frame (CurrentFile empty): CompletedFiles is the indexed/updated count
         // (in-loop skips excluded), SkippedFiles is every skipped file, and the chunk fields
         // carry the batch totals so the UI can render an honest completion summary.
@@ -350,7 +350,23 @@ public sealed class DocumentIngestor
     {
         var batchSize = Math.Max(1, config.EmbeddingBatchSize);
         var maxConcurrency = Math.Max(1, config.MaxEmbeddingConcurrency);
+        var numCtx = config.EmbeddingContextTokens > 0 ? config.EmbeddingContextTokens : (int?)null;
+        var maxInputChars = config.EmbeddingMaxInputChars > 0 ? config.EmbeddingMaxInputChars : (int?)null;
         using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+
+        // One-shot WARN so a tolerated (under-threshold) embed failure is diagnosable
+        // without flooding the log on a large document. Names the chunk index + char
+        // length, which surfaces the dense-page chunks (#68) that don't embed cleanly.
+        var oversizeLogged = 0;
+        void LogChunkFailureOnce(int chunkIndex, int charLength, Exception ex)
+        {
+            if (_logger is null) return;
+            if (Interlocked.Exchange(ref oversizeLogged, 1) != 0) return;
+            _logger.Warn(
+                $"Embedding failed for a chunk (index {chunkIndex}, {charLength} chars) and was skipped " +
+                $"(tolerated under the {EffectiveFailureThreshold(config):P0} failure threshold). " +
+                $"First such failure for this file: {ex.Message}");
+        }
 
         var batches = new List<(int Start, int Count)>();
         for (var start = 0; start < spans.Count; start += batchSize)
@@ -360,7 +376,7 @@ public sealed class DocumentIngestor
 
         var tasks = batches.Select(async batch =>
         {
-            await semaphore.WaitAsync(cancellationToken);
+            await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 var inputs = new string[batch.Count];
@@ -373,7 +389,7 @@ public sealed class DocumentIngestor
                 try
                 {
                     embeddings = await _embeddingClient.EmbedBatchAsync(
-                        host, config.EmbeddingModelName, inputs, cancellationToken);
+                        host, config.EmbeddingModelName, inputs, cancellationToken, numCtx, maxInputChars).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -385,7 +401,8 @@ public sealed class DocumentIngestor
                     // a single bad chunk doesn't fail the whole batch.
                     await EmbedBatchPerChunkAsync(
                         host, config, spans, batch.Start, batch.Count, results,
-                        buildChunk, onChunkEmbedded, onChunkFailed, cancellationToken);
+                        buildChunk, onChunkEmbedded, onChunkFailed, LogChunkFailureOnce,
+                        numCtx, maxInputChars, cancellationToken).ConfigureAwait(false);
                     return;
                 }
 
@@ -402,7 +419,7 @@ public sealed class DocumentIngestor
             }
         });
 
-        await Task.WhenAll(tasks);
+        await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -420,6 +437,9 @@ public sealed class DocumentIngestor
         Func<int, DocumentChunkSpan, float[], DocumentChunk> buildChunk,
         Action onChunkEmbedded,
         Action<Exception> onChunkFailed,
+        Action<int, int, Exception> logChunkFailure,
+        int? numCtx,
+        int? maxInputChars,
         CancellationToken cancellationToken)
     {
         for (var k = 0; k < count; k++)
@@ -429,7 +449,7 @@ public sealed class DocumentIngestor
             try
             {
                 var embedding = await _embeddingClient.EmbedAsync(
-                    host, config.EmbeddingModelName, spans[chunkIndex].Text, cancellationToken);
+                    host, config.EmbeddingModelName, spans[chunkIndex].Text, cancellationToken, numCtx, maxInputChars).ConfigureAwait(false);
                 results[chunkIndex] = buildChunk(chunkIndex, spans[chunkIndex], embedding);
                 onChunkEmbedded();
             }
@@ -439,6 +459,7 @@ public sealed class DocumentIngestor
             }
             catch (Exception ex)
             {
+                logChunkFailure(chunkIndex, spans[chunkIndex].Text.Length, ex);
                 onChunkFailed(ex);
             }
         }
@@ -493,7 +514,7 @@ public sealed class DocumentIngestor
             }
         }
 
-        await IngestFilesAsync(manifest, files, host, config, progress, rebuildIndex: false, cancellationToken);
+        await IngestFilesAsync(manifest, files, host, config, progress, rebuildIndex: false, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task RebuildIndexAsync(DocumentLibraryManifest manifest, string host, PortableConfig config, Action<IndexingProgress>? progress = null, CancellationToken cancellationToken = default)
@@ -532,7 +553,7 @@ public sealed class DocumentIngestor
         foreach (var entry in toRemove)
             manifest.Files.Remove(entry);
         if (toRemove.Count > 0)
-            await _libraryManager.SaveManifestAsync(manifest);
+            await _libraryManager.SaveManifestAsync(manifest).ConfigureAwait(false);
 
         if (storedFallbacks.Count > 0)
         {
@@ -543,7 +564,7 @@ public sealed class DocumentIngestor
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
-                    await EmbedStoredCopyAsync(manifest, entry, storedAbsPath, host, config, vectorIndex, cancellationToken);
+                    await EmbedStoredCopyAsync(manifest, entry, storedAbsPath, host, config, vectorIndex, cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -557,7 +578,7 @@ public sealed class DocumentIngestor
                     perFileErrors);
         }
 
-        await IngestFilesAsync(manifest, sourceFiles, host, config, progress, rebuildIndex: true, cancellationToken: cancellationToken);
+        await IngestFilesAsync(manifest, sourceFiles, host, config, progress, rebuildIndex: true, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
     private async Task EmbedStoredCopyAsync(
@@ -613,7 +634,7 @@ public sealed class DocumentIngestor
                 Interlocked.CompareExchange(ref firstFailure, ex, null);
                 Interlocked.Increment(ref failedCount);
             },
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         var totalChunks = spans.Count;
         var failureRatio = totalChunks == 0 ? 0d : (double)failedCount / totalChunks;
@@ -663,7 +684,7 @@ public sealed class DocumentIngestor
                 File.Delete(fullPath);
             }
 
-            await _libraryManager.SaveManifestAsync(manifest);
+            await _libraryManager.SaveManifestAsync(manifest).ConfigureAwait(false);
         }
     }
 }
