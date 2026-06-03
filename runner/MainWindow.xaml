@@ -1318,6 +1318,7 @@
                     <RowDefinition Height="Auto"/> <!-- 0: compatibility info  -->
                     <RowDefinition Height="Auto"/> <!-- 1: dependencies card   -->
                     <RowDefinition Height="Auto"/> <!-- 2: model parameters    -->
+                    <RowDefinition Height="Auto"/> <!-- 3: network mode        -->
                 </Grid.RowDefinitions>
                 <Border Grid.Row="0" x:Name="SystemCompatibilityCard" Style="{StaticResource NeumorphicCard}" Margin="0,0,0,10">
                     <StackPanel>
@@ -1544,6 +1545,91 @@
                                 HorizontalAlignment="Left"
                                 Click="ResetModelParameters_Click"
                                 ToolTip="Clear every override; all five values (including Thinking) fall back to whatever the active model ships with."/>
+                    </StackPanel>
+                </Border>
+
+                <!-- Network Mode (LAN API): serve the Runner HTTP API + web chat
+                     UI (/chat/). Loopback needs no encryption; the LAN bind forces
+                     an API key, which the fail-closed write guard requires an
+                     encrypted SSD config to store. The LAN radio is disabled until
+                     the drive is encrypted. -->
+                <Border Grid.Row="3" x:Name="NetworkModeCard" Style="{StaticResource NeumorphicCard}" Margin="0,10,0,0">
+                    <StackPanel>
+                        <TextBlock Text="Network Mode (LAN API)"
+                                   Style="{StaticResource H2Text}"
+                                   Margin="0,0,0,4"/>
+                        <TextBlock Text="Serve the web chat UI (/chat/) and Runner API over HTTP — from a browser on this PC, or from another device on your LAN."
+                                   Style="{StaticResource CaptionText}"
+                                   TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+                        <CheckBox x:Name="NetworkModeEnabledCheck"
+                                  Content="Enable Network Mode"
+                                  Foreground="{StaticResource TextSecondaryBrush}"
+                                  Checked="NetworkModeEnabledCheck_Changed"
+                                  Unchecked="NetworkModeEnabledCheck_Changed"
+                                  ToolTip="Start the Runner-hosted HTTP API. The web chat UI is served at /chat/ on the address shown below."/>
+
+                        <StackPanel x:Name="NetworkModeOptionsPanel" Margin="22,10,0,0" IsEnabled="False">
+                            <TextBlock Text="Access from:"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       Margin="0,0,0,4"/>
+                            <RadioButton x:Name="BindLoopbackRadio"
+                                         GroupName="NetworkBind"
+                                         Content="This device only (127.0.0.1)"
+                                         Foreground="{StaticResource TextSecondaryBrush}"
+                                         Checked="BindLoopbackRadio_Checked"
+                                         ToolTip="Bind to loopback. The web UI works only in a browser on this PC. No API key required."/>
+                            <RadioButton x:Name="BindLanRadio"
+                                         GroupName="NetworkBind"
+                                         Content="Other devices on my LAN (0.0.0.0)"
+                                         Foreground="{StaticResource TextSecondaryBrush}"
+                                         Margin="0,4,0,0"
+                                         Checked="BindLanRadio_Checked"
+                                         ToolTip="Bind to all interfaces so other LAN devices can connect. Requires an API key and an encrypted SSD config. Plain HTTP, no TLS — trusted home LAN only."/>
+                            <TextBlock x:Name="BindLanHintText"
+                                       Style="{StaticResource CaptionText}"
+                                       TextWrapping="Wrap"
+                                       Margin="22,2,0,0"
+                                       Visibility="Collapsed"
+                                       Text="Encrypt the SSD config in the Prep app to expose the API on your LAN."/>
+
+                            <CheckBox x:Name="NetworkRequireKeyCheck"
+                                      Content="Require API key"
+                                      Foreground="{StaticResource TextSecondaryBrush}"
+                                      Margin="0,10,0,0"
+                                      Checked="NetworkRequireKeyCheck_Changed"
+                                      Unchecked="NetworkRequireKeyCheck_Changed"
+                                      ToolTip="Require a shared-secret key on every non-health request. Forced on for LAN access. Storing a key requires an encrypted SSD config."/>
+
+                            <StackPanel x:Name="NetworkApiKeyRow" Orientation="Horizontal" Margin="0,8,0,0">
+                                <TextBox x:Name="NetworkApiKeyText"
+                                         Style="{StaticResource GlowFocusTextBox}"
+                                         IsReadOnly="True"
+                                         Width="300"
+                                         VerticalAlignment="Center"
+                                         ToolTip="The shared-secret API key. Enter it once in the web UI / Companion app on each device."/>
+                                <Button Content="Generate"
+                                        Style="{StaticResource GhostSecondaryButton}"
+                                        Margin="8,0,0,0"
+                                        Click="GenerateApiKey_Click"
+                                        ToolTip="Generate a new random 256-bit key. Existing devices must re-enter it."/>
+                                <Button Content="Copy"
+                                        Style="{StaticResource GhostSecondaryButton}"
+                                        Margin="8,0,0,0"
+                                        Click="CopyApiKey_Click"
+                                        ToolTip="Copy the key to the clipboard."/>
+                            </StackPanel>
+
+                            <TextBlock x:Name="NetworkStatusText"
+                                       Foreground="{StaticResource AccentCyanBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,10,0,0"
+                                       Text=""/>
+                            <TextBlock Style="{StaticResource CaptionText}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,6,0,0"
+                                       Text="Plain HTTP, no TLS. Only use on a trusted network; never expose to the public internet."/>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
             </Grid>
