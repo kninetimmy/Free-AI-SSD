@@ -266,7 +266,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
                 return Results.BadRequest(new ErrorResponse(error));
             }
 
-            var result = await _chatService.SendPromptAsync(request.Model.Trim(), request.Prompt.Trim(), ollamaHost, config);
+            var result = await _chatService.SendPromptAsync(request.Model.Trim(), request.Prompt.Trim(), ollamaHost, config, BuildOverrides(request));
             return result switch
             {
                 ChatResult.Success s => SetRagStatusHeader(context, "success",
@@ -333,7 +333,8 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
                     ollamaHost,
                     config,
                     onToken: token => WriteFrameAsync(new { type = "token", token }),
-                    cancellationToken: ct);
+                    cancellationToken: ct,
+                    overrides: BuildOverrides(request));
             }
             finally
             {
@@ -1098,7 +1099,65 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             return "'prompt' exceeds maximum length.";
         }
 
+        // Optional per-request model parameters: validate ranges only when present.
+        if (request.Temperature is { } temp && (temp < 0 || temp > 2))
+        {
+            return "'temperature' must be between 0 and 2.";
+        }
+
+        if (request.TopP is { } topP && (topP < 0 || topP > 1))
+        {
+            return "'topP' must be between 0 and 1.";
+        }
+
+        if (request.MaxOutputTokens is { } maxTokens && (maxTokens <= 0 || maxTokens > 131072))
+        {
+            return "'maxOutputTokens' must be between 1 and 131072.";
+        }
+
+        if (request.ContextWindow is { } ctx && (ctx <= 0 || ctx > 1048576))
+        {
+            return "'contextWindow' must be between 1 and 1048576.";
+        }
+
+        if (request.Think is { } think && think.Trim().Length > 0)
+        {
+            switch (think.Trim().ToLowerInvariant())
+            {
+                case "off":
+                case "low":
+                case "medium":
+                case "high":
+                    break;
+                default:
+                    return "'think' must be one of: off, low, medium, high.";
+            }
+        }
+
         return null;
+    }
+
+    /// <summary>
+    /// Builds the per-request <see cref="ChatParameterOverrides"/> from a
+    /// <see cref="ChatRequest"/>, or null when the request carries no overrides
+    /// (so untouched requests behave exactly as before). Validation has already
+    /// range-checked any present values.
+    /// </summary>
+    private static ChatParameterOverrides? BuildOverrides(ChatRequest request)
+    {
+        var think = string.IsNullOrWhiteSpace(request.Think) ? null : request.Think!.Trim();
+        if (request.Temperature is null && request.TopP is null && request.MaxOutputTokens is null
+            && think is null && request.ContextWindow is null)
+        {
+            return null;
+        }
+
+        return new ChatParameterOverrides(
+            request.Temperature,
+            request.TopP,
+            request.MaxOutputTokens,
+            think,
+            request.ContextWindow);
     }
 
     private async Task<VoiceQueryResponse> ExecuteVoiceQueryAsync(
@@ -1557,7 +1616,17 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
                System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(expectedBytes, providedBytes);
     }
 
-    public sealed record ChatRequest(string Model, string Prompt);
+    // Optional per-request model parameters (X4 web chat UI). Null = fall back to
+    // the host's saved PortableConfig. These NEVER write back to config — they are
+    // applied for this one request only (the WPF/Mac runner shares the saved config).
+    public sealed record ChatRequest(
+        string Model,
+        string Prompt,
+        double? Temperature = null,
+        double? TopP = null,
+        int? MaxOutputTokens = null,
+        string? Think = null,
+        int? ContextWindow = null);
     public sealed record ChatResultResponse(string ResponseText, IReadOnlyList<string> Sources, bool UsedRagContext, string? RagWarning = null);
     public sealed record TtsSpeakRequest(string Text);
     public sealed record SttTranscribeResponse(string Transcription);

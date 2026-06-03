@@ -77,12 +77,14 @@ public class PttVoicePipelineServiceTests
         public event Action<int>? FirstTokenPending;
         public StubChat(string[] tokensToEmit) => _tokens = tokensToEmit;
 
-        public Task<ChatResult> SendPromptAsync(string model, string userPrompt, string host, PortableConfig config)
+        public Task<ChatResult> SendPromptAsync(string model, string userPrompt, string host, PortableConfig config,
+            ChatParameterOverrides? overrides = null)
             => Task.FromResult<ChatResult>(new ChatResult.Success(new ChatResponse(string.Concat(_tokens), null, false)));
 
         public async Task<ChatResult> SendPromptStreamingAsync(
             string model, string userPrompt, string host, PortableConfig config,
-            Func<string, Task> onToken, CancellationToken cancellationToken = default)
+            Func<string, Task> onToken, CancellationToken cancellationToken = default,
+            ChatParameterOverrides? overrides = null)
         {
             foreach (var t in _tokens)
                 await onToken(t);
