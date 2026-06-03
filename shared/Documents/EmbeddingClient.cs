@@ -11,7 +11,38 @@ public sealed class EmbeddingClient
         _http = httpClient ?? new HttpClient();
     }
 
+    /// <summary>
+    /// Embeds a single input. Sends <c>input</c> as a JSON string (unchanged wire
+    /// format) — used by the chat-query path and as the per-chunk fallback when a
+    /// batch request fails.
+    /// </summary>
     public async Task<float[]> EmbedAsync(string host, string model, string input, CancellationToken cancellationToken = default)
+    {
+        var embeddings = await PostEmbedAsync(host, model, input, expectedCount: 1, cancellationToken);
+        return embeddings[0];
+    }
+
+    /// <summary>
+    /// Embeds many inputs in a single /api/embed request and returns the embeddings
+    /// 1:1 in input order. Batching collapses the per-chunk HTTP round-trips that
+    /// dominate ingestion of large documents. Ollama accepts <c>input</c> as an array
+    /// and returns <c>embeddings</c> in the same order.
+    /// </summary>
+    public async Task<float[][]> EmbedBatchAsync(string host, string model, IReadOnlyList<string> inputs, CancellationToken cancellationToken = default)
+    {
+        if (inputs is null || inputs.Count == 0)
+        {
+            return Array.Empty<float[]>();
+        }
+
+        return await PostEmbedAsync(host, model, inputs, inputs.Count, cancellationToken);
+    }
+
+    /// <summary>
+    /// Shared POST + parse for both shapes. <paramref name="input"/> is serialized by
+    /// its runtime type — a string for single embed, a string[] for a batch.
+    /// </summary>
+    private async Task<float[][]> PostEmbedAsync(string host, string model, object input, int expectedCount, CancellationToken cancellationToken)
     {
         var payload = new
         {
@@ -21,15 +52,9 @@ public sealed class EmbeddingClient
 
         using var response = await _http.PostAsJsonAsync($"http://{host}/api/embed", payload, cancellationToken);
 
-        // C2: surface the actual /api/embed error body instead of the
-        // generic EnsureSuccessStatusCode message. Pre-C2 a missing
-        // embedder returned a 404 with `{"error":"model 'X' not found"}`
-        // — that body was discarded and DocumentIngestor's catch-all
-        // bumped a counter, so the user saw "embedding failures
-        // exceeded threshold" with no clue WHY. Mirrors MAC40's
-        // OllamaPullClient body-on-error pattern so Stage 2 of C2
-        // makes the provisioning gap self-explanatory the next time
-        // it happens.
+        // C2: surface the actual /api/embed error body instead of the generic
+        // EnsureSuccessStatusCode message (e.g. `{"error":"model 'X' not found"}`),
+        // so the ingestor's threshold-abort message can name the real cause.
         if (!response.IsSuccessStatusCode)
         {
             string body;
@@ -46,14 +71,15 @@ public sealed class EmbeddingClient
         }
 
         var parsed = await response.Content.ReadFromJsonAsync<EmbedResponse>(cancellationToken: cancellationToken);
-        var embedding = parsed?.Embeddings?.FirstOrDefault();
-        if (embedding is null)
+        var embeddings = parsed?.Embeddings;
+        if (embeddings is null || embeddings.Count != expectedCount)
         {
             throw new InvalidOperationException(
-                $"/api/embed returned 200 but no embedding payload for model '{model}'. The model may be unavailable or the response shape changed.");
+                $"/api/embed returned {embeddings?.Count ?? 0} embedding(s) for {expectedCount} input(s) with model '{model}'. " +
+                "The model may be unavailable or the response shape changed.");
         }
 
-        return embedding;
+        return embeddings.ToArray();
     }
 
     private sealed class EmbedResponse

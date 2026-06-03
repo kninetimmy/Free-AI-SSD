@@ -49,6 +49,17 @@ public partial class MainWindow : System.Windows.Window
     private bool _isEncryptedDrive;
     private bool _isUnlocked;
     private DocumentLibraryManifest? _activeLibrary;
+    // Suppresses the LibraryCombo SelectionChanged handler while RefreshLibraryUi
+    // programmatically sets SelectedIndex. Without this, the create-library path
+    // fired a reentrant SetActiveLibraryAsync/config-save mid-refresh — an
+    // unguarded async-void re-entry that was the crash window for #3.
+    private bool _suppressLibrarySelectionChanged;
+    // #4 indexing transparency: wall-clock for the time-remaining estimate.
+    private readonly System.Diagnostics.Stopwatch _indexingStopwatch = new();
+    // #5 CPU/GPU transparency: the Ollama acceleration backend embeddings run
+    // on (NVIDIA CUDA auto, Intel Vulkan, CPU, …). Computed once — GetGpuVendor
+    // can hit WMI — and shown as the progress-panel tooltip.
+    private string? _embeddingBackendLabel;
     private CancellationTokenSource? _streamingCts;
     private StreamingTtsSpeaker? _ttsSpeaker;
     private bool _isVoiceRecording;
@@ -1078,8 +1089,20 @@ public partial class MainWindow : System.Windows.Window
 
         AppendLog("Refreshing library list...");
         var info = _docService.GetLibraryDisplayInfo(_config);
-        LibraryCombo.ItemsSource = info.Options;
-        LibraryCombo.SelectedIndex = info.SelectedIndex;
+        // Suppress the SelectionChanged handler while we set the index
+        // programmatically — the active library is already resolved here, so
+        // the handler's reentrant SetActiveLibraryAsync is redundant (and was
+        // the unguarded async-void crash window for #3).
+        _suppressLibrarySelectionChanged = true;
+        try
+        {
+            LibraryCombo.ItemsSource = info.Options;
+            LibraryCombo.SelectedIndex = info.SelectedIndex;
+        }
+        finally
+        {
+            _suppressLibrarySelectionChanged = false;
+        }
         _activeLibrary = info.ActiveLibrary;
         AppendLog($"Library list refreshed ({Math.Max(info.Options.Count - 1, 0)} libraries).");
         if (_activeLibrary is not null)
@@ -1110,23 +1133,38 @@ public partial class MainWindow : System.Windows.Window
 
     private async Task<bool> EnsureActiveLibraryAsync()
     {
-        var selectedId = _docService.GetLibraryIdByIndex(LibraryCombo.SelectedIndex);
         if (_config is null)
         {
             _activeLibrary = null;
             return false;
         }
 
-        _activeLibrary = await _docService.SetActiveLibraryAsync(_config, _ssdRoot, selectedId);
-        LibraryFilesList.ItemsSource = _activeLibrary?.Files ?? new List<DocumentFileEntry>();
-        UpdateWatchedFolders();
-        UpdateLibraryActionButtons();
-        UpdateNoLibraryEmptyState();
-        return _activeLibrary is not null;
+        // This runs fire-and-forget from LibraryCombo_SelectionChanged, so an
+        // uncaught throw here would be an unhandled async-void exception (#3).
+        // Degrade to a visible message and "no active library" instead.
+        try
+        {
+            var selectedId = _docService.GetLibraryIdByIndex(LibraryCombo.SelectedIndex);
+            _activeLibrary = await _docService.SetActiveLibraryAsync(_config, _ssdRoot, selectedId);
+            LibraryFilesList.ItemsSource = _activeLibrary?.Files ?? new List<DocumentFileEntry>();
+            UpdateWatchedFolders();
+            UpdateLibraryActionButtons();
+            UpdateNoLibraryEmptyState();
+            return _activeLibrary is not null;
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Selecting library failed: {ex.Message}");
+            IndexingStatusText.Text = $"Selecting library failed: {ex.Message}";
+            return false;
+        }
     }
 
     private void LibraryCombo_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
+        // Ignore the index changes RefreshLibraryUi makes programmatically; only
+        // a real user pick should drive a SetActiveLibraryAsync round-trip.
+        if (_suppressLibrarySelectionChanged) return;
         _ = EnsureActiveLibraryAsync();
     }
 
@@ -1153,6 +1191,15 @@ public partial class MainWindow : System.Windows.Window
         {
             AppendLog(ex.Message);
             IndexingStatusText.Text = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            // Any other failure (IO, SQLite, etc.) must degrade to a visible
+            // message, not an unhandled async-void exception that kills the app
+            // (#3). The global handler is the backstop; this keeps the failure
+            // local and actionable.
+            AppendLog($"Create library failed: {ex.Message}");
+            IndexingStatusText.Text = $"Create library failed: {ex.Message}";
         }
     }
 
@@ -1185,11 +1232,12 @@ public partial class MainWindow : System.Windows.Window
         try
         {
             IndexingStatusText.Text = "Indexing...";
+            BeginIndexingProgress();
             IndexingProgress? last = null;
             await _docService.IngestFilesAsync(_activeLibrary, dlg.FileNames, host, _config, p =>
             {
                 last = p;
-                Dispatcher.Invoke(() => IndexingStatusText.Text = FormatProgressLine("Indexing", p));
+                Dispatcher.Invoke(() => UpdateIndexingProgress("Indexing", p));
             });
             RefreshLibraryUi();
             if (last is not null)
@@ -1202,6 +1250,10 @@ public partial class MainWindow : System.Windows.Window
             var cause = IndexingSummary.DescribeFailure(ex);
             AppendLog($"Indexing failed: {cause}");
             IndexingStatusText.Text = $"Indexing failed: {cause}";
+        }
+        finally
+        {
+            EndIndexingProgress();
         }
     }
 
@@ -1319,11 +1371,12 @@ public partial class MainWindow : System.Windows.Window
 
         try
         {
+            BeginIndexingProgress();
             IndexingProgress? last = null;
             await _docService.SweepFoldersAsync(_activeLibrary, host, _config, p =>
             {
                 last = p;
-                Dispatcher.Invoke(() => IndexingStatusText.Text = FormatProgressLine("Sweep", p));
+                Dispatcher.Invoke(() => UpdateIndexingProgress("Sweep", p));
             });
             RefreshLibraryUi();
             if (last is not null)
@@ -1336,6 +1389,10 @@ public partial class MainWindow : System.Windows.Window
             var cause = IndexingSummary.DescribeFailure(ex);
             AppendLog($"Sweep failed: {cause}");
             IndexingStatusText.Text = $"Sweep failed: {cause}";
+        }
+        finally
+        {
+            EndIndexingProgress();
         }
     }
 
@@ -1351,11 +1408,12 @@ public partial class MainWindow : System.Windows.Window
 
         try
         {
+            BeginIndexingProgress();
             IndexingProgress? last = null;
             await _docService.RebuildIndexAsync(_activeLibrary, host, _config, p =>
             {
                 last = p;
-                Dispatcher.Invoke(() => IndexingStatusText.Text = FormatProgressLine("Rebuild", p));
+                Dispatcher.Invoke(() => UpdateIndexingProgress("Rebuild", p));
             });
             RefreshLibraryUi();
             if (last is not null)
@@ -1368,6 +1426,10 @@ public partial class MainWindow : System.Windows.Window
             var cause = IndexingSummary.DescribeFailure(ex);
             AppendLog($"Rebuild failed: {cause}");
             IndexingStatusText.Text = $"Rebuild failed: {cause}";
+        }
+        finally
+        {
+            EndIndexingProgress();
         }
     }
 
@@ -1394,6 +1456,79 @@ public partial class MainWindow : System.Windows.Window
         }
 
         return line;
+    }
+
+    // ── #4 indexing transparency: progress bar + time-remaining estimate ────
+
+    /// <summary>Reset the stopwatch and reveal the determinate progress row at
+    /// the start of an ingest / sweep / rebuild.</summary>
+    private void BeginIndexingProgress()
+    {
+        _indexingStopwatch.Restart();
+        IndexingProgressBar.Value = 0;
+        IndexingEtaText.Text = "estimating…";
+        _embeddingBackendLabel ??= FreeAiSsd.Shared.GpuAccelerationPolicy
+            .ResolveFor(FreeAiSsd.Shared.SystemResources.GetGpuVendor())
+            .BackendDescription;
+        IndexingProgressPanel.ToolTip =
+            $"Embedding acceleration: {_embeddingBackendLabel}. " +
+            "If this is CPU on a GPU machine, the GPU runtime (CUDA/ROCm) isn't loaded — " +
+            "see the log for Ollama's actual backend.";
+        IndexingProgressPanel.Visibility = System.Windows.Visibility.Visible;
+    }
+
+    /// <summary>Stop the stopwatch and hide the progress row when the run ends
+    /// (success or failure). Called from each handler's finally.</summary>
+    private void EndIndexingProgress()
+    {
+        _indexingStopwatch.Stop();
+        IndexingProgressPanel.Visibility = System.Windows.Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// Update the status line, progress bar, and ETA from a progress frame.
+    /// Runs on the UI thread (callers wrap it in Dispatcher.Invoke). The
+    /// terminal frame (empty CurrentFile) only refreshes the status line — the
+    /// caller replaces it with the summary and the finally hides the bar.
+    /// </summary>
+    private void UpdateIndexingProgress(string verb, IndexingProgress p)
+    {
+        IndexingStatusText.Text = FormatProgressLine(verb, p);
+        if (string.IsNullOrEmpty(p.CurrentFile)) return;
+
+        var percent = ComputeIndexingPercent(p);
+        IndexingProgressBar.Value = percent;
+
+        var elapsed = _indexingStopwatch.Elapsed;
+        if (percent >= 2 && percent < 100 && elapsed.TotalSeconds >= 1)
+        {
+            var remaining = TimeSpan.FromSeconds(elapsed.TotalSeconds * (100 - percent) / percent);
+            IndexingEtaText.Text = $"~{FormatEta(remaining)} left";
+        }
+        else
+        {
+            IndexingEtaText.Text = "estimating…";
+        }
+    }
+
+    /// <summary>
+    /// Overall percent across the batch: completed whole files plus the current
+    /// file's chunk fraction, over total files. For the single-large-file case
+    /// (e.g. a Chuck's-Guide PDF) this is exactly EmbeddedChunks/TotalChunks.
+    /// </summary>
+    private static double ComputeIndexingPercent(IndexingProgress p)
+    {
+        if (p.TotalFiles <= 0) return 0;
+        var fileFraction = p.TotalChunks > 0 ? (double)p.EmbeddedChunks / p.TotalChunks : 0;
+        var overall = (p.CompletedFiles + fileFraction) / p.TotalFiles;
+        return Math.Clamp(overall * 100.0, 0, 100);
+    }
+
+    private static string FormatEta(TimeSpan t)
+    {
+        if (t.TotalHours >= 1) return $"{(int)t.TotalHours}h {t.Minutes}m";
+        if (t.TotalMinutes >= 1) return $"{t.Minutes}m {t.Seconds}s";
+        return $"{t.Seconds}s";
     }
 
     private async void PullEmbeddingModel_Click(object sender, System.Windows.RoutedEventArgs e)

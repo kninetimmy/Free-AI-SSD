@@ -514,6 +514,28 @@
                             <TextBlock x:Name="IndexingStatusText"
                                        Foreground="{StaticResource TextSecondaryBrush}"
                                        Margin="0,8,0,0"/>
+                            <!-- #4 indexing transparency: determinate progress bar +
+                                 time-remaining estimate, driven by the per-chunk
+                                 IndexingProgress callback. Collapsed when idle; shown
+                                 while an ingest/sweep/rebuild runs. -->
+                            <Grid x:Name="IndexingProgressPanel"
+                                  Margin="0,6,0,0"
+                                  Visibility="Collapsed">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <ProgressBar x:Name="IndexingProgressBar"
+                                             Grid.Column="0"
+                                             Height="6"
+                                             Minimum="0" Maximum="100" Value="0"
+                                             VerticalAlignment="Center"/>
+                                <TextBlock x:Name="IndexingEtaText"
+                                           Grid.Column="1"
+                                           Margin="10,0,0,0"
+                                           VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextSecondaryBrush}"/>
+                            </Grid>
                             <!-- Workstream C: proactive embedding-model readiness.
                                  UpdateEmbeddingModelHint() shows this when a library
                                  is active but the configured embedder isn't installed,

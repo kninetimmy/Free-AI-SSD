@@ -149,36 +149,31 @@ public sealed class DocumentIngestor
                 // and has no path to the underlying provisioning gap.
                 Exception? firstFailure = null;
 
-                var maxConcurrency = Math.Max(1, config.MaxEmbeddingConcurrency);
-                using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
-
-                var tasks = spans.Select(async (span, i) =>
-                {
-                    await semaphore.WaitAsync(cancellationToken);
-                    try
+                await EmbedSpansBatchedAsync(
+                    host, config, spans, results,
+                    buildChunk: (chunkIndex, span, embedding) => new DocumentChunk
                     {
-                        var embedding = await _embeddingClient.EmbedAsync(host, config.EmbeddingModelName, span.Text, cancellationToken);
-                        results[i] = new DocumentChunk
-                        {
-                            LibraryId = manifest.Id,
-                            SourceFileName = fileName,
-                            StoredRelativePath = storedRelativePath,
-                            Page = span.Page,
-                            ChunkIndex = i,
-                            Text = span.Text,
-                            TextLength = span.Text.Length,
-                            Sha256 = sha,
-                            Embedding = embedding,
-                            EmbeddingModel = config.EmbeddingModelName,
-                            EmbeddingDimension = embedding.Length,
-                            ParserVersion = DocumentParser.Version,
-                            ChunkerVersion = DocumentChunker.Version,
-                            Section = span.Section,
-                            HeadingPath = span.HeadingPath,
-                            CharOffsetStart = span.CharOffsetStart,
-                            CharOffsetEnd = span.CharOffsetEnd,
-                            ContentType = span.ContentType,
-                        };
+                        LibraryId = manifest.Id,
+                        SourceFileName = fileName,
+                        StoredRelativePath = storedRelativePath,
+                        Page = span.Page,
+                        ChunkIndex = chunkIndex,
+                        Text = span.Text,
+                        TextLength = span.Text.Length,
+                        Sha256 = sha,
+                        Embedding = embedding,
+                        EmbeddingModel = config.EmbeddingModelName,
+                        EmbeddingDimension = embedding.Length,
+                        ParserVersion = DocumentParser.Version,
+                        ChunkerVersion = DocumentChunker.Version,
+                        Section = span.Section,
+                        HeadingPath = span.HeadingPath,
+                        CharOffsetStart = span.CharOffsetStart,
+                        CharOffsetEnd = span.CharOffsetEnd,
+                        ContentType = span.ContentType,
+                    },
+                    onChunkEmbedded: () =>
+                    {
                         var completed = Interlocked.Increment(ref embeddedChunks);
                         progress?.Invoke(new IndexingProgress
                         {
@@ -188,23 +183,13 @@ public sealed class DocumentIngestor
                             EmbeddedChunks = completed,
                             TotalChunks = totalChunks
                         });
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (Exception ex)
+                    },
+                    onChunkFailed: ex =>
                     {
                         Interlocked.CompareExchange(ref firstFailure, ex, null);
                         Interlocked.Increment(ref failedChunkCount);
-                    }
-                    finally
-                    {
-                        semaphore.Release();
-                    }
-                });
-
-                await Task.WhenAll(tasks);
+                    },
+                    cancellationToken);
 
                 // Collect successfully embedded chunks in original document order.
                 var chunks = results.Where(r => r is not null).Select(r => r!).ToList();
@@ -343,6 +328,123 @@ public sealed class DocumentIngestor
         => DocumentChunker.ChunkBlocks(parsed.Blocks, config.ChunkSize, config.ChunkOverlap);
 
     /// <summary>
+    /// Embeds <paramref name="spans"/> into <paramref name="results"/> in batches of
+    /// <c>config.EmbeddingBatchSize</c>, with up to <c>config.MaxEmbeddingConcurrency</c>
+    /// batches in flight. Each embedded chunk fires <paramref name="onChunkEmbedded"/>;
+    /// each failure fires <paramref name="onChunkFailed"/>. A whole-batch HTTP failure
+    /// falls back to per-chunk embedding (<see cref="EmbedBatchPerChunkAsync"/>) so one
+    /// bad chunk can't drop the rest of the batch and skew the failure ratio (X18). Each
+    /// chunk is written at its original index, so document order is preserved regardless
+    /// of completion order. Shared by the fresh-ingest and rebuild-from-stored paths so
+    /// they stay in lockstep on embedding behavior.
+    /// </summary>
+    private async Task EmbedSpansBatchedAsync(
+        string host,
+        PortableConfig config,
+        IReadOnlyList<DocumentChunkSpan> spans,
+        DocumentChunk?[] results,
+        Func<int, DocumentChunkSpan, float[], DocumentChunk> buildChunk,
+        Action onChunkEmbedded,
+        Action<Exception> onChunkFailed,
+        CancellationToken cancellationToken)
+    {
+        var batchSize = Math.Max(1, config.EmbeddingBatchSize);
+        var maxConcurrency = Math.Max(1, config.MaxEmbeddingConcurrency);
+        using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+
+        var batches = new List<(int Start, int Count)>();
+        for (var start = 0; start < spans.Count; start += batchSize)
+        {
+            batches.Add((start, Math.Min(batchSize, spans.Count - start)));
+        }
+
+        var tasks = batches.Select(async batch =>
+        {
+            await semaphore.WaitAsync(cancellationToken);
+            try
+            {
+                var inputs = new string[batch.Count];
+                for (var k = 0; k < batch.Count; k++)
+                {
+                    inputs[k] = spans[batch.Start + k].Text;
+                }
+
+                float[][] embeddings;
+                try
+                {
+                    embeddings = await _embeddingClient.EmbedBatchAsync(
+                        host, config.EmbeddingModelName, inputs, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception)
+                {
+                    // Isolate the failure: retry this batch one chunk at a time so
+                    // a single bad chunk doesn't fail the whole batch.
+                    await EmbedBatchPerChunkAsync(
+                        host, config, spans, batch.Start, batch.Count, results,
+                        buildChunk, onChunkEmbedded, onChunkFailed, cancellationToken);
+                    return;
+                }
+
+                for (var k = 0; k < batch.Count; k++)
+                {
+                    var chunkIndex = batch.Start + k;
+                    results[chunkIndex] = buildChunk(chunkIndex, spans[chunkIndex], embeddings[k]);
+                    onChunkEmbedded();
+                }
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        });
+
+        await Task.WhenAll(tasks);
+    }
+
+    /// <summary>
+    /// Per-chunk fallback for a failed batch embed: embeds each chunk in the
+    /// failed range individually so transient or single-chunk failures stay
+    /// isolated to that chunk and the rest still land.
+    /// </summary>
+    private async Task EmbedBatchPerChunkAsync(
+        string host,
+        PortableConfig config,
+        IReadOnlyList<DocumentChunkSpan> spans,
+        int start,
+        int count,
+        DocumentChunk?[] results,
+        Func<int, DocumentChunkSpan, float[], DocumentChunk> buildChunk,
+        Action onChunkEmbedded,
+        Action<Exception> onChunkFailed,
+        CancellationToken cancellationToken)
+    {
+        for (var k = 0; k < count; k++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var chunkIndex = start + k;
+            try
+            {
+                var embedding = await _embeddingClient.EmbedAsync(
+                    host, config.EmbeddingModelName, spans[chunkIndex].Text, cancellationToken);
+                results[chunkIndex] = buildChunk(chunkIndex, spans[chunkIndex], embedding);
+                onChunkEmbedded();
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                onChunkFailed(ex);
+            }
+        }
+    }
+
+    /// <summary>
     /// The configured per-file embedding-failure abort threshold, clamped to [0, 1] so an
     /// out-of-range config value can't invert the comparison or starve every ingest.
     /// </summary>
@@ -476,58 +578,42 @@ public sealed class DocumentIngestor
             return;
         }
 
-        var maxConcurrency = Math.Max(1, config.MaxEmbeddingConcurrency);
-        using var semaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
         var results = new DocumentChunk?[spans.Count];
         var failedCount = 0;
         // C2: same first-failure capture as IngestFilesAsync — see the
         // comment there for rationale.
         Exception? firstFailure = null;
 
-        var tasks = spans.Select(async (span, i) =>
-        {
-            await semaphore.WaitAsync(cancellationToken);
-            try
+        await EmbedSpansBatchedAsync(
+            host, config, spans, results,
+            buildChunk: (chunkIndex, span, embedding) => new DocumentChunk
             {
-                var embedding = await _embeddingClient.EmbedAsync(host, config.EmbeddingModelName, span.Text, cancellationToken);
-                results[i] = new DocumentChunk
-                {
-                    LibraryId = manifest.Id,
-                    SourceFileName = entry.FileName,
-                    StoredRelativePath = entry.StoredRelativePath,
-                    Page = span.Page,
-                    ChunkIndex = i,
-                    Text = span.Text,
-                    TextLength = span.Text.Length,
-                    Sha256 = entry.Sha256,
-                    Embedding = embedding,
-                    EmbeddingModel = config.EmbeddingModelName,
-                    EmbeddingDimension = embedding.Length,
-                    ParserVersion = DocumentParser.Version,
-                    ChunkerVersion = DocumentChunker.Version,
-                    Section = span.Section,
-                    HeadingPath = span.HeadingPath,
-                    CharOffsetStart = span.CharOffsetStart,
-                    CharOffsetEnd = span.CharOffsetEnd,
-                    ContentType = span.ContentType,
-                };
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
+                LibraryId = manifest.Id,
+                SourceFileName = entry.FileName,
+                StoredRelativePath = entry.StoredRelativePath,
+                Page = span.Page,
+                ChunkIndex = chunkIndex,
+                Text = span.Text,
+                TextLength = span.Text.Length,
+                Sha256 = entry.Sha256,
+                Embedding = embedding,
+                EmbeddingModel = config.EmbeddingModelName,
+                EmbeddingDimension = embedding.Length,
+                ParserVersion = DocumentParser.Version,
+                ChunkerVersion = DocumentChunker.Version,
+                Section = span.Section,
+                HeadingPath = span.HeadingPath,
+                CharOffsetStart = span.CharOffsetStart,
+                CharOffsetEnd = span.CharOffsetEnd,
+                ContentType = span.ContentType,
+            },
+            onChunkEmbedded: () => { },
+            onChunkFailed: ex =>
             {
                 Interlocked.CompareExchange(ref firstFailure, ex, null);
                 Interlocked.Increment(ref failedCount);
-            }
-            finally
-            {
-                semaphore.Release();
-            }
-        });
-
-        await Task.WhenAll(tasks);
+            },
+            cancellationToken);
 
         var totalChunks = spans.Count;
         var failureRatio = totalChunks == 0 ? 0d : (double)failedCount / totalChunks;

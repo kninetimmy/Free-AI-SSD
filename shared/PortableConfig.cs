@@ -111,6 +111,13 @@ public sealed class PortableConfig
     /// </summary>
     public int MaxEmbeddingConcurrency { get; set; } = 4;
     /// <summary>
+    /// Number of chunk texts sent per /api/embed request during ingestion. Batching collapses
+    /// the per-chunk HTTP round-trips that dominate ingestion of large documents into far fewer
+    /// calls. Clamped to ≥1 by the ingestor. A failed batch falls back to per-chunk embedding so
+    /// one bad chunk can't drop the rest of the batch (preserves the failure-ratio semantics).
+    /// </summary>
+    public int EmbeddingBatchSize { get; set; } = 16;
+    /// <summary>
     /// Fraction (0.0–1.0) of a file's chunks that may fail to embed before the whole file
     /// is aborted and rolled back. Below the threshold, the successfully embedded chunks are
     /// kept and the dropped count is surfaced in the post-ingest summary. Default 0.50;
