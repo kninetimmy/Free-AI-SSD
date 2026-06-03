@@ -536,10 +536,98 @@
                         <StackPanel>
                             <TextBlock Text="Set up the drive"
                                        Style="{StaticResource H2Text}"/>
-                            <TextBlock Text="Choose what to stage, name the volume, and decide on encryption. Format the drive when you're ready — you'll be asked to confirm before anything is erased."
+                            <TextBlock Text="Pick how you'll reach the assistant, choose what to stage, name the volume, then format. You'll be asked to confirm before anything is erased."
                                        Style="{StaticResource CaptionText}"
                                        TextWrapping="Wrap"
                                        Margin="0,0,0,12"/>
+
+                            <!-- Up-front access-mode choice. Sits ABOVE the
+                                 Drive-preparation box and is gated only on
+                                 CanMutateDrive (not CanInitiateFreshFormat), so
+                                 it stays editable after a format completes — the
+                                 fix for the encrypt checkbox going permanently
+                                 unreachable once a fresh format flips the
+                                 already-configured banner on. Encryption is
+                                 applied at Finalize, so the choice is safe to
+                                 change up to that point. Radios drive the VM via
+                                 code-behind (SelectDeviceOnlyAccess /
+                                 RequestLanAccess); LAN runs the
+                                 encryption-required confirm first. -->
+                            <GroupBox Header="How will you use this?" Margin="0,0,0,10"
+                                      IsEnabled="{Binding CanMutateDrive}">
+                                <StackPanel Margin="8">
+                                    <TextBlock Text="You can change this until you finish setup."
+                                               Style="{StaticResource CaptionText}"
+                                               TextWrapping="Wrap"
+                                               Margin="0,0,0,8"/>
+                                    <RadioButton x:Name="AccessDeviceOnlyRadio"
+                                                 GroupName="WebUiAccess"
+                                                 Content="This device only"
+                                                 IsChecked="True"
+                                                 Foreground="{StaticResource TextSecondaryBrush}"
+                                                 FontWeight="SemiBold"
+                                                 Checked="AccessDeviceOnlyRadio_Checked"
+                                                 ToolTip="Runner and the web chat UI run only on this PC. Encryption is optional."/>
+                                    <TextBlock Text="Runner and the web chat UI run only on this PC. No API key needed."
+                                               Style="{StaticResource CaptionText}"
+                                               TextWrapping="Wrap"
+                                               Margin="22,2,0,8"/>
+                                    <RadioButton x:Name="AccessLanRadio"
+                                                 GroupName="WebUiAccess"
+                                                 Content="Other devices on my LAN (iPad, second PC)"
+                                                 Foreground="{StaticResource TextSecondaryBrush}"
+                                                 FontWeight="SemiBold"
+                                                 Checked="AccessLanRadio_Checked"
+                                                 ToolTip="Open the web chat UI from other devices on your home network. Requires encrypting the drive — your network API key is only ever stored encrypted."/>
+                                    <TextBlock Text="Open the web chat UI in a browser on your iPad or another PC. This requires encrypting the drive."
+                                               Style="{StaticResource CaptionText}"
+                                               TextWrapping="Wrap"
+                                               Margin="22,2,0,0"/>
+
+                                    <!-- LAN-only API-key explainer. -->
+                                    <Border Margin="22,8,0,0" Padding="10,8"
+                                            Background="{StaticResource BgRaisedBrush}"
+                                            BorderBrush="{StaticResource AccentCyanBrush}"
+                                            BorderThickness="1" CornerRadius="6"
+                                            Visibility="{Binding IsLanAccess, Converter={StaticResource BoolToVisibilityConverter}}">
+                                        <StackPanel>
+                                            <StackPanel Orientation="Horizontal">
+                                                <theme:LedStatusIndicator State="Ok" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                                <TextBlock Text="About the API key"
+                                                           Foreground="{StaticResource AccentCyanBrush}"
+                                                           FontWeight="SemiBold"
+                                                           VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                            <TextBlock Margin="0,6,0,0"
+                                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                                       TextWrapping="Wrap"
+                                                       Text="A random API key is generated automatically when you finish setup and is stored encrypted on the drive. You'll see it on the final screen with a Copy button — enter it once in the browser on each device (it's remembered per device). You can always re-copy it later from Runner → Network Mode → Copy."/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <!-- Encryption toggle: user-editable only in
+                                         device-only mode; LAN forces it on and
+                                         locks it (IsEncryptionToggleEnabled). -->
+                                    <CheckBox Margin="0,12,0,0"
+                                              Foreground="{StaticResource TextSecondaryBrush}"
+                                              Content="Encrypt the drive configuration"
+                                              IsChecked="{Binding EnableEncryption, Mode=TwoWay}"
+                                              IsEnabled="{Binding IsEncryptionToggleEnabled}"
+                                              ToolTip="Wrap portable-config.json with a passphrase-derived key (AES-256-GCM). The Runner prompts for the passphrase on every launch. Required for LAN access; optional but recommended otherwise."/>
+                                    <TextBlock Margin="22,4,0,0"
+                                               FontSize="11"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               TextWrapping="Wrap"
+                                               Text="Optional for device-only use — protects your configuration and any saved Hugging Face token at rest. You'll choose the passphrase at the final step."
+                                               Visibility="{Binding IsDeviceOnlyAccess, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                                    <TextBlock Margin="22,4,0,0"
+                                               FontSize="11"
+                                               Foreground="{StaticResource AccentCyanBrush}"
+                                               TextWrapping="Wrap"
+                                               Text="Required for LAN access — the network API key is never written in plaintext. You'll choose the passphrase at the final step."
+                                               Visibility="{Binding IsLanAccess, Converter={StaticResource BoolToVisibilityConverter}}"/>
+                                </StackPanel>
+                            </GroupBox>
 
                             <GroupBox Header="Drive preparation" Margin="0,0,0,10"
                                       IsEnabled="{Binding CanInitiateFreshFormat}">
@@ -578,17 +666,6 @@
                                                 Command="{Binding FormatPrepareCommand}"
                                                 ToolTip="Erase and re-layout the target drive for Free AI SSD use. Destroys existing data. You'll be asked to confirm first."/>
                                     </StackPanel>
-                                    <CheckBox Margin="0,10,0,0"
-                                              Foreground="{StaticResource TextSecondaryBrush}"
-                                              Content="Encrypt SSD config (optional, recommended for Network Mode)"
-                                              IsChecked="{Binding EnableEncryption, Mode=TwoWay}"
-                                              IsEnabled="{Binding CanMutateDrive}"
-                                              ToolTip="Wrap portable-config.json with a passphrase-derived key. The runner will prompt for the passphrase on every launch. Required if you plan to expose the Runner API on your LAN — your API key is only stored encrypted."/>
-                                    <TextBlock Margin="22,4,0,0"
-                                               FontSize="11"
-                                               Foreground="{StaticResource TextSecondaryBrush}"
-                                               TextWrapping="Wrap"
-                                               Text="Off by default. Enabling Network Mode later requires this on (the LAN API key is never written in plaintext)."/>
                                 </StackPanel>
                             </GroupBox>
 
@@ -1216,6 +1293,55 @@
                                    TextAlignment="Center"
                                    Margin="0,12,0,0"
                                    Text="Eject this SSD and plug it into the machine that will run Free AI SSD, then launch the Runner from the drive."/>
+
+                        <!-- LAN API key surface. Shown only when the user chose
+                             LAN access (ShowFinalizedApiKey) so first-time LAN
+                             users get the generated key here without opening
+                             Runner. Re-copyable later from Runner → Network Mode. -->
+                        <Border Margin="0,16,0,0"
+                                Padding="12"
+                                Background="{StaticResource BgRaisedBrush}"
+                                BorderBrush="{StaticResource AccentCyanBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                Visibility="{Binding ShowFinalizedApiKey, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <StackPanel>
+                                <TextBlock Text="Your LAN API key"
+                                           Style="{StaticResource H2Text}"
+                                           FontSize="14"/>
+                                <TextBlock Style="{StaticResource CaptionText}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,2,0,0"
+                                           Text="Enter this once in the browser (or Companion app) on each device that connects over your LAN. It's remembered per device. Keep it private — anyone with it can reach the assistant on your network."/>
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                    <TextBox x:Name="FinalizedApiKeyText"
+                                             Style="{StaticResource GlowFocusTextBox}"
+                                             IsReadOnly="True"
+                                             Width="360"
+                                             VerticalAlignment="Center"
+                                             FontFamily="Consolas, Menlo, monospace"
+                                             Text="{Binding FinalizedNetworkApiKey, Mode=OneWay}"
+                                             ToolTip="The shared-secret API key generated for LAN access."/>
+                                    <Button Content="Copy"
+                                            Margin="8,0,0,0"
+                                            Padding="14,4" MinHeight="0"
+                                            Style="{StaticResource GhostSecondaryButton}"
+                                            Click="CopyFinalizedApiKey_Click"
+                                            ToolTip="Copy the API key to the clipboard."/>
+                                </StackPanel>
+                                <TextBlock x:Name="ApiKeyCopiedHint"
+                                           Style="{StaticResource CaptionText}"
+                                           Foreground="{StaticResource StatusSuccessBrush}"
+                                           Margin="0,6,0,0"
+                                           Visibility="Collapsed"
+                                           Text="Copied to clipboard."/>
+                                <TextBlock Style="{StaticResource CaptionText}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,8,0,0"
+                                           Text="In Runner, enable Network Mode and choose 'Other devices on my LAN', then open the web UI at http://&lt;this-PC&gt;:41555/chat/ from your other device. You can re-copy this key anytime from Runner → Network Mode → Copy."/>
+                            </StackPanel>
+                        </Border>
+
                         <Border Margin="0,16,0,0"
                                 Padding="10"
                                 Background="{StaticResource BgRaisedBrush}"

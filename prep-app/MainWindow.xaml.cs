@@ -46,6 +46,11 @@ public partial class MainWindow : Window
     private PrepFlowStep _currentStep = PrepFlowStep.Welcome;
     private bool _isManageMode;
 
+    // Guards the access-mode radio Checked handlers against reentrancy while
+    // we programmatically re-sync them to the VM (on step entry, or after the
+    // user cancels the LAN encryption-required confirm).
+    private bool _syncingAccessRadios;
+
     // #1 soft-lock gate: tracks whether finalize ("Finish setup") has
     // verifiably completed in the current Finalize visit. The footer
     // Continue must not skip finalize and land on the "Drive ready" Done
@@ -903,6 +908,14 @@ public partial class MainWindow : Window
             ? Visibility.Visible
             : Visibility.Collapsed;
 
+        // Keep the access-mode radios in lockstep with the VM whenever the
+        // Set-up-drive step is shown (Back/forward navigation preserves VM
+        // state but the radios are plain controls).
+        if (step == PrepFlowStep.FormatSetup)
+        {
+            SyncAccessModeRadios();
+        }
+
         BackButton.Visibility = HasBack(step) ? Visibility.Visible : Visibility.Collapsed;
         PrimaryButton.Content = PrimaryLabel(step);
         UpdateFooterState();
@@ -1191,6 +1204,67 @@ public partial class MainWindow : Window
         {
             card.BorderBrush = (System.Windows.Media.Brush)resources["SurfaceBorderBrush"];
             card.Effect = (System.Windows.Media.Effects.Effect)resources["RaisedDarkShadow"];
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Access-mode radios (top of the Set-up-drive step). Device-only is
+    // a straight VM write; LAN routes through RequestLanAccess, which runs
+    // the encryption-required confirm and reverts on cancel.
+    // ─────────────────────────────────────────────────────────────
+
+    private void AccessDeviceOnlyRadio_Checked(object sender, RoutedEventArgs e)
+    {
+        if (_syncingAccessRadios) return;
+        _viewModel.SelectDeviceOnlyAccess();
+    }
+
+    private void AccessLanRadio_Checked(object sender, RoutedEventArgs e)
+    {
+        if (_syncingAccessRadios) return;
+        if (!_viewModel.RequestLanAccess())
+        {
+            // User declined the encryption-required confirm — snap the radio
+            // back to whatever the VM still holds (device-only).
+            SyncAccessModeRadios();
+        }
+    }
+
+    private void SyncAccessModeRadios()
+    {
+        _syncingAccessRadios = true;
+        try
+        {
+            if (_viewModel.WebUiAccessMode == WebUiAccessMode.Lan)
+            {
+                AccessLanRadio.IsChecked = true;
+            }
+            else
+            {
+                AccessDeviceOnlyRadio.IsChecked = true;
+            }
+        }
+        finally
+        {
+            _syncingAccessRadios = false;
+        }
+    }
+
+    /// <summary>Done step: copy the generated LAN API key to the clipboard
+    /// and flash a short confirmation.</summary>
+    private void CopyFinalizedApiKey_Click(object sender, RoutedEventArgs e)
+    {
+        var key = _viewModel.FinalizedNetworkApiKey;
+        if (string.IsNullOrEmpty(key)) return;
+        try
+        {
+            Clipboard.SetText(key);
+            ApiKeyCopiedHint.Visibility = Visibility.Visible;
+        }
+        catch (Exception ex)
+        {
+            // Clipboard can transiently fail if another app holds it open.
+            _viewModel.LogLines.Add($"Could not copy API key to clipboard: {ex.Message}");
         }
     }
 }
