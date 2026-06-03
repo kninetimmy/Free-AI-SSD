@@ -325,7 +325,7 @@
                                 Style="{StaticResource TactilePrimaryButton}"
                                 Margin="10,0,0,0"
                                 Click="OpenBrowser_Click"
-                                ToolTip="Open the local Ollama chat web UI in your default browser."/>
+                                ToolTip="Open the Free-AI-SSD web chat UI (/chat/) in your default browser. Requires Network Mode to be enabled."/>
 
                         <StackPanel Orientation="Horizontal" Margin="16,0,0,0"
                                     VerticalAlignment="Center">

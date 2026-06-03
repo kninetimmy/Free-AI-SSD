@@ -769,8 +769,40 @@ public partial class MainWindow : System.Windows.Window
 
     private void OpenBrowser_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        if (!TryGetCurrentHost(out var host)) return;
-        Process.Start(new ProcessStartInfo { FileName = $"http://{host}", UseShellExecute = true });
+        // The web chat UI is served at /chat/ by the LAN API (RunnerLocalApiService),
+        // not by Ollama. CurrentBaseUrl is non-null only while that API is running,
+        // which requires Ollama started AND Network Mode enabled.
+        var baseUrl = _localApiService.CurrentBaseUrl;
+        if (string.IsNullOrEmpty(baseUrl))
+        {
+            var message = "Web chat UI isn't running. Start Ollama and enable Network Mode, then try again.";
+            StatusText.Text = message;
+            AppendLog(message);
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo { FileName = BuildChatUiUrl(baseUrl), UseShellExecute = true });
+    }
+
+    /// <summary>
+    /// Builds the local browser URL for the web chat UI served at /chat/ by the
+    /// LAN API. <paramref name="baseUrl"/> is the API's CurrentBaseUrl, which
+    /// reflects the configured bind address; a 0.0.0.0 / :: wildcard means "all
+    /// interfaces" and isn't itself browsable, so it is rewritten to loopback. A
+    /// specific LAN IP is kept as-is (loopback isn't served on that bind).
+    /// </summary>
+    private static string BuildChatUiUrl(string baseUrl)
+    {
+        var uri = new Uri(baseUrl);
+        var host = uri.Host switch
+        {
+            "0.0.0.0" => "127.0.0.1",
+            "::" => "::1",
+            _ => uri.Host
+        };
+        // Re-bracket IPv6 literals for the URL authority.
+        var authority = host.Contains(':') ? $"[{host}]" : host;
+        return $"http://{authority}:{uri.Port}/chat/";
     }
 
     private async void RerunDependencyCheck_Click(object sender, System.Windows.RoutedEventArgs e)
