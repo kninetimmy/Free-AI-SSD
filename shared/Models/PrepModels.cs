@@ -250,3 +250,18 @@ public enum ModelRemoveChoice
     ConfigOnly,
     DeleteFromDisk
 }
+
+/// <summary>
+/// How the prepared SSD's Runner / web chat UI will be reached. Surfaced
+/// up front on the prep "Set up drive" step so the encryption decision is
+/// framed by the user's actual goal rather than a bare checkbox.
+/// <see cref="DeviceOnly"/> keeps everything on the host PC (encryption
+/// optional). <see cref="Lan"/> exposes the Runner LAN API + web UI to
+/// other devices, which requires an encrypted config because the network
+/// API key is never written in plaintext (see Security invariants).
+/// </summary>
+public enum WebUiAccessMode
+{
+    DeviceOnly,
+    Lan,
+}

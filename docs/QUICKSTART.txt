@@ -30,9 +30,14 @@
        This goes away with the next signed release. See "macOS first
        launch" below for details.  ***
    Select your SSD. Choose target compatibility (Windows-only / Mac-only
-   / cross-platform). Format the drive (the prep tool picks the right
+   / cross-platform). On the "Set up the drive" step, pick how you'll
+   reach the assistant: "This device only" (encryption optional) or
+   "Other devices on my LAN" (encryption required — see "API key & LAN
+   access" below). Format the drive (the prep tool picks the right
    filesystem from your target choice — see matrix below). Pull one
    model (e.g. phi3 or llama3.1:8b). Run readiness checks, then finalize.
+   If you chose LAN, the final screen shows your API key with a Copy
+   button.
 4) Unplug. Plug into the machine you actually want to use it on.
      - Windows: <SSD>\windows\runner\FreeAiSsd.Runner.exe
      - macOS:   <SSD>/Runner.app    (at the drive root; beta bundle only;
@@ -63,12 +68,16 @@
  |           |                |            |   format NTFS)                   |
  +-----------+----------------+------------+----------------------------------+
 
- Encryption is opt-in (off by default). Plaintext-prepped SSDs roundtrip
- cleanly between OSes. Enabling encryption is recommended if you plan to
- expose the Runner API on your LAN — your API key is only stored
- encrypted, and Network Mode + Require API Key is enforced to require
- encryption at save time. The on-disk encrypted format (AES-256-GCM +
- PBKDF2-SHA256) is identical on both platforms when enabled.
+ Encryption is driven by the access choice on the "Set up the drive"
+ step. "This device only" leaves encryption optional (off by default;
+ turn it on to protect your config + any saved Hugging Face token at
+ rest). "Other devices on my LAN" requires encryption and turns it on
+ for you, because your LAN API key is only ever stored encrypted —
+ PrepApp confirms this before switching. Either way you choose the
+ unlock passphrase at the final step, and the Runner asks for it on
+ each launch. Plaintext-prepped SSDs roundtrip cleanly between OSes.
+ The on-disk encrypted format (AES-256-GCM + PBKDF2-SHA256) is identical
+ on both platforms when enabled.
 
  Notes:
  - APFS is a Mac-native filesystem; Windows cannot reliably create or
@@ -258,6 +267,63 @@ Everything below is optional and layered on top of that baseline.
  - Port note: 41555 is the default; if it's busy Runner picks the next
    free port and logs "Network API started at http://...". The in-app
    "Open Chat UI" button always targets the right one.
+
+ 9. API key & LAN access — step by step
+ --------------------------------------
+ The API key is the shared secret that lets other devices reach the
+ Runner over your LAN. You never invent it — it's generated for you.
+ Here's the whole lifecycle so there's no guesswork.
+
+ What it is
+   - A random 256-bit key created automatically the first time you
+     finalize an SSD. It's stored ONLY in the drive's encrypted config,
+     which is why LAN access requires encryption.
+   - It is not a cloud account, login, or anything you sign up for.
+     Everything stays on your drive and your LAN.
+
+ During prep (one time)
+   1. On the "Set up the drive" step, choose "Other devices on my LAN".
+      PrepApp confirms that the drive must be encrypted and turns
+      encryption on.
+   2. Finish pulling models and click "Finish setup". You'll set the
+      unlock passphrase here.
+   3. On the final "Drive ready" screen, your API key is shown with a
+      Copy button. Copy it now (or come back for it later — see below).
+
+ On the host PC (the machine that runs Runner)
+   1. Launch the Runner from the SSD and unlock it with your passphrase.
+   2. Start the AI engine, then open Settings -> Network Mode.
+   3. Tick "Enable Network Mode" and choose "Other devices on my LAN
+      (0.0.0.0)". (This radio is only available on an encrypted drive.)
+      "Require API key" is forced on for LAN.
+   4. The key is shown in the API key box. Use "Copy" to grab it, or
+      "Generate" to roll a new one (every device then has to re-enter
+      the new value).
+   5. Allow inbound TCP 41555 through the host's firewall the first time
+      Windows asks.
+
+ On each other device (iPad, laptop, second PC)
+   1. Open a browser and go to http://<host-LAN-IP>:41555/chat/
+      (or http://<hostname>.local:41555/chat/). Find the host IP from
+      Runner's Network Mode status line, or your router.
+   2. The web UI prompts for the API key on first use. Paste it once.
+      It's saved in that browser (localStorage) along with your chat
+      history, so you won't be asked again on that device.
+   3. The Companion app (VR/split-PC setups) takes the same key in its
+      Settings, or reads it from companion-config.json staged on the SSD.
+
+ Lost or rotating the key
+   - Forgot to copy it? Open Runner -> Settings -> Network Mode ->
+     Copy. (You must unlock the drive first; the key lives in the
+     encrypted config.)
+   - Suspect it leaked, or just want a fresh one? Click "Generate" in
+     Network Mode, then re-enter the new key on every device. Old
+     values stop working immediately.
+
+ Safety
+   - Plain HTTP, no TLS — trusted home LAN only. Anyone who has the key
+     AND can reach port 41555 can use your assistant. Never forward the
+     port or expose it to the public internet.
 
 --------------------------------------------------------------------------------
  Use Cases
