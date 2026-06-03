@@ -132,7 +132,10 @@ internal sealed class HostLifetime : IAsyncDisposable
 
         collection.AddSingleton(_httpClient);
         collection.AddSingleton(sp => new DocumentLibraryManager(_ssdRoot));
-        collection.AddSingleton(sp => new EmbeddingClient(sp.GetRequiredService<HttpClient>()));
+        // Parity with the Windows runner: ingestion embeds use a dedicated HttpClient with a
+        // bounded per-request timeout so a wedged /api/embed fails fast. The shared _httpClient
+        // stays on chat, which needs the long/streaming timeout.
+        collection.AddSingleton(sp => new EmbeddingClient(new HttpClient { Timeout = TimeSpan.FromSeconds(60) }));
         collection.AddSingleton(sp => new DocumentIngestor(
             sp.GetRequiredService<DocumentLibraryManager>(),
             sp.GetRequiredService<EmbeddingClient>(),
