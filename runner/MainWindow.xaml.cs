@@ -67,6 +67,15 @@ public partial class MainWindow : System.Windows.Window
     private StreamingTtsSpeaker? _ttsSpeaker;
     private bool _isVoiceRecording;
 
+    // On-screen log throttling. Service log events (notably Ollama's per-request stdout) can
+    // arrive thousands of lines a second during a large ingest. Appending each one to the
+    // non-virtualized log TextBox with a per-line ScrollToEnd saturated the dispatcher and froze
+    // the runner mid-ingest (#68). Lines are now queued and drained by a single coalesced flush,
+    // and the buffer is capped so the TextBox layout cost stays bounded.
+    private readonly System.Collections.Concurrent.ConcurrentQueue<string> _logQueue = new();
+    private int _logFlushScheduled;
+    private const int MaxLogChars = 256 * 1024;
+
     // Push-to-Talk (HOTAS) state
     private readonly IHotasInputService _hotasService;
     private readonly PttVoicePipelineService _pttPipeline;
@@ -1812,15 +1821,46 @@ public partial class MainWindow : System.Windows.Window
 
     private void AppendLog(string line)
     {
-        // InvokeAsync (not Invoke): LogMessage fires from ThreadPool reader
-        // pumps inside Process.Dispose. A synchronous Invoke here deadlocks
-        // when Stop_Click is also waiting on Dispose from the UI thread.
-        Dispatcher.InvokeAsync(() =>
-        {
-            LogText.AppendText(line + Environment.NewLine);
-            LogText.ScrollToEnd();
-        });
         _logger?.Info(line);
+
+        // Queue the line and schedule at most one pending flush. Bursts (thousands of Ollama
+        // lines/sec during ingest) collapse into a single dispatcher op that drains the whole
+        // backlog, instead of one InvokeAsync + AppendText + ScrollToEnd per line, which froze
+        // the UI (#68). The flush also fires from the ThreadPool-safe BeginInvoke, preserving the
+        // old reason for not using a synchronous Invoke here (Process.Dispose reader-pump deadlock).
+        _logQueue.Enqueue(line);
+        if (System.Threading.Interlocked.Exchange(ref _logFlushScheduled, 1) == 0)
+        {
+            Dispatcher.BeginInvoke(new Action(FlushLogQueue));
+        }
+    }
+
+    /// <summary>
+    /// Drains the queued log lines into the TextBox in one batched append, then caps the buffer.
+    /// Runs on the UI thread. The scheduled flag is cleared first so lines enqueued during the
+    /// drain reschedule exactly one follow-up flush rather than being lost.
+    /// </summary>
+    private void FlushLogQueue()
+    {
+        System.Threading.Interlocked.Exchange(ref _logFlushScheduled, 0);
+        if (_logQueue.IsEmpty) return;
+
+        var batch = new System.Text.StringBuilder();
+        while (_logQueue.TryDequeue(out var queued))
+        {
+            batch.Append(queued).Append('\n');
+        }
+        LogText.AppendText(batch.ToString());
+
+        // Bound the on-screen buffer so the TextBox layout cost stays O(cap), not O(session).
+        if (LogText.Text.Length > MaxLogChars)
+        {
+            var overflow = LogText.Text.Length - MaxLogChars;
+            var cut = LogText.Text.IndexOf('\n', overflow);
+            LogText.Text = cut >= 0 ? LogText.Text[(cut + 1)..] : LogText.Text[overflow..];
+        }
+
+        LogText.ScrollToEnd();
     }
 
     private void UnlockDrive_Click(object sender, System.Windows.RoutedEventArgs e)

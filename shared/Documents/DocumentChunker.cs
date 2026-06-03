@@ -4,7 +4,17 @@ namespace FreeAiSsd.Shared.Documents;
 
 public static class DocumentChunker
 {
-    public const string Version = "2";
+    // v3: sub-floor trailing chunks of a named section are folded into the preceding chunk so
+    // heading-dense documents don't emit micro-chunks (#68).
+    public const string Version = "3";
+
+    /// <summary>
+    /// A chunk shorter than this (in characters) is merged into the preceding chunk of the same
+    /// section/page rather than embedded as its own micro-chunk. All-body runs are exempt so the
+    /// degenerate path stays byte-for-byte equal to <see cref="ChunkText"/>.
+    /// </summary>
+    private const int MinChunkChars = 120;
+
     public static List<string> ChunkText(string text, int chunkSize, int overlap)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -142,6 +152,40 @@ public static class DocumentChunker
         }
 
         Flush();
-        return spans;
+        return CoalesceSmallSpans(spans);
+    }
+
+    /// <summary>
+    /// Folds a sub-<see cref="MinChunkChars"/> span into the preceding chunk when both belong to
+    /// the same named section on the same page. This absorbs a section's tiny trailing remainder
+    /// without crossing a section or page boundary (so attribution stays clean) and without
+    /// touching all-body runs (empty heading path), which must remain identical to
+    /// <see cref="ChunkText"/>. Distinct short sibling sections are left separate.
+    /// </summary>
+    private static List<DocumentChunkSpan> CoalesceSmallSpans(List<DocumentChunkSpan> spans)
+    {
+        if (spans.Count <= 1) return spans;
+
+        var result = new List<DocumentChunkSpan>(spans.Count);
+        foreach (var span in spans)
+        {
+            if (result.Count > 0 &&
+                span.Text.Length < MinChunkChars &&
+                !string.IsNullOrEmpty(span.HeadingPath) &&
+                result[^1].Page == span.Page &&
+                string.Equals(result[^1].HeadingPath, span.HeadingPath, StringComparison.Ordinal))
+            {
+                var prev = result[^1];
+                prev.Text = prev.Text + "\n" + span.Text;
+                // Keep CharOffsetEnd - CharOffsetStart == Text.Length so neighbor expansion's
+                // offset math stays consistent after the merge.
+                prev.CharOffsetEnd = prev.CharOffsetStart + prev.Text.Length;
+                continue;
+            }
+
+            result.Add(span);
+        }
+
+        return result;
     }
 }

@@ -79,14 +79,8 @@ public sealed class OllamaLifecycleService : IOllamaLifecycleService
         LogMessage?.Invoke($"GPU backend: {gpuDecision.BackendDescription}");
 
         _ollama = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-        _ollama.OutputDataReceived += (_, args) =>
-        {
-            if (!string.IsNullOrWhiteSpace(args.Data)) LogMessage?.Invoke(args.Data);
-        };
-        _ollama.ErrorDataReceived += (_, args) =>
-        {
-            if (!string.IsNullOrWhiteSpace(args.Data)) LogMessage?.Invoke(args.Data);
-        };
+        _ollama.OutputDataReceived += (_, args) => ForwardOllamaLine(args.Data);
+        _ollama.ErrorDataReceived += (_, args) => ForwardOllamaLine(args.Data);
         _ollama.Exited += (_, _) =>
         {
             LogMessage?.Invoke("Ollama exited.");
@@ -101,6 +95,50 @@ public sealed class OllamaLifecycleService : IOllamaLifecycleService
         _logger?.Info($"Started ollama on port {port}");
 
         return new OllamaStartResult(true);
+    }
+
+    /// <summary>
+    /// Routes one line of Ollama output to the right sink. llama-server emits roughly seven
+    /// lines per embedding/generation request (slot scheduling, cache state, request done). On a
+    /// large ingest that is thousands of lines a second — forwarded verbatim to the on-screen log
+    /// it saturated the WPF dispatcher and froze the runner during the F18-guide ingest (#68).
+    /// The per-request churn now goes to the file log only (DEBUG); meaningful lifecycle lines —
+    /// and anything that looks like a warning or error — still surface in the UI via
+    /// <see cref="LogMessage"/>, which also persists them to the file.
+    /// </summary>
+    private void ForwardOllamaLine(string? data)
+    {
+        if (string.IsNullOrWhiteSpace(data)) return;
+
+        if (IsVerboseServerLine(data))
+        {
+            _logger?.Debug(data);
+            return;
+        }
+
+        LogMessage?.Invoke(data);
+    }
+
+    /// <summary>
+    /// True for high-frequency llama-server per-request scheduler/server chatter that is noise to
+    /// a user. Conservative: any line mentioning an error/warning/failure is never suppressed.
+    /// </summary>
+    private static bool IsVerboseServerLine(string line)
+    {
+        if (line.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("warn", StringComparison.OrdinalIgnoreCase) ||
+            line.Contains("fail", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return line.StartsWith("slot ", StringComparison.Ordinal)
+            || line.StartsWith("srv ", StringComparison.Ordinal)
+            || line.Contains("update_slots", StringComparison.Ordinal)
+            || line.Contains("log_server_r", StringComparison.Ordinal)
+            || line.Contains("launch_slot_", StringComparison.Ordinal)
+            || line.Contains("get_availabl", StringComparison.Ordinal)
+            || line.Contains("kv cache", StringComparison.OrdinalIgnoreCase);
     }
 
     public void Stop()

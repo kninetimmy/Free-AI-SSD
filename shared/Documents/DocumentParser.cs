@@ -6,13 +6,26 @@ namespace FreeAiSsd.Shared.Documents;
 
 public static class DocumentParser
 {
-    public const string Version = "1";
+    // v2: per-page heading-density backoff so graphically dense pages stop fragmenting (#68).
+    public const string Version = "2";
 
     /// <summary>A heading tier must be at least this many times the body font size.</summary>
     private const double HeadingSizeFactor = 1.15;
 
     /// <summary>A bold, body-or-larger line longer than this is treated as body, not a heading.</summary>
     private const int BoldHeadingMaxChars = 80;
+
+    /// <summary>A page must carry at least this many lines to be eligible for heading-density backoff.</summary>
+    private const int HeadingDensityMinLines = 6;
+
+    /// <summary>
+    /// When more than this fraction of an eligible page's lines classify as headings, the
+    /// typographic signal on that page is treated as noise (a graphically dense diagram page,
+    /// e.g. a cockpit layout whose every callout is a short bold label) and heading detection
+    /// is suppressed for the whole page. Without this, such a page fragments into one chunk per
+    /// label — the F18-guide ingest explosion (#68).
+    /// </summary>
+    private const double HeadingDensityMaxFraction = 0.40;
     private static readonly HashSet<string> Supported = new(StringComparer.OrdinalIgnoreCase)
     {
         ".pdf", ".txt", ".md", ".json", ".csv"
@@ -283,6 +296,12 @@ public static class DocumentParser
     /// form heading tiers, ranked largest-first into levels 1..N. Bold, short, body-or-larger
     /// lines that aren't in a size tier are treated as the deepest heading level. Body lines
     /// coalesce into one block but never across a page boundary.
+    /// <para>
+    /// A per-page backoff guards against graphically dense pages (cockpit diagrams etc.) where
+    /// nearly every short label trips a heading heuristic: when an eligible page classifies more
+    /// than <see cref="HeadingDensityMaxFraction"/> of its lines as headings, the page's
+    /// typographic signal is treated as noise and all its lines degrade to body (#68).
+    /// </para>
     /// </summary>
     public static List<DocumentBlock> ClassifyLinesIntoBlocks(IReadOnlyList<LineRecord> lines)
     {
@@ -312,7 +331,45 @@ public static class DocumentParser
             levelBySize[headingSizes[i]] = i + 1;
         }
 
-        // 3. Walk lines, coalescing body and flushing it at each heading or page change.
+        // Would this line be classified as a heading by the size-tier or bold-caption rule?
+        bool IsHeadingLine(LineRecord line, out int level)
+        {
+            var size = Math.Round(line.FontSize, 1);
+            if (levelBySize.TryGetValue(size, out level)) return true;
+            if (line.IsBold && size >= bodySize && line.Text.Length <= BoldHeadingMaxChars)
+            {
+                // A bold caption with no distinct size still reads as a section break; place it
+                // one level below the smallest size tier (level 1 when there are no size tiers).
+                level = headingSizes.Count + 1;
+                return true;
+            }
+            level = 0;
+            return false;
+        }
+
+        // 3. Per-page heading-density backoff: find pages where the heading heuristics fire on
+        // too large a share of the lines, so the page is a diagram/label sheet rather than prose.
+        var linesByPage = new Dictionary<int, int>();
+        var headingsByPage = new Dictionary<int, int>();
+        foreach (var line in lines)
+        {
+            linesByPage[line.Page] = linesByPage.GetValueOrDefault(line.Page) + 1;
+            if (IsHeadingLine(line, out _))
+            {
+                headingsByPage[line.Page] = headingsByPage.GetValueOrDefault(line.Page) + 1;
+            }
+        }
+        var suppressedPages = new HashSet<int>();
+        foreach (var (page, count) in linesByPage)
+        {
+            if (count >= HeadingDensityMinLines &&
+                headingsByPage.GetValueOrDefault(page) > count * HeadingDensityMaxFraction)
+            {
+                suppressedPages.Add(page);
+            }
+        }
+
+        // 4. Walk lines, coalescing body and flushing it at each heading or page change.
         DocumentBlock? bodyBlock = null;
 
         void FlushBody()
@@ -326,15 +383,8 @@ public static class DocumentParser
 
         foreach (var line in lines)
         {
-            var size = Math.Round(line.FontSize, 1);
-            var isHeading = levelBySize.TryGetValue(size, out var level);
-            if (!isHeading && line.IsBold && size >= bodySize && line.Text.Length <= BoldHeadingMaxChars)
-            {
-                // A bold caption with no distinct size still reads as a section break; place it
-                // one level below the smallest size tier (level 1 when there are no size tiers).
-                isHeading = true;
-                level = headingSizes.Count + 1;
-            }
+            var level = 0;
+            var isHeading = !suppressedPages.Contains(line.Page) && IsHeadingLine(line, out level);
 
             if (isHeading)
             {

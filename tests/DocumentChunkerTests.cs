@@ -212,5 +212,65 @@ public class DocumentChunkerTests
         Assert.Empty(DocumentChunker.ChunkBlocks(new List<DocumentBlock>(), 300, 50));
     }
 
+    [Fact]
+    public void ChunkBlocks_TinyTrailingRemainder_FoldsIntoPreviousSameSectionChunk()
+    {
+        // A single section whose body splits into a couple of full chunks plus a small remainder.
+        // The remainder must be folded into the preceding chunk, not emitted as a micro-chunk (#68).
+        var body = string.Join(' ', Enumerable.Repeat("alpha", 110)) + " uniquetail";
+        var blocks = new List<DocumentBlock>
+        {
+            new() { Page = 3, Kind = BlockKind.Heading, HeadingLevel = 1, Text = "Systems" },
+            new() { Page = 3, Kind = BlockKind.Body, Text = body },
+        };
+
+        var spans = DocumentChunker.ChunkBlocks(blocks, 300, 0);
+
+        Assert.True(spans.Count >= 2, $"Expected the body to split into multiple chunks, got {spans.Count}");
+        Assert.All(spans, s => Assert.True(s.Text.Length >= 120, $"Chunk below the floor: {s.Text.Length} chars"));
+        // The tail survived the merge (wasn't dropped) and rides on the final chunk.
+        Assert.Contains("uniquetail", spans[^1].Text);
+        Assert.Equal("Systems", spans[^1].Section);
+        // Offset invariant preserved after the merge.
+        Assert.All(spans, s => Assert.Equal(s.Text.Length, s.CharOffsetEnd - s.CharOffsetStart));
+    }
+
+    [Fact]
+    public void ChunkBlocks_TinySiblingSections_AreNotMergedAcrossSections()
+    {
+        // Two distinct short sections must stay separate — the floor only folds a remainder into
+        // the SAME section, never across a section boundary (attribution would otherwise blur).
+        var blocks = new List<DocumentBlock>
+        {
+            new() { Page = 1, Kind = BlockKind.Heading, HeadingLevel = 1, Text = "Alpha" },
+            new() { Page = 1, Kind = BlockKind.Body, Text = "Short alpha body." },
+            new() { Page = 1, Kind = BlockKind.Heading, HeadingLevel = 1, Text = "Bravo" },
+            new() { Page = 1, Kind = BlockKind.Body, Text = "Short bravo body." },
+        };
+
+        var spans = DocumentChunker.ChunkBlocks(blocks, 300, 0);
+
+        Assert.Equal(2, spans.Count);
+        Assert.Equal("Alpha", spans[0].Section);
+        Assert.Equal("Bravo", spans[1].Section);
+    }
+
+    [Fact]
+    public void ClassifyThenChunk_DenseDiagramPage_DoesNotFragmentIntoMicroChunks()
+    {
+        // End-to-end guard for #68: a dense label page (40 short bold callouts) must not explode
+        // into one chunk per label. Density backoff collapses it to body; chunking yields a handful.
+        var lines = new List<LineRecord>();
+        for (var i = 0; i < 40; i++)
+        {
+            lines.Add(new LineRecord { Page = 1, Text = $"CALLOUT {i}", FontSize = 12 + (i % 3), IsBold = true });
+        }
+
+        var blocks = DocumentParser.ClassifyLinesIntoBlocks(lines);
+        var spans = DocumentChunker.ChunkBlocks(blocks, 1200, 200);
+
+        Assert.True(spans.Count <= 3, $"Dense page should collapse, got {spans.Count} chunks");
+    }
+
     #endregion
 }
