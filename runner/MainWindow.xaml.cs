@@ -292,6 +292,7 @@ public partial class MainWindow : System.Windows.Window
         InitializePtt();
         InitializeVoiceUi();
         InitializeModelParametersUi();
+        InitializeNetworkModeUi();
         RefreshProfileVisibility();
         StatusText.Text = "Ready (not running)";
         AppendLog($"Loaded config from {configPath}");
@@ -431,6 +432,7 @@ public partial class MainWindow : System.Windows.Window
             InitializeTts();
             InitializePtt();
             InitializeVoiceUi();
+            InitializeNetworkModeUi();
             StatusText.Text = "Unlocked and ready";
             AppendLog("SSD unlocked successfully.");
             _ = SaveEncryptionUnlockStateAsync();
@@ -2475,8 +2477,71 @@ public partial class MainWindow : System.Windows.Window
             BindingsErrorText.Visibility = System.Windows.Visibility.Visible;
         }
 
+        // Writing the .txt files is only half the job: they land in the library's
+        // files/ folder but are not searchable until embedded into the RAG index —
+        // the same ingest the "Add files" button runs. Skipping this left imported
+        // bindings invisible to chat retrieval (the model never saw them).
+        await IndexImportedBindingsAsync(summary, ct);
+
         BindingsImportButton.IsEnabled = true;
         RefreshLibraryUi();
+    }
+
+    /// <summary>
+    /// Embeds the freshly generated binding files into the active library's RAG index,
+    /// mirroring the ingest the "Add files" path runs (<see cref="AddFiles_Click"/>).
+    /// Without this the binding docs are written to disk but never indexed, so chat
+    /// retrieval can't surface them. Requires Ollama (embeddings); when it isn't running
+    /// the files are kept and the user is told to re-run the import once Ollama is up —
+    /// already-imported aircraft stay selectable, so this is recoverable.
+    /// </summary>
+    private async Task IndexImportedBindingsAsync(DcsBatchSummary summary, CancellationToken ct)
+    {
+        var filePaths = summary.OutputFilePaths.ToArray();
+        if (filePaths.Length == 0) return;
+
+        if (!TryGetCurrentHost(out var host) || _config is null || _activeLibrary is null)
+        {
+            BindingsResultText.Text +=
+                " Saved, but not indexed — start Ollama and re-run the import to make them searchable.";
+            return;
+        }
+
+        var library = _activeLibrary;
+        var config = _config;
+        BindingsProgressText.Text = $"Indexing {filePaths.Length} binding file(s)…";
+
+        IndexingProgress? last = null;
+        void OnProgress(IndexingProgress p)
+        {
+            last = p;
+            if (string.IsNullOrEmpty(p.CurrentFile)) return;
+            Dispatcher.BeginInvoke(new Action(() =>
+                BindingsProgressText.Text =
+                    $"Indexing {p.CurrentFile} ({p.CompletedFiles}/{p.TotalFiles})…"));
+        }
+
+        try
+        {
+            // Embedding is blocking work — keep it off the UI thread (#331).
+            await Task.Run(() => _docService.IngestFilesAsync(
+                library, filePaths, host, config, OnProgress, ct), ct);
+
+            BindingsProgressText.Text = string.Empty;
+            if (last is not null)
+                BindingsResultText.Text += $" {IndexingSummary.Format(last)}";
+        }
+        catch (OperationCanceledException)
+        {
+            BindingsProgressText.Text = "Indexing cancelled.";
+        }
+        catch (Exception ex)
+        {
+            BindingsProgressText.Text = string.Empty;
+            BindingsErrorText.Text = $"Indexing failed: {IndexingSummary.DescribeFailure(ex)}";
+            BindingsErrorText.Visibility = System.Windows.Visibility.Visible;
+            AppendLog($"Bindings indexing error: {ex.Message}");
+        }
     }
 
     /// <summary>Shows one wizard step panel and collapses the others.</summary>
@@ -3313,6 +3378,251 @@ public partial class MainWindow : System.Windows.Window
         SaveConfigAsync();
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Network Mode (LAN API) — System tab toggle
+    //
+    // Replaces the old "edit portable-config.json by hand" workflow. The fail-closed
+    // guard (ConfigStore.SaveAsync / PortableConfig) forbids writing an API key to an
+    // unencrypted drive, so the UX is shaped by encryption state:
+    //   • Unencrypted drive → loopback only, no API key (host-only web UI).
+    //   • Encrypted drive    → loopback or LAN (0.0.0.0) with a required key.
+    // The LAN radio is disabled until the drive is encrypted.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private bool _suppressNetworkEvents;
+
+    /// <summary>Populates the Network Mode controls from config. Call after a config
+    /// load or unlock; safe to call when <c>_config</c> is null (no-op).</summary>
+    private void InitializeNetworkModeUi()
+    {
+        if (_config is null) return;
+
+        _suppressNetworkEvents = true;
+        try
+        {
+            NetworkModeEnabledCheck.IsChecked = _config.NetworkModeEnabled;
+
+            var isLan = string.Equals(_config.NetworkBindAddress, "0.0.0.0", StringComparison.Ordinal);
+            BindLoopbackRadio.IsChecked = !isLan;
+            BindLanRadio.IsChecked = isLan;
+
+            NetworkRequireKeyCheck.IsChecked = _config.NetworkRequireApiKey;
+            NetworkApiKeyText.Text = _config.NetworkApiKey;
+
+            // LAN bind can only be persisted on an encrypted drive (the guard refuses
+            // to store the shared-secret key in plaintext).
+            BindLanRadio.IsEnabled = _isEncryptedDrive;
+            BindLanHintText.Visibility = _isEncryptedDrive
+                ? System.Windows.Visibility.Collapsed
+                : System.Windows.Visibility.Visible;
+
+            NetworkModeOptionsPanel.IsEnabled = _config.NetworkModeEnabled;
+            UpdateApiKeyRowState();
+        }
+        finally
+        {
+            _suppressNetworkEvents = false;
+        }
+
+        RefreshNetworkStatus();
+    }
+
+    /// <summary>The API key row is only meaningful when a key is required.</summary>
+    private void UpdateApiKeyRowState()
+    {
+        NetworkApiKeyRow.IsEnabled = NetworkRequireKeyCheck.IsChecked == true;
+    }
+
+    /// <summary>Updates the status line with host- and LAN-reachable chat URLs.</summary>
+    private void RefreshNetworkStatus()
+    {
+        if (_config is null) { NetworkStatusText.Text = string.Empty; return; }
+
+        if (!_config.NetworkModeEnabled)
+        {
+            NetworkStatusText.Text = "Network Mode is off.";
+            return;
+        }
+
+        var url = _localApiService.CurrentBaseUrl;
+        if (string.IsNullOrEmpty(url))
+        {
+            NetworkStatusText.Text = _ollamaService.IsRunning
+                ? "Network Mode is on, but the API isn't running — check the log."
+                : "Network Mode is on. Start Ollama to bring the API up.";
+            return;
+        }
+
+        // CurrentBaseUrl is http://<bind>:<port>; a LAN bind shows 0.0.0.0, which is
+        // not browsable — rewrite to loopback for the on-PC link.
+        int port;
+        try { port = new Uri(url).Port; } catch { port = _config.NetworkPort; }
+        var hostLink = $"http://127.0.0.1:{port}/chat/";
+
+        NetworkStatusText.Text =
+            string.Equals(_config.NetworkBindAddress, "0.0.0.0", StringComparison.Ordinal)
+                ? $"On this PC: {hostLink}\nOther devices: http://<this-PC-LAN-IP>:{port}/chat/  (open firewall TCP {port}, enter the API key)"
+                : $"On this PC: {hostLink}";
+    }
+
+    /// <summary>Stops and restarts the LAN API so a config change (bind/auth) takes
+    /// effect. StartLocalApiIfEnabledAsync is a no-op until Ollama is running.</summary>
+    private async Task RestartNetworkApiAsync()
+    {
+        await _localApiService.StopAsync();
+        await StartLocalApiIfEnabledAsync();
+        RefreshNetworkStatus();
+    }
+
+    /// <summary>256-bit URL-safe random key (CSPRNG).</summary>
+    private static string GenerateApiKey()
+    {
+        var bytes = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+        return Convert.ToBase64String(bytes)
+            .Replace('+', '-').Replace('/', '_').TrimEnd('=');
+    }
+
+    private async void NetworkModeEnabledCheck_Changed(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_suppressNetworkEvents || _config is null) return;
+
+        var enabled = NetworkModeEnabledCheck.IsChecked == true;
+
+        // On an unencrypted drive the only saveable shape is loopback without a key
+        // (the guard blocks key+plaintext). Snap to that so enabling never fails closed.
+        if (enabled && !_isEncryptedDrive)
+        {
+            _config.NetworkBindAddress = "127.0.0.1";
+            _config.NetworkRequireApiKey = false;
+        }
+
+        // Never leave a key-required mode with no key — the API would reject every
+        // request, including the host's own web UI.
+        if (enabled && _config.NetworkRequireApiKey && string.IsNullOrEmpty(_config.NetworkApiKey))
+            _config.NetworkApiKey = GenerateApiKey();
+
+        _config.NetworkModeEnabled = enabled;
+        NetworkModeOptionsPanel.IsEnabled = enabled;
+
+        _suppressNetworkEvents = true;
+        BindLoopbackRadio.IsChecked =
+            !string.Equals(_config.NetworkBindAddress, "0.0.0.0", StringComparison.Ordinal);
+        BindLanRadio.IsChecked =
+            string.Equals(_config.NetworkBindAddress, "0.0.0.0", StringComparison.Ordinal);
+        NetworkRequireKeyCheck.IsChecked = _config.NetworkRequireApiKey;
+        NetworkApiKeyText.Text = _config.NetworkApiKey;
+        _suppressNetworkEvents = false;
+        UpdateApiKeyRowState();
+
+        SaveConfigAsync();
+        await RestartNetworkApiAsync();
+    }
+
+    private async void BindLoopbackRadio_Checked(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_suppressNetworkEvents || _config is null) return;
+        if (string.Equals(_config.NetworkBindAddress, "127.0.0.1", StringComparison.Ordinal)) return;
+
+        _config.NetworkBindAddress = "127.0.0.1";
+        SaveConfigAsync();
+        await RestartNetworkApiAsync();
+    }
+
+    private async void BindLanRadio_Checked(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_suppressNetworkEvents || _config is null) return;
+
+        // Explicit, security-relevant opt-in: exposing the API beyond loopback over
+        // plain HTTP. Default stays loopback if the user declines.
+        var choice = System.Windows.MessageBox.Show(
+            $"Network Mode will expose the Runner API on 0.0.0.0:{_config.NetworkPort}. There is no TLS. " +
+            "Anyone on this network who has your API key can use this machine's AI and audio. " +
+            "Only enable on a trusted LAN. Continue?",
+            "Expose API on your LAN?",
+            System.Windows.MessageBoxButton.YesNo,
+            System.Windows.MessageBoxImage.Warning);
+
+        if (choice != System.Windows.MessageBoxResult.Yes)
+        {
+            _suppressNetworkEvents = true;
+            BindLoopbackRadio.IsChecked = true;
+            _suppressNetworkEvents = false;
+            return;
+        }
+
+        // LAN bind forces a required key; BindLanRadio is only enabled on an encrypted
+        // drive, so the fail-closed guard will not trip here.
+        _config.NetworkBindAddress = "0.0.0.0";
+        _config.NetworkRequireApiKey = true;
+        if (string.IsNullOrEmpty(_config.NetworkApiKey))
+            _config.NetworkApiKey = GenerateApiKey();
+
+        _suppressNetworkEvents = true;
+        NetworkRequireKeyCheck.IsChecked = true;
+        NetworkApiKeyText.Text = _config.NetworkApiKey;
+        _suppressNetworkEvents = false;
+        UpdateApiKeyRowState();
+
+        SaveConfigAsync();
+        await RestartNetworkApiAsync();
+    }
+
+    private async void NetworkRequireKeyCheck_Changed(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_suppressNetworkEvents || _config is null) return;
+
+        var require = NetworkRequireKeyCheck.IsChecked == true;
+
+        // A required key is a stored secret; that needs an encrypted drive.
+        if (require && !_isEncryptedDrive)
+        {
+            System.Windows.MessageBox.Show(
+                "Requiring an API key stores a shared secret. Encrypt the SSD config in the Prep app first — " +
+                "the key is never written to disk in plaintext.",
+                "Encryption required",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Warning);
+
+            _suppressNetworkEvents = true;
+            NetworkRequireKeyCheck.IsChecked = false;
+            _suppressNetworkEvents = false;
+            return;
+        }
+
+        _config.NetworkRequireApiKey = require;
+        if (require && string.IsNullOrEmpty(_config.NetworkApiKey))
+        {
+            _config.NetworkApiKey = GenerateApiKey();
+            NetworkApiKeyText.Text = _config.NetworkApiKey;
+        }
+
+        UpdateApiKeyRowState();
+        SaveConfigAsync();
+        await RestartNetworkApiAsync();
+    }
+
+    private void GenerateApiKey_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_config is null) return;
+        _config.NetworkApiKey = GenerateApiKey();
+        NetworkApiKeyText.Text = _config.NetworkApiKey;
+        SaveConfigAsync();
+    }
+
+    private void CopyApiKey_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (string.IsNullOrEmpty(NetworkApiKeyText.Text)) return;
+        try
+        {
+            System.Windows.Clipboard.SetText(NetworkApiKeyText.Text);
+            StatusText.Text = "API key copied to clipboard.";
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"Copy failed: {ex.Message}");
+        }
+    }
+
     protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
     {
         // All shutdown work runs synchronously here, each step bounded.
@@ -3356,17 +3666,4 @@ public partial class MainWindow : System.Windows.Window
         try { step(); }
         catch (Exception ex) { AppendLog($"Shutdown step '{name}' failed: {ex.Message}"); }
     }
-
-    // TODO (phase-a-default-hardening, Task 1 UI confirmation):
-    // There is currently no Runner UI control that toggles NetworkModeEnabled or edits
-    // NetworkBindAddress — users edit portable-config.json directly. When such a UI is
-    // added, call IDialogService.Confirm with the following text before persisting a
-    // non-loopback bind address, and revert to "127.0.0.1" if the user cancels:
-    //
-    //   "Network Mode will expose the Runner API on <addr>:<port>. There is no TLS."
-    //   " Anyone on this network who has your API key can use this machine's AI and"
-    //   " audio. Only enable on a trusted LAN. Continue?"
-    //
-    // The runtime-side warning (logged + AppendLog) in RunnerLocalApiService.StartAsync
-    // fires whenever the effective bind address is not loopback.
 }
