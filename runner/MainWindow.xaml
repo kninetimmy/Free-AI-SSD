@@ -524,6 +524,7 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <ProgressBar x:Name="IndexingProgressBar"
                                              Grid.Column="0"
@@ -535,6 +536,17 @@
                                            Margin="10,0,0,0"
                                            VerticalAlignment="Center"
                                            Foreground="{StaticResource TextSecondaryBrush}"/>
+                                <!-- Cancel the in-flight ingest/sweep/rebuild. Visible only
+                                     while the panel is shown; wired to RunIndexingAsync's token. -->
+                                <Button x:Name="IndexingCancelButton"
+                                        Grid.Column="2"
+                                        Content="Cancel"
+                                        Style="{StaticResource GhostSecondaryButton}"
+                                        Margin="10,0,0,0"
+                                        Padding="10,2"
+                                        VerticalAlignment="Center"
+                                        Click="CancelIndexing_Click"
+                                        ToolTip="Stop the current indexing run. Chunks already written are kept."/>
                             </Grid>
                             <!-- Workstream C: proactive embedding-model readiness.
                                  UpdateEmbeddingModelHint() shows this when a library

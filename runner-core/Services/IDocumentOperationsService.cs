@@ -39,7 +39,8 @@ public interface IDocumentOperationsService
     /// Ingests the given files into the active library (copies, chunks, embeds, indexes).
     /// </summary>
     Task IngestFilesAsync(DocumentLibraryManifest library, string[] filePaths, string host,
-        PortableConfig config, Action<IndexingProgress>? progress = null);
+        PortableConfig config, Action<IndexingProgress>? progress = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Adds a watched folder to the library manifest. Returns true if newly added.
@@ -66,13 +67,15 @@ public interface IDocumentOperationsService
     /// Re-ingests all files found in the library's watched folders.
     /// </summary>
     Task SweepFoldersAsync(DocumentLibraryManifest library, string host,
-        PortableConfig config, Action<IndexingProgress>? progress = null);
+        PortableConfig config, Action<IndexingProgress>? progress = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Drops and rebuilds the vector index from existing source files.
     /// </summary>
     Task RebuildIndexAsync(DocumentLibraryManifest library, string host,
-        PortableConfig config, Action<IndexingProgress>? progress = null);
+        PortableConfig config, Action<IndexingProgress>? progress = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Removes a file from the library (deletes stored copy, removes from index and manifest).

@@ -96,9 +96,11 @@ public sealed class DocumentOperationsService : IDocumentOperationsService
 
     public async Task IngestFilesAsync(
         DocumentLibraryManifest library, string[] filePaths, string host,
-        PortableConfig config, Action<IndexingProgress>? progress = null)
+        PortableConfig config, Action<IndexingProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
-        await _documentIngestor.IngestFilesAsync(library, filePaths, host, config, progress);
+        await _documentIngestor.IngestFilesAsync(
+            library, filePaths, host, config, progress, rebuildIndex: false, cancellationToken);
     }
 
     public async Task<bool> AddWatchedFolderAsync(
@@ -153,16 +155,18 @@ public sealed class DocumentOperationsService : IDocumentOperationsService
 
     public async Task SweepFoldersAsync(
         DocumentLibraryManifest library, string host,
-        PortableConfig config, Action<IndexingProgress>? progress = null)
+        PortableConfig config, Action<IndexingProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
-        await _documentIngestor.SweepFoldersAsync(library, host, config, progress);
+        await _documentIngestor.SweepFoldersAsync(library, host, config, progress, cancellationToken);
     }
 
     public async Task RebuildIndexAsync(
         DocumentLibraryManifest library, string host,
-        PortableConfig config, Action<IndexingProgress>? progress = null)
+        PortableConfig config, Action<IndexingProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
-        await _documentIngestor.RebuildIndexAsync(library, host, config, progress);
+        await _documentIngestor.RebuildIndexAsync(library, host, config, progress, cancellationToken);
     }
 
     public async Task RemoveFileAsync(DocumentLibraryManifest library, string storedRelativePath)

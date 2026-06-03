@@ -118,6 +118,25 @@ public sealed class PortableConfig
     /// </summary>
     public int EmbeddingBatchSize { get; set; } = 16;
     /// <summary>
+    /// Context window (tokens) pinned on every <c>/api/embed</c> request via Ollama's
+    /// <c>options.num_ctx</c>. Embedding models have a small fixed context (e.g.
+    /// nomic-embed-text is 2048); without a pin Ollama tries to grow the context to fit a
+    /// token-dense chunk, which forces a full embed-model <em>reload</em> per oversized
+    /// input (observed: 300+ reloads ≈ 36 min on a dense PDF). Pinning it keeps the embed
+    /// runner stable; paired with Ollama's default <c>truncate=true</c> an over-long input is
+    /// truncated to fit instead of erroring. Match this to the embedding model's trained
+    /// context. Clamped to ≥1 at use; ≤0 omits the pin (legacy behavior).
+    /// </summary>
+    public int EmbeddingContextTokens { get; set; } = 2048;
+    /// <summary>
+    /// Hard ceiling (characters) on the text sent to the embedder. A coarse safety net for
+    /// absurdly long inputs from any parser — only the embedded text is clipped; the stored
+    /// chunk text (used by BM25/FTS5, citations, and display) is unaffected. The real bound on
+    /// token-dense chunks is <see cref="EmbeddingContextTokens"/> + Ollama truncation, since
+    /// character length does not predict token count. ≤0 disables clipping.
+    /// </summary>
+    public int EmbeddingMaxInputChars { get; set; } = 8000;
+    /// <summary>
     /// Fraction (0.0–1.0) of a file's chunks that may fail to embed before the whole file
     /// is aborted and rolled back. Below the threshold, the successfully embedded chunks are
     /// kept and the dropped count is surfaced in the post-ingest summary. Default 0.50;

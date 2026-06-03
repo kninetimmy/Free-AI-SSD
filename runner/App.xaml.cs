@@ -32,7 +32,10 @@ public partial class App : System.Windows.Application
         collection.AddSingleton(new SsdLogger(ssdRoot, "runner"));
         collection.AddSingleton<HttpClient>();
         collection.AddSingleton(sp => new DocumentLibraryManager(ssdRoot));
-        collection.AddSingleton(sp => new EmbeddingClient(sp.GetRequiredService<HttpClient>()));
+        // Ingestion embeds get their own HttpClient with a bounded per-request timeout so a
+        // wedged /api/embed fails fast instead of hanging the default 100s. The shared
+        // singleton stays on chat/model-management, where streaming needs a long timeout.
+        collection.AddSingleton(sp => new EmbeddingClient(new HttpClient { Timeout = TimeSpan.FromSeconds(60) }));
         collection.AddSingleton(sp => new DocumentIngestor(
             sp.GetRequiredService<DocumentLibraryManager>(),
             sp.GetRequiredService<EmbeddingClient>(),

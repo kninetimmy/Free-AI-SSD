@@ -237,6 +237,53 @@ public sealed class DocumentIngestorFailureHandlingTests : IDisposable
         Assert.Equal(terminal.EmbeddedChunks, vectorIndex.GetChunkCount(manifest.Id));
     }
 
+    /// Indexing freeze fix: a cancellation tripped mid-embed propagates as an
+    /// OperationCanceledException and persists nothing (the Cancel button path).
+    [Fact]
+    public async Task IngestFilesAsync_CancellationDuringEmbed_ThrowsAndDoesNotPersist()
+    {
+        using var cts = new CancellationTokenSource();
+        var (manager, manifest, ingestor) = await CreateIngestorAsync(new CancelOnFirstEmbedHandler(cts));
+        var sourcePath = Path.Combine(_tempRoot, "cancel.txt");
+        File.WriteAllText(sourcePath, CreateLongText(1600));
+        var config = CreateConfig();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => ingestor.IngestFilesAsync(manifest, new[] { sourcePath }, "localhost:11434", config,
+                progress: null, rebuildIndex: false, cancellationToken: cts.Token));
+
+        Assert.Empty(manifest.Files);
+        var vectorIndex = new VectorIndex(manager.GetIndexPath(manifest.Id));
+        Assert.Equal(0, vectorIndex.GetChunkCount(manifest.Id));
+    }
+
+    /// A3: a tolerated (under-threshold) chunk embed failure is logged exactly once
+    /// per file — diagnosable without flooding the log on a large document.
+    [Fact]
+    public async Task IngestFilesAsync_ToleratedChunkFailures_LogsDiagnosticOnce()
+    {
+        var ssdRoot = Path.Combine(_tempRoot, Guid.NewGuid().ToString("N"));
+        SsdLayout.EnsureStructure(ssdRoot);
+        var logger = new SsdLogger(ssdRoot, "runner");
+        var manager = new DocumentLibraryManager(ssdRoot);
+        var manifest = await manager.CreateLibraryAsync("log-lib");
+        var ingestor = new DocumentIngestor(
+            manager,
+            new EmbeddingClient(new HttpClient(new ChunkFailingEmbeddingHandler(failChunks: 2))),
+            logger);
+        var sourcePath = Path.Combine(_tempRoot, "log-failures.txt");
+        File.WriteAllText(sourcePath, CreateLongText(2000)); // ~13 chunks at ChunkSize=200
+        var config = CreateConfig();
+
+        await ingestor.IngestFilesAsync(manifest, new[] { sourcePath }, "localhost:11434", config);
+
+        Assert.Single(manifest.Files); // tolerated: 2/13 failures < 0.50, file persists
+        var logFile = Directory.GetFiles(Path.Combine(ssdRoot, SsdLayout.Logs), "runner-*.log").Single();
+        var logText = await File.ReadAllTextAsync(logFile);
+        var occurrences = logText.Split("Embedding failed for a chunk").Length - 1;
+        Assert.Equal(1, occurrences); // one-shot, even though 2 chunks failed
+    }
+
     private async Task<(DocumentLibraryManager Manager, DocumentLibraryManifest Manifest, DocumentIngestor Ingestor)> CreateIngestorAsync(HttpMessageHandler handler)
     {
         var ssdRoot = Path.Combine(_tempRoot, Guid.NewGuid().ToString("N"));
@@ -265,6 +312,20 @@ public sealed class DocumentIngestorFailureHandlingTests : IDisposable
         }
 
         return text;
+    }
+
+    // Mimics HttpClient honoring cancellation: cancels the shared token on the first
+    // embed request and throws OperationCanceledException, as a real cancelled /api/embed would.
+    private sealed class CancelOnFirstEmbedHandler : HttpMessageHandler
+    {
+        private readonly CancellationTokenSource _cts;
+        public CancelOnFirstEmbedHandler(CancellationTokenSource cts) => _cts = cts;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            _cts.Cancel();
+            throw new OperationCanceledException(_cts.Token);
+        }
     }
 
     private sealed class AlwaysFailEmbeddingHandler : HttpMessageHandler

@@ -60,6 +60,9 @@ public partial class MainWindow : System.Windows.Window
     // on (NVIDIA CUDA auto, Intel Vulkan, CPU, …). Computed once — GetGpuVendor
     // can hit WMI — and shown as the progress-panel tooltip.
     private string? _embeddingBackendLabel;
+    // Cancels the in-flight ingest/sweep/rebuild. Created in RunIndexingAsync, tripped by
+    // the Cancel button, disposed when the run ends. Null when no indexing is running.
+    private CancellationTokenSource? _indexingCts;
     private CancellationTokenSource? _streamingCts;
     private StreamingTtsSpeaker? _ttsSpeaker;
     private bool _isVoiceRecording;
@@ -1229,32 +1232,12 @@ public partial class MainWindow : System.Windows.Window
         };
         if (dlg.ShowDialog() != true) return;
 
-        try
-        {
-            IndexingStatusText.Text = "Indexing...";
-            BeginIndexingProgress();
-            IndexingProgress? last = null;
-            await _docService.IngestFilesAsync(_activeLibrary, dlg.FileNames, host, _config, p =>
-            {
-                last = p;
-                Dispatcher.Invoke(() => UpdateIndexingProgress("Indexing", p));
-            });
-            RefreshLibraryUi();
-            if (last is not null)
-            {
-                IndexingStatusText.Text = IndexingSummary.Format(last);
-            }
-        }
-        catch (Exception ex)
-        {
-            var cause = IndexingSummary.DescribeFailure(ex);
-            AppendLog($"Indexing failed: {cause}");
-            IndexingStatusText.Text = $"Indexing failed: {cause}";
-        }
-        finally
-        {
-            EndIndexingProgress();
-        }
+        var library = _activeLibrary!;
+        var config = _config!;
+        var fileNames = dlg.FileNames;
+        IndexingStatusText.Text = "Indexing...";
+        await RunIndexingAsync("Indexing", (progress, ct) =>
+            _docService.IngestFilesAsync(library, fileNames, host, config, progress, ct));
     }
 
     private async void AddFolder_Click(object sender, System.Windows.RoutedEventArgs e)
@@ -1369,31 +1352,10 @@ public partial class MainWindow : System.Windows.Window
 
         if (!TryGetCurrentHost(out var host)) return;
 
-        try
-        {
-            BeginIndexingProgress();
-            IndexingProgress? last = null;
-            await _docService.SweepFoldersAsync(_activeLibrary, host, _config, p =>
-            {
-                last = p;
-                Dispatcher.Invoke(() => UpdateIndexingProgress("Sweep", p));
-            });
-            RefreshLibraryUi();
-            if (last is not null)
-            {
-                IndexingStatusText.Text = IndexingSummary.Format(last);
-            }
-        }
-        catch (Exception ex)
-        {
-            var cause = IndexingSummary.DescribeFailure(ex);
-            AppendLog($"Sweep failed: {cause}");
-            IndexingStatusText.Text = $"Sweep failed: {cause}";
-        }
-        finally
-        {
-            EndIndexingProgress();
-        }
+        var library = _activeLibrary!;
+        var config = _config!;
+        await RunIndexingAsync("Sweep", (progress, ct) =>
+            _docService.SweepFoldersAsync(library, host, config, progress, ct));
     }
 
     private async void RebuildIndex_Click(object sender, System.Windows.RoutedEventArgs e)
@@ -1406,31 +1368,10 @@ public partial class MainWindow : System.Windows.Window
 
         if (!TryGetCurrentHost(out var host)) return;
 
-        try
-        {
-            BeginIndexingProgress();
-            IndexingProgress? last = null;
-            await _docService.RebuildIndexAsync(_activeLibrary, host, _config, p =>
-            {
-                last = p;
-                Dispatcher.Invoke(() => UpdateIndexingProgress("Rebuild", p));
-            });
-            RefreshLibraryUi();
-            if (last is not null)
-            {
-                IndexingStatusText.Text = IndexingSummary.Format(last);
-            }
-        }
-        catch (Exception ex)
-        {
-            var cause = IndexingSummary.DescribeFailure(ex);
-            AppendLog($"Rebuild failed: {cause}");
-            IndexingStatusText.Text = $"Rebuild failed: {cause}";
-        }
-        finally
-        {
-            EndIndexingProgress();
-        }
+        var library = _activeLibrary!;
+        var config = _config!;
+        await RunIndexingAsync("Rebuild", (progress, ct) =>
+            _docService.RebuildIndexAsync(library, host, config, progress, ct));
     }
 
     /// <summary>
@@ -1483,6 +1424,77 @@ public partial class MainWindow : System.Windows.Window
     {
         _indexingStopwatch.Stop();
         IndexingProgressPanel.Visibility = System.Windows.Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// Runs an ingest/sweep/rebuild off the UI thread with a Cancel-able token and
+    /// coalesced progress, then renders the summary. The actual work runs on a thread-pool
+    /// thread (<see cref="Task.Run(System.Func{Task})"/>) so the heavy embed-result parsing
+    /// and SQLite writes never land on the dispatcher; progress frames are marshaled back
+    /// non-blocking via <see cref="System.Windows.Threading.Dispatcher.BeginInvoke(System.Delegate, object[])"/>
+    /// and throttled to ~10/sec (the terminal frame always flushes). This replaces the old
+    /// per-chunk blocking <c>Dispatcher.Invoke</c> that starved the message pump and showed
+    /// the window as "not responding" during large ingests.
+    /// </summary>
+    private async Task RunIndexingAsync(string verb, Func<Action<IndexingProgress>, CancellationToken, Task> operation)
+    {
+        BeginIndexingProgress();
+        var cts = new CancellationTokenSource();
+        _indexingCts = cts;
+        IndexingCancelButton.IsEnabled = true;
+
+        IndexingProgress? last = null;
+        long lastMarshalMs = 0;
+
+        void OnProgress(IndexingProgress p)
+        {
+            last = p;
+            var isTerminal = string.IsNullOrEmpty(p.CurrentFile);
+            var nowMs = _indexingStopwatch.ElapsedMilliseconds;
+            // Throttle non-terminal frames to ~10/sec; always flush the terminal frame.
+            if (!isTerminal && nowMs - System.Threading.Interlocked.Read(ref lastMarshalMs) < 100)
+            {
+                return;
+            }
+            System.Threading.Interlocked.Exchange(ref lastMarshalMs, nowMs);
+            Dispatcher.BeginInvoke(new Action(() => UpdateIndexingProgress(verb, p)));
+        }
+
+        try
+        {
+            await Task.Run(() => operation(OnProgress, cts.Token), cts.Token);
+            RefreshLibraryUi();
+            if (last is not null)
+            {
+                IndexingStatusText.Text = IndexingSummary.Format(last);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            IndexingStatusText.Text = $"{verb} cancelled.";
+            AppendLog($"{verb} cancelled by user.");
+        }
+        catch (Exception ex)
+        {
+            var cause = IndexingSummary.DescribeFailure(ex);
+            AppendLog($"{verb} failed: {cause}");
+            IndexingStatusText.Text = $"{verb} failed: {cause}";
+        }
+        finally
+        {
+            _indexingCts = null;
+            cts.Dispose();
+            EndIndexingProgress();
+        }
+    }
+
+    /// <summary>Trip the active indexing cancellation token (Cancel button).</summary>
+    private void CancelIndexing_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_indexingCts is null) return;
+        IndexingCancelButton.IsEnabled = false;
+        IndexingStatusText.Text = "Cancelling…";
+        _indexingCts.Cancel();
     }
 
     /// <summary>
