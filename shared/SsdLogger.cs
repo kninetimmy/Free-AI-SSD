@@ -37,13 +37,40 @@ public sealed class SsdLogger
     /// <summary>
     /// Appends a single log line to the file. Each line follows the format:
     /// "2024-01-15T14:30:00.0000000+00:00 [INFO] Message text"
+    /// <para>
+    /// Opened with <see cref="FileShare.ReadWrite"/> so a second process holding the same
+    /// daily log file can't cause a sharing-violation <see cref="IOException"/> — that
+    /// exception used to escape as an unhandled, terminating crash that killed the next
+    /// runner launch. Logging is best-effort: a write that still fails after a short retry
+    /// is dropped rather than propagated, because the logger must never take down the app.
+    /// </para>
     /// </summary>
     private void Write(string level, string message)
     {
         var line = $"{DateTime.UtcNow:o} [{level}] {message}{Environment.NewLine}";
         lock (_sync)
         {
-            File.AppendAllText(_logFilePath, line);
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    using var stream = new FileStream(
+                        _logFilePath, FileMode.Append, FileAccess.Write,
+                        FileShare.ReadWrite | FileShare.Delete);
+                    using var writer = new StreamWriter(stream);
+                    writer.Write(line);
+                    return;
+                }
+                catch (IOException) when (attempt < 5)
+                {
+                    Thread.Sleep(20);
+                }
+                catch
+                {
+                    // Final failure (still locked, drive removed, etc.): drop the line.
+                    return;
+                }
+            }
         }
     }
 }
