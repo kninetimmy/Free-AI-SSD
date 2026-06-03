@@ -71,3 +71,63 @@ enum PrepFlowStep: Equatable {
     /// retry from the appropriate previous step.
     case failed(message: String)
 }
+
+// MARK: - Web-UI access mode (#338 parity)
+//
+// Mirrors the Windows `WebUiAccessMode` (shared/Models/PrepModels.cs). Surfaced
+// on the PrepApp's reframed "How will you use this drive?" step so the
+// encryption decision is framed by the user's actual goal rather than a bare
+// checkbox. `.deviceOnly` keeps everything on this Mac (encryption optional);
+// `.lan` exposes the Runner LAN API + web chat UI to other devices, which
+// requires an encrypted config because the network API key is never written in
+// plaintext (PlaintextConfigWriter clears it; EncryptedConfigWriter seals it).
+//
+// The pure transition + gating helpers below live here — not on the
+// @MainActor PrepViewModel — so the parity-pin tests can exercise the rules
+// without constructing the view-model, exactly like applyStarterModelFilters
+// in StarterCatalogTypes.swift. This file is compiled into both the test
+// binary and the app (see the swiftc file lists in .github/workflows/build.yml).
+
+// Hashable (refines Equatable) so it can serve as a SwiftUI Picker `.tag`.
+enum WebUiAccessMode: Hashable {
+    case deviceOnly
+    case lan
+}
+
+/// Pure result of selecting an access mode. LAN forces encryption on (its API
+/// key is only ever stored encrypted); a cancelled LAN confirm or a
+/// device-only selection preserves whatever encryption choice the user already
+/// made. Mirrors the state half of the Windows `RequestLanAccess` /
+/// `SelectDeviceOnlyAccess`.
+///
+/// - Parameters:
+///   - target: the mode the user clicked.
+///   - lanConfirmed: result of the encryption-required confirm (ignored unless
+///     `target == .lan`).
+///   - currentEncryption: the user's current `enableEncryption` value, preserved
+///     for device-only.
+func resolveAccessMode(
+    selecting target: WebUiAccessMode,
+    lanConfirmed: Bool,
+    currentEncryption: Bool
+) -> (mode: WebUiAccessMode, enableEncryption: Bool) {
+    switch target {
+    case .deviceOnly:
+        return (.deviceOnly, currentEncryption)
+    case .lan:
+        // Cancelled confirm leaves everything unchanged (device-only).
+        return lanConfirmed ? (.lan, true) : (.deviceOnly, currentEncryption)
+    }
+}
+
+/// The "Encrypt SSD config" toggle is user-editable only in device-only mode;
+/// LAN locks it on. Mirrors the C# `IsEncryptionToggleEnabled`.
+func accessEncryptionToggleEnabled(for mode: WebUiAccessMode) -> Bool {
+    mode == .deviceOnly
+}
+
+/// Done-step gate: surface the generated API key only when LAN was chosen and
+/// finalize produced a non-empty key. Mirrors the C# `ShowFinalizedApiKey`.
+func accessShowFinalizedApiKey(mode: WebUiAccessMode, key: String?) -> Bool {
+    mode == .lan && !(key ?? "").isEmpty
+}
