@@ -723,6 +723,183 @@ public class PrepViewModelTests
             Times.Never);
     }
 
+    // ── Web-UI access mode (device-only vs LAN) + encryption coupling ───────
+    //
+    // Replaces the bare "Encrypt SSD config" checkbox with an up-front access
+    // choice. LAN access requires encryption (the network API key is only ever
+    // stored encrypted), so RequestLanAccess gates on a confirm and forces the
+    // encryption flag on. Device-only leaves encryption an optional toggle.
+
+    [Fact]
+    public void RequestLanAccess_Confirmed_SetsLanMode_AndForcesEncryptionOn()
+    {
+        SetupDefaultMocks();
+        _dialogService
+            .Setup(d => d.Confirm(It.IsAny<string>(), "Encryption required for LAN access"))
+            .Returns(true);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        Assert.Equal(WebUiAccessMode.DeviceOnly, vm.WebUiAccessMode);
+        Assert.False(vm.EnableEncryption);
+
+        var applied = vm.RequestLanAccess();
+
+        Assert.True(applied);
+        Assert.Equal(WebUiAccessMode.Lan, vm.WebUiAccessMode);
+        Assert.True(vm.IsLanAccess);
+        Assert.True(vm.EnableEncryption);
+        // The toggle locks so the user can't clear the LAN precondition.
+        Assert.False(vm.IsEncryptionToggleEnabled);
+        _dialogService.Verify(
+            d => d.Confirm(It.IsAny<string>(), "Encryption required for LAN access"),
+            Times.Once);
+    }
+
+    [Fact]
+    public void RequestLanAccess_Cancelled_StaysDeviceOnly_AndLeavesEncryptionOff()
+    {
+        SetupDefaultMocks();
+        _dialogService
+            .Setup(d => d.Confirm(It.IsAny<string>(), "Encryption required for LAN access"))
+            .Returns(false);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+
+        var applied = vm.RequestLanAccess();
+
+        Assert.False(applied);
+        Assert.Equal(WebUiAccessMode.DeviceOnly, vm.WebUiAccessMode);
+        Assert.False(vm.IsLanAccess);
+        Assert.False(vm.EnableEncryption);
+        Assert.True(vm.IsEncryptionToggleEnabled);
+    }
+
+    [Fact]
+    public void DeviceOnly_EncryptionToggleEditable_AndUserCanOptIn()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+
+        // Default is device-only with the toggle editable and off.
+        Assert.True(vm.IsDeviceOnlyAccess);
+        Assert.True(vm.IsEncryptionToggleEnabled);
+        Assert.False(vm.EnableEncryption);
+
+        // The user may still opt into at-rest encryption for device-only use.
+        vm.EnableEncryption = true;
+        Assert.True(vm.EnableEncryption);
+        Assert.Equal(WebUiAccessMode.DeviceOnly, vm.WebUiAccessMode);
+    }
+
+    [Fact]
+    public void SelectDeviceOnlyAccess_AfterLan_RestoresEditableToggle()
+    {
+        SetupDefaultMocks();
+        _dialogService
+            .Setup(d => d.Confirm(It.IsAny<string>(), "Encryption required for LAN access"))
+            .Returns(true);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.RequestLanAccess();
+        Assert.False(vm.IsEncryptionToggleEnabled);
+
+        vm.SelectDeviceOnlyAccess();
+
+        Assert.Equal(WebUiAccessMode.DeviceOnly, vm.WebUiAccessMode);
+        Assert.True(vm.IsEncryptionToggleEnabled);
+        // Encryption already-enabled is preserved — the user opted in; only the
+        // mode reverts. They can now clear it if they want.
+        Assert.True(vm.EnableEncryption);
+    }
+
+    [Fact]
+    public async Task FinalizeCommand_LanAccess_PopulatesAndShowsFinalizedApiKey()
+    {
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        _dialogService
+            .Setup(d => d.Confirm(It.IsAny<string>(), "Encryption required for LAN access"))
+            .Returns(true);
+        _dialogService.Setup(d => d.PromptForEncryptionPassword()).Returns("correct horse battery staple");
+        _encryptionService
+            .Setup(e => e.EnableConfigEncryptionAsync(It.IsAny<string>(), It.IsAny<PortableConfig>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new UnlockMaterial(new byte[32], new byte[16], 210_000, "test"));
+        _ollamaPackageService
+            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
+        _prereqService
+            .Setup(s => s.StagePrerequisitesAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _artifactStagingService
+            .Setup(s => s.StageRunnerAsync(It.IsAny<string>(), It.IsAny<Action<string>>()))
+            .Returns(Task.CompletedTask);
+        _readinessService
+            .Setup(s => s.RunReadinessChecksAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ReadinessItem> { ReadinessItem.Pass("Runner payload") });
+
+        var config = new PortableConfig
+        {
+            Models = { new ModelConfigEntry { Name = "llama3.2:3b", Status = ModelInstallStatus.Installed } }
+        };
+        _modelService.Setup(m => m.LoadConfigAsync(It.IsAny<string>())).ReturnsAsync(config);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.SelectedProfile = UserProfile.GeneralAssistant;
+        Assert.True(vm.RequestLanAccess());
+        Assert.Null(vm.FinalizedNetworkApiKey);
+
+        vm.FinalizeCommand.Execute(null);
+        await WaitForCommandAsync(vm.FinalizeCommand);
+
+        Assert.Equal("Complete", vm.StatusText);
+        Assert.False(string.IsNullOrWhiteSpace(vm.FinalizedNetworkApiKey));
+        Assert.Equal(config.NetworkApiKey, vm.FinalizedNetworkApiKey);
+        Assert.True(vm.ShowFinalizedApiKey);
+    }
+
+    [Fact]
+    public async Task FinalizeCommand_DeviceOnly_DoesNotShowFinalizedApiKey()
+    {
+        SetupDefaultMocks();
+        _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
+        _ollamaPackageService
+            .Setup(s => s.EnsureOllamaReadyAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(@"E:\windows\tools\ollama\ollama.exe");
+        _prereqService
+            .Setup(s => s.StagePrerequisitesAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _artifactStagingService
+            .Setup(s => s.StageRunnerAsync(It.IsAny<string>(), It.IsAny<Action<string>>()))
+            .Returns(Task.CompletedTask);
+        _readinessService
+            .Setup(s => s.RunReadinessChecksAsync(It.IsAny<string>(), It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ReadinessItem> { ReadinessItem.Pass("Runner payload") });
+
+        var config = new PortableConfig
+        {
+            Models = { new ModelConfigEntry { Name = "llama3.2:3b", Status = ModelInstallStatus.Installed } }
+        };
+        _modelService.Setup(m => m.LoadConfigAsync(It.IsAny<string>())).ReturnsAsync(config);
+
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.SelectedProfile = UserProfile.GeneralAssistant;
+        // Default device-only, no encryption.
+
+        vm.FinalizeCommand.Execute(null);
+        await WaitForCommandAsync(vm.FinalizeCommand);
+
+        Assert.Equal("Complete", vm.StatusText);
+        // A key still exists in config, but the Done-step surface stays hidden
+        // for device-only — the user has no LAN device to enter it on.
+        Assert.False(vm.ShowFinalizedApiKey);
+    }
+
     /// MAC32: modal must NOT fire when readiness fails. The existing
     /// readiness-failure ShowWarning is the user's signal in that case.
     [Fact]

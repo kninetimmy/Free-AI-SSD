@@ -91,6 +91,18 @@ public class PrepViewModel : BaseViewModel
     private string _macPrepAvailabilityMessage = string.Empty;
     private string _prereqStatusText = string.Empty;
     private bool _enableEncryption;
+    // Up-front access-mode choice (top of the "Set up drive" step). Lan
+    // forces _enableEncryption on and locks the toggle; DeviceOnly leaves
+    // encryption optional. Drives the encryption decision off the user's
+    // actual goal instead of a bare checkbox that silently expired after
+    // a format (the pre-fix bug: the checkbox lived inside the
+    // CanInitiateFreshFormat-gated GroupBox and became unreachable once a
+    // fresh format flipped ShowAlreadyConfiguredBanner true).
+    private WebUiAccessMode _webUiAccessMode = WebUiAccessMode.DeviceOnly;
+    // Populated at the end of a successful FinalizeAsync so the Done step
+    // can surface + copy the generated LAN API key when the user chose
+    // LAN access. Null until finalize completes (or for device-only).
+    private string? _finalizedNetworkApiKey;
     private string _volumeLabel = "Portable AI";
     private CancellationTokenSource? _modelOperationCts;
     private int? _systemRamGb;
@@ -444,6 +456,119 @@ public class PrepViewModel : BaseViewModel
         => !_enableEncryption
            && _activeSource == ModelSource.HuggingFace
            && !string.IsNullOrWhiteSpace(_huggingFaceTokenInput);
+
+    /// <summary>
+    /// Up-front access-mode choice shown at the top of the "Set up drive"
+    /// step. The view writes this through <see cref="SelectDeviceOnlyAccess"/>
+    /// / <see cref="RequestLanAccess"/> rather than a plain setter, because
+    /// switching to <see cref="WebUiAccessMode.Lan"/> must run the
+    /// encryption-required confirmation first.
+    /// </summary>
+    public WebUiAccessMode WebUiAccessMode
+    {
+        get => _webUiAccessMode;
+        private set
+        {
+            if (SetProperty(ref _webUiAccessMode, value))
+            {
+                OnPropertyChanged(nameof(IsLanAccess));
+                OnPropertyChanged(nameof(IsDeviceOnlyAccess));
+                OnPropertyChanged(nameof(IsEncryptionToggleEnabled));
+                OnPropertyChanged(nameof(ShowFinalizedApiKey));
+            }
+        }
+    }
+
+    /// <summary>Convenience flag for view bindings (LAN-only explainer,
+    /// Done-step API-key surface gating).</summary>
+    public bool IsLanAccess => _webUiAccessMode == WebUiAccessMode.Lan;
+
+    /// <summary>Inverse of <see cref="IsLanAccess"/>. Needed because the
+    /// built-in BooleanToVisibilityConverter can't invert via a parameter.</summary>
+    public bool IsDeviceOnlyAccess => _webUiAccessMode == WebUiAccessMode.DeviceOnly;
+
+    /// <summary>
+    /// The optional "encrypt anyway" toggle is user-editable only in
+    /// device-only mode. LAN access forces encryption on and locks the
+    /// toggle so the user can't clear the precondition the LAN API key
+    /// storage depends on.
+    /// </summary>
+    public bool IsEncryptionToggleEnabled => _webUiAccessMode == WebUiAccessMode.DeviceOnly;
+
+    /// <summary>
+    /// Select device-only access. Encryption reverts to a user-controlled
+    /// optional toggle; the current <see cref="EnableEncryption"/> value is
+    /// preserved (the user may have opted into at-rest encryption anyway).
+    /// </summary>
+    public void SelectDeviceOnlyAccess()
+    {
+        WebUiAccessMode = WebUiAccessMode.DeviceOnly;
+    }
+
+    /// <summary>
+    /// Request LAN access. Because LAN exposure stores a network API key
+    /// that is only ever written encrypted (Security invariant), this first
+    /// confirms with the user that the drive must be encrypted. On confirm,
+    /// the mode flips to <see cref="WebUiAccessMode.Lan"/> and
+    /// <see cref="EnableEncryption"/> is forced on (the toggle locks via
+    /// <see cref="IsEncryptionToggleEnabled"/>). On cancel, nothing changes
+    /// and the method returns false so the view can snap the radio back to
+    /// device-only.
+    /// </summary>
+    /// <returns>True if LAN access was confirmed and applied.</returns>
+    public bool RequestLanAccess()
+    {
+        if (_webUiAccessMode == WebUiAccessMode.Lan)
+        {
+            return true;
+        }
+
+        var confirmed = _dialogService.Confirm(
+            "Letting other devices on your LAN reach the web chat UI stores a "
+            + "network API key on the drive. That key is only ever written "
+            + "encrypted, so the drive's configuration must be encrypted." + Environment.NewLine + Environment.NewLine
+            + "You'll choose an unlock passphrase at the final step, and the "
+            + "Runner will ask for it each time it starts." + Environment.NewLine + Environment.NewLine
+            + "Enable encryption and continue with LAN access?",
+            "Encryption required for LAN access");
+
+        if (!confirmed)
+        {
+            // Re-announce so a view that optimistically checked the LAN radio
+            // can re-sync to the unchanged device-only state.
+            OnPropertyChanged(nameof(IsLanAccess));
+            OnPropertyChanged(nameof(WebUiAccessMode));
+            return false;
+        }
+
+        EnableEncryption = true;
+        WebUiAccessMode = WebUiAccessMode.Lan;
+        return true;
+    }
+
+    /// <summary>
+    /// The LAN API key generated (or preserved) during the last successful
+    /// <see cref="FinalizeAsync"/>. Surfaced on the Done step so a LAN user
+    /// can copy it straight into the web UI / Companion on each device.
+    /// Null until finalize completes.
+    /// </summary>
+    public string? FinalizedNetworkApiKey
+    {
+        get => _finalizedNetworkApiKey;
+        private set
+        {
+            if (SetProperty(ref _finalizedNetworkApiKey, value))
+            {
+                OnPropertyChanged(nameof(ShowFinalizedApiKey));
+            }
+        }
+    }
+
+    /// <summary>Done-step gate: show the API-key panel only when LAN access
+    /// was chosen and finalize actually produced a key.</summary>
+    public bool ShowFinalizedApiKey =>
+        _webUiAccessMode == WebUiAccessMode.Lan
+        && !string.IsNullOrWhiteSpace(_finalizedNetworkApiKey);
 
     public string VolumeLabel
     {
@@ -2784,6 +2909,11 @@ public class PrepViewModel : BaseViewModel
             {
                 await _modelService.SaveConfigAsync(configPath, config);
             }
+
+            // Surface the LAN API key on the Done step so a LAN user can copy
+            // it into the web UI / Companion on each device. Captured only on
+            // the full-success path (every early return above bails first).
+            FinalizedNetworkApiKey = config.NetworkApiKey;
 
             ProgressValue = 100;
             StatusText = "Complete";
