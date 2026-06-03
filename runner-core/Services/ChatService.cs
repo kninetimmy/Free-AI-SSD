@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text;
@@ -20,6 +21,9 @@ public sealed class ChatService : IChatService
     private readonly DocumentLibraryManager _libraryManager;
     private readonly SsdLogger? _logger;
 
+    /// <summary>Per-(host, model) cache of the model's trained context length from /api/show.</summary>
+    private static readonly ConcurrentDictionary<string, int> _trainedContextCache = new();
+
     public ChatService(HttpClient http, DocumentLibraryManager libraryManager, SsdLogger? logger)
     {
         _http = http;
@@ -33,9 +37,10 @@ public sealed class ChatService : IChatService
     public async Task<ChatResult> SendPromptAsync(
         string model, string userPrompt, string host, PortableConfig config)
     {
-        var (promptToSend, sources, usedContext, ragError) = await PrepareRagContextAsync(userPrompt, host, config);
+        var effectiveCtx = await ResolveEffectiveContextWindowAsync(host, model, config);
+        var (promptToSend, sources, usedContext, ragError) = await PrepareRagContextAsync(userPrompt, host, config, effectiveCtx);
 
-        var request = BuildGenerateRequest(model, promptToSend, stream: false, config);
+        var request = BuildGenerateRequest(model, promptToSend, stream: false, config, effectiveCtx);
 
         try
         {
@@ -62,9 +67,10 @@ public sealed class ChatService : IChatService
         string model, string userPrompt, string host, PortableConfig config,
         Func<string, Task> onToken, CancellationToken cancellationToken = default)
     {
-        var (promptToSend, sources, usedContext, ragError) = await PrepareRagContextAsync(userPrompt, host, config);
+        var effectiveCtx = await ResolveEffectiveContextWindowAsync(host, model, config, cancellationToken);
+        var (promptToSend, sources, usedContext, ragError) = await PrepareRagContextAsync(userPrompt, host, config, effectiveCtx);
 
-        var request = BuildGenerateRequest(model, promptToSend, stream: true, config);
+        var request = BuildGenerateRequest(model, promptToSend, stream: true, config, effectiveCtx);
 
         var assembled = new StringBuilder();
         var requestStart = DateTimeOffset.UtcNow;
@@ -175,7 +181,7 @@ public sealed class ChatService : IChatService
     }
 
     private async Task<(string Prompt, List<string>? Sources, bool UsedContext, string? RagError)> PrepareRagContextAsync(
-        string userPrompt, string host, PortableConfig config)
+        string userPrompt, string host, PortableConfig config, int effectiveContextWindow)
     {
         var promptToSend = userPrompt;
         List<string>? sources = null;
@@ -208,8 +214,9 @@ public sealed class ChatService : IChatService
                 // context window (minus reserved output) instead of a fixed char count.
                 // TokenBudget converts back to a char budget for the char-based packer —
                 // equivalent under a constant chars/token ratio. See TokenBudget for why
-                // we estimate rather than tokenize.
-                var contextTokens = TokenBudget.ContextTokenBudget(config.ModelContextWindow, config.ModelMaxOutputTokens);
+                // we estimate rather than tokenize. effectiveContextWindow is clamped to the
+                // model's trained context so we don't pack a prompt Ollama would then truncate.
+                var contextTokens = TokenBudget.ContextTokenBudget(effectiveContextWindow, config.ModelMaxOutputTokens);
                 var rag = RagPromptBuilder.Build(userPrompt, results,
                     maxContextChars: TokenBudget.CharsForTokens(contextTokens), librarySearched: true);
 
@@ -248,7 +255,7 @@ public sealed class ChatService : IChatService
     /// defaults rather than forcing them to a single global value.
     /// </summary>
     internal static Dictionary<string, object?> BuildGenerateRequest(
-        string model, string prompt, bool stream, PortableConfig config)
+        string model, string prompt, bool stream, PortableConfig config, int? contextWindowOverride = null)
     {
         var request = new Dictionary<string, object?>
         {
@@ -257,7 +264,7 @@ public sealed class ChatService : IChatService
             ["stream"] = stream
         };
 
-        var options = BuildOllamaOptions(config);
+        var options = BuildOllamaOptions(config, contextWindowOverride);
         if (options.Count > 0)
         {
             request["options"] = options;
@@ -297,12 +304,17 @@ public sealed class ChatService : IChatService
         }
     }
 
-    internal static Dictionary<string, object?> BuildOllamaOptions(PortableConfig config)
+    internal static Dictionary<string, object?> BuildOllamaOptions(PortableConfig config, int? contextWindowOverride = null)
     {
         var options = new Dictionary<string, object?>();
-        if (config.ModelContextWindow > 0)
+        // Prefer the resolved effective window (clamped to the model's trained context)
+        // over the raw config value, which can exceed what the model supports (e.g. a
+        // 32768 config against llama3:8b's 8192) — Ollama would clamp + warn, and a prompt
+        // packed for the larger window would be silently truncated.
+        var numCtx = contextWindowOverride ?? config.ModelContextWindow;
+        if (numCtx > 0)
         {
-            options["num_ctx"] = config.ModelContextWindow;
+            options["num_ctx"] = numCtx;
         }
         if (config.ModelTemperature >= 0)
         {
@@ -317,6 +329,68 @@ public sealed class ChatService : IChatService
             options["num_predict"] = config.ModelMaxOutputTokens;
         }
         return options;
+    }
+
+    /// <summary>
+    /// The context window to actually request: the smaller of the configured
+    /// <see cref="PortableConfig.ModelContextWindow"/> and the model's trained context length
+    /// (from /api/show). Asking for more than the model trained on makes Ollama clamp and
+    /// emit a "requested context size too large" warning, and over-budgets RAG packing so the
+    /// prompt is truncated. Falls back to the configured value when /api/show is unavailable.
+    /// </summary>
+    private async Task<int> ResolveEffectiveContextWindowAsync(
+        string host, string model, PortableConfig config, CancellationToken cancellationToken = default)
+    {
+        var requested = config.ModelContextWindow;
+        if (requested <= 0) return requested;
+
+        var trained = await GetTrainedContextLengthAsync(host, model, cancellationToken).ConfigureAwait(false);
+        if (trained is > 0 && trained.Value < requested)
+        {
+            _logger?.Info($"Clamping context window {requested}→{trained.Value} for model '{model}' (trained limit).");
+            return trained.Value;
+        }
+        return requested;
+    }
+
+    /// <summary>
+    /// Reads the model's trained context length from Ollama's /api/show <c>model_info</c>
+    /// (the arch-specific <c>*.context_length</c> key), cached per (host, model). Returns null
+    /// on any failure so the caller falls back to the configured window.
+    /// </summary>
+    private async Task<int?> GetTrainedContextLengthAsync(string host, string model, CancellationToken cancellationToken)
+    {
+        var key = $"{host}/{model}";
+        if (_trainedContextCache.TryGetValue(key, out var cached)) return cached;
+
+        try
+        {
+            using var response = await _http.PostAsJsonAsync(
+                $"http://{host}/api/show", new { model }, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode) return null;
+
+            using var doc = JsonDocument.Parse(
+                await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+            if (doc.RootElement.TryGetProperty("model_info", out var info) &&
+                info.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in info.EnumerateObject())
+                {
+                    if (prop.Name.EndsWith(".context_length", StringComparison.OrdinalIgnoreCase) &&
+                        prop.Value.ValueKind == JsonValueKind.Number &&
+                        prop.Value.TryGetInt32(out var ctx) && ctx > 0)
+                    {
+                        _trainedContextCache[key] = ctx;
+                        return ctx;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.Info($"Could not read trained context for model '{model}': {ex.Message}");
+        }
+        return null;
     }
 
     /// <summary>

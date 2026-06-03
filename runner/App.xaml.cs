@@ -30,7 +30,12 @@ public partial class App : System.Windows.Application
 
         // Infrastructure / shared
         collection.AddSingleton(new SsdLogger(ssdRoot, "runner"));
-        collection.AddSingleton<HttpClient>();
+        // Chat + model-management client. Streaming chat uses ResponseHeadersRead, so this
+        // timeout is effectively a first-token deadline; the default 100s aborted slow CPU
+        // cold-loads (logged as "chat stream cancelled after 100012ms"). A generous ceiling
+        // lets CPU first-token land; the chat path still honors the user's CancellationToken
+        // (cancel / lock) so a genuinely wedged request is never stuck for the full window.
+        collection.AddSingleton(sp => new HttpClient { Timeout = TimeSpan.FromMinutes(10) });
         collection.AddSingleton(sp => new DocumentLibraryManager(ssdRoot));
         // Ingestion embeds get their own HttpClient with a bounded per-request timeout so a
         // wedged /api/embed fails fast instead of hanging the default 100s. The shared
@@ -109,6 +114,16 @@ public partial class App : System.Windows.Application
             logger.Error(
                 $"Unhandled non-UI exception (terminating={args.IsTerminating}): " +
                 (detail?.ToString() ?? args.ExceptionObject?.ToString() ?? "unknown"));
+
+            // A terminating crash skips OnExit, so the container is never disposed and
+            // OllamaLifecycleService.Stop() never runs — the ollama (and its llama-server
+            // children) are orphaned, holding the port and the GPU for the next launch.
+            // Reap it here as a last act before the process dies.
+            if (args.IsTerminating)
+            {
+                try { _services?.GetService<IOllamaLifecycleService>()?.Stop(); }
+                catch (Exception stopEx) { logger.Warn($"Best-effort ollama stop on crash failed: {stopEx.Message}"); }
+            }
         };
         System.Threading.Tasks.TaskScheduler.UnobservedTaskException += (_, args) =>
         {
@@ -122,7 +137,12 @@ public partial class App : System.Windows.Application
 
     protected override void OnExit(ExitEventArgs e)
     {
-        _services?.Dispose();
+        // Dispose via DisposeAsync: the container holds a service that only implements
+        // IAsyncDisposable (RunnerLocalApiService). Synchronous Dispose() throws
+        // InvalidOperationException for it, which previously aborted the dispose chain
+        // before OllamaLifecycleService.Stop() ran — orphaning ollama on every clean exit.
+        try { _services?.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Service disposal on exit failed: {ex}"); }
         _services = null;
         base.OnExit(e);
     }

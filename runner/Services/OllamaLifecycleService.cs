@@ -39,6 +39,12 @@ public sealed class OllamaLifecycleService : IOllamaLifecycleService
             return new OllamaStartResult(false, "ollama.exe missing in staged tools folder.");
         }
 
+        // A runner that crashed via an unhandled exception never ran Stop(), so its
+        // ollama (and llama-server children) outlive it — they hold the preferred
+        // port (forcing this launch to climb) and contend for the GPU. Reap any such
+        // orphan rooted at THIS SSD's tools folder before starting a fresh one.
+        KillStaleInstances(ollamaExe);
+
         int port;
         try
         {
@@ -64,7 +70,7 @@ public sealed class OllamaLifecycleService : IOllamaLifecycleService
         startInfo.Environment["OLLAMA_HOST"] = $"127.0.0.1:{port}";
         startInfo.Environment["OLLAMA_ORIGINS"] = "http://127.0.0.1,http://localhost";
 
-        var gpuDecision = GpuAccelerationPolicy.ResolveFor(SystemResources.GetGpuVendor());
+        var gpuDecision = GpuAccelerationPolicy.ResolveFor(SystemResources.GetGpuVendor(), config.PreferredCompute);
         foreach (var kvp in gpuDecision.EnvironmentVariables)
         {
             startInfo.Environment[kvp.Key] = kvp.Value;
@@ -122,5 +128,44 @@ public sealed class OllamaLifecycleService : IOllamaLifecycleService
         }
 
         throw new InvalidOperationException("No free ports in range.");
+    }
+
+    /// <summary>
+    /// Kills any ollama / llama-server process whose executable lives under this SSD's
+    /// staged tools folder — orphans left behind by a runner that crashed without
+    /// running <see cref="Stop"/>. Scoped by path so a system-wide ollama (or one from
+    /// another drive) is never touched. Best-effort: inspection can throw for processes
+    /// we can't open, in which case we skip them.
+    /// </summary>
+    private void KillStaleInstances(string ollamaExe)
+    {
+        var toolsDir = Path.GetDirectoryName(ollamaExe);
+        if (toolsDir is null) return;
+
+        foreach (var name in new[] { "ollama", "llama-server" })
+        {
+            foreach (var proc in Process.GetProcessesByName(name))
+            {
+                try
+                {
+                    var path = proc.MainModule?.FileName;
+                    if (path is not null &&
+                        path.StartsWith(toolsDir, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger?.Info($"Reaping stale {name} process {proc.Id} from a prior session.");
+                        proc.Kill(entireProcessTree: true);
+                        proc.WaitForExit(3000);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.Warn($"Could not inspect/reap {name} process {proc.Id}: {ex.Message}");
+                }
+                finally
+                {
+                    proc.Dispose();
+                }
+            }
+        }
     }
 }
