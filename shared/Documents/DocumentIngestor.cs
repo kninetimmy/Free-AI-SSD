@@ -368,6 +368,27 @@ public sealed class DocumentIngestor
                 $"First such failure for this file: {ex.Message}");
         }
 
+        // Warm up the embed model with one request before fanning out concurrent batches.
+        // A cold model load takes several seconds; requests that arrive during it get a 400
+        // ("connection forcibly closed") and cascade into the per-chunk fallback, multiplying
+        // load on the single-slot (-np 1) embed runner and triggering reload thrash. The
+        // warmup absorbs the cold load once. Best-effort — a failure here just means the
+        // first real batch pays the load cost (and the existing fallback still applies).
+        if (maxConcurrency > 1 && spans.Count > 0)
+        {
+            try
+            {
+                await _embeddingClient.EmbedAsync(
+                    host, config.EmbeddingModelName, spans[0].Text, cancellationToken, numCtx, maxInputChars)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                _logger?.Info($"Embed warmup failed (continuing): {ex.Message}");
+            }
+        }
+
         var batches = new List<(int Start, int Count)>();
         for (var start = 0; start < spans.Count; start += batchSize)
         {
