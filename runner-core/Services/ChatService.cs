@@ -224,7 +224,8 @@ public sealed class ChatService : IChatService
                 // model's trained context so we don't pack a prompt Ollama would then truncate.
                 var contextTokens = TokenBudget.ContextTokenBudget(effectiveContextWindow, config.ModelMaxOutputTokens);
                 var rag = RagPromptBuilder.Build(userPrompt, results,
-                    maxContextChars: TokenBudget.CharsForTokens(contextTokens), librarySearched: true);
+                    maxContextChars: TokenBudget.CharsForTokens(contextTokens), librarySearched: true,
+                    inlineCitations: config.RagInlineCitations);
 
                 if (rag.UsedContext)
                 {

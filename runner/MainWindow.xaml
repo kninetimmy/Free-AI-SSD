@@ -1525,6 +1525,20 @@
                             </ComboBox>
                         </StackPanel>
 
+                        <!-- Inline citations (RAG) -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <TextBlock Text="Citations:"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       VerticalAlignment="Center" Width="110"/>
+                            <CheckBox x:Name="RagInlineCitationsCheck"
+                                      Content="Show inline source labels in answers"
+                                      Foreground="{StaticResource TextSecondaryBrush}"
+                                      VerticalAlignment="Center"
+                                      Checked="RagInlineCitationsCheck_Changed"
+                                      Unchecked="RagInlineCitationsCheck_Changed"
+                                      ToolTip="When on, the assistant appends a [file §Section p.N] label after each claim (muted in voice). When off (default), answers stay concise — retrieved sources still appear in the Sources panel below."/>
+                        </StackPanel>
+
                         <Button Content="Reset to model defaults"
                                 Style="{StaticResource GhostSecondaryButton}"
                                 HorizontalAlignment="Left"

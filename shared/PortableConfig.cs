@@ -110,6 +110,15 @@ public sealed class PortableConfig
     /// </summary>
     public double MinimumSimilarityThreshold { get; set; } = 0.3;
     /// <summary>
+    /// When true, the grounding prompt asks the model to append the bracketed citation
+    /// label (e.g. <c>[guide.pdf §Engine Start p.12]</c>) after each factual claim, and those
+    /// labels are muted before text-to-speech. When false (default), answers stay concise
+    /// with no inline labels — the retrieved sources are still listed separately in the
+    /// Sources panel. Either way the model is instructed to answer only from the supplied
+    /// context and to refuse when the answer is absent.
+    /// </summary>
+    public bool RagInlineCitations { get; set; } = false;
+    /// <summary>
     /// Maximum number of chunk embeddings to request concurrently during document ingestion.
     /// Higher values may improve throughput but increase load on the local Ollama server.
     /// </summary>

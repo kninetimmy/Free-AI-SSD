@@ -230,13 +230,47 @@ public class RagPromptBuilderTests
     }
 
     [Fact]
-    public void Build_WithContext_RequiresInlineCitations()
+    public void Build_DefaultMode_OmitsInlineCitationInstruction()
     {
         var results = new List<RetrievalResult> { MakeResult("Plants use sunlight for energy.", 0.9) };
 
         var output = RagPromptBuilder.Build("What is photosynthesis?", results);
 
+        // Concise default: no inline-cite instruction, and the model is told not to emit
+        // bracketed labels (so TTS never reads them and answers stay short).
+        Assert.DoesNotContain("cite its source inline", output.Prompt);
+        Assert.Contains("Do not include source labels", output.Prompt);
+    }
+
+    [Fact]
+    public void Build_InlineCitationsEnabled_RequiresInlineCitations()
+    {
+        var results = new List<RetrievalResult> { MakeResult("Plants use sunlight for energy.", 0.9) };
+
+        var output = RagPromptBuilder.Build("What is photosynthesis?", results, inlineCitations: true);
+
         Assert.Contains("cite its source inline", output.Prompt);
+        Assert.DoesNotContain("Do not include source labels", output.Prompt);
+    }
+
+    [Fact]
+    public void Build_BothModes_InstructConciseAnswer()
+    {
+        var results = new List<RetrievalResult> { MakeResult("Plants use sunlight for energy.", 0.9) };
+
+        Assert.Contains("Be concise", RagPromptBuilder.Build("q", results).Prompt);
+        Assert.Contains("Be concise", RagPromptBuilder.Build("q", results, inlineCitations: true).Prompt);
+    }
+
+    [Fact]
+    public void Build_BothModes_AlwaysListSourcesSeparately()
+    {
+        // The Sources list (Sources panel) is independent of the inline-citation toggle —
+        // it is always populated from the matched chunks.
+        var results = new List<RetrievalResult> { MakeResult("Content.", 0.9, "report.pdf", page: 3) };
+
+        Assert.Contains("[report.pdf p.3]", RagPromptBuilder.Build("q", results).Sources);
+        Assert.Contains("[report.pdf p.3]", RagPromptBuilder.Build("q", results, inlineCitations: true).Sources);
     }
 
     [Fact]
