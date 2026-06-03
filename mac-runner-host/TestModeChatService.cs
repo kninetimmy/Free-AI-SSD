@@ -18,7 +18,8 @@ internal sealed class TestModeChatService : IChatService
     // so this never fires — but it must exist to satisfy the contract.
     public event Action<int>? FirstTokenPending;
 
-    public Task<ChatResult> SendPromptAsync(string model, string userPrompt, string host, PortableConfig config)
+    public Task<ChatResult> SendPromptAsync(string model, string userPrompt, string host, PortableConfig config,
+        ChatParameterOverrides? overrides = null)
     {
         LogMessage?.Invoke($"test-mode chat: model={model}, host={host}, promptLength={userPrompt.Length}");
         var response = new ChatResponse(
@@ -34,7 +35,8 @@ internal sealed class TestModeChatService : IChatService
         string host,
         PortableConfig config,
         Func<string, Task> onToken,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        ChatParameterOverrides? overrides = null)
     {
         var tokens = new[] { "test", "-", "mode", " ", "stream" };
         var assembled = new System.Text.StringBuilder();

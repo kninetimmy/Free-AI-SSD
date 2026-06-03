@@ -83,6 +83,109 @@ public sealed class RunnerLocalApiServiceTests
     }
 
     [Fact]
+    public async Task ChatEndpoint_PassesParamOverridesToService()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true);
+        using var http = new HttpClient();
+
+        var response = await http.PostAsJsonAsync($"{fixture.BaseUrl}/api/chat", new
+        {
+            model = "phi3",
+            prompt = "status",
+            temperature = 0.7,
+            topP = 0.9,
+            maxOutputTokens = 256,
+            think = "medium",
+            contextWindow = 4096
+        });
+
+        response.EnsureSuccessStatusCode();
+        var overrides = fixture.Chat.LastOverrides;
+        Assert.NotNull(overrides);
+        Assert.Equal(0.7, overrides!.Temperature!.Value, 6);
+        Assert.Equal(0.9, overrides.TopP!.Value, 6);
+        Assert.Equal(256, overrides.MaxOutputTokens);
+        Assert.Equal("medium", overrides.Think);
+        Assert.Equal(4096, overrides.ContextWindow);
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ChatEndpoint_WithoutParams_PassesNullOverrides()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true);
+        using var http = new HttpClient();
+
+        var response = await http.PostAsJsonAsync($"{fixture.BaseUrl}/api/chat", new { model = "phi3", prompt = "status" });
+
+        response.EnsureSuccessStatusCode();
+        // No overrides on the wire → null carrier so the request behaves exactly
+        // as before (saved-config params only, no config mutation).
+        Assert.Null(fixture.Chat.LastOverrides);
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ChatStream_PassesParamOverridesToService()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true);
+        using var http = new HttpClient();
+
+        using var response = await http.PostAsJsonAsync($"{fixture.BaseUrl}/api/chat/stream", new
+        {
+            model = "phi3",
+            prompt = "status",
+            temperature = 0.2,
+            think = "off"
+        });
+
+        response.EnsureSuccessStatusCode();
+        await ReadNdjsonLinesAsync(response);
+        var overrides = fixture.Chat.LastOverrides;
+        Assert.NotNull(overrides);
+        Assert.Equal(0.2, overrides!.Temperature!.Value, 6);
+        Assert.Equal("off", overrides.Think);
+
+        await fixture.DisposeAsync();
+    }
+
+    [Theory]
+    [InlineData("temperature", 5.0)]
+    [InlineData("topP", 2.0)]
+    [InlineData("maxOutputTokens", -1)]
+    [InlineData("contextWindow", 0)]
+    public async Task ChatEndpoint_RejectsOutOfRangeParam(string field, double value)
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true);
+        using var http = new HttpClient();
+
+        var body = new Dictionary<string, object> { ["model"] = "phi3", ["prompt"] = "status", [field] = value };
+        var response = await http.PostAsJsonAsync($"{fixture.BaseUrl}/api/chat", body);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, fixture.Chat.SendPromptCallCount);
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ChatEndpoint_RejectsInvalidThinkMode()
+    {
+        var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true);
+        using var http = new HttpClient();
+
+        var response = await http.PostAsJsonAsync($"{fixture.BaseUrl}/api/chat",
+            new { model = "phi3", prompt = "status", think = "ultra" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, fixture.Chat.SendPromptCallCount);
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
     public async Task ChatStream_EmitsNdjsonTokensInOrder()
     {
         var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: false, allowTts: true);
@@ -777,9 +880,14 @@ public sealed class RunnerLocalApiServiceTests
         public int SendPromptCallCount { get; private set; }
         public bool EnforceConfigModelAllowList { get; set; }
 
-        public Task<ChatResult> SendPromptAsync(string model, string userPrompt, string host, PortableConfig config)
+        // X4: the most recent per-request overrides the API layer passed in, so
+        // tests can assert ChatRequest params reach the chat service unmutated.
+        public ChatParameterOverrides? LastOverrides { get; private set; }
+
+        public Task<ChatResult> SendPromptAsync(string model, string userPrompt, string host, PortableConfig config, ChatParameterOverrides? overrides = null)
         {
             SendPromptCallCount++;
+            LastOverrides = overrides;
             if (EnforceConfigModelAllowList && !config.Models.Any(m => m.Status == ModelInstallStatus.Installed && string.Equals(m.Name, model, StringComparison.OrdinalIgnoreCase)))
             {
                 throw new InvalidOperationException($"Model '{model}' is not installed in config.");
@@ -799,8 +907,9 @@ public sealed class RunnerLocalApiServiceTests
         private readonly TaskCompletionSource<bool> _allowTokenCallbacks = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource<bool> _streamCancellationObserved = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public async Task<ChatResult> SendPromptStreamingAsync(string model, string userPrompt, string host, PortableConfig config, Func<string, Task> onToken, CancellationToken cancellationToken = default)
+        public async Task<ChatResult> SendPromptStreamingAsync(string model, string userPrompt, string host, PortableConfig config, Func<string, Task> onToken, CancellationToken cancellationToken = default, ChatParameterOverrides? overrides = null)
         {
+            LastOverrides = overrides;
             var assembled = new StringBuilder();
 
             foreach (var seconds in HeartbeatSecondsBeforeTokens)

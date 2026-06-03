@@ -35,17 +35,18 @@ public sealed class ChatService : IChatService
     public event Action<int>? FirstTokenPending;
 
     public async Task<ChatResult> SendPromptAsync(
-        string model, string userPrompt, string host, PortableConfig config)
+        string model, string userPrompt, string host, PortableConfig config,
+        ChatParameterOverrides? overrides = null)
     {
-        var effectiveCtx = await ResolveEffectiveContextWindowAsync(host, model, config);
+        var effectiveCtx = await ResolveEffectiveContextWindowAsync(host, model, config, overrides);
         var (promptToSend, sources, usedContext, ragError) = await PrepareRagContextAsync(userPrompt, host, config, effectiveCtx);
 
-        var request = BuildGenerateRequest(model, promptToSend, stream: false, config, effectiveCtx);
+        var request = BuildGenerateRequest(model, promptToSend, stream: false, config, effectiveCtx, overrides);
 
         try
         {
             using var response = await _http.PostAsJsonAsync($"http://{host}/api/generate", request);
-            var thinkError = await DetectThinkUnsupportedAsync(response, config);
+            var thinkError = await DetectThinkUnsupportedAsync(response, config, overrides);
             if (thinkError is not null) return new ChatResult.Failure(thinkError);
             response.EnsureSuccessStatusCode();
 
@@ -65,12 +66,13 @@ public sealed class ChatService : IChatService
 
     public async Task<ChatResult> SendPromptStreamingAsync(
         string model, string userPrompt, string host, PortableConfig config,
-        Func<string, Task> onToken, CancellationToken cancellationToken = default)
+        Func<string, Task> onToken, CancellationToken cancellationToken = default,
+        ChatParameterOverrides? overrides = null)
     {
-        var effectiveCtx = await ResolveEffectiveContextWindowAsync(host, model, config, cancellationToken).ConfigureAwait(false);
+        var effectiveCtx = await ResolveEffectiveContextWindowAsync(host, model, config, overrides, cancellationToken).ConfigureAwait(false);
         var (promptToSend, sources, usedContext, ragError) = await PrepareRagContextAsync(userPrompt, host, config, effectiveCtx).ConfigureAwait(false);
 
-        var request = BuildGenerateRequest(model, promptToSend, stream: true, config, effectiveCtx);
+        var request = BuildGenerateRequest(model, promptToSend, stream: true, config, effectiveCtx, overrides);
 
         var assembled = new StringBuilder();
         var requestStart = DateTimeOffset.UtcNow;
@@ -118,7 +120,7 @@ public sealed class ChatService : IChatService
             // when the stream ends. Off the UI thread, each onToken's Dispatcher.InvokeAsync
             // posts a small append the otherwise-idle UI thread renders incrementally.
             using var response = await _http.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-            var thinkError = await DetectThinkUnsupportedAsync(response, config, cancellationToken).ConfigureAwait(false);
+            var thinkError = await DetectThinkUnsupportedAsync(response, config, overrides, cancellationToken).ConfigureAwait(false);
             if (thinkError is not null) return new ChatResult.Failure(thinkError);
             response.EnsureSuccessStatusCode();
 
@@ -262,7 +264,8 @@ public sealed class ChatService : IChatService
     /// defaults rather than forcing them to a single global value.
     /// </summary>
     internal static Dictionary<string, object?> BuildGenerateRequest(
-        string model, string prompt, bool stream, PortableConfig config, int? contextWindowOverride = null)
+        string model, string prompt, bool stream, PortableConfig config,
+        int? contextWindowOverride = null, ChatParameterOverrides? overrides = null)
     {
         var request = new Dictionary<string, object?>
         {
@@ -271,16 +274,18 @@ public sealed class ChatService : IChatService
             ["stream"] = stream
         };
 
-        var options = BuildOllamaOptions(config, contextWindowOverride);
+        var options = BuildOllamaOptions(config, contextWindowOverride, overrides);
         if (options.Count > 0)
         {
             request["options"] = options;
         }
 
         // `think` is a top-level field, NOT an Ollama option. Only emitted when
-        // the user has set it away from the default sentinel — omitting it lets
-        // every model (thinking or not) behave exactly as it always has.
-        if (TryGetThinkValue(config, out var think))
+        // a value (per-request override or the saved config) is set away from the
+        // default sentinel — omitting it lets every model (thinking or not)
+        // behave exactly as it always has. The per-request override wins.
+        var thinkMode = overrides?.Think ?? config.ModelThinkMode;
+        if (TryGetThinkValue(thinkMode, out var think))
         {
             request["think"] = think;
         }
@@ -289,13 +294,14 @@ public sealed class ChatService : IChatService
     }
 
     /// <summary>
-    /// Maps <see cref="PortableConfig.ModelThinkMode"/> to Ollama's top-level
-    /// <c>think</c> value. <c>"off"</c> → <c>false</c>; <c>"low"/"medium"/"high"</c> →
-    /// the level string. Empty/unrecognized → not set (omit the field).
+    /// Maps a think-mode string (<see cref="PortableConfig.ModelThinkMode"/> or a
+    /// per-request override) to Ollama's top-level <c>think</c> value.
+    /// <c>"off"</c> → <c>false</c>; <c>"low"/"medium"/"high"</c> → the level string.
+    /// Empty/unrecognized → not set (omit the field).
     /// </summary>
-    internal static bool TryGetThinkValue(PortableConfig config, out object? value)
+    internal static bool TryGetThinkValue(string? thinkMode, out object? value)
     {
-        switch (config.ModelThinkMode?.Trim().ToLowerInvariant())
+        switch (thinkMode?.Trim().ToLowerInvariant())
         {
             case "off":
                 value = false;
@@ -303,7 +309,7 @@ public sealed class ChatService : IChatService
             case "low":
             case "medium":
             case "high":
-                value = config.ModelThinkMode!.Trim().ToLowerInvariant();
+                value = thinkMode!.Trim().ToLowerInvariant();
                 return true;
             default:
                 value = null;
@@ -311,29 +317,40 @@ public sealed class ChatService : IChatService
         }
     }
 
-    internal static Dictionary<string, object?> BuildOllamaOptions(PortableConfig config, int? contextWindowOverride = null)
+    internal static Dictionary<string, object?> BuildOllamaOptions(
+        PortableConfig config, int? contextWindowOverride = null, ChatParameterOverrides? overrides = null)
     {
         var options = new Dictionary<string, object?>();
         // Prefer the resolved effective window (clamped to the model's trained context)
         // over the raw config value, which can exceed what the model supports (e.g. a
         // 32768 config against llama3:8b's 8192) — Ollama would clamp + warn, and a prompt
-        // packed for the larger window would be silently truncated.
+        // packed for the larger window would be silently truncated. A per-request
+        // ContextWindow override is folded into contextWindowOverride upstream
+        // (ResolveEffectiveContextWindowAsync) so it is clamped the same way.
         var numCtx = contextWindowOverride ?? config.ModelContextWindow;
         if (numCtx > 0)
         {
             options["num_ctx"] = numCtx;
         }
-        if (config.ModelTemperature >= 0)
+
+        // Per-request override wins; otherwise honor the saved-config slider when it
+        // has been moved off its negative "untouched" sentinel.
+        var temperature = overrides?.Temperature ?? (config.ModelTemperature >= 0 ? config.ModelTemperature : (double?)null);
+        if (temperature is >= 0)
         {
-            options["temperature"] = config.ModelTemperature;
+            options["temperature"] = temperature.Value;
         }
-        if (config.ModelTopP >= 0)
+
+        var topP = overrides?.TopP ?? (config.ModelTopP >= 0 ? config.ModelTopP : (double?)null);
+        if (topP is >= 0)
         {
-            options["top_p"] = config.ModelTopP;
+            options["top_p"] = topP.Value;
         }
-        if (config.ModelMaxOutputTokens >= 0)
+
+        var maxOutputTokens = overrides?.MaxOutputTokens ?? (config.ModelMaxOutputTokens >= 0 ? config.ModelMaxOutputTokens : (int?)null);
+        if (maxOutputTokens is >= 0)
         {
-            options["num_predict"] = config.ModelMaxOutputTokens;
+            options["num_predict"] = maxOutputTokens.Value;
         }
         return options;
     }
@@ -346,9 +363,12 @@ public sealed class ChatService : IChatService
     /// prompt is truncated. Falls back to the configured value when /api/show is unavailable.
     /// </summary>
     private async Task<int> ResolveEffectiveContextWindowAsync(
-        string host, string model, PortableConfig config, CancellationToken cancellationToken = default)
+        string host, string model, PortableConfig config,
+        ChatParameterOverrides? overrides = null, CancellationToken cancellationToken = default)
     {
-        var requested = config.ModelContextWindow;
+        // A per-request ContextWindow override replaces the configured window as the
+        // requested value; it is still clamped to the model's trained limit below.
+        var requested = overrides?.ContextWindow ?? config.ModelContextWindow;
         if (requested <= 0) return requested;
 
         var trained = await GetTrainedContextLengthAsync(host, model, cancellationToken).ConfigureAwait(false);
@@ -409,10 +429,14 @@ public sealed class ChatService : IChatService
     /// <c>think: false</c> — so this also catches the "Off" case.
     /// </summary>
     private async Task<string?> DetectThinkUnsupportedAsync(
-        HttpResponseMessage response, PortableConfig config, CancellationToken cancellationToken = default)
+        HttpResponseMessage response, PortableConfig config, ChatParameterOverrides? overrides = null,
+        CancellationToken cancellationToken = default)
     {
         if (response.IsSuccessStatusCode) return null;
-        if (!TryGetThinkValue(config, out _)) return null;
+        // The effective think mode for this request — a per-request override wins
+        // over the saved config — must be set for a 400 to be think-related.
+        var thinkMode = overrides?.Think ?? config.ModelThinkMode;
+        if (!TryGetThinkValue(thinkMode, out _)) return null;
 
         string body;
         try { body = await response.Content.ReadAsStringAsync(cancellationToken); }
@@ -420,7 +444,7 @@ public sealed class ChatService : IChatService
 
         if (body.Contains("think", StringComparison.OrdinalIgnoreCase))
         {
-            _logger?.Warn($"chat rejected think='{config.ModelThinkMode}' ({(int)response.StatusCode}): {body.Trim()}");
+            _logger?.Warn($"chat rejected think='{thinkMode}' ({(int)response.StatusCode}): {body.Trim()}");
             return "This model doesn't support the Thinking control. Set Thinking to Default, " +
                    "or use Max output to cap a runaway reasoning model.";
         }

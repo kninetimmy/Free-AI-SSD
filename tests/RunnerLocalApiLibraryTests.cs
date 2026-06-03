@@ -635,9 +635,9 @@ public sealed class RunnerLocalApiLibraryTests : IDisposable
     {
         public event Action<string>? LogMessage;
         public event Action<int>? FirstTokenPending;
-        public Task<ChatResult> SendPromptAsync(string model, string userPrompt, string host, PortableConfig config)
+        public Task<ChatResult> SendPromptAsync(string model, string userPrompt, string host, PortableConfig config, ChatParameterOverrides? overrides = null)
             => Task.FromResult<ChatResult>(new ChatResult.Success(new ChatResponse("stub", null, false)));
-        public Task<ChatResult> SendPromptStreamingAsync(string model, string userPrompt, string host, PortableConfig config, Func<string, Task> onToken, CancellationToken cancellationToken = default)
+        public Task<ChatResult> SendPromptStreamingAsync(string model, string userPrompt, string host, PortableConfig config, Func<string, Task> onToken, CancellationToken cancellationToken = default, ChatParameterOverrides? overrides = null)
             => Task.FromResult<ChatResult>(new ChatResult.Success(new ChatResponse("stub", null, false)));
     }
 

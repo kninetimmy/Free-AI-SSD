@@ -45,6 +45,32 @@ public sealed class RunnerLocalApiStaticFilesTests
     }
 
     [Fact]
+    public async Task ChatRoute_ServesShippedSpaAssets()
+    {
+        // X4: the real wwwroot/ ships alongside the assembly (csproj Content), so
+        // the test bin carries the actual SPA. Point the host at it and confirm the
+        // shell + an ES module serve through the same middleware the runner uses.
+        using var workdir = new TempWorkingDir();
+        var shippedWwwroot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
+        Assert.True(Directory.Exists(Path.Combine(shippedWwwroot, "chat")),
+            "Shipped wwwroot/chat assets were not copied to the test output.");
+
+        await using var fixture = await StaticFileFixture.StartAsync(workdir.Path, staticFilesRoot: shippedWwwroot);
+        using var http = new HttpClient();
+
+        var index = await http.GetAsync($"{fixture.BaseUrl}/chat/");
+        Assert.Equal(HttpStatusCode.OK, index.StatusCode);
+        var indexBody = await index.Content.ReadAsStringAsync();
+        Assert.Contains("Free-AI", indexBody);
+
+        foreach (var asset in new[] { "/chat/app.js", "/chat/styles.css", "/chat/js/api.js" })
+        {
+            var res = await http.GetAsync($"{fixture.BaseUrl}{asset}");
+            Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        }
+    }
+
+    [Fact]
     public async Task ChatRoute_WithoutAssets_ReturnsCleanNotFound()
     {
         using var workdir = new TempWorkingDir();
@@ -151,9 +177,9 @@ public sealed class RunnerLocalApiStaticFilesTests
     {
         public event Action<string>? LogMessage;
         public event Action<int>? FirstTokenPending;
-        public Task<ChatResult> SendPromptAsync(string model, string userPrompt, string host, PortableConfig config)
+        public Task<ChatResult> SendPromptAsync(string model, string userPrompt, string host, PortableConfig config, ChatParameterOverrides? overrides = null)
             => Task.FromResult<ChatResult>(new ChatResult.Success(new ChatResponse("ok", null, false)));
-        public Task<ChatResult> SendPromptStreamingAsync(string model, string userPrompt, string host, PortableConfig config, Func<string, Task> onToken, CancellationToken cancellationToken = default)
+        public Task<ChatResult> SendPromptStreamingAsync(string model, string userPrompt, string host, PortableConfig config, Func<string, Task> onToken, CancellationToken cancellationToken = default, ChatParameterOverrides? overrides = null)
             => Task.FromResult<ChatResult>(new ChatResult.Success(new ChatResponse("ok", null, false)));
     }
 }
