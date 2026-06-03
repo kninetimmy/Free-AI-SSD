@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="dark" />
+  <title>Free-AI · Web Chat</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="app" class="app">
+    <!-- Sidebar -->
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-header">
+        <button id="sidebar-close" class="icon-btn" title="Toggle sidebar (Ctrl+B)" aria-label="Toggle sidebar">&#9776;</button>
+        <span class="brand"><span class="brand-mark">&#9650;</span>Free-AI</span>
+      </div>
+
+      <button id="new-chat" class="nav-item nav-accent" type="button">
+        <span class="nav-icon">+</span><span>New Chat</span>
+      </button>
+
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">Chats</div>
+        <ul id="chat-list" class="chat-list"></ul>
+        <div id="chat-list-empty" class="chat-list-empty">No conversations yet.</div>
+      </div>
+
+      <div class="sidebar-footer">
+        <button id="open-library" class="nav-item" type="button">
+          <span class="nav-icon">&#9636;</span>
+          <span class="nav-label">Library: <span id="active-library-name" class="nav-value">None</span></span>
+        </button>
+        <button id="open-settings" class="nav-item" type="button">
+          <span class="nav-icon">&#9881;</span><span>Settings</span>
+        </button>
+      </div>
+    </aside>
+    <div id="sidebar-scrim" class="sidebar-scrim"></div>
+
+    <!-- Main -->
+    <main class="main">
+      <header class="topbar">
+        <button id="sidebar-open" class="icon-btn topbar-toggle" title="Open sidebar" aria-label="Open sidebar">&#9776;</button>
+        <span id="conversation-title" class="topbar-title">New Chat</span>
+        <span id="connection-dot" class="conn-dot" title="Connection status"></span>
+      </header>
+
+      <section id="messages" class="messages">
+        <div id="hero" class="hero">
+          <div class="hero-brand"><span class="brand-mark">&#9650;</span>Free-AI</div>
+          <div class="hero-tagline">Your offline wingman.</div>
+          <div class="hero-tip">Tip: chats are saved on this device. Press <kbd>Ctrl</kbd>+<kbd>B</kbd> to toggle the sidebar.</div>
+        </div>
+        <div id="message-list" class="message-list"></div>
+      </section>
+
+      <div class="composer">
+        <div class="composer-card">
+          <textarea id="prompt-input" class="prompt-input" rows="1"
+                    placeholder="Message Free-AI &hellip;" autocomplete="off"></textarea>
+          <div class="composer-toolbar">
+            <label class="model-select-wrap" title="Model">
+              <span class="model-prefix">&#9737;</span>
+              <select id="model-select" class="model-select"></select>
+            </label>
+            <div class="composer-actions">
+              <button id="stop-btn" class="stop-btn hidden" type="button" title="Stop">&#9632;</button>
+              <button id="send-btn" class="send-btn" type="button" title="Send" aria-label="Send">&#8593;</button>
+            </div>
+          </div>
+        </div>
+        <div class="composer-hint" id="composer-hint"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Settings modal -->
+  <div id="settings-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="settings-title">Settings</h2>
+        <button class="icon-btn modal-close" data-close="settings-modal" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label for="set-temperature">Temperature <span id="set-temperature-value" class="field-value">default</span></label>
+          <input id="set-temperature" type="range" min="0" max="2" step="0.05" />
+          <p class="field-hint">Per-request only &mdash; does not change the host's saved config.</p>
+        </div>
+        <div class="field">
+          <label for="set-think">Thinking</label>
+          <select id="set-think">
+            <option value="">Default (model decides)</option>
+            <option value="off">Off</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </div>
+        <hr class="modal-sep" />
+        <div class="field">
+          <label for="set-host">Host</label>
+          <input id="set-host" type="text" inputmode="url" placeholder="(this device &mdash; leave blank)" />
+          <p class="field-hint">Blank uses the server that served this page. Set e.g. <code>http://192.168.1.50:41555</code> to reach a different host.</p>
+        </div>
+        <div class="field">
+          <label for="set-apikey">API key</label>
+          <input id="set-apikey" type="password" placeholder="(none required)" autocomplete="off" />
+          <p class="field-hint">Stored only in this browser.</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-close="settings-modal">Close</button>
+        <button id="settings-save" class="btn btn-accent">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Library modal -->
+  <div id="library-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="library-title">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="library-title">Document library</h2>
+        <button class="icon-btn modal-close" data-close="library-modal" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="field-hint">Pick the library to ground answers against. Choose <em>None</em> for plain chat.</p>
+        <ul id="library-list" class="library-list"></ul>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" data-close="library-modal">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- API key modal (first-run) -->
+  <div id="apikey-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="apikey-title">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="apikey-title">API key required</h2>
+      </div>
+      <div class="modal-body">
+        <p class="field-hint">This host requires an API key. Enter it once &mdash; it is stored only in this browser.</p>
+        <div class="field">
+          <label for="apikey-input">API key</label>
+          <input id="apikey-input" type="password" autocomplete="off" />
+          <p id="apikey-error" class="field-error hidden"></p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="apikey-save" class="btn btn-accent">Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
