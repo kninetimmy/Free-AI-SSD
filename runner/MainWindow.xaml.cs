@@ -480,7 +480,7 @@ public partial class MainWindow : System.Windows.Window
         OllamaStatusLed.State = LedState.Ok;
         UpdateOllamaOfflineEmptyState();
         UpdateOllamaRunStopButtonStyles();
-        await StartLocalApiIfEnabledAsync();
+        await StartLocalApiAsync();
         await Task.Delay(1000);
     }
 
@@ -521,27 +521,25 @@ public partial class MainWindow : System.Windows.Window
         StopOllamaButton.Style = running ? magenta : ghost;
     }
 
-    private async Task StartLocalApiIfEnabledAsync()
+    private async Task StartLocalApiAsync()
     {
         if (_config is null || _ollamaService.CurrentHost is null)
         {
             return;
         }
 
-        if (!_config.NetworkModeEnabled)
-        {
-            await _localApiService.StopAsync();
-            return;
-        }
-
+        // #85: the LAN API host always runs alongside Ollama so the /chat/ web UI
+        // is reachable on this device without any opt-in. The core forces a
+        // loopback bind and skips API-key enforcement when NetworkModeEnabled
+        // ("Expose API on LAN") is off; turning it on rebinds to the LAN.
         try
         {
             await _localApiService.StartAsync(_config, _ollamaService.CurrentHost);
         }
         catch (Exception ex)
         {
-            AppendLog($"Failed to start Network API: {ex.Message}");
-            _logger?.Error($"Network API start failure: {ex}");
+            AppendLog($"Failed to start web chat API: {ex.Message}");
+            _logger?.Error($"Web chat API start failure: {ex}");
         }
     }
 
@@ -772,12 +770,12 @@ public partial class MainWindow : System.Windows.Window
     private void OpenBrowser_Click(object sender, System.Windows.RoutedEventArgs e)
     {
         // The web chat UI is served at /chat/ by the LAN API (RunnerLocalApiService),
-        // not by Ollama. CurrentBaseUrl is non-null only while that API is running,
-        // which requires Ollama started AND Network Mode enabled.
+        // not by Ollama. The API host now runs on loopback whenever Ollama is up
+        // (#85), so the only prerequisite for the on-device web UI is Ollama.
         var baseUrl = _localApiService.CurrentBaseUrl;
         if (string.IsNullOrEmpty(baseUrl))
         {
-            var message = "Web chat UI isn't running. Start Ollama and enable Network Mode, then try again.";
+            var message = "Web chat UI isn't running yet. Start Ollama, then try again.";
             StatusText.Text = message;
             AppendLog(message);
             return;
@@ -3400,18 +3398,17 @@ public partial class MainWindow : System.Windows.Window
         _suppressNetworkEvents = true;
         try
         {
+            // NetworkModeEnabled now means "expose on the LAN" (#85). The web UI
+            // host always runs on loopback once Ollama is up, so there is no
+            // separate "enable" control — the single toggle is LAN exposure.
             NetworkModeEnabledCheck.IsChecked = _config.NetworkModeEnabled;
-
-            var isLan = string.Equals(_config.NetworkBindAddress, "0.0.0.0", StringComparison.Ordinal);
-            BindLoopbackRadio.IsChecked = !isLan;
-            BindLanRadio.IsChecked = isLan;
 
             NetworkRequireKeyCheck.IsChecked = _config.NetworkRequireApiKey;
             NetworkApiKeyText.Text = _config.NetworkApiKey;
 
-            // LAN bind can only be persisted on an encrypted drive (the guard refuses
-            // to store the shared-secret key in plaintext).
-            BindLanRadio.IsEnabled = _isEncryptedDrive;
+            // LAN exposure can only be persisted on an encrypted drive (the guard
+            // refuses to store the shared-secret key in plaintext).
+            NetworkModeEnabledCheck.IsEnabled = _isEncryptedDrive;
             BindLanHintText.Visibility = _isEncryptedDrive
                 ? System.Windows.Visibility.Collapsed
                 : System.Windows.Visibility.Visible;
@@ -3438,18 +3435,12 @@ public partial class MainWindow : System.Windows.Window
     {
         if (_config is null) { NetworkStatusText.Text = string.Empty; return; }
 
-        if (!_config.NetworkModeEnabled)
-        {
-            NetworkStatusText.Text = "Network Mode is off.";
-            return;
-        }
-
         var url = _localApiService.CurrentBaseUrl;
         if (string.IsNullOrEmpty(url))
         {
-            NetworkStatusText.Text = _ollamaService.IsRunning
-                ? "Network Mode is on, but the API isn't running — check the log."
-                : "Network Mode is on. Start Ollama to bring the API up.";
+            // The web UI host runs alongside Ollama (#85); if it isn't up yet the
+            // only thing missing is Ollama.
+            NetworkStatusText.Text = "Start Ollama to open the web chat UI on this PC.";
             return;
         }
 
@@ -3459,18 +3450,17 @@ public partial class MainWindow : System.Windows.Window
         try { port = new Uri(url).Port; } catch { port = _config.NetworkPort; }
         var hostLink = $"http://127.0.0.1:{port}/chat/";
 
-        NetworkStatusText.Text =
-            string.Equals(_config.NetworkBindAddress, "0.0.0.0", StringComparison.Ordinal)
-                ? $"On this PC: {hostLink}\nOther devices: http://<this-PC-LAN-IP>:{port}/chat/  (open firewall TCP {port}, enter the API key)"
-                : $"On this PC: {hostLink}";
+        NetworkStatusText.Text = _config.NetworkModeEnabled
+            ? $"On this PC: {hostLink}\nOther devices: http://<this-PC-LAN-IP>:{port}/chat/  (open firewall TCP {port}, enter the API key)"
+            : $"On this PC: {hostLink}";
     }
 
     /// <summary>Stops and restarts the LAN API so a config change (bind/auth) takes
-    /// effect. StartLocalApiIfEnabledAsync is a no-op until Ollama is running.</summary>
+    /// effect. StartLocalApiAsync is a no-op until Ollama is running.</summary>
     private async Task RestartNetworkApiAsync()
     {
         await _localApiService.StopAsync();
-        await StartLocalApiIfEnabledAsync();
+        await StartLocalApiAsync();
         RefreshNetworkStatus();
     }
 
@@ -3482,83 +3472,57 @@ public partial class MainWindow : System.Windows.Window
             .Replace('+', '-').Replace('/', '_').TrimEnd('=');
     }
 
+    /// <summary>The single "Expose API on my LAN" toggle (#85). Off = device-only
+    /// loopback with no key (the web UI still works on this PC); On = bind 0.0.0.0
+    /// behind a required key. Only interactive on an encrypted drive, so the
+    /// fail-closed write guard cannot trip when a key is stored.</summary>
     private async void NetworkModeEnabledCheck_Changed(object sender, System.Windows.RoutedEventArgs e)
     {
         if (_suppressNetworkEvents || _config is null) return;
 
-        var enabled = NetworkModeEnabledCheck.IsChecked == true;
+        var exposeOnLan = NetworkModeEnabledCheck.IsChecked == true;
 
-        // On an unencrypted drive the only saveable shape is loopback without a key
-        // (the guard blocks key+plaintext). Snap to that so enabling never fails closed.
-        if (enabled && !_isEncryptedDrive)
+        if (exposeOnLan)
         {
+            // Explicit, security-relevant opt-in: exposing the API beyond loopback
+            // over plain HTTP. Default stays loopback if the user declines.
+            var choice = System.Windows.MessageBox.Show(
+                $"This will expose the Runner API on 0.0.0.0:{_config.NetworkPort}. There is no TLS. " +
+                "Anyone on this network who has your API key can use this machine's AI and audio. " +
+                "Only enable on a trusted LAN. Continue?",
+                "Expose API on your LAN?",
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Warning);
+
+            if (choice != System.Windows.MessageBoxResult.Yes)
+            {
+                _suppressNetworkEvents = true;
+                NetworkModeEnabledCheck.IsChecked = false;
+                _suppressNetworkEvents = false;
+                return;
+            }
+
+            // LAN bind forces a required key; the toggle is only enabled on an
+            // encrypted drive, so the fail-closed guard will not trip here.
+            _config.NetworkModeEnabled = true;
+            _config.NetworkBindAddress = "0.0.0.0";
+            _config.NetworkRequireApiKey = true;
+            if (string.IsNullOrEmpty(_config.NetworkApiKey))
+                _config.NetworkApiKey = GenerateApiKey();
+        }
+        else
+        {
+            // Device-only: loopback, no key enforced. The web UI keeps working in a
+            // browser on this PC via the always-on loopback host.
+            _config.NetworkModeEnabled = false;
             _config.NetworkBindAddress = "127.0.0.1";
             _config.NetworkRequireApiKey = false;
         }
 
-        // Never leave a key-required mode with no key — the API would reject every
-        // request, including the host's own web UI.
-        if (enabled && _config.NetworkRequireApiKey && string.IsNullOrEmpty(_config.NetworkApiKey))
-            _config.NetworkApiKey = GenerateApiKey();
-
-        _config.NetworkModeEnabled = enabled;
-        NetworkModeOptionsPanel.IsEnabled = enabled;
+        NetworkModeOptionsPanel.IsEnabled = _config.NetworkModeEnabled;
 
         _suppressNetworkEvents = true;
-        BindLoopbackRadio.IsChecked =
-            !string.Equals(_config.NetworkBindAddress, "0.0.0.0", StringComparison.Ordinal);
-        BindLanRadio.IsChecked =
-            string.Equals(_config.NetworkBindAddress, "0.0.0.0", StringComparison.Ordinal);
         NetworkRequireKeyCheck.IsChecked = _config.NetworkRequireApiKey;
-        NetworkApiKeyText.Text = _config.NetworkApiKey;
-        _suppressNetworkEvents = false;
-        UpdateApiKeyRowState();
-
-        SaveConfigAsync();
-        await RestartNetworkApiAsync();
-    }
-
-    private async void BindLoopbackRadio_Checked(object sender, System.Windows.RoutedEventArgs e)
-    {
-        if (_suppressNetworkEvents || _config is null) return;
-        if (string.Equals(_config.NetworkBindAddress, "127.0.0.1", StringComparison.Ordinal)) return;
-
-        _config.NetworkBindAddress = "127.0.0.1";
-        SaveConfigAsync();
-        await RestartNetworkApiAsync();
-    }
-
-    private async void BindLanRadio_Checked(object sender, System.Windows.RoutedEventArgs e)
-    {
-        if (_suppressNetworkEvents || _config is null) return;
-
-        // Explicit, security-relevant opt-in: exposing the API beyond loopback over
-        // plain HTTP. Default stays loopback if the user declines.
-        var choice = System.Windows.MessageBox.Show(
-            $"Network Mode will expose the Runner API on 0.0.0.0:{_config.NetworkPort}. There is no TLS. " +
-            "Anyone on this network who has your API key can use this machine's AI and audio. " +
-            "Only enable on a trusted LAN. Continue?",
-            "Expose API on your LAN?",
-            System.Windows.MessageBoxButton.YesNo,
-            System.Windows.MessageBoxImage.Warning);
-
-        if (choice != System.Windows.MessageBoxResult.Yes)
-        {
-            _suppressNetworkEvents = true;
-            BindLoopbackRadio.IsChecked = true;
-            _suppressNetworkEvents = false;
-            return;
-        }
-
-        // LAN bind forces a required key; BindLanRadio is only enabled on an encrypted
-        // drive, so the fail-closed guard will not trip here.
-        _config.NetworkBindAddress = "0.0.0.0";
-        _config.NetworkRequireApiKey = true;
-        if (string.IsNullOrEmpty(_config.NetworkApiKey))
-            _config.NetworkApiKey = GenerateApiKey();
-
-        _suppressNetworkEvents = true;
-        NetworkRequireKeyCheck.IsChecked = true;
         NetworkApiKeyText.Text = _config.NetworkApiKey;
         _suppressNetworkEvents = false;
         UpdateApiKeyRowState();

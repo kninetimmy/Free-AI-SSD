@@ -65,13 +65,17 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             await StopAsync(cancellationToken);
         }
 
-        if (!config.NetworkModeEnabled)
-        {
-            LogMessage?.Invoke("Network Mode is disabled in config.");
-            return;
-        }
-
-        var bindAddress = NormalizeBindAddress(config.NetworkBindAddress);
+        // #85: the host always runs once Ollama is up so the /chat/ web UI is
+        // reachable on this device without any opt-in. NetworkModeEnabled no
+        // longer gates whether the API runs — it now means "expose on the LAN".
+        //   - device-only (false): force loopback, do not enforce an API key
+        //     (loopback has no remote attack surface, same posture as Ollama).
+        //   - LAN (true): bind the configured address and enforce the key.
+        // Keying the no-key rule on NetworkModeEnabled (not the bind address)
+        // keeps the auth tests — enabled + loopback + RequireApiKey — meaningful.
+        var lanExposed = config.NetworkModeEnabled;
+        var bindAddress = lanExposed ? NormalizeBindAddress(config.NetworkBindAddress) : "127.0.0.1";
+        var enforceApiKey = lanExposed && config.NetworkRequireApiKey;
         var configuredPort = ValidatePort(config.NetworkPort);
 
         // MAC39: scan for a free port from configuredPort..+20. The previous
@@ -139,7 +143,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
                 return;
             }
 
-            if (!config.NetworkRequireApiKey)
+            if (!enforceApiKey)
             {
                 await next();
                 return;
@@ -169,7 +173,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         {
             status = "ok",
             networkModeEnabled = config.NetworkModeEnabled,
-            requireApiKey = config.NetworkRequireApiKey,
+            requireApiKey = enforceApiKey,
             ollamaRunning = !string.IsNullOrWhiteSpace(ollamaHost),
             timestampUtc = DateTime.UtcNow
         }));

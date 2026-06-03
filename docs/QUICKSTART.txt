@@ -231,9 +231,12 @@ Everything below is optional and layered on top of that baseline.
 
  - Ollama stays loopback-only. LAN clients talk to the Runner API,
    never to Ollama directly.
- - Default bind is 127.0.0.1; 0.0.0.0 is an explicit opt-in in
-   portable-config.json (Runner logs a warning when not loopback).
- - API key auth required on non-health endpoints.
+ - The API runs on 127.0.0.1 automatically whenever Ollama is up (so the
+   on-PC web UI works with no setup). Reaching it from other devices is an
+   explicit opt-in: tick "Expose API on my LAN" (Runner logs a warning
+   when the bind is not loopback).
+ - API key auth required on non-health endpoints once exposed on the LAN;
+   device-only loopback needs no key.
  - Endpoints: /api/health, /api/models, /api/chat, /api/chat/stream,
    /api/stt/transcribe, /api/voice/query, /api/tts/speak, /api/tts/stop.
  - Do not expose this API to the public internet.
@@ -244,13 +247,12 @@ Everything below is optional and layered on top of that baseline.
  Open it in any browser — the host machine or another device on your LAN
  — for the full assistant experience minus voice.
 
- - Requires Network Mode (section 7): the web UI is served by the same
-   Runner API, so Start Ollama and enable Network Mode first.
- - On the host machine: click "Open Chat UI (browser)" in Runner, or
-   browse to http://127.0.0.1:41555/chat/.
+ - On this PC: just Start Ollama, then click "Open Chat UI (browser)" in
+   Runner (or browse to http://127.0.0.1:41555/chat/). The web UI runs on
+   loopback automatically — no Network Mode, no API key needed for local use.
  - From another LAN device (e.g. an iPad on the sim rig):
-     1. Set networkBindAddress to 0.0.0.0 in portable-config.json and
-        restart Runner (same opt-in as Network Mode above).
+     1. In Runner's "Web chat UI & LAN access" settings, tick "Expose API on
+        my LAN" (only available on an encrypted drive; see section 7).
      2. Allow inbound TCP 41555 through the host firewall.
      3. Browse to http://<host-LAN-IP>:41555/chat/ (or
         http://<hostname>.local:41555/chat/).
@@ -292,10 +294,12 @@ Everything below is optional and layered on top of that baseline.
 
  On the host PC (the machine that runs Runner)
    1. Launch the Runner from the SSD and unlock it with your passphrase.
-   2. Start the AI engine, then open Settings -> Network Mode.
-   3. Tick "Enable Network Mode" and choose "Other devices on my LAN
-      (0.0.0.0)". (This radio is only available on an encrypted drive.)
-      "Require API key" is forced on for LAN.
+   2. Start the AI engine, then open Settings -> "Web chat UI & LAN access".
+      (The on-PC web UI already works at this point — this step is only
+      needed to reach it from other devices.)
+   3. Tick "Expose API on my LAN (other devices)". (Only available on an
+      encrypted drive.) You'll confirm the no-TLS warning; "Require API
+      key" is then forced on for LAN.
    4. The key is shown in the API key box. Use "Copy" to grab it, or
       "Generate" to roll a new one (every device then has to re-enter
       the new value).
@@ -305,7 +309,7 @@ Everything below is optional and layered on top of that baseline.
  On each other device (iPad, laptop, second PC)
    1. Open a browser and go to http://<host-LAN-IP>:41555/chat/
       (or http://<hostname>.local:41555/chat/). Find the host IP from
-      Runner's Network Mode status line, or your router.
+      Runner's "Web chat UI & LAN access" status line, or your router.
    2. The web UI prompts for the API key on first use. Paste it once.
       It's saved in that browser (localStorage) along with your chat
       history, so you won't be asked again on that device.
@@ -313,12 +317,12 @@ Everything below is optional and layered on top of that baseline.
       Settings, or reads it from companion-config.json staged on the SSD.
 
  Lost or rotating the key
-   - Forgot to copy it? Open Runner -> Settings -> Network Mode ->
-     Copy. (You must unlock the drive first; the key lives in the
-     encrypted config.)
+   - Forgot to copy it? Open Runner -> Settings -> "Web chat UI & LAN
+     access" -> Copy. (You must unlock the drive first; the key lives in
+     the encrypted config.)
    - Suspect it leaked, or just want a fresh one? Click "Generate" in
-     Network Mode, then re-enter the new key on every device. Old
-     values stop working immediately.
+     "Web chat UI & LAN access", then re-enter the new key on every
+     device. Old values stop working immediately.
 
  Safety
    - Plain HTTP, no TLS — trusted home LAN only. Anyone who has the key
