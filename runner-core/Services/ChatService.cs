@@ -67,8 +67,8 @@ public sealed class ChatService : IChatService
         string model, string userPrompt, string host, PortableConfig config,
         Func<string, Task> onToken, CancellationToken cancellationToken = default)
     {
-        var effectiveCtx = await ResolveEffectiveContextWindowAsync(host, model, config, cancellationToken);
-        var (promptToSend, sources, usedContext, ragError) = await PrepareRagContextAsync(userPrompt, host, config, effectiveCtx);
+        var effectiveCtx = await ResolveEffectiveContextWindowAsync(host, model, config, cancellationToken).ConfigureAwait(false);
+        var (promptToSend, sources, usedContext, ragError) = await PrepareRagContextAsync(userPrompt, host, config, effectiveCtx).ConfigureAwait(false);
 
         var request = BuildGenerateRequest(model, promptToSend, stream: true, config, effectiveCtx);
 
@@ -111,19 +111,25 @@ public sealed class ChatService : IChatService
                 Content = new StringContent(json, Encoding.UTF8, "application/json")
             };
 
-            using var response = await _http.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            var thinkError = await DetectThinkUnsupportedAsync(response, config, cancellationToken);
+            // ConfigureAwait(false) throughout the read loop keeps it off the UI thread.
+            // The WPF caller invokes this on the dispatcher; without it, every per-token
+            // continuation resumes on the UI thread and the Normal-priority token appends
+            // starve the lower-priority render pass, so the whole answer paints at once
+            // when the stream ends. Off the UI thread, each onToken's Dispatcher.InvokeAsync
+            // posts a small append the otherwise-idle UI thread renders incrementally.
+            using var response = await _http.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            var thinkError = await DetectThinkUnsupportedAsync(response, config, cancellationToken).ConfigureAwait(false);
             if (thinkError is not null) return new ChatResult.Failure(thinkError);
             response.EnsureSuccessStatusCode();
 
-            using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
             using var reader = new StreamReader(stream, Encoding.UTF8);
 
             while (!reader.EndOfStream)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var line = await reader.ReadLineAsync(cancellationToken);
+                var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
                 if (string.IsNullOrEmpty(line)) continue;
 
                 try
@@ -140,7 +146,7 @@ public sealed class ChatService : IChatService
                                     _logger?.Info($"chat first-token in {elapsedMs}ms (model={model})");
                                 }
                                 assembled.Append(token);
-                                await onToken(token);
+                                await onToken(token).ConfigureAwait(false);
                             }
                         }
                 }
@@ -169,14 +175,14 @@ public sealed class ChatService : IChatService
             var partial = assembled.ToString();
             if (partial.Length > 0)
             {
-                await onToken($"\n\n[Error: {ex.Message}]");
+                await onToken($"\n\n[Error: {ex.Message}]").ConfigureAwait(false);
             }
             return new ChatResult.Failure(SanitizeError(ex));
         }
         finally
         {
             heartbeatCts.Cancel();
-            try { await heartbeatTask; } catch { /* heartbeat task swallows its own cancel */ }
+            try { await heartbeatTask.ConfigureAwait(false); } catch { /* heartbeat task swallows its own cancel */ }
         }
     }
 
