@@ -76,7 +76,7 @@ struct ContentView: View {
         case .eraseConfirmation: return "2 / 6 — Confirm erase"
         case .formatting:        return "2 / 6 — Formatting"
         case .staging:           return "3 / 6 — Staging"
-        case .encryptionSetup:   return "4 / 6 — Encryption"
+        case .encryptionSetup:   return "4 / 6 — Access & encryption"
         case .modelPull:         return "5 / 6 — Models"
         case .modelPullPaused:   return "5 / 6 — Pull paused"
         case .modelPullFailed:   return "5 / 6 — Pull failed"
@@ -260,29 +260,70 @@ struct EraseConfirmationStepView: View {
 struct EncryptionSetupStepView: View {
     @ObservedObject var vm: PrepViewModel
 
+    // #338 parity: local mirror of the VM's access mode so the radio can
+    // change optimistically, then snap back if requestLanAccess()'s confirm is
+    // cancelled (the VM stays on .deviceOnly and we re-read it below). Mirrors
+    // the Windows code-behind "radios drive the VM, re-sync on cancel" pattern.
+    @State private var accessSelection: WebUiAccessMode = .deviceOnly
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Set up encryption")
-                .font(.headline)
-            // MAC30: encryption is opt-in. Default OFF — most users want
-            // a frictionless plaintext config. Toggle ON re-shows the
-            // MAC17a passphrase flow.
-            Toggle("Encrypt SSD config", isOn: $vm.enableEncryption)
-                .toggleStyle(.checkbox)
-            if vm.enableEncryption {
-                Form {
-                    SecureField("Passphrase", text: $vm.passphrase)
-                    SecureField("Confirm passphrase", text: $vm.passphraseConfirm)
+            // Access-mode chooser. Grouped in its own VStack so the outer
+            // VStack stays within SwiftUI's 10-child ViewBuilder limit.
+            VStack(alignment: .leading, spacing: 8) {
+                Text("How will you use this drive?")
+                    .font(.headline)
+
+                // #338 parity: the access mode frames the encryption decision.
+                // Choosing LAN runs an encryption-required confirm and locks the
+                // encrypt toggle on; device-only leaves encryption optional.
+                Picker("", selection: $accessSelection) {
+                    Text("This Mac only").tag(WebUiAccessMode.deviceOnly)
+                    Text("Other devices on my LAN").tag(WebUiAccessMode.lan)
                 }
-                Text("The passphrase decrypts the SSD's config on every launch. Store it somewhere you won't lose it — there is no recovery path.")
+                .pickerStyle(.radioGroup)
+                .labelsHidden()
+                .onChange(of: accessSelection) { newValue in
+                    switch newValue {
+                    case .deviceOnly: vm.selectDeviceOnlyAccess()
+                    case .lan:        vm.requestLanAccess()
+                    }
+                    // Re-sync from the VM: a cancelled LAN confirm leaves the VM
+                    // on .deviceOnly, so snap the radio back to match.
+                    accessSelection = vm.webUiAccessMode
+                }
+
+                Text(vm.isLanAccess
+                     ? "A phone, iPad, or second PC can reach the web chat UI over your network. This requires an encrypted config — the API key is only ever stored encrypted."
+                     : "Everything stays on this Mac. Encryption is optional.")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-            } else {
-                Text("Encryption is optional. Recommended if you plan to expose the Runner API on your LAN — your API key is only stored encrypted. You can always re-prep the SSD later to enable it.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Divider()
+
+            // Encryption section. Also grouped to keep the outer VStack's child
+            // count down. MAC30: encryption is opt-in; #338: LAN locks it on.
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Encrypt SSD config", isOn: $vm.enableEncryption)
+                    .toggleStyle(.checkbox)
+                    .disabled(!vm.isEncryptionToggleEnabled)
+                if vm.isLanAccess {
+                    Text("Required for LAN access.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                if vm.enableEncryption {
+                    Form {
+                        SecureField("Passphrase", text: $vm.passphrase)
+                        SecureField("Confirm passphrase", text: $vm.passphraseConfirm)
+                    }
+                    Text("The passphrase decrypts the SSD's config on every launch. Store it somewhere you won't lose it — there is no recovery path.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             Divider()
@@ -307,6 +348,7 @@ struct EncryptionSetupStepView: View {
                           (vm.passphrase.isEmpty || vm.passphrase != vm.passphraseConfirm))
             }
         }
+        .onAppear { accessSelection = vm.webUiAccessMode }
     }
 }
 
@@ -543,6 +585,29 @@ struct DoneStepView: View {
                 .bold()
             Text("Your SSD is ready. Open `Runner.app` at the top level of the SSD to start chatting. Quit when ready.")
                 .foregroundColor(.secondary)
+
+            // #338 parity: surface the generated LAN API key (LAN access only)
+            // so the user can copy it onto each device's web chat UI / Companion.
+            if vm.showFinalizedApiKeyPanel, let key = vm.finalizedNetworkApiKey {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("LAN API key").font(.headline)
+                    Text("Enter this on each device (web chat UI or Companion) to reach this drive's Runner over your network. You can re-read it later by unlocking the drive in this app.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Text(key)
+                            .font(.system(.caption, design: .monospaced))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                        Button("Copy") { vm.copyApiKeyToClipboard() }
+                    }
+                }
+                .padding(10)
+                .background(Color.brandAccentCyan.opacity(0.12))
+                .cornerRadius(6)
+            }
 
             if !vm.readinessItems.isEmpty {
                 Text("Readiness").font(.headline)

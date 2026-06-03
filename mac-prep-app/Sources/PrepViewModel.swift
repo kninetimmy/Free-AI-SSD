@@ -99,6 +99,93 @@ final class PrepViewModel: ObservableObject {
     @Published var passphrase: String = ""
     @Published var passphraseConfirm: String = ""
 
+    // #338 parity: up-front access-mode choice on the reframed encryption
+    // step. LAN forces encryption on and locks the toggle; device-only leaves
+    // encryption an optional toggle. Mutated only via selectDeviceOnlyAccess /
+    // requestLanAccess (the latter runs an encryption-required confirm first),
+    // never a bare setter — so the radio can't clear the precondition the LAN
+    // API key storage depends on. Mirrors the Windows PrepViewModel flow.
+    @Published private(set) var webUiAccessMode: WebUiAccessMode = .deviceOnly
+
+    // #338 parity: the LAN API key generated + sealed during the successful
+    // encrypted-config write. Surfaced on the Done step so a LAN user can copy
+    // it onto each device. Nil for device-only / plaintext (the key is cleared
+    // on that path). Mirrors the Windows `FinalizedNetworkApiKey`.
+    @Published private(set) var finalizedNetworkApiKey: String?
+
+    /// Convenience flags for the view (LAN-only explainer, toggle lock, Done
+    /// gate). Delegate to the pure helpers in PrepFlowStep.swift so the rules
+    /// have a single, test-covered source of truth.
+    var isLanAccess: Bool { webUiAccessMode == .lan }
+    var isDeviceOnlyAccess: Bool { webUiAccessMode == .deviceOnly }
+    var isEncryptionToggleEnabled: Bool { accessEncryptionToggleEnabled(for: webUiAccessMode) }
+    var showFinalizedApiKeyPanel: Bool {
+        accessShowFinalizedApiKey(mode: webUiAccessMode, key: finalizedNetworkApiKey)
+    }
+
+    /// Select device-only access. Encryption reverts to a user-controlled
+    /// optional toggle; the current `enableEncryption` value is preserved.
+    func selectDeviceOnlyAccess() {
+        let result = resolveAccessMode(
+            selecting: .deviceOnly, lanConfirmed: false,
+            currentEncryption: enableEncryption)
+        webUiAccessMode = result.mode
+        enableEncryption = result.enableEncryption
+    }
+
+    /// Request LAN access. Because LAN exposure stores a network API key that
+    /// is only ever written encrypted, this first confirms (NSAlert) that the
+    /// drive must be encrypted. On confirm the mode flips to `.lan` and
+    /// encryption is forced on; on cancel nothing changes (the view snaps the
+    /// radio back to device-only by re-reading `webUiAccessMode`).
+    func requestLanAccess() {
+        if webUiAccessMode == .lan { return }
+        let confirmed = confirmLanEncryptionRequired()
+        let result = resolveAccessMode(
+            selecting: .lan, lanConfirmed: confirmed,
+            currentEncryption: enableEncryption)
+        webUiAccessMode = result.mode
+        enableEncryption = result.enableEncryption
+    }
+
+    /// #338: encryption-required confirmation for LAN access. Routed through
+    /// NSAlert per the Mac UI design language (PrepApp leans pure-native). Copy
+    /// adapted from the Windows `RequestLanAccess`. Returns true on confirm.
+    private func confirmLanEncryptionRequired() -> Bool {
+#if canImport(AppKit)
+        let alert = NSAlert()
+        alert.messageText = "Encryption required for LAN access"
+        alert.informativeText = """
+        Letting other devices on your LAN reach the web chat UI stores a \
+        network API key on the drive. That key is only ever written encrypted, \
+        so the drive's configuration must be encrypted.
+
+        You'll choose an unlock passphrase below, and Mac Runner will ask for \
+        it each time it starts.
+        """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Enable encryption & continue")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+#else
+        // Headless/test builds have no AppKit. The access-mode rule itself is
+        // unit-tested via resolveAccessMode; this path is never driven there.
+        return true
+#endif
+    }
+
+    /// #338: Done-step Copy button. Writes the finalized LAN API key to the
+    /// system clipboard. No-op when there's no key.
+    func copyApiKeyToClipboard() {
+#if canImport(AppKit)
+        guard let key = finalizedNetworkApiKey, !key.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(key, forType: .string)
+        appendLog("API key copied to clipboard.")
+#endif
+    }
+
     // Starter models — F2: rich catalog matches Windows PrepApp's
     // merged Models grid projection. Populated by discoverCatalog()
     // (bundled JSON via sidecar) and replaced by refreshCatalog() when
@@ -1260,6 +1347,13 @@ final class PrepViewModel: ObservableObject {
             }.value
             appendLog("Encrypted config written.")
 
+            // #338 parity: capture the generated key so the Done step can
+            // surface + copy it when LAN access was chosen. The key was sealed
+            // into the encrypted config above; it is only ever displayed when
+            // showFinalizedApiKeyPanel (LAN-gated) is true, mirroring the
+            // Windows FinalizedNetworkApiKey capture-on-every-encrypted-success.
+            finalizedNetworkApiKey = payload.networkApiKey
+
             // Zeroize the in-memory passphrase strings. Swift Strings
             // aren't backed by a fixed buffer the way Data is, but
             // overwriting the storage minimizes lifetime and clarifies
@@ -1291,6 +1385,10 @@ final class PrepViewModel: ObservableObject {
                     ssdRoot: mount, payload: payload)
             }.value
             appendLog("Plaintext config written (encryption skipped).")
+
+            // #338 parity: no key on the plaintext path — PlaintextConfigWriter
+            // clears networkApiKey on disk, so there's nothing to surface.
+            finalizedNetworkApiKey = nil
 
             currentStep = .modelPull
             await pullStarterModels()
@@ -1554,6 +1652,8 @@ final class PrepViewModel: ObservableObject {
         statusMessage = ""
         passphrase = ""
         passphraseConfirm = ""
+        webUiAccessMode = .deviceOnly
+        finalizedNetworkApiKey = nil
         pendingPullTags = []
         pullProgressLine = ""
         manageModelsPullFailureTags = []

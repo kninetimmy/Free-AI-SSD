@@ -328,6 +328,63 @@ struct PrepAppTestsMain {
             try expect(failed != .readiness)
         }
 
+        // MARK: #338 — web-UI access mode (device-only vs LAN) parity
+        //
+        // Pins the Swift port of the Windows PrepViewModel access-mode rules
+        // (PR #338): LAN forces encryption on; device-only preserves the
+        // user's encryption choice; the encrypt toggle is locked in LAN mode;
+        // and the Done-step API-key panel is gated to LAN + a non-empty key.
+        // Exercises the pure helpers in PrepFlowStep.swift so the rules are
+        // covered without constructing the @MainActor PrepViewModel (same
+        // approach as the F2a / M11 filter tests below).
+
+        runner.test("#338: device-only preserves the user's encryption choice") {
+            let offKept = resolveAccessMode(
+                selecting: .deviceOnly, lanConfirmed: false, currentEncryption: false)
+            try expect(offKept.mode == .deviceOnly, "mode: \(offKept.mode)")
+            try expect(offKept.enableEncryption == false, "encryption should stay off")
+
+            let onKept = resolveAccessMode(
+                selecting: .deviceOnly, lanConfirmed: false, currentEncryption: true)
+            try expect(onKept.mode == .deviceOnly, "mode: \(onKept.mode)")
+            try expect(onKept.enableEncryption == true,
+                       "an opted-in at-rest encryption choice should be preserved")
+        }
+
+        runner.test("#338: confirmed LAN forces encryption on") {
+            let r = resolveAccessMode(
+                selecting: .lan, lanConfirmed: true, currentEncryption: false)
+            try expect(r.mode == .lan, "mode: \(r.mode)")
+            try expect(r.enableEncryption == true, "LAN must force encryption on")
+        }
+
+        runner.test("#338: cancelled LAN confirm leaves everything unchanged") {
+            let r = resolveAccessMode(
+                selecting: .lan, lanConfirmed: false, currentEncryption: false)
+            try expect(r.mode == .deviceOnly,
+                       "cancel should snap back to device-only, got \(r.mode)")
+            try expect(r.enableEncryption == false,
+                       "cancel must not force encryption on")
+        }
+
+        runner.test("#338: encryption toggle is locked only in LAN mode") {
+            try expect(accessEncryptionToggleEnabled(for: .deviceOnly) == true,
+                       "device-only should allow editing the toggle")
+            try expect(accessEncryptionToggleEnabled(for: .lan) == false,
+                       "LAN should lock the toggle")
+        }
+
+        runner.test("#338: Done-step API key surfaces only for LAN with a key") {
+            try expect(accessShowFinalizedApiKey(mode: .lan, key: "deadbeef") == true,
+                       "LAN + non-empty key should surface")
+            try expect(accessShowFinalizedApiKey(mode: .deviceOnly, key: "deadbeef") == false,
+                       "device-only must never surface the key panel")
+            try expect(accessShowFinalizedApiKey(mode: .lan, key: nil) == false,
+                       "nil key should not surface")
+            try expect(accessShowFinalizedApiKey(mode: .lan, key: "") == false,
+                       "empty key should not surface")
+        }
+
         // MARK: MAC34 — InitialPortableConfigPayload generates a non-empty
         // 64-hex network API key by default. Pre-MAC34 this defaulted to
         // `""` which fail-closed every chat request through the LAN API
