@@ -14,7 +14,7 @@ public static class RagPromptBuilder
     /// results are provided, a "No relevant documents found" note is included so the LLM
     /// knows the library was consulted but yielded nothing.
     /// </summary>
-    public static RagPromptBuildResult Build(string userPrompt, IReadOnlyList<RetrievalResult> retrieval, int maxContextChars = 5000, bool librarySearched = false)
+    public static RagPromptBuildResult Build(string userPrompt, IReadOnlyList<RetrievalResult> retrieval, int maxContextChars = 5000, bool librarySearched = false, bool inlineCitations = false)
     {
         if (retrieval.Count == 0)
         {
@@ -60,11 +60,21 @@ public static class RagPromptBuilder
         // Pass 3 — emit in the supplied order so neighbors stay adjacent to their hit.
         var sb = new StringBuilder();
         // Grounding enforcement (X22): require the model to answer only from the
-        // supplied context, cite inline using the bracketed labels CitationBuilder
-        // already prepends to each block, and refuse with an exact phrase when the
-        // answer isn't present — rather than the prior soft "say so if insufficient".
+        // supplied context and refuse with an exact phrase when the answer isn't present —
+        // rather than the prior soft "say so if insufficient". Inline citation labels are
+        // opt-in (default off) so answers stay concise and TTS doesn't read bracketed
+        // file/section/page labels aloud; retrieved sources are surfaced separately by the
+        // caller (Sources panel) regardless.
         sb.AppendLine("Answer the user's question using ONLY the reference context below.");
-        sb.AppendLine("After each factual claim, cite its source inline using the exact bracketed label shown with that context, e.g. [guide.pdf §Engine Start p.12].");
+        sb.AppendLine("Be concise and direct — answer the question without preamble, without restating the question, and without summarizing the context you were given.");
+        if (inlineCitations)
+        {
+            sb.AppendLine("After each factual claim, cite its source inline using the exact bracketed label shown with that context, e.g. [guide.pdf §Engine Start p.12].");
+        }
+        else
+        {
+            sb.AppendLine("Do not include source labels, file names, page numbers, or bracketed citations in your answer.");
+        }
         sb.AppendLine("If the reference context does not contain the answer, reply exactly: \"That information is not in the provided context.\" Do not use outside knowledge or guess.");
         sb.AppendLine();
         sb.AppendLine("Reference context:");

@@ -59,6 +59,7 @@ Prepare the drive once on a Windows or Mac machine with internet access — down
 | Bug | Platform | Steps to reproduce | Introduced |
 |---|---|---|---|
 | PrepApp — HF source picker broken when managing an existing drive | macOS PrepApp (Windows unverified) | Open a previously-configured drive → choose "Manage models (don't erase)" → expand "Add a model" → switch source dropdown from Ollama to Hugging Face → picker shows a raw scrollable list of `hf.co/…` paths (all tagged Custom) instead of the organized HF catalog browser; no search or filters available | [v1.3.28](../../releases/tag/v1.3.28) |
+| Runner — System TTS `ObjectDisposedException` when the synthesizer is torn down mid-speech | Windows Runner | With TTS enabled, switch the TTS engine (e.g. Piper → System) or start a new query while a System-voice response is still finishing → the `SpeakCompleted` callback runs `_synth.SpeakCompleted -= OnComplete` on an already-disposed `SpeechSynthesizer`, throwing `TargetInvocationException → ObjectDisposedException`. Caught by the global UI exception handler, so the app survives and TTS keeps working, but it logs one unhandled-UI ERROR per occurrence. | Latent since TTS shipped; surfaced on-hardware in [v1.4.0-alpha.5](../../releases/tag/v1.4.0-alpha.5) |
 
 ---
 

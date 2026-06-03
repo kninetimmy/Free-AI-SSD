@@ -3132,6 +3132,9 @@ public partial class MainWindow : System.Windows.Window
             // Thinking: select the item whose Tag matches the stored mode
             // (empty Tag = "Default"). Falls back to Default for unknown values.
             SelectThinkModeItem(_config.ModelThinkMode);
+
+            // Inline citations: off by default keeps answers concise.
+            RagInlineCitationsCheck.IsChecked = _config.RagInlineCitations;
         }
         finally
         {
@@ -3250,6 +3253,17 @@ public partial class MainWindow : System.Windows.Window
         if (string.Equals(mode, _config.ModelThinkMode, StringComparison.Ordinal)) return;
 
         _config.ModelThinkMode = mode;
+        SaveConfigAsync();
+    }
+
+    private void RagInlineCitationsCheck_Changed(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_suppressModelParamEvents || _config is null) return;
+
+        var enabled = RagInlineCitationsCheck.IsChecked == true;
+        if (enabled == _config.RagInlineCitations) return;
+
+        _config.RagInlineCitations = enabled;
         SaveConfigAsync();
     }
 

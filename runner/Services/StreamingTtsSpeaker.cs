@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Channels;
 
 namespace FreeAiSsd.Runner.Services;
@@ -19,6 +20,17 @@ namespace FreeAiSsd.Runner.Services;
 public sealed class StreamingTtsSpeaker : IDisposable
 {
     private static readonly char[] SentenceEnders = { '.', '!', '?', '\n' };
+
+    /// <summary>
+    /// Matches an inline citation label so it can be muted before speech. Labels are produced
+    /// by <c>CitationBuilder</c> as <c>[file §Section p.N]</c> (section and page optional), so a
+    /// bracketed span is treated as a citation when it carries a section marker, a "p.N" page
+    /// ref, or a known source-file extension. The leading whitespace is consumed too so removing
+    /// the label doesn't leave a double space. No-op when inline citations are off (none present).
+    /// </summary>
+    private static readonly Regex CitationSpanRx = new(
+        @"\s*\[[^\]]*(?:§|\bp\.\s*\d|\.(?:pdf|txt|md|markdown|csv|json)\b)[^\]]*\]",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private readonly ITextToSpeechService _tts;
     private readonly Channel<string> _sentenceQueue = Channel.CreateUnbounded<string>();
@@ -60,7 +72,7 @@ public sealed class StreamingTtsSpeaker : IDisposable
     /// </summary>
     public void Finish()
     {
-        var remaining = _buffer.ToString().Trim();
+        var remaining = StripCitations(_buffer.ToString()).Trim();
         _buffer.Clear();
 
         if (remaining.Length > 0)
@@ -85,15 +97,20 @@ public sealed class StreamingTtsSpeaker : IDisposable
     {
         var text = _buffer.ToString();
 
-        // Find the last sentence-ending punctuation mark
+        // Find the last sentence-ender that is NOT inside a citation bracket. The label
+        // format embeds periods (e.g. "p.12"), so a naive scan would split a citation in
+        // half; tracking bracket depth keeps each "[...]" label intact until it is whole
+        // and a real sentence boundary follows, at which point StripCitations removes it.
+        // With no brackets present (citations off) depth stays 0 and this matches the
+        // previous "last sentence-ender wins" behaviour exactly.
         int lastEnd = -1;
-        for (int i = text.Length - 1; i >= 0; i--)
+        int depth = 0;
+        for (int i = 0; i < text.Length; i++)
         {
-            if (IsSentenceEnd(text, i))
-            {
-                lastEnd = i;
-                break;
-            }
+            var c = text[i];
+            if (c == '[') depth++;
+            else if (c == ']') { if (depth > 0) depth--; }
+            else if (depth == 0 && IsSentenceEnd(text, i)) lastEnd = i;
         }
 
         if (lastEnd < 0) return;
@@ -112,11 +129,19 @@ public sealed class StreamingTtsSpeaker : IDisposable
         _buffer.Clear();
         _buffer.Append(remainder);
 
-        if (sentences.Length > 0)
+        var speakable = StripCitations(sentences).Trim();
+        if (speakable.Length > 0)
         {
-            _sentenceQueue.Writer.TryWrite(sentences);
+            _sentenceQueue.Writer.TryWrite(speakable);
         }
     }
+
+    /// <summary>
+    /// Removes inline citation labels (and the space preceding them) so the synthesizer
+    /// never reads "[guide.pdf §Engine Start p.12]" aloud. A no-op when no labels are present.
+    /// </summary>
+    private static string StripCitations(string text) =>
+        CitationSpanRx.Replace(text, string.Empty);
 
     /// <summary>
     /// Returns true if the character at <paramref name="index"/> is a sentence-ending

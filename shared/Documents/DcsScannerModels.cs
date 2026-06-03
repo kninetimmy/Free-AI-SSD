@@ -29,15 +29,19 @@ public sealed class DcsInstallation
 }
 
 /// <summary>
-/// Describes a single physical device folder found inside an aircraft's Config/Input tree.
-/// Each device folder contains a diff.lua with that device's bindings.
+/// Describes a single physical device found inside an aircraft's Config/Input tree.
+/// DCS stores one <c>"&lt;device&gt; {GUID}.diff.lua"</c> file per device inside the aircraft's
+/// device-class folders (joystick/keyboard/mouse); each file holds that device's bindings.
 /// </summary>
 public sealed class DcsDeviceInfo
 {
-    /// <summary>Name of the device sub-folder (e.g. "Saitek X-56 Rhino Stick").</summary>
+    /// <summary>
+    /// Device name recovered from the diff file name (e.g. "VKBsim Gladiator EVO R"),
+    /// with the trailing instance GUID stripped.
+    /// </summary>
     public string DeviceFolderName { get; set; } = string.Empty;
 
-    /// <summary>Absolute path to the diff.lua file for this device.</summary>
+    /// <summary>Absolute path to the <c>.diff.lua</c> file for this device.</summary>
     public string DiffLuaPath { get; set; } = string.Empty;
 }
 
