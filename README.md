@@ -113,6 +113,7 @@ A clear picture of what works where today. Mac support is actively expanding but
 | HOTAS Push-to-Talk | ✅ DirectInput | ❌ Not supported yet |
 | DCS Bindings Import | ✅ Full | ❌ Not supported yet |
 | Network Mode (LAN API) | ✅ Full (v2) | ✅ Sidecar-hosted |
+| Web chat UI (`/chat/`, browser) | ✅ Full | ✅ Sidecar-hosted |
 | Companion tray app (second PC) | ✅ Full | — |
 | Headless CLI (RunnerCli) | ✅ Full | — |
 | Unlock Windows-prepped encrypted SSD | ✅ Full | ✅ Full (CryptoKit) |
@@ -132,6 +133,7 @@ A clear picture of what works where today. Mac support is actively expanding but
 - ✅ **Voice output (TTS)** — Windows SAPI or Piper neural TTS; per-device audio routing
 - ✅ **HOTAS Push-to-Talk** — DirectInput joystick button triggers record → transcribe → send → TTS, hands-free; VR-friendly overlay
 - ✅ **Network Mode (LAN API v2)** — authenticated HTTP API for chat, streaming chat, STT upload, TTS, and voice-query orchestration
+- ✅ **Web chat UI** — install-free browser client served from the LAN API (`http://HOST:41555/chat/`); full assistant minus voice, with model/library pickers, RAG sources, and per-device history. Works from any LAN device including an iPad
 - ✅ **Companion tray app** — lightweight Windows client for a second LAN PC; no SSD required; supports its own HOTAS PTT loop
 - ✅ **Headless CLI (`FreeAiSsd.RunnerCli`)** — terminal REPL for SSH/Tailscale access; streams chat, shows RAG sources, zero GUI deps
 
@@ -573,6 +575,17 @@ curl -X POST http://RUNNER_HOST:41555/api/voice/query \
 - Upload size limit controlled by `networkMaxAudioUploadMB`
 - Invalid type / empty payload / oversize uploads return clear 4xx errors
 - `returnAudio=true` returns synthesized TTS as WAV PCM 16-bit mono 16kHz (`AudioMime: "audio/wav"`, `AudioBase64`), bounded by `networkMaxAudioUploadMB`
+
+**Web chat / LAN access (no install):**
+
+Runner serves a standalone browser chat client from the same LAN API host — no app to install on the other device. It's the full assistant minus voice: model picker, document-library selection, RAG-grounded chat with sources, a collapsible thinking view, and per-request temperature/thinking controls. Chat history is saved per-device in the browser (localStorage).
+
+1. On the host, enable **Network Mode (Expose API on LAN)** in Runner. (Binding to the LAN is the same opt-in that powers the Companion app.)
+2. Allow inbound TCP **41555** through the host firewall.
+3. From any LAN device — including an iPad on the sim rig — open `http://RUNNER_HOST:41555/chat/` (use the host's LAN IP or `HOSTNAME.local`).
+4. If the host requires an API key, enter it once when prompted; it's stored only in that browser. Change the host/key later from the in-app **Settings**.
+
+Per-request model parameters set in the web UI (temperature, thinking) apply only to that request and never overwrite the host's saved configuration. Plain HTTP over a trusted home LAN, API-key gated — do not expose port 41555 to the public internet.
 
 </details>
 
