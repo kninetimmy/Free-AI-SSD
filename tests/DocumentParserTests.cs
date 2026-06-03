@@ -318,6 +318,45 @@ public class DocumentParserTests : IDisposable
         Assert.Empty(DocumentParser.ClassifyLinesIntoBlocks(new List<LineRecord>()));
     }
 
+    [Fact]
+    public void ClassifyLinesIntoBlocks_DenseDiagramPage_SuppressesHeadingOverFire()
+    {
+        // A graphically dense page (e.g. a cockpit diagram): many short bold labels at assorted
+        // sizes, each of which would individually trip a heading heuristic. Collectively they are
+        // noise, so the whole page degrades to body rather than fragmenting into one chunk per
+        // label — the F18-guide ingest explosion (#68).
+        var lines = new List<LineRecord>();
+        for (var i = 0; i < 20; i++)
+        {
+            lines.Add(new LineRecord { Page = 1, Text = $"LABEL {i}", FontSize = 12 + (i % 4), IsBold = true });
+        }
+        lines.Add(new LineRecord { Page = 1, Text = "Some genuine descriptive body text on the page.", FontSize = 12 });
+
+        var blocks = DocumentParser.ClassifyLinesIntoBlocks(lines);
+
+        Assert.NotEmpty(blocks);
+        Assert.All(blocks, b => Assert.Equal(BlockKind.Body, b.Kind));
+    }
+
+    [Fact]
+    public void ClassifyLinesIntoBlocks_SparseHeadingsOnDensePage_StillDetected()
+    {
+        // A normal prose page with one heading among many body lines stays well under the
+        // density threshold, so the heading is preserved (the backoff must not be over-eager).
+        var lines = new List<LineRecord>
+        {
+            new() { Page = 1, Text = "Chapter Two", FontSize = 20 },
+        };
+        for (var i = 0; i < 10; i++)
+        {
+            lines.Add(new LineRecord { Page = 1, Text = $"Ordinary body sentence number {i} of the page.", FontSize = 12 });
+        }
+
+        var blocks = DocumentParser.ClassifyLinesIntoBlocks(lines);
+
+        Assert.Contains(blocks, b => b.Kind == BlockKind.Heading && b.Text == "Chapter Two");
+    }
+
     #endregion
 
     #region Block extraction — real PDF (PdfPig word-extraction path)
