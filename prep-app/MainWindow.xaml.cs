@@ -46,6 +46,13 @@ public partial class MainWindow : Window
     private PrepFlowStep _currentStep = PrepFlowStep.Welcome;
     private bool _isManageMode;
 
+    // #1 soft-lock gate: tracks whether finalize ("Finish setup") has
+    // verifiably completed in the current Finalize visit. The footer
+    // Continue must not skip finalize and land on the "Drive ready" Done
+    // screen for an unprepared SSD. Keyed off the same StatusText "Complete"
+    // sentinel #67 uses; reset whenever we leave the Finalize step.
+    private bool _finalizeCompleted;
+
     // Loaded from preferences and written back unchanged. The FTUE
     // spotlight tour was removed in favour of the step flow itself; this
     // field is kept only so the on-disk PrepPreferenceSnapshot schema is
@@ -123,6 +130,12 @@ public partial class MainWindow : Window
         // Models step in manage mode (off the linear path). VM has no
         // reference to the view's step machine, hence the event hook.
         _viewModel.ModelsTabRequested += (_, _) => EnterManageModels();
+
+        // #2 interrupt-recovery: VM raises this when the user accepts the
+        // resume-setup prompt for a half-finished drive. Land them on the
+        // right step in the LINEAR flow — Models to re-pull (Continue →
+        // Finalize) or straight to Finalize to finish staging the runtime.
+        _viewModel.ResumeSetupRequested += OnResumeSetupRequested;
 
         // C7: banner's Unlock button raises this event; show the modal
         // passphrase prompt and hand a successful unlock back to the VM
@@ -826,6 +839,27 @@ public partial class MainWindow : Window
         GoToStep(PrepFlowStep.Models);
     }
 
+    /// <summary>
+    /// #2 interrupt-recovery: route a resume-setup acceptance to the right
+    /// step. Models lands in the LINEAR flow (not manage mode) so re-pulling
+    /// flows Continue → Finalize; Finalize lands the user on the finish step
+    /// to re-run the idempotent staging.
+    /// </summary>
+    private void OnResumeSetupRequested(object? sender, ResumeSetupTarget target)
+    {
+        switch (target)
+        {
+            case ResumeSetupTarget.Models:
+                _isManageMode = false;
+                GoToStep(PrepFlowStep.Models);
+                break;
+            case ResumeSetupTarget.Finalize:
+            default:
+                GoToStep(PrepFlowStep.Finalize);
+                break;
+        }
+    }
+
     /// <summary>Show one step panel, hide the rest, and reconfigure the
     /// header counter, footer buttons, and log-panel visibility.</summary>
     private void GoToStep(PrepFlowStep step)
@@ -838,6 +872,14 @@ public partial class MainWindow : Window
         }
 
         _currentStep = step;
+
+        // #1 gate: re-lock the Finalize→Done footer transition on every
+        // navigation except into Done (which is only reachable via a
+        // successful finalize). Entering Finalize fresh starts locked.
+        if (step != PrepFlowStep.Done)
+        {
+            _finalizeCompleted = false;
+        }
 
         StepWelcome.Visibility = Visibility.Collapsed;
         StepProfile.Visibility = Visibility.Collapsed;
@@ -928,6 +970,15 @@ public partial class MainWindow : Window
                         ? "This drive is already prepared — use Manage models or Start over above."
                         : null;
                 break;
+            case PrepFlowStep.Finalize:
+                // #1 gate: Continue stays disabled until "Finish setup"
+                // verifiably succeeds, so the footer can't skip finalize and
+                // brick the SSD on a false "Drive ready" screen.
+                PrimaryButton.IsEnabled = _finalizeCompleted;
+                PrimaryButton.ToolTip = _finalizeCompleted
+                    ? null
+                    : "Click “Finish setup” to prepare the drive before continuing.";
+                break;
             default:
                 PrimaryButton.IsEnabled = true;
                 PrimaryButton.ToolTip = null;
@@ -948,6 +999,7 @@ public partial class MainWindow : Window
                 UpdateFooterState();
                 break;
             case nameof(PrepViewModel.StatusText):
+                UpdateFinalizeGate();
                 MaybeAutoAdvanceAfterOperation();
                 break;
         }
@@ -965,6 +1017,21 @@ public partial class MainWindow : Window
     /// producers — Start-over and Reformat-to-NTFS run from the Drive step —
     /// and keeps Check-readiness and model pulls from advancing.
     /// </summary>
+    /// <summary>
+    /// #1 soft-lock gate: arm/disarm the Finalize→Done footer transition off
+    /// the same <see cref="PrepViewModel.StatusText"/> sentinel #67 keys on.
+    /// "Complete" (finalize success) arms it; every other Finalize-step status
+    /// ("Finalize blocked", "Finalize failed", staging progress, etc.) leaves
+    /// it locked. No-op off the Finalize step so the format-step "Drive
+    /// prepared" sentinel can't arm it.
+    /// </summary>
+    private void UpdateFinalizeGate()
+    {
+        if (_currentStep != PrepFlowStep.Finalize) return;
+        _finalizeCompleted = _viewModel.StatusText == "Complete";
+        UpdateFooterState();
+    }
+
     private void MaybeAutoAdvanceAfterOperation()
     {
         (PrepFlowStep From, PrepFlowStep To)? hop = (_viewModel.StatusText, _currentStep) switch
@@ -1035,7 +1102,13 @@ public partial class MainWindow : Window
                 }
                 break;
             case PrepFlowStep.Finalize:
-                GoToStep(PrepFlowStep.Done);
+                // #1 gate: only advance once finalize has verifiably completed.
+                // The button is disabled otherwise (UpdateFooterState), so this
+                // is belt-and-suspenders against a programmatic/keyboard invoke.
+                if (_finalizeCompleted)
+                {
+                    GoToStep(PrepFlowStep.Done);
+                }
                 break;
             case PrepFlowStep.Done:
                 Close();

@@ -14,6 +14,9 @@ public sealed class ReadinessService : IReadinessService
         _modelService = modelService;
     }
 
+    public SsdSetupCompletionResult InspectSetupCompletion(string root)
+        => SsdSetupCompletionProbe.Inspect(root);
+
     public async Task<List<ReadinessItem>> RunReadinessChecksAsync(string root, Action<string> onLog, CancellationToken ct)
     {
         var checks = new List<ReadinessItem>();

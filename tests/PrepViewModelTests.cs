@@ -94,6 +94,81 @@ public class PrepViewModelTests
         Assert.False(vm.HasDriveSelected);
     }
 
+    // ── #2 interrupt-recovery: resume-setup prompt on drive-select ──────────
+
+    [Fact]
+    public void DriveSelect_RuntimeNotStaged_PromptsResume_RaisesFinalizeTarget()
+    {
+        SetupDefaultMocks();
+        _readinessService
+            .Setup(s => s.InspectSetupCompletion(It.IsAny<string>()))
+            .Returns(new SsdSetupCompletionResult(
+                SsdSetupCompletionState.RuntimeNotStaged, "the Runner app wasn't finished staging"));
+        _dialogService.Setup(d => d.Confirm(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+
+        var vm = CreateViewModel();
+        ResumeSetupTarget? raised = null;
+        vm.ResumeSetupRequested += (_, t) => raised = t;
+        vm.Initialize();
+
+        Assert.Equal(ResumeSetupTarget.Finalize, raised);
+        _dialogService.Verify(d => d.Confirm(It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+    }
+
+    [Fact]
+    public void DriveSelect_ModelsIncomplete_PromptsResume_RaisesModelsTarget()
+    {
+        SetupDefaultMocks();
+        _readinessService
+            .Setup(s => s.InspectSetupCompletion(It.IsAny<string>()))
+            .Returns(new SsdSetupCompletionResult(
+                SsdSetupCompletionState.ModelsMissingOrIncomplete, "a model didn't finish downloading"));
+        _dialogService.Setup(d => d.Confirm(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
+
+        var vm = CreateViewModel();
+        ResumeSetupTarget? raised = null;
+        vm.ResumeSetupRequested += (_, t) => raised = t;
+        vm.Initialize();
+
+        Assert.Equal(ResumeSetupTarget.Models, raised);
+    }
+
+    [Fact]
+    public void DriveSelect_SetupComplete_DoesNotPrompt()
+    {
+        SetupDefaultMocks();
+        _readinessService
+            .Setup(s => s.InspectSetupCompletion(It.IsAny<string>()))
+            .Returns(SsdSetupCompletionResult.Complete);
+
+        var vm = CreateViewModel();
+        var raised = false;
+        vm.ResumeSetupRequested += (_, _) => raised = true;
+        vm.Initialize();
+
+        Assert.False(raised);
+        _dialogService.Verify(d => d.Confirm(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public void DriveSelect_ResumeDeclined_DoesNotRaiseEvent()
+    {
+        SetupDefaultMocks();
+        _readinessService
+            .Setup(s => s.InspectSetupCompletion(It.IsAny<string>()))
+            .Returns(new SsdSetupCompletionResult(
+                SsdSetupCompletionState.RuntimeNotStaged, "the Runner app wasn't finished staging"));
+        _dialogService.Setup(d => d.Confirm(It.IsAny<string>(), It.IsAny<string>())).Returns(false);
+
+        var vm = CreateViewModel();
+        var raised = false;
+        vm.ResumeSetupRequested += (_, _) => raised = true;
+        vm.Initialize();
+
+        Assert.False(raised);
+        _dialogService.Verify(d => d.Confirm(It.IsAny<string>(), It.IsAny<string>()), Times.Once);
+    }
+
     [Fact]
     public void ShowFixedDrives_Toggle_RefreshesDrives()
     {

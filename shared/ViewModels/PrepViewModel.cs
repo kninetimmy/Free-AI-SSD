@@ -112,6 +112,9 @@ public class PrepViewModel : BaseViewModel
     private bool _isElevated;
 
     private readonly HashSet<string> _provenanceCheckedRoots = new(StringComparer.OrdinalIgnoreCase);
+    // #2 interrupt-recovery: one resume prompt per drive root per process so a
+    // dismissed prompt doesn't re-nag on every re-select; re-fires next launch.
+    private readonly HashSet<string> _resumeSetupPromptedRoots = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<StarterCatalogEntry> _starterCatalog = Array.Empty<StarterCatalogEntry>();
 
     // F2a: picker filter state. The XAML wraps ModelRows in a
@@ -897,6 +900,15 @@ public class PrepViewModel : BaseViewModel
     public event EventHandler? ModelsTabRequested;
 
     /// <summary>
+    /// #2 interrupt-recovery: raised when the user accepts the launch-time
+    /// "resume setup" prompt for a half-finished SSD. The payload says where to
+    /// land them (Finalize to finish staging, or Models to re-pull). Same
+    /// view-hook posture as <see cref="ModelsTabRequested"/> — the VM has no
+    /// notion of the view's step machine.
+    /// </summary>
+    public event EventHandler<ResumeSetupTarget>? ResumeSetupRequested;
+
+    /// <summary>
     /// C7: raised when the user clicks Unlock in the encrypted-drive
     /// banner. View layer handles the modal passphrase dialog and on
     /// success calls <see cref="ApplyUnlockResult"/>. Same delegate-hook
@@ -1150,6 +1162,7 @@ public class PrepViewModel : BaseViewModel
         RaiseAllCommandsCanExecuteChanged();
         _ = RefreshModelStatusesAsync();
         _ = CheckAndPromptLibraryReindexAsync();
+        _ = CheckAndPromptResumeSetupAsync();
     }
 
     /// <summary>
@@ -1267,6 +1280,74 @@ public class PrepViewModel : BaseViewModel
         }
 
         await FormatPrepareAsync();
+    }
+
+    /// <summary>
+    /// #2 interrupt-recovery: on drive-select (incl. launch), if a drive carries
+    /// our config marker but isn't yet usable — no platform runtime staged, or
+    /// models missing/partial — prompt the user to resume the interrupted setup.
+    /// Routes to Finalize (finish staging) or Models (re-pull) via
+    /// <see cref="ResumeSetupRequested"/>. The probe is cheap presence-only (no
+    /// decrypt, no hashing); full integrity still runs in FinalizeAsync's
+    /// readiness pass. One prompt per root per process — a dismissed prompt
+    /// re-fires only on the next launch. Skipped on encrypted drives, which are
+    /// read-only in PrepApp (a drive only gets encrypted at the very end of a
+    /// successful finalize, so an encrypted-yet-incomplete drive can't arise).
+    /// Mirrors <see cref="CheckAndPromptLibraryReindexAsync"/>.
+    /// </summary>
+    private async Task CheckAndPromptResumeSetupAsync()
+    {
+        if (_isModelOperationRunning) return;
+        if (_isSelectedDriveEncrypted) return;
+        if (_selectedDrive is null) return;
+
+        var root = _selectedDrive.RootPath;
+        if (!_resumeSetupPromptedRoots.Add(root)) return;
+
+        SsdSetupCompletionResult? completion;
+        try { completion = _readinessService.InspectSetupCompletion(root); }
+        catch { return; }
+
+        if (completion is null || completion.IsComplete) return;
+
+        var target = completion.State == SsdSetupCompletionState.ModelsMissingOrIncomplete
+            ? ResumeSetupTarget.Models
+            : ResumeSetupTarget.Finalize;
+        var nextStep = target == ResumeSetupTarget.Models
+            ? "finish downloading your models, then finalize the drive"
+            : "finish staging the Runner app to the drive";
+        var message =
+            $"This SSD looks like setup didn’t finish — {completion.Detail}.\n\n" +
+            $"Resume setup now? You’ll {nextStep}.";
+        const string title = "Resume SSD setup?";
+
+        bool confirm;
+        if (_uiSyncContext is null || SynchronizationContext.Current == _uiSyncContext)
+        {
+            confirm = _dialogService.Confirm(message, title);
+        }
+        else
+        {
+            var tcs = new TaskCompletionSource<bool>();
+            _uiSyncContext.Post(_ => tcs.SetResult(_dialogService.Confirm(message, title)), null);
+            confirm = await tcs.Task;
+        }
+
+        if (!confirm)
+        {
+            AppendLog("Resume setup declined. Use Manage models or Start over from the drive banner.");
+            return;
+        }
+
+        AppendLog($"Resuming interrupted setup ({completion.Detail}).");
+        if (_uiSyncContext is null || SynchronizationContext.Current == _uiSyncContext)
+        {
+            ResumeSetupRequested?.Invoke(this, target);
+        }
+        else
+        {
+            _uiSyncContext.Post(_ => ResumeSetupRequested?.Invoke(this, target), null);
+        }
     }
 
     private async Task CheckAndPromptLibraryReindexAsync()
