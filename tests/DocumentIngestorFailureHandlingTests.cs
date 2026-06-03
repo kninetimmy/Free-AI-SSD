@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Documents;
 using Microsoft.Data.Sqlite;
@@ -28,7 +29,7 @@ public sealed class DocumentIngestorFailureHandlingTests : IDisposable
     [Fact]
     public async Task IngestFilesAsync_ZeroChunks_ThrowsAndDoesNotPersist()
     {
-        var (manager, manifest, ingestor) = await CreateIngestorAsync(new FailFirstEmbeddingHandler(0));
+        var (manager, manifest, ingestor) = await CreateIngestorAsync(new SuccessEmbeddingHandler());
         var sourcePath = Path.Combine(_tempRoot, "blank.txt");
         File.WriteAllText(sourcePath, "   \r\n\t   ");
         var config = CreateConfig();
@@ -96,7 +97,7 @@ public sealed class DocumentIngestorFailureHandlingTests : IDisposable
     [Fact]
     public async Task IngestFilesAsync_TerminalFrame_ReportsIndexedAndSkippedCounts()
     {
-        var (_, manifest, ingestor) = await CreateIngestorAsync(new FailFirstEmbeddingHandler(failFirstRequests: 0));
+        var (_, manifest, ingestor) = await CreateIngestorAsync(new SuccessEmbeddingHandler());
 
         var goodPath = Path.Combine(_tempRoot, "good.txt");
         File.WriteAllText(goodPath, CreateLongText(1600));
@@ -132,7 +133,7 @@ public sealed class DocumentIngestorFailureHandlingTests : IDisposable
     [Fact]
     public async Task IngestFilesAsync_PartialChunkFailure_EmitsFailedChunksFrame()
     {
-        var (_, manifest, ingestor) = await CreateIngestorAsync(new FailFirstEmbeddingHandler(failFirstRequests: 1));
+        var (_, manifest, ingestor) = await CreateIngestorAsync(new ChunkFailingEmbeddingHandler(failChunks: 1));
         var sourcePath = Path.Combine(_tempRoot, "partial.txt");
         File.WriteAllText(sourcePath, CreateLongText(1600));
         var config = CreateConfig();
@@ -147,20 +148,23 @@ public sealed class DocumentIngestorFailureHandlingTests : IDisposable
     [Fact]
     public async Task IngestFilesAsync_AcceptableFailureRatio_PersistsSuccessfulChunksOnly()
     {
-        var handler = new FailFirstEmbeddingHandler(failFirstRequests: 1);
+        var handler = new ChunkFailingEmbeddingHandler(failChunks: 1);
         var (manager, manifest, ingestor) = await CreateIngestorAsync(handler);
         var sourcePath = Path.Combine(_tempRoot, "partial-success.txt");
         File.WriteAllText(sourcePath, CreateLongText(1600));
         var config = CreateConfig();
 
-        await ingestor.IngestFilesAsync(manifest, new[] { sourcePath }, "localhost:11434", config);
+        var frames = new List<IndexingProgress>();
+        await ingestor.IngestFilesAsync(manifest, new[] { sourcePath }, "localhost:11434", config, frames.Add);
 
         Assert.Single(manifest.Files);
-        Assert.True(handler.RequestCount > 1);
-        Assert.Equal(1, handler.FailedCount);
+        var terminal = frames.Last();
+        Assert.True(terminal.FailedChunks >= 1);     // the bad chunk(s) were dropped via the fallback
+        Assert.True(terminal.EmbeddedChunks >= 1);   // the rest still embedded
 
+        // Only successfully embedded chunks land in the index.
         var vectorIndex = new VectorIndex(manager.GetIndexPath(manifest.Id));
-        Assert.Equal(handler.RequestCount - handler.FailedCount, vectorIndex.GetChunkCount(manifest.Id));
+        Assert.Equal(terminal.EmbeddedChunks, vectorIndex.GetChunkCount(manifest.Id));
     }
 
     /// X18 Stage 2: the abort threshold is now config-driven. A single dropped chunk is
@@ -169,7 +173,7 @@ public sealed class DocumentIngestorFailureHandlingTests : IDisposable
     [Fact]
     public async Task IngestFilesAsync_ZeroToleranceThreshold_AbortsOnSingleChunkFailure()
     {
-        var handler = new FailFirstEmbeddingHandler(failFirstRequests: 1);
+        var handler = new ChunkFailingEmbeddingHandler(failChunks: 1);
         var (manager, manifest, ingestor) = await CreateIngestorAsync(handler);
         var sourcePath = Path.Combine(_tempRoot, "zero-tolerance.txt");
         File.WriteAllText(sourcePath, CreateLongText(1600));
@@ -192,7 +196,7 @@ public sealed class DocumentIngestorFailureHandlingTests : IDisposable
     [Fact]
     public async Task IngestFilesAsync_ToleratedPartialFailure_TerminalFrameCarriesBatchFailedChunks()
     {
-        var handler = new FailFirstEmbeddingHandler(failFirstRequests: 1);
+        var handler = new ChunkFailingEmbeddingHandler(failChunks: 1);
         var (_, manifest, ingestor) = await CreateIngestorAsync(handler);
         var sourcePath = Path.Combine(_tempRoot, "partial-terminal.txt");
         File.WriteAllText(sourcePath, CreateLongText(1600));
@@ -203,8 +207,34 @@ public sealed class DocumentIngestorFailureHandlingTests : IDisposable
 
         var terminal = frames.Last();
         Assert.Equal(string.Empty, terminal.CurrentFile);
-        Assert.Equal(1, terminal.FailedChunks);
+        Assert.True(terminal.FailedChunks >= 1);
         Assert.Single(manifest.Files);
+    }
+
+    /// B3: ingestion batches chunk embeddings into far fewer /api/embed calls
+    /// than there are chunks, and every chunk still lands in the index in order.
+    [Fact]
+    public async Task IngestFilesAsync_LargeDocument_BatchesEmbeddingRequests()
+    {
+        var handler = new SuccessEmbeddingHandler();
+        var (manager, manifest, ingestor) = await CreateIngestorAsync(handler);
+        var sourcePath = Path.Combine(_tempRoot, "large.txt");
+        File.WriteAllText(sourcePath, CreateLongText(6000)); // many chunks at ChunkSize=200
+        var config = CreateConfig();
+        config.EmbeddingBatchSize = 16;
+
+        var frames = new List<IndexingProgress>();
+        await ingestor.IngestFilesAsync(manifest, new[] { sourcePath }, "localhost:11434", config, frames.Add);
+
+        var terminal = frames.Last();
+        Assert.True(terminal.EmbeddedChunks > 1);
+        Assert.True(handler.MaxInputCount > 1,
+            $"At least one request should carry a batch of inputs (max seen: {handler.MaxInputCount}).");
+        Assert.True(handler.RequestCount < terminal.EmbeddedChunks,
+            $"Batching should send fewer requests ({handler.RequestCount}) than chunks ({terminal.EmbeddedChunks}).");
+
+        var vectorIndex = new VectorIndex(manager.GetIndexPath(manifest.Id));
+        Assert.Equal(terminal.EmbeddedChunks, vectorIndex.GetChunkCount(manifest.Id));
     }
 
     private async Task<(DocumentLibraryManager Manager, DocumentLibraryManifest Manifest, DocumentIngestor Ingestor)> CreateIngestorAsync(HttpMessageHandler handler)
@@ -266,35 +296,106 @@ public sealed class DocumentIngestorFailureHandlingTests : IDisposable
         }
     }
 
-    private sealed class FailFirstEmbeddingHandler : HttpMessageHandler
+    // Batch-aware success handler: returns one embedding per input (single or
+    // batched), mirroring Ollama's /api/embed array contract. Tracks request
+    // count and the largest batch seen so tests can assert batching happened.
+    private sealed class SuccessEmbeddingHandler : HttpMessageHandler
     {
-        private readonly int _failFirstRequests;
         private int _requestCount;
-        private int _failedCount;
-
-        public FailFirstEmbeddingHandler(int failFirstRequests)
-        {
-            _failFirstRequests = failFirstRequests;
-        }
+        private int _maxInputCount;
 
         public int RequestCount => _requestCount;
-        public int FailedCount => _failedCount;
+        public int MaxInputCount => _maxInputCount;
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            var requestNumber = Interlocked.Increment(ref _requestCount);
-            if (requestNumber <= _failFirstRequests)
+            Interlocked.Increment(ref _requestCount);
+            var inputs = await ReadInputsAsync(request, cancellationToken);
+            InterlockedMax(ref _maxInputCount, inputs.Length);
+            return EmbeddingsFor(inputs.Length);
+        }
+    }
+
+    // Batch-aware failure handler used to exercise the per-chunk fallback. From
+    // the first request (the first batch, which under MaxEmbeddingConcurrency=1
+    // carries every chunk) it captures the first <failChunks> distinct inputs as
+    // permanent failures. Any request containing one of them 500s — so the batch
+    // fails (forcing fallback) and, in the per-chunk retry, only the captured
+    // chunk(s) fail while the rest succeed. This models a genuinely bad chunk,
+    // which a request-ordinal failure no longer can once a failed batch is retried.
+    private sealed class ChunkFailingEmbeddingHandler : HttpMessageHandler
+    {
+        private readonly int _failChunks;
+        private readonly List<string> _failInputs = new();
+        private readonly object _gate = new();
+        private bool _captured;
+        private int _requestCount;
+
+        public ChunkFailingEmbeddingHandler(int failChunks) => _failChunks = failChunks;
+
+        public int RequestCount => _requestCount;
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _requestCount);
+            var inputs = await ReadInputsAsync(request, cancellationToken);
+
+            lock (_gate)
             {
-                Interlocked.Increment(ref _failedCount);
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError));
+                if (!_captured)
+                {
+                    foreach (var s in inputs)
+                    {
+                        if (_failInputs.Count >= _failChunks) break;
+                        if (!_failInputs.Contains(s)) _failInputs.Add(s);
+                    }
+                    _captured = true;
+                }
             }
 
-            var embedding = new[] { 1f, 0f, 0f };
-            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            if (inputs.Any(i => _failInputs.Contains(i)))
             {
-                Content = JsonContent.Create(new { embeddings = new[] { embedding } })
-            };
-            return Task.FromResult(response);
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+            }
+
+            return EmbeddingsFor(inputs.Length);
+        }
+    }
+
+    // Handles both the batch shape (input: [...]) and the single-string shape
+    // (input: "...") the per-chunk fallback uses, so one handler serves both paths.
+    private static async Task<string[]> ReadInputsAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        var raw = await request.Content!.ReadAsStringAsync(cancellationToken);
+        using var doc = JsonDocument.Parse(raw);
+        if (!doc.RootElement.TryGetProperty("input", out var input))
+        {
+            return Array.Empty<string>();
+        }
+
+        return input.ValueKind switch
+        {
+            JsonValueKind.String => new[] { input.GetString() ?? string.Empty },
+            JsonValueKind.Array => input.EnumerateArray().Select(e => e.GetString() ?? string.Empty).ToArray(),
+            _ => Array.Empty<string>(),
+        };
+    }
+
+    private static HttpResponseMessage EmbeddingsFor(int count)
+    {
+        var embeddings = Enumerable.Range(0, count).Select(_ => new[] { 1f, 0f, 0f }).ToArray();
+        return new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = JsonContent.Create(new { embeddings })
+        };
+    }
+
+    private static void InterlockedMax(ref int target, int value)
+    {
+        int current;
+        while (value > (current = Volatile.Read(ref target)))
+        {
+            if (Interlocked.CompareExchange(ref target, value, current) == current) break;
         }
     }
 }

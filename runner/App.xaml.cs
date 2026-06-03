@@ -83,6 +83,36 @@ public partial class App : System.Windows.Application
 
         _services = collection.BuildServiceProvider();
 
+        // Global safety net. Without this, an unhandled exception on the UI
+        // thread — e.g. an `async void` handler throwing a type a local catch
+        // missed — silently tears the whole Runner down (this is what made
+        // "Create Library" appear to crash even though the library persisted).
+        // Log the full stack to the SSD and keep the session alive; the
+        // AppDomain / TaskScheduler hooks capture anything off the UI thread.
+        var logger = _services.GetRequiredService<SsdLogger>();
+        DispatcherUnhandledException += (_, args) =>
+        {
+            logger.Error($"Unhandled UI exception: {args.Exception}");
+            System.Windows.MessageBox.Show(
+                $"Something went wrong, but the app is still running.\n\n{args.Exception.Message}",
+                "Free AI SSD — unexpected error",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Warning);
+            args.Handled = true;
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            var detail = args.ExceptionObject as Exception;
+            logger.Error(
+                $"Unhandled non-UI exception (terminating={args.IsTerminating}): " +
+                (detail?.ToString() ?? args.ExceptionObject?.ToString() ?? "unknown"));
+        };
+        System.Threading.Tasks.TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            logger.Error($"Unobserved task exception: {args.Exception}");
+            args.SetObserved();
+        };
+
         var window = _services.GetRequiredService<MainWindow>();
         window.Show();
     }
