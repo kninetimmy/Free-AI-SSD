@@ -1281,45 +1281,103 @@ final class RunnerViewModel: ObservableObject {
         ingestFiles(urls: urls, libraryId: activeId)
     }
 
+    /// Uploads each picked document in its OWN multipart request, sequentially.
+    /// The sidecar sizes its Kestrel/FormOptions body limits to the per-file
+    /// MaxDocumentSizeMB policy (+ headroom), so batching every file into a
+    /// single request would 413 the whole batch before anything ingested (the
+    /// bug that left libraries empty and the model hallucinating). One file per
+    /// request keeps each body within the per-file limit and yields accurate
+    /// per-file rejection messages; outcomes are aggregated into one status line.
     private func ingestFiles(urls: [URL], libraryId: String) {
         guard let baseUrl = networkApiBaseUrl,
               let url = URL(string: "\(baseUrl)/api/library/\(libraryId)/files") else {
             libraryStatus = "Start Network Mode first."
             return
         }
+        guard !urls.isEmpty else { return }
 
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        if let key = apiKeyForLocalApiRequest() { req.addValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        libraryBusy = true
 
-        let boundary = "Boundary-\(UUID().uuidString)"
-        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        // Mutated only from the sequential completion chain below (one upload in
+        // flight at a time), so no concurrent access.
+        var totalRejected = 0
+        var totalSkipped = 0
+        var totalFailedChunks = 0
+        var firstError: String? = nil
+        var latestDetail: LibraryDetail? = nil
 
-        var body = Data()
-        for fileURL in urls {
-            guard let fileData = try? Data(contentsOf: fileURL) else { continue }
-            let fileName = fileURL.lastPathComponent
+        func finish() {
+            DispatchQueue.main.async {
+                self.libraryBusy = false
+                if let latestDetail { self.activeLibrary = latestDetail }
+                if let firstError {
+                    self.libraryStatus = "Ingest failed: \(firstError)"
+                } else {
+                    let fileCount = latestDetail?.fileCount ?? 0
+                    var status = "Ingest complete: \(fileCount) file(s)"
+                    if totalSkipped > 0 { status += ", \(totalSkipped) skipped" }
+                    if totalFailedChunks > 0 { status += " (\(totalFailedChunks) chunk(s) failed)" }
+                    if totalRejected > 0 { status += " (\(totalRejected) rejected — see logs)" }
+                    self.libraryStatus = status
+                }
+                self.refreshLibraries()
+            }
+        }
+
+        func uploadNext(_ index: Int) {
+            if index >= urls.count {
+                finish()
+                return
+            }
+
+            let fileURL = urls[index]
+            DispatchQueue.main.async {
+                self.libraryStatus = "Uploading \(index + 1) of \(urls.count): \(fileURL.lastPathComponent)…"
+            }
+
+            guard let fileData = try? Data(contentsOf: fileURL) else {
+                self.log("[library] could not read '\(fileURL.lastPathComponent)' — skipping")
+                totalRejected += 1
+                uploadNext(index + 1)
+                return
+            }
+
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            if let key = self.apiKeyForLocalApiRequest() { req.addValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+            let boundary = "Boundary-\(UUID().uuidString)"
+            req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+            var body = Data()
             body.append("--\(boundary)\r\n".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"files\"; filename=\"\(fileName)\"\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"files\"; filename=\"\(fileURL.lastPathComponent)\"\r\n".data(using: .utf8)!)
             body.append("Content-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
             body.append(fileData)
             body.append("\r\n".data(using: .utf8)!)
-        }
-        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
-        req.httpBody = body
+            body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+            req.httpBody = body
 
-        libraryBusy = true
-        libraryStatus = "Uploading \(urls.count) file(s)…"
-        URLSession.shared.dataTask(with: req) { [weak self] data, urlResponse, error in
-            guard let self else { return }
-            DispatchQueue.main.async { self.libraryBusy = false }
-            if let http = urlResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                let msg = RunnerChatErrorMessage.decode(statusCode: http.statusCode, body: data)
-                DispatchQueue.main.async { self.libraryStatus = msg }
-                return
-            }
-            self.handleNdjsonProgress(data: data, error: error, completionVerb: "Ingest")
-        }.resume()
+            URLSession.shared.dataTask(with: req) { [weak self] data, urlResponse, error in
+                guard let self else { return }
+                if let http = urlResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                    let msg = RunnerChatErrorMessage.decode(statusCode: http.statusCode, body: data)
+                    if firstError == nil { firstError = msg }
+                    self.log("[library] upload '\(fileURL.lastPathComponent)' failed (HTTP \(http.statusCode)): \(msg)")
+                    uploadNext(index + 1)
+                    return
+                }
+                let outcome = self.parseIngestNdjson(data: data, error: error)
+                totalRejected += outcome.rejectedCount
+                totalSkipped += outcome.skippedFiles
+                totalFailedChunks += outcome.failedChunks
+                if let detail = outcome.completedDetail { latestDetail = detail }
+                if let message = outcome.errorMessage, firstError == nil { firstError = message }
+                outcome.rejectionLogs.forEach { self.log($0) }
+                uploadNext(index + 1)
+            }.resume()
+        }
+
+        uploadNext(0)
     }
 
     func pickAndAddWatchedFolder() {
@@ -1678,6 +1736,58 @@ final class RunnerViewModel: ObservableObject {
             }
             self.refreshLibraries()
         }
+    }
+
+    /// Parsed result of one ingest NDJSON response (one file per request).
+    private struct IngestFileOutcome {
+        var rejectedCount = 0
+        var skippedFiles = 0
+        var failedChunks = 0
+        var completedDetail: LibraryDetail? = nil
+        var errorMessage: String? = nil
+        var rejectionLogs: [String] = []
+    }
+
+    /// Parses the sidecar's `application/x-ndjson` ingest response into an
+    /// `IngestFileOutcome`. Mirrors the frame handling in
+    /// `handleNdjsonProgress` but returns the result instead of mutating UI,
+    /// so `ingestFiles` can aggregate across the per-file upload sequence.
+    private func parseIngestNdjson(data: Data?, error: Error?) -> IngestFileOutcome {
+        var outcome = IngestFileOutcome()
+        if let error {
+            outcome.errorMessage = error.localizedDescription
+            return outcome
+        }
+        guard let data, let text = String(data: data, encoding: .utf8) else {
+            outcome.errorMessage = "empty response"
+            return outcome
+        }
+        for line in text.split(separator: "\n") {
+            guard let lineData = line.data(using: .utf8),
+                  let frame = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                  let type = frame["type"] as? String else {
+                continue
+            }
+            switch type {
+            case "file-rejected":
+                outcome.rejectedCount += 1
+                if let fileName = frame["fileName"] as? String,
+                   let reason = frame["reason"] as? String {
+                    outcome.rejectionLogs.append("[library] rejected '\(fileName)': \(reason)")
+                }
+            case "progress":
+                if let s = frame["skippedFiles"] as? Int, s > 0 { outcome.skippedFiles = s }
+                let isTerminalFrame = (frame["currentFile"] as? String)?.isEmpty ?? false
+                if isTerminalFrame, let f = frame["failedChunks"] as? Int { outcome.failedChunks = f }
+            case "complete":
+                outcome.completedDetail = self.decodeActiveLibrary(frame["library"] as? [String: Any])
+            case "error":
+                outcome.errorMessage = frame["message"] as? String
+            default:
+                break
+            }
+        }
+        return outcome
     }
 
     private func decodeActiveLibrary(_ obj: [String: Any]?) -> LibraryDetail? {

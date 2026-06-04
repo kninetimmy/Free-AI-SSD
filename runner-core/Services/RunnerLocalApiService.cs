@@ -6,6 +6,7 @@ using FreeAiSsd.Shared.Documents;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.StaticFiles;
@@ -29,6 +30,14 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
     private readonly SemaphoreSlim _sttInitGate = new(1, 1);
     private readonly SemaphoreSlim _sttTranscribeGate = new(1, 1);
     private WebApplication? _app;
+
+    /// <summary>
+    /// Slack added on top of <see cref="PortableConfig.MaxDocumentSizeMB"/> when
+    /// sizing the ingest request-body / multipart transport limits, covering
+    /// multipart boundaries and part headers so a file at exactly the per-file
+    /// limit isn't rejected by transport framing overhead.
+    /// </summary>
+    private const int IngestMultipartHeadroomMB = 16;
 
     public RunnerLocalApiService(
         IChatService chatService,
@@ -101,8 +110,30 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             LogMessage?.Invoke(warning);
         }
 
+        // Ingest uploads (POST /api/library/{id}/files) arrive as one multipart
+        // body per file. Kestrel's default MaxRequestBodySize (30 MB) and the
+        // default FormOptions.MultipartBodyLengthLimit (128 MB) both sit far
+        // below the app-layer per-file policy (config.MaxDocumentSizeMB, 512 MB
+        // default), so a large PDF was rejected at the transport layer with a
+        // 413 before the size check at HandleIngestUploadAsync ever ran — RAG
+        // then had nothing to retrieve and the model hallucinated. (Windows
+        // ingests in-process and never hits an HTTP body limit; this gap was
+        // Mac/sidecar-only.) Size both transport limits to the per-file policy
+        // plus headroom for multipart framing so MaxDocumentSizeMB is the single
+        // authoritative limit and oversized files get the clean per-file
+        // rejection at line ~829 instead of an opaque 413.
+        var maxUploadBytes =
+            ((long)Math.Max(1, config.MaxDocumentSizeMB) + IngestMultipartHeadroomMB) * 1024L * 1024L;
+
         var builder = WebApplication.CreateSlimBuilder();
-        builder.WebHost.UseKestrel().UseUrls($"http://{bindAddress}:{networkPort}");
+        builder.WebHost
+            .UseKestrel(options => options.Limits.MaxRequestBodySize = maxUploadBytes)
+            .UseUrls($"http://{bindAddress}:{networkPort}");
+
+        builder.Services.Configure<FormOptions>(options =>
+        {
+            options.MultipartBodyLengthLimit = maxUploadBytes;
+        });
 
         builder.Services.AddRouting();
         builder.Services.ConfigureHttpJsonOptions(options =>
