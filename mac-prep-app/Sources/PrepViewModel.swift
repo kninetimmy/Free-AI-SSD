@@ -41,16 +41,10 @@ final class PrepViewModel: ObservableObject {
     @Published var prepareForWindowsToo: Bool = true   // default cross-platform
     @Published var volumeLabel: String = "FREEAI"
 
-    /// Opt-in to staging Piper neural TTS during the staging step. Off by
-    /// default — system TTS works for everyone and Piper adds ~80 MB. When
-    /// true, the staging block runs a `stage-piper` arm after `stage-ollama`;
-    /// a download failure logs but does not block the rest of the flow.
-    @Published var installPiper: Bool = false
-
     /// Opt-in to staging the Tesseract OCR bundle during the staging step. Off
     /// by default — OCR is slow and adds ~10 MB, and most DCS guides are
     /// text-layer. When true, the staging block runs a `stage-tesseract` arm
-    /// after `stage-piper` (failure logs but does not block), and the written
+    /// after the core arms (failure logs but does not block), and the written
     /// config sets `ocrEnabled = true` so OCR is usable without a second toggle
     /// hunt in the Runner. Mirrors the Windows PrepApp PDF-image-OCR expander.
     @Published var installOcr: Bool = false
@@ -927,13 +921,12 @@ final class PrepViewModel: ObservableObject {
             _ = try await hostController.send("stage-ollama")
             _ = try await hostController.send("stage-prereqs")
 
-            // Optional bundles (Piper TTS, Tesseract OCR). Each is fail-soft:
-            // the sidecar catches its own exceptions and returns ok=false, so a
-            // bundle download failure lands in the log without blocking
-            // finalize — hence `try?` and no per-arm do/catch. The ordered
-            // command list is a pure, parity-pinned helper in PrepFlowStep
-            // (Piper before Tesseract).
-            for command in optionalStagingCommands(installPiper: installPiper, installOcr: installOcr) {
+            // Optional bundles (Tesseract OCR). Fail-soft: the sidecar catches
+            // its own exceptions and returns ok=false, so a bundle download
+            // failure lands in the log without blocking finalize — hence `try?`
+            // and no per-arm do/catch. The command list is a pure, parity-pinned
+            // helper in PrepFlowStep.
+            for command in optionalStagingCommands(installOcr: installOcr) {
                 _ = try? await hostController.send(command)
             }
 

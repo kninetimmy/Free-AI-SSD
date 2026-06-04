@@ -178,10 +178,6 @@ struct DriveSelectionStepView: View {
             Form {
                 TextField("Volume label", text: $vm.volumeLabel)
                 Toggle("Also prepare for Windows (cross-platform)", isOn: $vm.prepareForWindowsToo)
-                Toggle("Install Piper neural TTS (optional, ~80 MB)", isOn: $vm.installPiper)
-                Text("Optional upgrade over system TTS. Downloads the Piper binary plus the en_US-amy-medium voice; needs internet during staging. Skip if you're happy with the macOS default voice.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
                 Toggle("Enable PDF image OCR (optional, ~10 MB)", isOn: $vm.installOcr)
                 Text("Recovers text baked into screenshots and diagrams inside PDFs so it's searchable in chat. Downloads the Tesseract OCR engine; needs internet during staging. Slower ingest — leave off if your PDFs are mostly selectable text.")
                     .font(.caption)

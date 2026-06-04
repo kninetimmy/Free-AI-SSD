@@ -135,22 +135,23 @@ func accessShowFinalizedApiKey(mode: WebUiAccessMode, key: String?) -> Bool {
 // MARK: - Optional staging commands (#91 / task #92)
 //
 // The staging step always runs the core arms (stage-runner / stage-ollama /
-// stage-prereqs); the two opt-in bundles — Piper neural TTS and the Tesseract
-// OCR fast-follow (#342) — each emit one extra `stage-*` arm only when their
-// toggle is set. PrepViewModel.runStaging() iterates the result after the core
-// arms; each arm is fail-soft (the sidecar catches its own exceptions and
-// returns ok=false, so a bundle download failure lands in the log without
-// blocking finalize). The mapping lives here — not on the @MainActor
-// PrepViewModel — so the parity-pin tests can exercise it without constructing
-// the view-model, exactly like the #338 access-mode helpers above.
+// stage-prereqs); the opt-in Tesseract OCR fast-follow (#342) emits one extra
+// `stage-*` arm only when its toggle is set. PrepViewModel.runStaging()
+// iterates the result after the core arms; each arm is fail-soft (the sidecar
+// catches its own exceptions and returns ok=false, so a bundle download failure
+// lands in the log without blocking finalize). The mapping lives here — not on
+// the @MainActor PrepViewModel — so the parity-pin tests can exercise it
+// without constructing the view-model, exactly like the #338 access-mode
+// helpers above.
+//
+// Mac Piper staging was removed: the Mac runner backs TTS with native
+// AVSpeechSynthesizer (decision #166) and never consumes a staged Piper, so the
+// opt-in only ever stranded an unusable ~80 MB bundle on the SSD.
 
 /// Ordered list of the optional `stage-*` sidecar commands the staging step
-/// emits for the given opt-in toggles. Empty when nothing is opted into. Order
-/// is load-bearing: Piper before Tesseract, mirroring the documented
-/// "stage-tesseract after stage-piper" sequence.
-func optionalStagingCommands(installPiper: Bool, installOcr: Bool) -> [String] {
+/// emits for the given opt-in toggles. Empty when nothing is opted into.
+func optionalStagingCommands(installOcr: Bool) -> [String] {
     var commands: [String] = []
-    if installPiper { commands.append("stage-piper") }
     if installOcr { commands.append("stage-tesseract") }
     return commands
 }
