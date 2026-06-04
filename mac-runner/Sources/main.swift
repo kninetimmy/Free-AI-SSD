@@ -124,6 +124,13 @@ final class RunnerViewModel: ObservableObject {
     @Published var networkApiStatus: String = "API stopped"
     @Published var networkApiBaseUrl: String? = nil
 
+    /// Opt-in PDF-image OCR at ingest. Persisted as `ocrEnabled` in
+    /// PortableConfig (mirrors the Windows runner toggle in the Reference
+    /// Documents card). Only meaningful when the Tesseract bundle is staged on
+    /// the SSD (see `ocrBundleStaged`); the UI disables the toggle with a hint
+    /// otherwise, mirroring the Windows `IsAvailable` gate.
+    @Published var ocrEnabled: Bool = false
+
     /// MAC8: Document library state, populated from /api/library when the
     /// Network Mode sidecar is running. The active library + its files/watched
     /// folders surface in the Documents UI; mutations round-trip through the
@@ -693,6 +700,32 @@ final class RunnerViewModel: ObservableObject {
         modelNames = installed
         selectedModel = installed.first ?? ""
         hydrateModelParams(config)
+        // Hydrate the OCR opt-in from persisted config (default false). Single
+        // place both the plaintext-load and unlock paths route through.
+        ocrEnabled = (config["ocrEnabled"] as? Bool) ?? false
+    }
+
+    /// True when the Tesseract OCR bundle is staged on the SSD — i.e. the
+    /// relocated `tesseract` binary exists at `mac/tools/tesseract/`. Mirrors
+    /// the Windows runner's `IsAvailable` gate (which checks the staged exe);
+    /// the OCR toggle is disabled-with-hint until this holds.
+    var ocrBundleStaged: Bool {
+        guard let root = ssdRoot else { return false }
+        let exe = root
+            .appendingPathComponent("mac/tools/tesseract/tesseract")
+        return FileManager.default.fileExists(atPath: exe.path)
+    }
+
+    /// UI setter for the OCR toggle. Updates the published flag and persists it
+    /// via `saveConfig` so the next ingest (and the Windows/LAN readers) see the
+    /// same intent. `saveConfig` refuses while the drive is locked.
+    func setOcrEnabled(_ enabled: Bool) {
+        ocrEnabled = enabled
+        saveConfig { current in
+            var config = current
+            config["ocrEnabled"] = enabled
+            return config
+        }
     }
 
     /// Mirror the persisted model knobs into the slider/picker state. Setting
@@ -2024,6 +2057,23 @@ struct DocumentsSection: View {
                 Spacer()
                 if !vm.libraryStatus.isEmpty {
                     Text(vm.libraryStatus)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            // OCR opt-in (parity with the Windows runner's Reference Documents
+            // card). Disabled-with-hint until the Tesseract bundle is staged on
+            // the SSD — flipping it on without the engine present would be a
+            // no-op at ingest. When staged, the toggle persists `ocrEnabled`.
+            VStack(alignment: .leading, spacing: 2) {
+                Toggle("Extract text from PDF images (OCR)", isOn: Binding(
+                    get: { vm.ocrEnabled },
+                    set: { newValue in vm.setOcrEnabled(newValue) }
+                ))
+                .disabled(vm.isEncryptedLocked || !vm.ocrBundleStaged)
+                if !vm.ocrBundleStaged {
+                    Text("Re-run the prep tool with “Enable PDF image OCR” to stage the OCR engine onto this drive.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }

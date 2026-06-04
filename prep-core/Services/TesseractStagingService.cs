@@ -1,3 +1,4 @@
+using System.Formats.Tar;
 using System.IO.Compression;
 using System.Net.Http;
 using System.Runtime.InteropServices;
@@ -38,8 +39,10 @@ public sealed class TesseractStagingService : ITesseractStagingService
 
     /// <summary>
     /// Detects the running host's Tesseract platform. Throws on unsupported
-    /// hosts — the catalog currently only covers Windows-amd64 (macOS is a
-    /// fast-follow), so this fails closed rather than guessing.
+    /// hosts (Linux, 32-bit Windows, etc.), mirroring
+    /// <see cref="PiperStagingService.DetectCurrentPlatform"/>. Intel Macs map to
+    /// <see cref="TesseractPlatform.MacosX64"/>, which the catalog does not yet
+    /// cover — the asset lookup then fails closed with a clear error.
     /// </summary>
     public static TesseractPlatform DetectCurrentPlatform()
     {
@@ -47,6 +50,16 @@ public sealed class TesseractStagingService : ITesseractStagingService
             RuntimeInformation.ProcessArchitecture == Architecture.X64)
         {
             return TesseractPlatform.WindowsAmd64;
+        }
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            return RuntimeInformation.ProcessArchitecture switch
+            {
+                Architecture.Arm64 => TesseractPlatform.MacosAarch64,
+                Architecture.X64 => TesseractPlatform.MacosX64,
+                _ => throw new PlatformNotSupportedException(
+                    $"macOS process architecture {RuntimeInformation.ProcessArchitecture} is not supported by the Tesseract catalog."),
+            };
         }
         throw new PlatformNotSupportedException(
             $"Tesseract staging is not supported on {RuntimeInformation.OSDescription} ({RuntimeInformation.ProcessArchitecture}).");
@@ -137,7 +150,18 @@ public sealed class TesseractStagingService : ITesseractStagingService
                 $"Tesseract archive size mismatch: expected {asset.SizeBytes}, got {observedSize}.");
         }
 
-        ExtractZipPreservingLayout(archivePath, tesseractDir, onLog);
+        // The archive format is the source of truth from the asset filename: Windows ships a
+        // .zip, macOS a .tar.gz (the Unix convention, matching Piper). Both extracts preserve the
+        // bundle's nested layout so tessdata/ — including tessdata/configs/tsv — lands intact.
+        if (asset.ArchiveFileName.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase) ||
+            asset.ArchiveFileName.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase))
+        {
+            ExtractTarGzPreservingLayout(archivePath, tesseractDir, onLog);
+        }
+        else
+        {
+            ExtractZipPreservingLayout(archivePath, tesseractDir, onLog);
+        }
         File.Delete(archivePath);
 
         if (!File.Exists(executablePath))
@@ -152,11 +176,21 @@ public sealed class TesseractStagingService : ITesseractStagingService
                 $"Tesseract extraction completed but the tessdata directory is missing at {tessdataDir}.");
         }
 
+        // macOS hardening: a bundle downloaded by our app carries com.apple.quarantine, which
+        // Gatekeeper can use to block first exec of the unsigned binary + dylibs. Strip it
+        // recursively (fail-soft — logged, not fatal), and re-assert the exec bit on the binary in
+        // case the extract dropped it. Mirrors the quarantine risk called out in the OCR plan.
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            await StripQuarantineAsync(tesseractDir, onLog, ct);
+            EnsureExecutable(executablePath, onLog);
+        }
+
         manifest.Binary = new TesseractBinaryManifestEntry
         {
             Platform = platform.ToString(),
             ReleaseTag = TesseractCatalog.BinaryReleaseTag,
-            TesseractVersion = TesseractCatalog.TesseractVersion,
+            TesseractVersion = asset.TesseractVersion,
             ArchiveFileName = asset.ArchiveFileName,
             SourceUrl = asset.Url,
             Sha256 = observedSha,
@@ -196,6 +230,106 @@ public sealed class TesseractStagingService : ITesseractStagingService
             entryCount++;
         }
         onLog($"Extracted {entryCount} files from {Path.GetFileName(archivePath)}.");
+    }
+
+    /// <summary>
+    /// Extracts the curated Tesseract <c>.tar.gz</c> into <paramref name="targetDir"/>,
+    /// preserving the archive's relative layout. Unlike Piper's flat extract this keeps the
+    /// nested <c>tessdata/</c> subtree (no top-level wrapper dir is stripped — the bundle is
+    /// packed with <c>tar -C stage .</c> so entries are already root-relative). Each entry is
+    /// guarded against zip-slip; symlinks are skipped loudly (the bundle ships none).
+    /// <see cref="TarEntry.ExtractToFile"/> restores the Unix exec bit from the entry mode on
+    /// Unix, so the relocated <c>tesseract</c> binary stays executable.
+    /// </summary>
+    internal static void ExtractTarGzPreservingLayout(string archivePath, string targetDir, Action<string> onLog)
+    {
+        var entryCount = 0;
+        using (var fileStream = File.OpenRead(archivePath))
+        using (var gzip = new GZipStream(fileStream, CompressionMode.Decompress))
+        using (var tar = new TarReader(gzip, leaveOpen: false))
+        {
+            while (tar.GetNextEntry() is { } entry)
+            {
+                var relative = entry.Name.Replace('\\', '/').TrimStart('/');
+                // tar packed with "-C stage ." prefixes entries with "./" — normalize it away.
+                if (relative.StartsWith("./", StringComparison.Ordinal)) relative = relative[2..];
+                if (string.IsNullOrEmpty(relative) || relative == ".") continue;
+
+                var destPath = Path.Combine(targetDir, relative);
+                EnsureWithin(targetDir, destPath, entry.Name);
+
+                switch (entry.EntryType)
+                {
+                    case TarEntryType.Directory:
+                    case TarEntryType.DirectoryList:
+                        Directory.CreateDirectory(destPath);
+                        break;
+                    case TarEntryType.RegularFile:
+                    case TarEntryType.V7RegularFile:
+                    case TarEntryType.ContiguousFile:
+                        Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
+                        entry.ExtractToFile(destPath, overwrite: true);
+                        entryCount++;
+                        break;
+                    case TarEntryType.SymbolicLink:
+                        onLog($"Skipped tar symlink entry: {entry.Name} -> {entry.LinkName}");
+                        break;
+                    default:
+                        onLog($"Skipped tar entry {entry.Name} of type {entry.EntryType}.");
+                        break;
+                }
+            }
+        }
+        onLog($"Extracted {entryCount} files from {Path.GetFileName(archivePath)}.");
+    }
+
+    /// <summary>
+    /// Strips <c>com.apple.quarantine</c> recursively from the staged tesseract dir so Gatekeeper
+    /// does not block first exec of the unsigned bundle. Fail-soft: a non-zero exit or a missing
+    /// <c>xattr</c> is logged, not thrown — staging still succeeds and any block surfaces at run
+    /// time with a clearer signal than a half-staged drive.
+    /// </summary>
+    private static async Task StripQuarantineAsync(string tesseractDir, Action<string> onLog, CancellationToken ct)
+    {
+        try
+        {
+            var exit = await ProcessRunner.RunAsync(
+                "/usr/bin/xattr",
+                new[] { "-dr", "com.apple.quarantine", tesseractDir },
+                tesseractDir,
+                onOutput: onLog,
+                ct: ct).ConfigureAwait(false);
+            onLog(exit == 0
+                ? "Cleared com.apple.quarantine from staged Tesseract bundle."
+                : $"xattr quarantine strip exited {exit} (non-fatal).");
+        }
+        catch (Exception ex)
+        {
+            onLog($"Could not strip quarantine xattr (non-fatal): {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Re-asserts the owner-execute bit on the tesseract binary on Unix. Defensive: the tar extract
+    /// normally restores the mode, but a permissive umask or odd archive can drop it.
+    /// </summary>
+    private static void EnsureExecutable(string executablePath, Action<string> onLog)
+    {
+        if (OperatingSystem.IsWindows()) return;   // NTFS has no Unix mode bits; caller already guards
+        try
+        {
+            var mode = File.GetUnixFileMode(executablePath);
+            var withExec = mode | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
+            if (mode != withExec)
+            {
+                File.SetUnixFileMode(executablePath, withExec);
+                onLog($"Set exec bit on {Path.GetFileName(executablePath)}.");
+            }
+        }
+        catch (Exception ex)
+        {
+            onLog($"Could not set exec bit on {Path.GetFileName(executablePath)} (non-fatal): {ex.Message}");
+        }
     }
 
     private static void EnsureWithin(string baseDir, string candidatePath, string archiveEntryName)

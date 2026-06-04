@@ -121,6 +121,13 @@ internal sealed class HostLifetime : IAsyncDisposable
         _httpClient.Dispose();
     }
 
+    /// <summary>
+    /// Test seam: resolve a service from the built DI container, or null before
+    /// <see cref="StartAsync"/> has run. Lets RAG-parity tests assert the Mac
+    /// sidecar wires the same services the Windows runner does (e.g. IOcrService).
+    /// </summary>
+    internal T? GetService<T>() where T : class => _services?.GetService(typeof(T)) as T;
+
     private void BuildContainer(PortableConfig config)
     {
         var collection = new ServiceCollection();
@@ -136,10 +143,18 @@ internal sealed class HostLifetime : IAsyncDisposable
         // bounded per-request timeout so a wedged /api/embed fails fast. The shared _httpClient
         // stays on chat, which needs the long/streaming timeout.
         collection.AddSingleton(sp => new EmbeddingClient(new HttpClient { Timeout = TimeSpan.FromSeconds(60) }));
+        // Parity with the Windows runner (runner/App.xaml.cs): OCR over PDF images at ingest,
+        // opt-in via PortableConfig.OcrEnabled. Resolves the Tesseract binary staged at
+        // mac/tools/tesseract on the SSD; IsAvailable is false until it's staged, so ingest works
+        // unchanged when OCR isn't set up. Without this the Mac sidecar built DocumentIngestor with
+        // no IOcrService, so a staged bundle would never run (the MAC OCR parity bug).
+        collection.AddSingleton<IOcrService>(sp =>
+            TesseractOcrService.FromSsdRoot(_ssdRoot, sp.GetService<SsdLogger>()));
         collection.AddSingleton(sp => new DocumentIngestor(
             sp.GetRequiredService<DocumentLibraryManager>(),
             sp.GetRequiredService<EmbeddingClient>(),
-            sp.GetService<SsdLogger>()));
+            sp.GetService<SsdLogger>(),
+            sp.GetRequiredService<IOcrService>()));
 
         // The host never saves config — Swift owns saves. NoOpConfigStore
         // satisfies DocumentOperationsService's IConfigStore dependency while

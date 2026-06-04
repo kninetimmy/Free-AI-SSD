@@ -153,6 +153,40 @@ public sealed class MacPrepHostSmokeTests
     }
 
     [Fact]
+    public async Task HostRunner_StageTesseractInTestMode_EmitsOkAndContinues()
+    {
+        // Task #91: the stage-tesseract command (Mac OCR staging) must be wired
+        // into the dispatch loop and short-circuit cleanly in test-mode — same
+        // shape as stage-piper — so the Swift PrepApp's OCR opt-in has a sidecar
+        // command to call and a published host smoke can exercise it offline.
+        using var workdir = new TempDir("freeai-mac91-stage-tesseract-");
+        Directory.CreateDirectory(Path.Combine(workdir.Path, "logs"));
+        Directory.CreateDirectory(Path.Combine(workdir.Path, "config"));
+
+        var handshake = JsonSerializer.Serialize(new { ssdRoot = workdir.Path });
+        var inputBuilder = new System.Text.StringBuilder();
+        inputBuilder.AppendLine(handshake);
+        inputBuilder.AppendLine("stage-tesseract");
+        inputBuilder.AppendLine("readiness");
+        inputBuilder.AppendLine("shutdown");
+
+        using var stdin = new StringReader(inputBuilder.ToString());
+        using var stdout = new StringWriter();
+        using var stderr = new StringWriter();
+
+        var exitCode = await FreeAiSsd.MacPrepHost.HostRunner.RunAsync(
+            stdin, stdout, stderr, new[] { "--test-mode" });
+
+        Assert.Equal(0, exitCode);
+        var output = stdout.ToString();
+        Assert.Contains("result: stage-tesseract", output);
+        Assert.Contains("\"ok\":true", output);
+        Assert.Contains("\"testMode\":true", output);
+        // Loop continues to the follow-up command.
+        Assert.Contains("result: readiness", output);
+    }
+
+    [Fact]
     public async Task HostRunner_PullModelInTestMode_EmitsProgressSeedThenResult()
     {
         // MAC31: even in test-mode (which short-circuits the real pull),

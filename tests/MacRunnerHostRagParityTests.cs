@@ -178,6 +178,35 @@ public sealed class MacRunnerHostRagParityTests : IDisposable
         }
     };
 
+    [Fact]
+    public async Task Container_WiresOcrServiceIntoDocumentIngestor()
+    {
+        // MAC OCR parity: the Mac sidecar previously built DocumentIngestor with no IOcrService,
+        // so a staged Tesseract bundle would never run at ingest. Assert the container now
+        // registers an IOcrService AND that the resolved DocumentIngestor actually holds it
+        // (mirrors the Windows runner wiring in runner/App.xaml.cs).
+        using var ollama = FakeOllamaServer.Start(keyword: "noop");
+        var (ssdRoot, manifest) = await SeedLibraryAsync(
+            ollama.Host, fileName: "ocr-parity.txt", text: "any text is fine for wiring assertions.");
+
+        var apiPort = GetFreePort();
+        await using var host = await StartMacHostAsync(ssdRoot, ollama.Host, CreateConfig(manifest.Id, apiPort));
+
+        var ocr = host.GetService<IOcrService>();
+        Assert.NotNull(ocr);
+        Assert.IsType<TesseractOcrService>(ocr);
+
+        var ingestor = host.GetService<DocumentIngestor>();
+        Assert.NotNull(ingestor);
+
+        // The ingestor must have been constructed WITH the same IOcrService instance — proving the
+        // parity bug (ctor called without an OCR service) is fixed, not just that the service exists.
+        var ocrField = typeof(DocumentIngestor)
+            .GetField("_ocrService", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        Assert.NotNull(ocrField);
+        Assert.Same(ocr, ocrField!.GetValue(ingestor));
+    }
+
     private static async Task<HostLifetime> StartMacHostAsync(
         string ssdRoot,
         string ollamaHost,

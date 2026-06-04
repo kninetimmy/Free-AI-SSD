@@ -62,6 +62,11 @@ struct InitialPortableConfigPayload {
     /// the AES-256-GCM seal when encryption is on; plaintext otherwise.
     var huggingFaceToken: String? = nil
 
+    /// Opt-in PDF-image OCR at ingest. Maps to PortableConfig.OcrEnabled
+    /// (default false in C#). Emitted only when true so the JSON stays minimal
+    /// and an un-opted-in drive takes the C# default on deserialization.
+    var ocrEnabled: Bool = false
+
     /// Render as the `[String: Any]` dictionary SsdEncryption expects.
     /// Keys must stay camelCase — PortableConfig.SaveAsync uses
     /// JsonNamingPolicy.CamelCase. PortableConfig deserialization is
@@ -82,6 +87,10 @@ struct InitialPortableConfigPayload {
         // defaults to null on deserialization.
         if let token = huggingFaceToken, !token.isEmpty {
             dict["huggingFaceToken"] = token
+        }
+        // Emit ocrEnabled only when opted in; absence ⇒ C# PortableConfig default (false).
+        if ocrEnabled {
+            dict["ocrEnabled"] = true
         }
         return dict
     }
