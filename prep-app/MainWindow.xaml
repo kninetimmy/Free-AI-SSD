@@ -691,6 +691,28 @@
                                 </StackPanel>
                             </Expander>
 
+                            <!-- Tesseract OCR (optional, ~60 MB). Off by default
+                                 — only helps PDFs with text baked into images
+                                 (e.g. cockpit screenshots in DCS guides). -->
+                            <Expander Header="PDF image OCR (optional, ~60 MB)"
+                                      Style="{StaticResource NeumorphicExpander}"
+                                      IsExpanded="False"
+                                      Margin="0,0,0,10"
+                                      ToolTip="Download and stage the Tesseract OCR engine so the Runner can recover text baked into PDF images. Optional — text-layer PDFs work without it.">
+                                <StackPanel Margin="8">
+                                    <CheckBox Foreground="{StaticResource TextSecondaryBrush}"
+                                              Content="Install Tesseract OCR engine for PDF image text (~60 MB)"
+                                              IsChecked="{Binding InstallTesseractOcr, Mode=TwoWay}"
+                                              IsEnabled="{Binding CanMutateDrive}"
+                                              ToolTip="Downloads the curated portable Tesseract 5.4.0 bundle (engine + English language data), SHA-256 verified against a pinned hash."/>
+                                    <TextBlock Margin="22,4,0,0"
+                                               FontSize="11"
+                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                               TextWrapping="Wrap"
+                                               Text="Requires internet at finalize. Lets the Runner extract text from images inside PDFs (e.g. labels on cockpit screenshots). You still turn OCR on per-document in the Runner; this only makes it available."/>
+                                </StackPanel>
+                            </Expander>
+
                             <!-- VR companion folded into a collapsed disclosure
                                  (split-PC setups only). -->
                             <Expander Header="VR companion (split-PC, optional)"

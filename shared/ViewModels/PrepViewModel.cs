@@ -16,6 +16,7 @@ public class PrepViewModel : BaseViewModel
     private readonly IOllamaPackageService _ollamaPackageService;
     private readonly IPrereqService _prereqService;
     private readonly IPiperStagingService? _piperStagingService;
+    private readonly ITesseractStagingService? _tesseractStagingService;
     private readonly IArtifactStagingService _artifactStagingService;
     private readonly IReadinessService _readinessService;
     private readonly IEncryptionService _encryptionService;
@@ -109,6 +110,7 @@ public class PrepViewModel : BaseViewModel
     private int? _gpuVramGb;
     private bool _installVrCompanion;
     private bool _installPiper;
+    private bool _installTesseractOcr;
     private string _companionHostAddress = string.Empty;
     private int _companionHostPort = 41555;
     private UserProfile? _selectedProfile;
@@ -217,13 +219,15 @@ public class PrepViewModel : BaseViewModel
         IDialogService dialogService,
         ILogService logService,
         IElevationService elevationService,
-        IPiperStagingService? piperStagingService = null)
+        IPiperStagingService? piperStagingService = null,
+        ITesseractStagingService? tesseractStagingService = null)
     {
         _driveService = driveService;
         _modelService = modelService;
         _ollamaPackageService = ollamaPackageService;
         _prereqService = prereqService;
         _piperStagingService = piperStagingService;
+        _tesseractStagingService = tesseractStagingService;
         _artifactStagingService = artifactStagingService;
         _readinessService = readinessService;
         _encryptionService = encryptionService;
@@ -633,6 +637,24 @@ public class PrepViewModel : BaseViewModel
         set
         {
             if (SetProperty(ref _installPiper, value))
+                OnPreferenceStateChanged?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Opt-in to staging the Tesseract OCR engine during finalize. Off by
+    /// default — the curated bundle adds ~60 MB to the SSD payload and OCR
+    /// only helps PDFs with text baked into images (e.g. cockpit screenshots).
+    /// When false, the Runner's OCR toggle stays disabled because the binary
+    /// won't be on disk. The user still has to turn OCR on per-ingest in the
+    /// Runner; staging only makes it available.
+    /// </summary>
+    public bool InstallTesseractOcr
+    {
+        get => _installTesseractOcr;
+        set
+        {
+            if (SetProperty(ref _installTesseractOcr, value))
                 OnPreferenceStateChanged?.Invoke();
         }
     }
@@ -2805,6 +2827,24 @@ public class PrepViewModel : BaseViewModel
                         // continue; Runner will fall back to system TTS until the
                         // user retries via "Manage models" or re-runs prep online.
                         AppendLog($"Piper staging failed — continuing without it. {ex.Message}");
+                    }
+                }
+
+                if (InstallTesseractOcr && _tesseractStagingService is not null)
+                {
+                    StatusText = "Staging Tesseract OCR...";
+                    try
+                    {
+                        await _tesseractStagingService.StageTesseractAsync(
+                            root, TesseractPlatform.WindowsAmd64, AppendLog, CancellationToken.None);
+                    }
+                    catch (Exception ex)
+                    {
+                        // Optional payload: a Tesseract download failure (offline,
+                        // release outage) must not block the rest of finalize. Log
+                        // and continue; the Runner's OCR toggle stays disabled until
+                        // the user re-runs prep online with this option checked.
+                        AppendLog($"Tesseract OCR staging failed — continuing without it. {ex.Message}");
                     }
                 }
 
