@@ -385,36 +385,23 @@ struct PrepAppTestsMain {
                        "empty key should not surface")
         }
 
-        // MARK: #91 / task #92 — optional staging commands (Piper / OCR opt-in)
+        // MARK: #91 / task #92 — optional staging commands (OCR opt-in)
         //
-        // Pins the pure mapping from the staging opt-in toggles to the ordered
-        // list of `stage-*` sidecar arms PrepViewModel.runStaging() emits after
-        // the core arms. The Tesseract OCR fast-follow (#342) added the
-        // stage-tesseract arm; these guard that installOcr emits it, that the
-        // order stays Piper-before-Tesseract, and that neither fires when off.
-        // Same pure-helper approach as the #338 access-mode tests above.
+        // Pins the pure mapping from the staging opt-in toggle to the list of
+        // `stage-*` sidecar arms PrepViewModel.runStaging() emits after the core
+        // arms. The Tesseract OCR fast-follow (#342) added the stage-tesseract
+        // arm; these guard that installOcr emits it and nothing fires when off.
+        // (Mac Piper staging was removed — the Mac runner never consumed it; see
+        // PrepFlowStep.) Same pure-helper approach as the #338 access-mode tests.
 
-        runner.test("#91: no optional staging commands when both toggles off") {
-            try expect(optionalStagingCommands(installPiper: false, installOcr: false) == [],
+        runner.test("#91: no optional staging commands when OCR off") {
+            try expect(optionalStagingCommands(installOcr: false) == [],
                        "expected no commands when nothing opted in")
         }
 
-        runner.test("#91: installOcr alone emits stage-tesseract") {
-            try expect(optionalStagingCommands(installPiper: false, installOcr: true) == ["stage-tesseract"],
-                       "got \(optionalStagingCommands(installPiper: false, installOcr: true))")
-        }
-
-        runner.test("#91: installPiper alone emits stage-piper") {
-            try expect(optionalStagingCommands(installPiper: true, installOcr: false) == ["stage-piper"],
-                       "got \(optionalStagingCommands(installPiper: true, installOcr: false))")
-        }
-
-        runner.test("#91: both toggles emit stage-piper before stage-tesseract") {
-            try expect(
-                optionalStagingCommands(installPiper: true, installOcr: true)
-                    == ["stage-piper", "stage-tesseract"],
-                "order must be piper before tesseract, got "
-                    + "\(optionalStagingCommands(installPiper: true, installOcr: true))")
+        runner.test("#91: installOcr emits stage-tesseract") {
+            try expect(optionalStagingCommands(installOcr: true) == ["stage-tesseract"],
+                       "got \(optionalStagingCommands(installOcr: true))")
         }
 
         // MARK: MAC34 — InitialPortableConfigPayload generates a non-empty

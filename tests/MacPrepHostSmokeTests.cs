@@ -156,9 +156,9 @@ public sealed class MacPrepHostSmokeTests
     public async Task HostRunner_StageTesseractInTestMode_EmitsOkAndContinues()
     {
         // Task #91: the stage-tesseract command (Mac OCR staging) must be wired
-        // into the dispatch loop and short-circuit cleanly in test-mode — same
-        // shape as stage-piper — so the Swift PrepApp's OCR opt-in has a sidecar
-        // command to call and a published host smoke can exercise it offline.
+        // into the dispatch loop and short-circuit cleanly in test-mode — so the
+        // Swift PrepApp's OCR opt-in has a sidecar command to call and a
+        // published host smoke can exercise it offline.
         using var workdir = new TempDir("freeai-mac91-stage-tesseract-");
         Directory.CreateDirectory(Path.Combine(workdir.Path, "logs"));
         Directory.CreateDirectory(Path.Combine(workdir.Path, "config"));

@@ -36,7 +36,6 @@ internal sealed class HostLifetime : IAsyncDisposable
     private readonly IOllamaPackageService _ollamaPackage;
     private readonly IModelService _modelService;
     private readonly PrereqService _prereqService;
-    private readonly PiperStagingService _piperStaging = new();
     private readonly TesseractStagingService _tesseractStaging = new();
     private readonly ReadinessService _readinessService;
     private readonly ILiveModelCatalogService _liveCatalogService;
@@ -150,9 +149,6 @@ internal sealed class HostLifetime : IAsyncDisposable
                 break;
             case "stage-prereqs":
                 await StagePrereqsAsync(ct);
-                break;
-            case "stage-piper":
-                await StagePiperAsync(ct);
                 break;
             case "stage-tesseract":
                 await StageTesseractAsync(ct);
@@ -287,38 +283,9 @@ internal sealed class HostLifetime : IAsyncDisposable
     }
 
     /// <summary>
-    /// Stages Piper for the local Mac arch. Optional payload — failures are
-    /// caught and reported as <c>ok=false</c> rather than thrown, mirroring
-    /// the Windows PrepViewModel posture: a Piper download failure should not
-    /// block the rest of finalize. The Swift UI surfaces the failure to the
-    /// user and the Runner falls back to system TTS.
-    /// </summary>
-    private async Task StagePiperAsync(CancellationToken ct)
-    {
-        if (_testMode)
-        {
-            EmitLog("test-mode: skipping StagePiperAsync");
-            EmitResult("stage-piper", new { ok = true, testMode = true });
-            return;
-        }
-
-        try
-        {
-            var platform = PiperStagingService.DetectCurrentPlatform();
-            await _piperStaging.StagePiperAsync(_ssdRoot, platform, EmitLog, ct);
-            EmitResult("stage-piper", new { ok = true, platform = platform.ToString() });
-        }
-        catch (Exception ex)
-        {
-            EmitLog($"Piper staging failed: {ex.Message}");
-            EmitResult("stage-piper", new { ok = false, reason = "stage-exception", message = ex.Message });
-        }
-    }
-
-    /// <summary>
     /// Stages the Tesseract OCR bundle for the local Mac arch. Optional payload —
     /// failures are caught and reported as <c>ok=false</c> rather than thrown,
-    /// mirroring <see cref="StagePiperAsync"/> and the Windows PrepViewModel posture:
+    /// mirroring the Windows PrepViewModel posture:
     /// an OCR download failure should not block the rest of finalize. The Swift UI
     /// surfaces the failure; the Runner keeps OCR disabled-with-hint until the bundle
     /// is present.
