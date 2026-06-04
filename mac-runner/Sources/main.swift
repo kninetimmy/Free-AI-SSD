@@ -791,7 +791,15 @@ final class RunnerViewModel: ObservableObject {
     /// options as soon as a config loads. Defaults match Windows PortableConfig.
     private func hydrateVoiceConfig(_ config: [String: Any]) {
         ttsEnabled = (config["ttsEnabled"] as? Bool) ?? false
-        ttsVoiceIdentifier = (config["ttsVoiceName"] as? String) ?? ""
+        // A present key (incl. "" = an explicit "System default" pick) is the
+        // user's choice and is respected. Only when the key is absent — a fresh
+        // config — do we land on the best installed neural voice so TTS sounds
+        // good out of the box instead of the robotic compact default.
+        if let savedVoice = config["ttsVoiceName"] as? String {
+            ttsVoiceIdentifier = savedVoice
+        } else {
+            ttsVoiceIdentifier = MacTextToSpeech.bestDefaultVoiceIdentifier() ?? ""
+        }
         ttsRate = Double((config["ttsRate"] as? NSNumber)?.intValue ?? 0)
         ttsVolume = Double((config["ttsVolume"] as? NSNumber)?.intValue ?? 100)
         autoSendVoiceInput = (config["autoSendVoiceInput"] as? Bool) ?? true
@@ -2321,6 +2329,11 @@ struct ContentView: View {
     @StateObject var vm = RunnerViewModel()
 
     var body: some View {
+        // The page outgrew a 640pt window once the Voice + Documents sections
+        // expand, so the whole thing scrolls. maxWidth: .infinity (below) keeps
+        // the editors full-width — a ScrollView otherwise collapses its content
+        // to intrinsic width and the layout would hug the left edge.
+        ScrollView {
         VStack(alignment: .leading, spacing: 10) {
             Text("Free AI SSD macOS Runner").font(.title2)
             Text(vm.status)
@@ -2458,6 +2471,8 @@ struct ContentView: View {
             DocumentsSection(vm: vm)
         }
         .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        }
         .frame(minWidth: 720, minHeight: 640)
         .sheet(isPresented: $vm.unlockDialogPresented) { UnlockSheet(vm: vm) }
         .sheet(isPresented: $vm.createLibraryDialogPresented) { CreateLibrarySheet(vm: vm) }
@@ -2558,6 +2573,13 @@ struct ModelParametersSection: View {
 
 struct VoiceSection: View {
     @ObservedObject var vm: RunnerViewModel
+    @Environment(\.openURL) private var openURL
+
+    /// Deep-link to the Spoken Content pane where Premium/Enhanced voices are
+    /// downloaded. Opens Accessibility settings on newer macOS; harmless if the
+    /// exact sub-pane has moved between releases.
+    private static let voiceDownloadSettingsURL =
+        URL(string: "x-apple.systempreferences:com.apple.preference.universalaccess?TextToSpeech")
 
     private var rateLabel: String {
         let r = Int(vm.ttsRate)
@@ -2591,6 +2613,22 @@ struct VoiceSection: View {
                     }
                     .pickerStyle(MenuPickerStyle())
                     .labelsHidden()
+                    Spacer()
+                }
+
+                // ⭐ marks Premium/Enhanced neural voices. If the picker is all
+                // "Default" compact voices it sounds robotic — point the user at
+                // the free downloads. (Apple reserves the actual Siri voice for
+                // the system, so a downloaded neural voice is the nicest we can
+                // wire into AVSpeechSynthesizer.)
+                HStack(spacing: 6) {
+                    Text("⭐ = neural voice. For the nicest sound, download a Premium voice in System Settings.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    if let url = Self.voiceDownloadSettingsURL {
+                        Button("Get voices…") { openURL(url) }
+                            .font(.caption)
+                    }
                     Spacer()
                 }
 
