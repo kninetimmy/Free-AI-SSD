@@ -268,9 +268,17 @@ final class RunnerViewModel: ObservableObject {
 
     init() {
         self.ssdRoot = inferSsdRoot()
-        if ssdRoot == nil { pickSsdRoot() }
         loadConfig()
         registerLifecycleHooks()
+        // Present the SSD picker only once init returns. Calling pickSsdRoot()
+        // synchronously here runs NSOpenPanel.runModal() inside SwiftUI's
+        // @StateObject initialization — i.e. mid view-graph update — and the
+        // panel's nested run loop re-enters the render, which aborts in
+        // AttributeGraph on macOS 26. Hopping to the next main-loop turn lets
+        // the first render finish before the modal opens.
+        if ssdRoot == nil {
+            DispatchQueue.main.async { [weak self] in self?.pickSsdRoot() }
+        }
     }
 
     deinit {

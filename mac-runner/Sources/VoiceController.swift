@@ -158,6 +158,8 @@ enum SpeechToTextError: LocalizedError {
     case onDeviceUnsupported
     case engineFailure(String)
     case noSpeechDetected
+    case micSilent
+    case recognitionFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -171,6 +173,10 @@ enum SpeechToTextError: LocalizedError {
             return "Voice capture failed: \(m)"
         case .noSpeechDetected:
             return "Didn't catch any speech."
+        case .micSilent:
+            return "The microphone is on but no sound is reaching the app. macOS may be feeding it silence — quit and reopen Free AI SSD, and re-grant Microphone access in System Settings → Privacy & Security → Microphone."
+        case .recognitionFailed(let m):
+            return "Speech recognition failed: \(m)"
         }
     }
 }
@@ -187,6 +193,14 @@ final class MacSpeechToText {
     private var task: SFSpeechRecognitionTask?
     private var latestTranscript: String = ""
     private var finished = false
+
+    // Diagnostics so an empty transcript can be attributed to the right cause:
+    // a silent mic (macOS feeding the unsigned app zeros) vs. a recognizer that
+    // errored vs. genuine silence from the user.
+    private var peakLevel: Float = 0          // loudest sample seen this session (0…1)
+    private var recognitionError: Error?       // last error from the recognition task
+    // Peaks below this are indistinguishable from a dead/zeroed input stream.
+    private let silenceFloor: Float = 0.001
 
     private(set) var isRecording = false
 
@@ -223,6 +237,8 @@ final class MacSpeechToText {
 
         latestTranscript = ""
         finished = false
+        peakLevel = 0
+        recognitionError = nil
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
@@ -233,7 +249,9 @@ final class MacSpeechToText {
         let input = audioEngine.inputNode
         let format = input.outputFormat(forBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-            self?.request?.append(buffer)
+            guard let self else { return }
+            self.request?.append(buffer)
+            self.trackPeak(buffer)
         }
 
         audioEngine.prepare()
@@ -246,14 +264,36 @@ final class MacSpeechToText {
         }
 
         isRecording = true
-        task = recognizer.recognitionTask(with: request) { [weak self] result, _ in
+        task = recognizer.recognitionTask(with: request) { [weak self] result, error in
             guard let self else { return }
+            if let error {
+                // Don't lose the real reason — stop() uses it to explain an
+                // empty transcript instead of the generic "no speech" message.
+                self.recognitionError = error
+            }
             if let result {
                 self.latestTranscript = result.bestTranscription.formattedString
                 let snapshot = self.latestTranscript
                 DispatchQueue.main.async { onPartial(snapshot) }
             }
         }
+    }
+
+    /// Records the loudest sample in a captured buffer so we can later tell a
+    /// silent input stream apart from a recognizer that simply found no words.
+    private func trackPeak(_ buffer: AVAudioPCMBuffer) {
+        guard let channels = buffer.floatChannelData else { return }
+        let frames = Int(buffer.frameLength)
+        guard frames > 0 else { return }
+        var localPeak: Float = 0
+        for ch in 0..<Int(buffer.format.channelCount) {
+            let samples = channels[ch]
+            for i in 0..<frames {
+                let mag = abs(samples[i])
+                if mag > localPeak { localPeak = mag }
+            }
+        }
+        if localPeak > peakLevel { peakLevel = localPeak }
     }
 
     /// Stop capturing and return the final transcript on the main queue.
@@ -268,20 +308,29 @@ final class MacSpeechToText {
         audioEngine.inputNode.removeTap(onBus: 0)
         request?.endAudio()
 
-        // Give the recognizer a brief moment to emit its final result, then take
-        // the best transcript we have. (On-device finalization is fast; we don't
-        // block the UI waiting for an isFinal callback that may lag.)
-        let deadline = DispatchTime.now() + 0.4
+        // Give the recognizer a moment to emit its final result, then take the
+        // best transcript we have. On-device finalization can lag the last audio
+        // buffer by a few hundred ms, so wait long enough to avoid clipping a
+        // result that is about to arrive.
+        let deadline = DispatchTime.now() + 0.8
         DispatchQueue.main.asyncAfter(deadline: deadline) { [weak self] in
             guard let self else { return }
             self.task?.finish()
             self.task = nil
             self.request = nil
             let text = self.latestTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-            if text.isEmpty {
-                completion(.failure(SpeechToTextError.noSpeechDetected))
-            } else {
+            if !text.isEmpty {
                 completion(.success(text))
+                return
+            }
+            // Empty transcript — attribute it to the real cause so the user gets
+            // an actionable message instead of a blanket "no speech."
+            if self.peakLevel < self.silenceFloor {
+                completion(.failure(SpeechToTextError.micSilent))
+            } else if let err = self.recognitionError {
+                completion(.failure(SpeechToTextError.recognitionFailed(err.localizedDescription)))
+            } else {
+                completion(.failure(SpeechToTextError.noSpeechDetected))
             }
         }
     }
@@ -297,5 +346,7 @@ final class MacSpeechToText {
         task = nil
         request = nil
         latestTranscript = ""
+        peakLevel = 0
+        recognitionError = nil
     }
 }
