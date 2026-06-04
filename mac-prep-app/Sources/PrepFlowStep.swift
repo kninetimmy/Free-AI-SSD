@@ -131,3 +131,26 @@ func accessEncryptionToggleEnabled(for mode: WebUiAccessMode) -> Bool {
 func accessShowFinalizedApiKey(mode: WebUiAccessMode, key: String?) -> Bool {
     mode == .lan && !(key ?? "").isEmpty
 }
+
+// MARK: - Optional staging commands (#91 / task #92)
+//
+// The staging step always runs the core arms (stage-runner / stage-ollama /
+// stage-prereqs); the two opt-in bundles — Piper neural TTS and the Tesseract
+// OCR fast-follow (#342) — each emit one extra `stage-*` arm only when their
+// toggle is set. PrepViewModel.runStaging() iterates the result after the core
+// arms; each arm is fail-soft (the sidecar catches its own exceptions and
+// returns ok=false, so a bundle download failure lands in the log without
+// blocking finalize). The mapping lives here — not on the @MainActor
+// PrepViewModel — so the parity-pin tests can exercise it without constructing
+// the view-model, exactly like the #338 access-mode helpers above.
+
+/// Ordered list of the optional `stage-*` sidecar commands the staging step
+/// emits for the given opt-in toggles. Empty when nothing is opted into. Order
+/// is load-bearing: Piper before Tesseract, mirroring the documented
+/// "stage-tesseract after stage-piper" sequence.
+func optionalStagingCommands(installPiper: Bool, installOcr: Bool) -> [String] {
+    var commands: [String] = []
+    if installPiper { commands.append("stage-piper") }
+    if installOcr { commands.append("stage-tesseract") }
+    return commands
+}

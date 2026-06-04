@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Task #92 — cross-platform OCR integration test project.
+
+    The main test project (tests/FreeAiSsd.Tests.csproj) <Compile Include>s WPF
+    runner/ + prep-app/ sources (net8.0-windows), so it cannot build on macOS —
+    which is why the mac CI jobs deliberately skip the xUnit suite. This slim
+    project links ONLY the Tesseract OCR test surface plus shared, so it builds
+    cross-platform and lets the real-Tesseract integration test
+    (TesseractOcrServiceTests) actually run on the macOS CI runner after a
+    `brew install tesseract`. The test files live physically in tests/ (where
+    the Windows lane already runs them); here they are linked, not duplicated,
+    so there is one source of truth. PdfPig flows in transitively through the
+    shared reference, exactly as it does for the main test project.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\shared\FreeAiSsd.Shared.csproj" />
+  </ItemGroup>
+
+  <!-- Mirror tests/GlobalUsings.cs so the linked test file resolves
+       [Fact]/Assert without an explicit using. -->
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\tests\TesseractOcrServiceTests.cs" Link="TesseractOcrServiceTests.cs" />
+    <Compile Include="..\tests\TesseractIntegrationFactAttribute.cs" Link="TesseractIntegrationFactAttribute.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- OCR integration fixture: the known-text PNG the real-Tesseract test reads. -->
+    <None Include="..\tests\Fixtures\Ocr\ocr-sample.png" Link="Fixtures\Ocr\ocr-sample.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

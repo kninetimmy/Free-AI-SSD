@@ -385,6 +385,38 @@ struct PrepAppTestsMain {
                        "empty key should not surface")
         }
 
+        // MARK: #91 / task #92 — optional staging commands (Piper / OCR opt-in)
+        //
+        // Pins the pure mapping from the staging opt-in toggles to the ordered
+        // list of `stage-*` sidecar arms PrepViewModel.runStaging() emits after
+        // the core arms. The Tesseract OCR fast-follow (#342) added the
+        // stage-tesseract arm; these guard that installOcr emits it, that the
+        // order stays Piper-before-Tesseract, and that neither fires when off.
+        // Same pure-helper approach as the #338 access-mode tests above.
+
+        runner.test("#91: no optional staging commands when both toggles off") {
+            try expect(optionalStagingCommands(installPiper: false, installOcr: false) == [],
+                       "expected no commands when nothing opted in")
+        }
+
+        runner.test("#91: installOcr alone emits stage-tesseract") {
+            try expect(optionalStagingCommands(installPiper: false, installOcr: true) == ["stage-tesseract"],
+                       "got \(optionalStagingCommands(installPiper: false, installOcr: true))")
+        }
+
+        runner.test("#91: installPiper alone emits stage-piper") {
+            try expect(optionalStagingCommands(installPiper: true, installOcr: false) == ["stage-piper"],
+                       "got \(optionalStagingCommands(installPiper: true, installOcr: false))")
+        }
+
+        runner.test("#91: both toggles emit stage-piper before stage-tesseract") {
+            try expect(
+                optionalStagingCommands(installPiper: true, installOcr: true)
+                    == ["stage-piper", "stage-tesseract"],
+                "order must be piper before tesseract, got "
+                    + "\(optionalStagingCommands(installPiper: true, installOcr: true))")
+        }
+
         // MARK: MAC34 — InitialPortableConfigPayload generates a non-empty
         // 64-hex network API key by default. Pre-MAC34 this defaulted to
         // `""` which fail-closed every chat request through the LAN API
