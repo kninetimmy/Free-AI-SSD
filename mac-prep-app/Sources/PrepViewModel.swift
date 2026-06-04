@@ -927,19 +927,14 @@ final class PrepViewModel: ObservableObject {
             _ = try await hostController.send("stage-ollama")
             _ = try await hostController.send("stage-prereqs")
 
-            // Optional Piper TTS staging. Sidecar handles its own failure
-            // path (catches exceptions internally and returns ok=false), so
-            // we don't need a separate do/catch here — the result lands in
-            // the log either way and finalize is not blocked.
-            if installPiper {
-                _ = try? await hostController.send("stage-piper")
-            }
-
-            // Optional Tesseract OCR staging. Same fail-soft posture as Piper:
+            // Optional bundles (Piper TTS, Tesseract OCR). Each is fail-soft:
             // the sidecar catches its own exceptions and returns ok=false, so a
-            // bundle download failure lands in the log without blocking finalize.
-            if installOcr {
-                _ = try? await hostController.send("stage-tesseract")
+            // bundle download failure lands in the log without blocking
+            // finalize — hence `try?` and no per-arm do/catch. The ordered
+            // command list is a pure, parity-pinned helper in PrepFlowStep
+            // (Piper before Tesseract).
+            for command in optionalStagingCommands(installPiper: installPiper, installOcr: installOcr) {
+                _ = try? await hostController.send(command)
             }
 
             appendLog("Staging complete.")

@@ -444,6 +444,17 @@ jobs:
         run: |
           dotnet build prep-core/FreeAiSsd.PrepCore.csproj -c Release --verbosity minimal
           dotnet build mac-prep-host/FreeAiSsd.MacPrepHost.csproj -c Release --verbosity minimal
+      - name: Run OCR integration test on the real Tesseract binary (task #92)
+        # The full tests/ project can't build on macOS (it Compile-Includes WPF
+        # runner/ + prep-app/ sources), so we run a slim cross-platform project
+        # (tests-ocr/) that links only the Tesseract test surface + shared. With
+        # a Homebrew tesseract on PATH the [TesseractIntegrationFact] tests
+        # actually exercise the shell-out on the target platform instead of
+        # auto-skipping — the Windows lane already runs them, this adds macOS.
+        run: |
+          brew install tesseract
+          tesseract --version | head -1
+          dotnet test tests-ocr/FreeAiSsd.Tests.Ocr.csproj -c Release --verbosity minimal
       - name: Run mac-prep-host smoke (spawn binary; handshake → readiness → shutdown)
         # MAC17: end-to-end smoke that spawns the published mac-prep-host
         # in --test-mode (so commands return synthetic OK results without
