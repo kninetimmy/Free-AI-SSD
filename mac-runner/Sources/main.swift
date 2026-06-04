@@ -141,6 +141,22 @@ final class RunnerViewModel: ObservableObject {
     @Published var activeLibrary: LibraryDetail? = nil
     @Published var libraryStatus: String = ""
     @Published var libraryBusy: Bool = false
+    /// Task #99: live ingest/rebuild progress. `libraryProgress` is the current
+    /// file's chunk-embed fraction (0...1) for a determinate bar, or nil for an
+    /// indeterminate spinner (busy but no chunk total yet — e.g. OCR running
+    /// before embedding). `libraryProgressDetail` is the "1,847 / 3,273 chunks
+    /// · ~2m" line. Both clear when the operation finishes.
+    @Published var libraryProgress: Double? = nil
+    @Published var libraryProgressDetail: String = ""
+    /// Wall-clock start of the current file's embed phase, used to estimate the
+    /// ETA. Reset per file; nil until the first progress frame arrives.
+    private var ingestFileStart: Date? = nil
+    /// Throttles progress paints to ~10/sec so a multi-thousand-chunk file
+    /// doesn't flood the main thread with SwiftUI invalidations.
+    private var lastProgressPaint: Date = .distantPast
+    /// Last file the progress bar was painting, so a sweep/rebuild that walks
+    /// many files restarts the ETA clock when it moves to the next one.
+    private var lastProgressFile: String = ""
     @Published var createLibraryDialogPresented: Bool = false
     @Published var createLibraryName: String = ""
     // D2: rename input sheet + delete confirmation, parity with the WPF runner's
@@ -211,6 +227,12 @@ final class RunnerViewModel: ObservableObject {
     /// completion to break the strong delegate-retention cycle.
     private var activeChatSession: URLSession?
 
+    /// Task #99: in-flight document ingest/sweep/rebuild streaming task and its
+    /// session, held so `lockSession` can tear them down before the unlock
+    /// material is zeroized and the sidecar is shut down.
+    private var activeIngestTask: URLSessionTask?
+    private var activeIngestSession: URLSession?
+
     init() {
         self.ssdRoot = inferSsdRoot()
         if ssdRoot == nil { pickSsdRoot() }
@@ -225,6 +247,8 @@ final class RunnerViewModel: ObservableObject {
         // half-released view-model.
         activeChatTask?.cancel()
         activeChatSession?.invalidateAndCancel()
+        activeIngestTask?.cancel()
+        activeIngestSession?.invalidateAndCancel()
         // MAC6: shut the sidecar before the unlock material is zeroized so the
         // host process never outlives an unlocked session.
         hostController.shutdown()
@@ -383,6 +407,14 @@ final class RunnerViewModel: ObservableObject {
         activeChatTask?.cancel()
         activeChatTask = nil
         isSending = false
+
+        // Task #99: a streaming ingest must not outlive the unlocked session
+        // either — drop it before the sidecar is shut down below.
+        activeIngestTask?.cancel()
+        activeIngestTask = nil
+        libraryBusy = false
+        libraryProgress = nil
+        libraryProgressDetail = ""
 
         // MAC6: tear the LAN API down BEFORE we zero the unlock material so
         // the sidecar can never serve requests using a config whose API key
@@ -914,6 +946,14 @@ final class RunnerViewModel: ObservableObject {
         guard !selectedModel.isEmpty else { return }
         guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
+        // Task #99: don't query a half-built index. While documents are
+        // indexing, retrieval returns few/zero chunks and the model answers
+        // ungrounded — which reads as a bug. Hold the send until ready.
+        guard !libraryBusy else {
+            status = "Documents are indexing — chat is paused until ready."
+            return
+        }
+
         guard let baseUrl = networkApiBaseUrl,
               let url = URL(string: "\(baseUrl)/api/chat/stream") else {
             // MAC34: post-auto-spawn this should be unreachable from the
@@ -1010,6 +1050,16 @@ final class RunnerViewModel: ObservableObject {
             }
         case "rag-warning":
             let message = (obj["message"] as? String) ?? "RAG retrieval failed."
+            DispatchQueue.main.async { [weak self] in
+                self?.ragWarning = message
+            }
+        case "indexing-warning":
+            // Task #99: the host emits this when a library ingest/rebuild is
+            // mid-flight, so retrieval may be incomplete. Surface it on the
+            // same orange notice surface as the RAG warning. (On this device a
+            // local ingest already pauses Send; this covers a second device
+            // querying the host over the LAN.)
+            let message = (obj["message"] as? String) ?? "Documents are still indexing — answers may be incomplete."
             DispatchQueue.main.async { [weak self] in
                 self?.ragWarning = message
             }
@@ -1309,6 +1359,10 @@ final class RunnerViewModel: ObservableObject {
         func finish() {
             DispatchQueue.main.async {
                 self.libraryBusy = false
+                self.libraryProgress = nil
+                self.libraryProgressDetail = ""
+                self.activeIngestSession = nil
+                self.activeIngestTask = nil
                 if let latestDetail { self.activeLibrary = latestDetail }
                 if let firstError {
                     self.libraryStatus = "Ingest failed: \(firstError)"
@@ -1333,6 +1387,8 @@ final class RunnerViewModel: ObservableObject {
             let fileURL = urls[index]
             DispatchQueue.main.async {
                 self.libraryStatus = "Uploading \(index + 1) of \(urls.count): \(fileURL.lastPathComponent)…"
+                self.libraryProgress = nil
+                self.libraryProgressDetail = ""
             }
 
             guard let fileData = try? Data(contentsOf: fileURL) else {
@@ -1345,6 +1401,7 @@ final class RunnerViewModel: ObservableObject {
             var req = URLRequest(url: url)
             req.httpMethod = "POST"
             if let key = self.apiKeyForLocalApiRequest() { req.addValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+            req.addValue("application/x-ndjson", forHTTPHeaderField: "Accept")
             let boundary = "Boundary-\(UUID().uuidString)"
             req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
@@ -1355,29 +1412,134 @@ final class RunnerViewModel: ObservableObject {
             body.append(fileData)
             body.append("\r\n".data(using: .utf8)!)
             body.append("--\(boundary)--\r\n".data(using: .utf8)!)
-            req.httpBody = body
 
-            URLSession.shared.dataTask(with: req) { [weak self] data, urlResponse, error in
-                guard let self else { return }
-                if let http = urlResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                    let msg = RunnerChatErrorMessage.decode(statusCode: http.statusCode, body: data)
-                    if firstError == nil { firstError = msg }
-                    self.log("[library] upload '\(fileURL.lastPathComponent)' failed (HTTP \(http.statusCode)): \(msg)")
+            // Task #99: stream the NDJSON response so per-chunk progress paints a
+            // live bar instead of the old buffer-until-done flood. macOS 11
+            // rules out URLSession.bytes(for:) (12+); the delegate chunk
+            // callback is the equivalent, mirroring the chat-stream path.
+            self.ingestFileStart = nil
+            let accumulator = IngestProgressAccumulator()
+            let delegate = NdjsonStreamDelegate(
+                onLine: { [weak self] line in
+                    self?.foldIngestFrame(line, into: accumulator, fileIndex: index, fileCount: urls.count)
+                },
+                onComplete: { [weak self] statusCode, errorBody, transportError in
+                    guard let self else { return }
+                    let session = self.activeIngestSession
+                    self.activeIngestSession = nil
+                    self.activeIngestTask = nil
+                    defer { session?.finishTasksAndInvalidate() }
+
+                    let nsError = transportError as NSError?
+                    if nsError?.domain == NSURLErrorDomain && nsError?.code == NSURLErrorCancelled {
+                        // Cancelled by Lock/Stop — UI state is already reset there.
+                        finish()
+                        return
+                    }
+                    if statusCode == 0 {
+                        let msg = transportError?.localizedDescription ?? "upload failed"
+                        if firstError == nil { firstError = msg }
+                        self.log("[library] upload '\(fileURL.lastPathComponent)' failed: \(msg)")
+                        uploadNext(index + 1)
+                        return
+                    }
+                    if !(200..<300).contains(statusCode) {
+                        let msg = RunnerChatErrorMessage.decode(statusCode: statusCode, body: errorBody)
+                        if firstError == nil { firstError = msg }
+                        self.log("[library] upload '\(fileURL.lastPathComponent)' failed (HTTP \(statusCode)): \(msg)")
+                        uploadNext(index + 1)
+                        return
+                    }
+                    let outcome = accumulator.outcome
+                    totalRejected += outcome.rejectedCount
+                    totalSkipped += outcome.skippedFiles
+                    totalFailedChunks += outcome.failedChunks
+                    if let detail = outcome.completedDetail { latestDetail = detail }
+                    if let message = outcome.errorMessage, firstError == nil { firstError = message }
+                    outcome.rejectionLogs.forEach { self.log($0) }
                     uploadNext(index + 1)
-                    return
-                }
-                let outcome = self.parseIngestNdjson(data: data, error: error)
-                totalRejected += outcome.rejectedCount
-                totalSkipped += outcome.skippedFiles
-                totalFailedChunks += outcome.failedChunks
-                if let detail = outcome.completedDetail { latestDetail = detail }
-                if let message = outcome.errorMessage, firstError == nil { firstError = message }
-                outcome.rejectionLogs.forEach { self.log($0) }
-                uploadNext(index + 1)
-            }.resume()
+                })
+
+            // The server emits an `indexing-heartbeat` every ~15s during quiet
+            // stretches (OCR before embed), so the per-packet timer stays alive;
+            // 300s gives wide headroom over that interval.
+            let sessionConfig = URLSessionConfiguration.default
+            sessionConfig.timeoutIntervalForRequest = 300
+            let session = URLSession(configuration: sessionConfig, delegate: delegate, delegateQueue: nil)
+            let task = session.uploadTask(with: req, from: body)
+            self.activeIngestSession = session
+            self.activeIngestTask = task
+            task.resume()
         }
 
         uploadNext(0)
+    }
+
+    /// Reference accumulator for one file's streamed ingest frames. A class so
+    /// the escaping delegate closure can mutate it (escaping closures can't
+    /// capture an `inout` value). (Task #99)
+    private final class IngestProgressAccumulator {
+        var outcome = IngestFileOutcome()
+    }
+
+    /// Folds one streamed ingest NDJSON line into `accumulator` and, for
+    /// non-terminal `progress` frames, paints the live bar. Same frame handling
+    /// as the old buffered `parseIngestNdjson`, applied incrementally. (Task #99)
+    private func foldIngestFrame(_ line: Data, into accumulator: IngestProgressAccumulator, fileIndex: Int, fileCount: Int) {
+        guard let frame = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+              let type = frame["type"] as? String else {
+            return
+        }
+        switch type {
+        case "file-rejected":
+            accumulator.outcome.rejectedCount += 1
+            if let fileName = frame["fileName"] as? String,
+               let reason = frame["reason"] as? String {
+                accumulator.outcome.rejectionLogs.append("[library] rejected '\(fileName)': \(reason)")
+            }
+        case "progress":
+            if let s = frame["skippedFiles"] as? Int, s > 0 { accumulator.outcome.skippedFiles = s }
+            let currentFile = (frame["currentFile"] as? String) ?? ""
+            let isTerminalFrame = currentFile.isEmpty
+            if isTerminalFrame {
+                if let f = frame["failedChunks"] as? Int { accumulator.outcome.failedChunks = f }
+            } else {
+                let embedded = (frame["embeddedChunks"] as? Int) ?? 0
+                let total = (frame["totalChunks"] as? Int) ?? 0
+                paintIngestProgress(embedded: embedded, total: total, currentFile: currentFile,
+                                    fileIndex: fileIndex, fileCount: fileCount)
+            }
+        case "complete":
+            accumulator.outcome.completedDetail = self.decodeActiveLibrary(frame["library"] as? [String: Any])
+        case "error":
+            accumulator.outcome.errorMessage = frame["message"] as? String
+        case "indexing-heartbeat":
+            break // keepalive only — keeps the per-packet timer alive
+        default:
+            break
+        }
+    }
+
+    /// Pushes a throttled progress paint to the UI. Invoked from the delegate
+    /// queue; marshals @Published writes to the main thread. (Task #99)
+    private func paintIngestProgress(embedded: Int, total: Int, currentFile: String, fileIndex: Int, fileCount: Int) {
+        let now = Date()
+        if ingestFileStart == nil { ingestFileStart = now }
+        let isLast = total > 0 && embedded >= total
+        if !isLast && now.timeIntervalSince(lastProgressPaint) < 0.1 { return }
+        lastProgressPaint = now
+
+        let elapsed = now.timeIntervalSince(ingestFileStart ?? now)
+        let eta = IngestProgressFormatter.etaSeconds(embeddedChunks: embedded, totalChunks: total, elapsedSeconds: elapsed)
+        let state = IngestProgressFormatter.state(embeddedChunks: embedded, totalChunks: total, etaSeconds: eta)
+        let label = currentFile
+        DispatchQueue.main.async {
+            self.libraryProgress = state.fraction
+            self.libraryProgressDetail = state.detail
+            self.libraryStatus = fileCount > 1
+                ? "Indexing \(fileIndex + 1) of \(fileCount): \(label)"
+                : "Indexing \(label)"
+        }
     }
 
     func pickAndAddWatchedFolder() {
@@ -1502,19 +1664,120 @@ final class RunnerViewModel: ObservableObject {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         if let key = apiKeyForLocalApiRequest() { req.addValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        req.addValue("application/x-ndjson", forHTTPHeaderField: "Accept")
 
         libraryBusy = true
         libraryStatus = "\(verb)ing…"
-        URLSession.shared.dataTask(with: req) { [weak self] data, urlResponse, error in
-            guard let self else { return }
-            DispatchQueue.main.async { self.libraryBusy = false }
-            if let http = urlResponse as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-                let msg = RunnerChatErrorMessage.decode(statusCode: http.statusCode, body: data)
-                DispatchQueue.main.async { self.libraryStatus = msg }
-                return
+        libraryProgress = nil
+        libraryProgressDetail = ""
+
+        // Task #99: stream sweep/rebuild progress live, same as ingest — these
+        // re-embed the whole library and can run for minutes, so the old
+        // buffer-until-done path left the UI looking idle the entire time.
+        self.ingestFileStart = nil
+        self.lastProgressFile = ""
+        let accumulator = IngestProgressAccumulator()
+        let delegate = NdjsonStreamDelegate(
+            onLine: { [weak self] line in
+                self?.foldProgressedOpFrame(line, into: accumulator)
+            },
+            onComplete: { [weak self] statusCode, errorBody, transportError in
+                guard let self else { return }
+                let session = self.activeIngestSession
+                self.activeIngestSession = nil
+                self.activeIngestTask = nil
+                defer { session?.finishTasksAndInvalidate() }
+
+                let outcome = accumulator.outcome
+                DispatchQueue.main.async {
+                    self.libraryBusy = false
+                    self.libraryProgress = nil
+                    self.libraryProgressDetail = ""
+
+                    let nsError = transportError as NSError?
+                    if nsError?.domain == NSURLErrorDomain && nsError?.code == NSURLErrorCancelled {
+                        return // cancelled by Lock/Stop — state already reset there
+                    }
+                    if statusCode == 0 {
+                        self.libraryStatus = "\(verb) failed: \(transportError?.localizedDescription ?? "request failed")"
+                        return
+                    }
+                    if !(200..<300).contains(statusCode) {
+                        self.libraryStatus = RunnerChatErrorMessage.decode(statusCode: statusCode, body: errorBody)
+                        return
+                    }
+                    if let errorMessage = outcome.errorMessage {
+                        self.libraryStatus = "\(verb) failed: \(errorMessage)"
+                        return
+                    }
+                    outcome.rejectionLogs.forEach { self.log($0) }
+                    if let detail = outcome.completedDetail {
+                        self.activeLibrary = detail
+                        var status = "\(verb) complete: \(detail.fileCount) file(s)"
+                        if outcome.skippedFiles > 0 { status += ", \(outcome.skippedFiles) skipped" }
+                        if outcome.failedChunks > 0 { status += " (\(outcome.failedChunks) chunk(s) failed)" }
+                        if outcome.rejectedCount > 0 { status += " (\(outcome.rejectedCount) rejected — see logs)" }
+                        self.libraryStatus = status
+                    } else {
+                        self.libraryStatus = "\(verb) finished."
+                    }
+                    self.refreshLibraries()
+                }
+            })
+
+        let sessionConfig = URLSessionConfiguration.default
+        sessionConfig.timeoutIntervalForRequest = 300
+        let session = URLSession(configuration: sessionConfig, delegate: delegate, delegateQueue: nil)
+        let task = session.dataTask(with: req)
+        self.activeIngestSession = session
+        self.activeIngestTask = task
+        task.resume()
+    }
+
+    /// Folds one streamed sweep/rebuild NDJSON line into `accumulator` and
+    /// paints the live bar. Like `foldIngestFrame` but the file position comes
+    /// from the frame's totalFiles/completedFiles (one request walks the whole
+    /// library) rather than a per-file upload index. (Task #99)
+    private func foldProgressedOpFrame(_ line: Data, into accumulator: IngestProgressAccumulator) {
+        guard let frame = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+              let type = frame["type"] as? String else {
+            return
+        }
+        switch type {
+        case "file-rejected":
+            accumulator.outcome.rejectedCount += 1
+            if let fileName = frame["fileName"] as? String,
+               let reason = frame["reason"] as? String {
+                accumulator.outcome.rejectionLogs.append("[library] rejected '\(fileName)': \(reason)")
             }
-            self.handleNdjsonProgress(data: data, error: error, completionVerb: verb)
-        }.resume()
+        case "progress":
+            if let s = frame["skippedFiles"] as? Int, s > 0 { accumulator.outcome.skippedFiles = s }
+            let currentFile = (frame["currentFile"] as? String) ?? ""
+            let isTerminalFrame = currentFile.isEmpty
+            if isTerminalFrame {
+                if let f = frame["failedChunks"] as? Int { accumulator.outcome.failedChunks = f }
+            } else {
+                // Restart the ETA clock when the op advances to a new file.
+                if currentFile != lastProgressFile {
+                    lastProgressFile = currentFile
+                    ingestFileStart = nil
+                }
+                let embedded = (frame["embeddedChunks"] as? Int) ?? 0
+                let total = (frame["totalChunks"] as? Int) ?? 0
+                let completedFiles = (frame["completedFiles"] as? Int) ?? 0
+                let totalFiles = (frame["totalFiles"] as? Int) ?? 0
+                paintIngestProgress(embedded: embedded, total: total, currentFile: currentFile,
+                                    fileIndex: completedFiles, fileCount: totalFiles)
+            }
+        case "complete":
+            accumulator.outcome.completedDetail = self.decodeActiveLibrary(frame["library"] as? [String: Any])
+        case "error":
+            accumulator.outcome.errorMessage = frame["message"] as? String
+        case "indexing-heartbeat":
+            break
+        default:
+            break
+        }
     }
 
     func removeFile(storedRelativePath: String) {
@@ -1666,79 +1929,8 @@ final class RunnerViewModel: ObservableObject {
         }.resume()
     }
 
-    /// Buffered NDJSON parser for /api/library/{id}/files and sweep/rebuild
-    /// responses. URLSession's streaming-bytes API is macOS 12+, but the
-    /// MAC1 baseline pins macOS 11; buffer the full response and replay
-    /// frames once it completes. Live progress display is a follow-up; for
-    /// MAC8 the user sees a single "completed" message and the refreshed
-    /// library detail.
-    private func handleNdjsonProgress(data: Data?, error: Error?, completionVerb: String) {
-        if let error {
-            DispatchQueue.main.async { self.libraryStatus = "\(completionVerb) failed: \(error.localizedDescription)" }
-            return
-        }
-        guard let data, let text = String(data: data, encoding: .utf8) else {
-            DispatchQueue.main.async { self.libraryStatus = "\(completionVerb) failed: empty response" }
-            return
-        }
-
-        var rejectedCount = 0
-        var skippedFiles = 0
-        var failedChunks = 0
-        var completedDetail: LibraryDetail? = nil
-        var errorMessage: String? = nil
-
-        for line in text.split(separator: "\n") {
-            guard let lineData = line.data(using: .utf8),
-                  let frame = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-                  let type = frame["type"] as? String else {
-                continue
-            }
-            switch type {
-            case "file-rejected":
-                rejectedCount += 1
-                if let fileName = frame["fileName"] as? String,
-                   let reason = frame["reason"] as? String {
-                    log("[library] rejected '\(fileName)': \(reason)")
-                }
-            case "progress":
-                // skippedFiles and the batch failedChunks total are both carried on the
-                // terminal frame (empty currentFile). Read failedChunks there rather than
-                // summing per-file frames, which would double-count now that the ingestor
-                // emits an authoritative batch total. The response is buffered and replayed
-                // at once (see comment above), so by completion we've seen the terminal frame.
-                if let s = frame["skippedFiles"] as? Int, s > 0 { skippedFiles = s }
-                let isTerminalFrame = (frame["currentFile"] as? String)?.isEmpty ?? false
-                if isTerminalFrame, let f = frame["failedChunks"] as? Int { failedChunks = f }
-            case "complete":
-                completedDetail = self.decodeActiveLibrary(frame["library"] as? [String: Any])
-            case "error":
-                errorMessage = frame["message"] as? String
-            default:
-                break
-            }
-        }
-
-        DispatchQueue.main.async {
-            if let errorMessage {
-                self.libraryStatus = "\(completionVerb) failed: \(errorMessage)"
-                return
-            }
-            if let completedDetail {
-                self.activeLibrary = completedDetail
-                var status = "\(completionVerb) complete: \(completedDetail.fileCount) file(s)"
-                if skippedFiles > 0 { status += ", \(skippedFiles) skipped" }
-                if failedChunks > 0 { status += " (\(failedChunks) chunk(s) failed)" }
-                if rejectedCount > 0 { status += " (\(rejectedCount) rejected — see logs)" }
-                self.libraryStatus = status
-            } else {
-                self.libraryStatus = "\(completionVerb) finished."
-            }
-            self.refreshLibraries()
-        }
-    }
-
-    /// Parsed result of one ingest NDJSON response (one file per request).
+    /// Parsed result of one streamed ingest/sweep/rebuild response. Folded
+    /// incrementally by `foldIngestFrame` / `foldProgressedOpFrame` (task #99).
     private struct IngestFileOutcome {
         var rejectedCount = 0
         var skippedFiles = 0
@@ -1746,48 +1938,6 @@ final class RunnerViewModel: ObservableObject {
         var completedDetail: LibraryDetail? = nil
         var errorMessage: String? = nil
         var rejectionLogs: [String] = []
-    }
-
-    /// Parses the sidecar's `application/x-ndjson` ingest response into an
-    /// `IngestFileOutcome`. Mirrors the frame handling in
-    /// `handleNdjsonProgress` but returns the result instead of mutating UI,
-    /// so `ingestFiles` can aggregate across the per-file upload sequence.
-    private func parseIngestNdjson(data: Data?, error: Error?) -> IngestFileOutcome {
-        var outcome = IngestFileOutcome()
-        if let error {
-            outcome.errorMessage = error.localizedDescription
-            return outcome
-        }
-        guard let data, let text = String(data: data, encoding: .utf8) else {
-            outcome.errorMessage = "empty response"
-            return outcome
-        }
-        for line in text.split(separator: "\n") {
-            guard let lineData = line.data(using: .utf8),
-                  let frame = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-                  let type = frame["type"] as? String else {
-                continue
-            }
-            switch type {
-            case "file-rejected":
-                outcome.rejectedCount += 1
-                if let fileName = frame["fileName"] as? String,
-                   let reason = frame["reason"] as? String {
-                    outcome.rejectionLogs.append("[library] rejected '\(fileName)': \(reason)")
-                }
-            case "progress":
-                if let s = frame["skippedFiles"] as? Int, s > 0 { outcome.skippedFiles = s }
-                let isTerminalFrame = (frame["currentFile"] as? String)?.isEmpty ?? false
-                if isTerminalFrame, let f = frame["failedChunks"] as? Int { outcome.failedChunks = f }
-            case "complete":
-                outcome.completedDetail = self.decodeActiveLibrary(frame["library"] as? [String: Any])
-            case "error":
-                outcome.errorMessage = frame["message"] as? String
-            default:
-                break
-            }
-        }
-        return outcome
     }
 
     private func decodeActiveLibrary(_ obj: [String: Any]?) -> LibraryDetail? {
@@ -1935,6 +2085,55 @@ private final class ChatStreamDelegate: NSObject, URLSessionDataDelegate {
     }
 }
 
+/// Task #99: generic NDJSON streaming delegate for the document ingest /
+/// sweep / rebuild responses. Mirrors `ChatStreamDelegate` (the macOS 11
+/// baseline rules out `URLSession.bytes(for:)`), but forwards each frame and
+/// the completion through closures so the per-operation aggregation can live
+/// at the call site. 2xx bytes feed the NDJSON line splitter; non-2xx bytes
+/// are buffered so the caller can decode a structured error body.
+private final class NdjsonStreamDelegate: NSObject, URLSessionDataDelegate {
+    private var buffer = NdjsonFrameBuffer()
+    private var httpStatus = 0
+    private var errorBuffer = Data()
+    private let onLine: (Data) -> Void
+    private let onComplete: (_ statusCode: Int, _ errorBody: Data, _ transportError: Error?) -> Void
+
+    init(onLine: @escaping (Data) -> Void,
+         onComplete: @escaping (Int, Data, Error?) -> Void) {
+        self.onLine = onLine
+        self.onComplete = onComplete
+    }
+
+    func urlSession(_ session: URLSession,
+                    dataTask: URLSessionDataTask,
+                    didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        httpStatus = (response as? HTTPURLResponse)?.statusCode ?? 0
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession,
+                    dataTask: URLSessionDataTask,
+                    didReceive data: Data) {
+        if (200..<300).contains(httpStatus) {
+            for line in buffer.append(data) where !line.isEmpty {
+                onLine(line)
+            }
+        } else {
+            errorBuffer.append(data)
+        }
+    }
+
+    func urlSession(_ session: URLSession,
+                    task: URLSessionTask,
+                    didCompleteWithError error: Error?) {
+        if (200..<300).contains(httpStatus), let tail = buffer.flush(), !tail.isEmpty {
+            onLine(tail)
+        }
+        onComplete(httpStatus, errorBuffer, error)
+    }
+}
+
 struct ContentView: View {
     @StateObject var vm = RunnerViewModel()
 
@@ -1977,9 +2176,17 @@ struct ContentView: View {
                     Text("Send")
                 }
             }
+            // Task #99: also disabled while documents are indexing — querying a
+            // half-built index answers ungrounded.
             .disabled(vm.isSending
+                      || vm.libraryBusy
                       || vm.selectedModel.isEmpty
                       || vm.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            if vm.libraryBusy {
+                Text("Documents are indexing — chat is paused until ready.")
+                    .font(.callout)
+                    .foregroundColor(.orange)
+            }
             TextEditor(text: $vm.response).frame(height: 200)
             if let chatError = vm.chatError {
                 // M12: red banner for X13 ChatResult.Failure / transport
@@ -2170,6 +2377,28 @@ struct DocumentsSection: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
+            }
+
+            // Task #99: live indexing indicator. A determinate bar once the
+            // chunk total is known, otherwise an indeterminate bar (e.g. while
+            // OCR runs before embedding). Makes "the system is still working,
+            // not idle" unmistakable so the user doesn't query a half-built
+            // index and mistake the ungrounded answer for a bug.
+            if vm.libraryBusy {
+                VStack(alignment: .leading, spacing: 2) {
+                    if let fraction = vm.libraryProgress {
+                        ProgressView(value: fraction)
+                    } else {
+                        ProgressView()
+                            .progressViewStyle(.linear)
+                    }
+                    if !vm.libraryProgressDetail.isEmpty {
+                        Text(vm.libraryProgressDetail)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .padding(.vertical, 2)
             }
 
             // OCR opt-in (parity with the Windows runner's Reference Documents

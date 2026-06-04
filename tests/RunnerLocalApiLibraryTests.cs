@@ -167,6 +167,77 @@ public sealed class RunnerLocalApiLibraryTests : IDisposable
     }
 
     [Fact]
+    public async Task Health_AfterIngestCompletes_ReportsNotIndexing()
+    {
+        await using var fixture = await Fixture.StartAsync(_tempRoot);
+        var libraryId = await CreateLibraryAsync(fixture, "Idle");
+
+        using var content = new MultipartFormDataContent();
+        var filePart = new ByteArrayContent(Encoding.UTF8.GetBytes("Landing gear actuator notes."));
+        filePart.Headers.ContentType = MediaTypeHeaderValue.Parse("text/plain");
+        content.Add(filePart, name: "files", fileName: "notes.txt");
+
+        var response = await fixture.Http.PostAsync($"{fixture.BaseUrl}/api/library/{libraryId}/files", content);
+        Assert.True(response.IsSuccessStatusCode);
+        await ReadNdjsonAsync(response); // drain to completion
+
+        using var health = await fixture.Http.GetAsync($"{fixture.BaseUrl}/api/health");
+        using var doc = JsonDocument.Parse(await health.Content.ReadAsStringAsync());
+        Assert.False(doc.RootElement.GetProperty("indexingInProgress").GetBoolean());
+    }
+
+    [Fact]
+    public async Task IngestInFlight_HealthReportsIndexing_AndChatStreamWarns()
+    {
+        // Gate every embed so the ingest stays in flight while we probe the
+        // busy signal, then release to let it finish. (Task #99)
+        using var embedGate = new SemaphoreSlim(0);
+        await using var fixture = await Fixture.StartAsync(_tempRoot, embedGate: embedGate);
+        var libraryId = await CreateLibraryAsync(fixture, "InFlight");
+
+        using var content = new MultipartFormDataContent();
+        var filePart = new ByteArrayContent(Encoding.UTF8.GetBytes("Hydraulics power the landing gear actuator."));
+        filePart.Headers.ContentType = MediaTypeHeaderValue.Parse("text/plain");
+        content.Add(filePart, name: "files", fileName: "hydraulics.txt");
+
+        // Start the ingest without awaiting — it blocks on the gated embed.
+        var ingestTask = fixture.Http.PostAsync(
+            $"{fixture.BaseUrl}/api/library/{libraryId}/files",
+            content);
+
+        try
+        {
+            // Poll /health until the busy scope is observed (the Begin() scope
+            // wraps the operation, so this flips before the first embed).
+            var sawIndexing = false;
+            for (var i = 0; i < 100 && !sawIndexing; i++)
+            {
+                using var health = await fixture.Http.GetAsync($"{fixture.BaseUrl}/api/health");
+                using var doc = JsonDocument.Parse(await health.Content.ReadAsStringAsync());
+                sawIndexing = doc.RootElement.GetProperty("indexingInProgress").GetBoolean();
+                if (!sawIndexing) await Task.Delay(25);
+            }
+            Assert.True(sawIndexing, "Expected /health to report indexingInProgress while ingest was in flight.");
+
+            // A chat issued mid-index must carry the indexing-warning frame.
+            using var chatReq = new HttpRequestMessage(HttpMethod.Post, $"{fixture.BaseUrl}/api/chat/stream")
+            {
+                Content = JsonContent.Create(new { model = "phi3", prompt = "hello" })
+            };
+            using var chatResp = await fixture.Http.SendAsync(chatReq, HttpCompletionOption.ResponseHeadersRead);
+            var chatEvents = await ReadNdjsonAsync(chatResp);
+            Assert.Contains(chatEvents, e => TypeOrMissing(e) == "indexing-warning");
+        }
+        finally
+        {
+            // Release enough permits for every embed and let the ingest finish.
+            embedGate.Release(1000);
+            using var done = await ingestTask;
+            await ReadNdjsonAsync(done);
+        }
+    }
+
+    [Fact]
     public async Task UploadFiles_UnsupportedExtension_RejectedAndCompletes()
     {
         await using var fixture = await Fixture.StartAsync(_tempRoot);
@@ -598,12 +669,13 @@ public sealed class RunnerLocalApiLibraryTests : IDisposable
         public static async Task<Fixture> StartAsync(
             string tempRoot,
             int maxDocSizeMB = 50,
-            bool requireApiKey = false)
+            bool requireApiKey = false,
+            SemaphoreSlim? embedGate = null)
         {
             var ssdRoot = Path.Combine(tempRoot, "ssd-" + Guid.NewGuid().ToString("N"));
             SsdLayout.EnsureStructure(ssdRoot);
 
-            var ollama = FakeOllamaServer.Start();
+            var ollama = FakeOllamaServer.Start(embedGate);
 
             var libraryManager = new DocumentLibraryManager(ssdRoot);
             var ingestor = new DocumentIngestor(libraryManager, new EmbeddingClient(new HttpClient { Timeout = TimeSpan.FromSeconds(10) }), logger: null);
@@ -688,7 +760,7 @@ public sealed class RunnerLocalApiLibraryTests : IDisposable
         public int Port { get; }
         public string Host => $"127.0.0.1:{Port}";
 
-        public static FakeOllamaServer Start()
+        public static FakeOllamaServer Start(SemaphoreSlim? embedGate = null)
         {
             var port = GetFreePort();
             var builder = WebApplication.CreateSlimBuilder();
@@ -697,6 +769,12 @@ public sealed class RunnerLocalApiLibraryTests : IDisposable
 
             app.MapPost("/api/embed", async (HttpContext ctx) =>
             {
+                // Task #99: an optional gate lets a test hold each embed open so
+                // an ingest stays in flight while it asserts the busy signal.
+                if (embedGate is not null)
+                {
+                    await embedGate.WaitAsync(ctx.RequestAborted);
+                }
                 using var reader = new StreamReader(ctx.Request.Body, Encoding.UTF8);
                 var body = await reader.ReadToEndAsync();
                 using var doc = JsonDocument.Parse(body);

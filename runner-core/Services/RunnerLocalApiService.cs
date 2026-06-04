@@ -29,7 +29,16 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
     private readonly string? _staticFilesRoot;
     private readonly SemaphoreSlim _sttInitGate = new(1, 1);
     private readonly SemaphoreSlim _sttTranscribeGate = new(1, 1);
+    private readonly IndexingActivity _indexing = new();
     private WebApplication? _app;
+
+    /// <summary>
+    /// True while a document ingest, sweep, or rebuild is running on the host.
+    /// The chat path warns callers when this is set and clients surface a
+    /// "documents indexing / not ready" state rather than querying a partial
+    /// index (task #99).
+    /// </summary>
+    public bool IndexingInProgress => _indexing.InProgress;
 
     /// <summary>
     /// Slack added on top of <see cref="PortableConfig.MaxDocumentSizeMB"/> when
@@ -38,6 +47,13 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
     /// limit isn't rejected by transport framing overhead.
     /// </summary>
     private const int IngestMultipartHeadroomMB = 16;
+
+    /// <summary>
+    /// How long the progress pump waits with no real frame before emitting an
+    /// <c>indexing-heartbeat</c> keepalive, so a client's per-packet read
+    /// timeout survives quiet stretches like OCR-before-embed (task #99).
+    /// </summary>
+    private static readonly TimeSpan ProgressHeartbeatInterval = TimeSpan.FromSeconds(15);
 
     public RunnerLocalApiService(
         IChatService chatService,
@@ -206,6 +222,9 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             networkModeEnabled = config.NetworkModeEnabled,
             requireApiKey = enforceApiKey,
             ollamaRunning = !string.IsNullOrWhiteSpace(ollamaHost),
+            // Task #99: lets a client (e.g. a second device on the LAN) tell
+            // whether the library is mid-index before relying on RAG answers.
+            indexingInProgress = _indexing.InProgress,
             timestampUtc = DateTime.UtcNow
         }));
 
@@ -348,6 +367,21 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
                 usedRagContext = false,
                 sources = Array.Empty<string>()
             });
+
+            // Task #99: if a library ingest/sweep/rebuild is mid-flight, the
+            // vector index is incomplete, so RAG retrieval may return nothing
+            // and the model will answer ungrounded. Warn the client up front so
+            // it can surface "documents still indexing" rather than letting the
+            // user mistake a premature answer for a bug. Same surface as the
+            // RAG-retrieval warning; the answer still streams.
+            if (_indexing.InProgress)
+            {
+                await WriteFrameAsync(new
+                {
+                    type = "indexing-warning",
+                    message = "Documents are still indexing — answers may be incomplete until indexing finishes."
+                });
+            }
 
             // C1: forward ChatService.FirstTokenPending heartbeats as NDJSON
             // `loading` frames. Each frame keeps the Mac URLSession 180s
@@ -907,6 +941,9 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
 
             if (accepted.Count > 0)
             {
+                // Task #99: mark the host busy for the duration so the chat path
+                // can warn and /health reports the in-flight index.
+                using var _ = _indexing.Begin();
                 var error = await PumpProgressAsync(context, ct, async progress =>
                 {
                     await _docOps!.IngestFilesAsync(
@@ -958,6 +995,9 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
 
         await WriteNdjsonAsync(context.Response, new { type = "start" }, ct);
 
+        // Task #99: sweep/rebuild re-embed the library and can run for minutes;
+        // mark the host busy so chat warns and /health reports it, same as ingest.
+        using var _ = _indexing.Begin();
         var error = await PumpProgressAsync(context, ct, async progress =>
         {
             await operation(manifest, ollamaHost, config, progress);
@@ -979,20 +1019,78 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
 
     /// <summary>
     /// Bridges a synchronous <see cref="Action{IndexingProgress}"/> callback to
-    /// NDJSON progress frames on the response. Buffers progress events in a
-    /// thread-safe queue during the operation, then drains the queue back to
-    /// the response after the operation completes — keeps response writes on
-    /// a single thread (no Task.Run cross-thread to Kestrel's pipe), at the
-    /// cost of replaying all progress at once instead of live-streaming.
-    /// Returns null on success, or the operation's failure message.
+    /// NDJSON progress frames on the response, streaming each frame to the
+    /// client as it is produced (task #99). The operation's per-chunk callback
+    /// fires from many embed worker threads, so it only enqueues onto a
+    /// <see cref="System.Threading.Channels.Channel{T}"/>; a single consumer
+    /// drains the channel and is the *sole* writer to the response while the
+    /// operation runs — preserving the "one thread touches the HttpResponse"
+    /// invariant the old buffer-and-replay design protected, but without
+    /// withholding every frame until completion. The caller does not write the
+    /// terminal frame until this method returns (the consumer has finished
+    /// draining), so writes never interleave. Returns null on success, or the
+    /// operation's failure message.
     /// </summary>
     private static async Task<string?> PumpProgressAsync(
         HttpContext context,
         CancellationToken ct,
         Func<Action<IndexingProgress>, Task> runOperation)
     {
-        var buffered = new System.Collections.Concurrent.ConcurrentQueue<IndexingProgress>();
-        Action<IndexingProgress> progressCallback = p => buffered.Enqueue(p);
+        var channel = System.Threading.Channels.Channel.CreateUnbounded<IndexingProgress>(
+            new System.Threading.Channels.UnboundedChannelOptions
+            {
+                SingleReader = true,
+                SingleWriter = false
+            });
+        Action<IndexingProgress> progressCallback = p => channel.Writer.TryWrite(p);
+
+        // Drain frames to the response on one thread while runOperation executes.
+        // When no real frame flows for a while — e.g. OCR runs over a PDF's
+        // images before any chunk is embedded, a multi-minute quiet stretch on
+        // a large document — emit a lightweight heartbeat so the client's
+        // per-packet read timeout doesn't fire mid-ingest. Clients ignore the
+        // unknown frame type; it exists only to keep bytes flowing (task #99).
+        var pump = Task.Run(async () =>
+        {
+            var reader = channel.Reader;
+            try
+            {
+                while (true)
+                {
+                    var readTask = reader.WaitToReadAsync(ct).AsTask();
+                    var winner = await Task.WhenAny(readTask, Task.Delay(ProgressHeartbeatInterval, ct)).ConfigureAwait(false);
+                    if (winner != readTask)
+                    {
+                        await WriteNdjsonAsync(context.Response, new { type = "indexing-heartbeat" }, ct).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    if (!await readTask.ConfigureAwait(false))
+                    {
+                        break; // writer completed; all frames drained
+                    }
+
+                    while (reader.TryRead(out var progress))
+                    {
+                        await WriteNdjsonAsync(context.Response, new
+                        {
+                            type = "progress",
+                            totalFiles = progress.TotalFiles,
+                            completedFiles = progress.CompletedFiles,
+                            currentFile = progress.CurrentFile,
+                            totalChunks = progress.TotalChunks,
+                            embeddedChunks = progress.EmbeddedChunks,
+                            failedChunks = progress.FailedChunks,
+                            skippedFiles = progress.SkippedFiles
+                        }, ct).ConfigureAwait(false);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Client disconnected / request aborted — stop pumping quietly.
+            }
+        }, ct);
 
         string? errorMessage = null;
         try
@@ -1007,20 +1105,21 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         {
             errorMessage = ex.Message;
         }
-
-        while (buffered.TryDequeue(out var progress))
+        finally
         {
-            await WriteNdjsonAsync(context.Response, new
-            {
-                type = "progress",
-                totalFiles = progress.TotalFiles,
-                completedFiles = progress.CompletedFiles,
-                currentFile = progress.CurrentFile,
-                totalChunks = progress.TotalChunks,
-                embeddedChunks = progress.EmbeddedChunks,
-                failedChunks = progress.FailedChunks,
-                skippedFiles = progress.SkippedFiles
-            }, ct);
+            channel.Writer.Complete();
+        }
+
+        // Flush all remaining frames before the caller writes the terminal frame.
+        // A cancelled request (client disconnected) surfaces here as the drain
+        // unwinds; prefer the operation's own message and don't rethrow.
+        try
+        {
+            await pump;
+        }
+        catch (OperationCanceledException)
+        {
+            errorMessage ??= "Operation was cancelled.";
         }
 
         return errorMessage;
