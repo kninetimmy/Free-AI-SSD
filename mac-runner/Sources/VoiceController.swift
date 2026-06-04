@@ -20,6 +20,25 @@ import Speech
 struct TtsVoiceOption: Identifiable, Hashable {
     let id: String
     let label: String
+    /// Premium/Enhanced neural voices — the "Siri-grade" voices the user
+    /// downloads under System Settings → Accessibility → Spoken Content. These
+    /// get a ⭐ in the picker and sort above the robotic bundled "compact" ones.
+    let isHighQuality: Bool
+}
+
+/// Audio-quality tier of an AVSpeechSynthesisVoice.
+///
+/// We read `AVSpeechSynthesisVoiceQuality.rawValue` (1 = default, 2 = enhanced,
+/// 3 = premium) instead of the `.premium` symbol on purpose: `.premium` is
+/// macOS 13+, and this app targets the macOS 11 baseline (see MAC1), so naming
+/// it directly wouldn't compile without availability guards. The raw values are
+/// ABI-stable, so the comparison is safe across SDKs and deployment targets.
+private func ttsVoiceTier(_ quality: AVSpeechSynthesisVoiceQuality) -> (rank: Int, label: String, highQuality: Bool) {
+    switch quality.rawValue {
+    case 3: return (0, "Premium", true)
+    case 2: return (1, "Enhanced", true)
+    default: return (2, "Default", false)
+    }
 }
 
 /// Wraps AVSpeechSynthesizer to speak streamed chat responses sentence-by-
@@ -40,20 +59,38 @@ final class MacTextToSpeech {
 
     var isSpeaking: Bool { synthesizer.isSpeaking }
 
-    /// Installed voices. English voices first so the DCS/aviation use case lands
-    /// on a sensible default, then the rest, each alphabetised by label.
+    /// Installed voices, best-first. Ordering:
+    ///   1. English before other languages (the DCS/aviation default), then
+    ///   2. higher audio quality (Premium → Enhanced → Default), then
+    ///   3. alphabetical by name.
+    /// The label carries the tier ("Ava (en-US) · Premium") and Premium/Enhanced
+    /// voices get a ⭐ so the user can tell the good neural voices from the
+    /// robotic compact ones — Apple walls off the literal Siri voice from
+    /// AVSpeechSynthesizer, so these downloadable neural voices are the closest
+    /// we can offer.
     static func availableVoices() -> [TtsVoiceOption] {
-        let voices = AVSpeechSynthesisVoice.speechVoices()
-        let mapped = voices.map { v -> (option: TtsVoiceOption, en: Bool) in
-            let lang = v.language
-            return (TtsVoiceOption(id: v.identifier, label: "\(v.name) (\(lang))"), lang.hasPrefix("en"))
-        }
-        return mapped
+        return AVSpeechSynthesisVoice.speechVoices()
+            .map { v in (voice: v, en: v.language.hasPrefix("en"), tier: ttsVoiceTier(v.quality)) }
             .sorted { a, b in
                 if a.en != b.en { return a.en && !b.en }
-                return a.option.label.localizedCaseInsensitiveCompare(b.option.label) == .orderedAscending
+                if a.tier.rank != b.tier.rank { return a.tier.rank < b.tier.rank }
+                return a.voice.name.localizedCaseInsensitiveCompare(b.voice.name) == .orderedAscending
             }
-            .map { $0.option }
+            .map { entry in
+                let star = entry.tier.highQuality ? "⭐ " : ""
+                return TtsVoiceOption(
+                    id: entry.voice.identifier,
+                    label: "\(star)\(entry.voice.name) (\(entry.voice.language)) · \(entry.tier.label)",
+                    isHighQuality: entry.tier.highQuality)
+            }
+    }
+
+    /// Best installed voice to land on for a brand-new config: the top-ranked
+    /// English neural (Premium/Enhanced) voice, or nil when none is installed —
+    /// in which case the caller falls back to the system default and the UI
+    /// nudges the user to download better voices.
+    static func bestDefaultVoiceIdentifier() -> String? {
+        return availableVoices().first(where: { $0.isHighQuality })?.id
     }
 
     func configure(voiceIdentifier: String?, rate: Int, volume: Int) {
