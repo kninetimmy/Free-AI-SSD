@@ -56,6 +56,8 @@
       env var (OllamaIntegrationFactAttribute).
     -->
     <None Include="Fixtures\RagCorpus\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <!-- OCR integration fixture: a known-text PNG the real-Tesseract test reads. -->
+    <None Include="Fixtures\Ocr\**\*" CopyToOutputDirectory="PreserveNewest" />
     <None Include="Retrieval\baseline.json" CopyToOutputDirectory="PreserveNewest" Condition="Exists('Retrieval\baseline.json')" />
   </ItemGroup>
 </Project>

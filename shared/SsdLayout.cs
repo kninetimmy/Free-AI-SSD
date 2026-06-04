@@ -10,12 +10,14 @@ namespace FreeAiSsd.Shared;
 ///   │   ├── tools/
 ///   │   │   ├── ollama/       → Windows Ollama binary + trust attestation
 ///   │   │   ├── piper/        → Optional Piper neural TTS binary + voices
+///   │   │   ├── tesseract/    → Optional Tesseract OCR binary + tessdata
 ///   │   │   └── prereqs/      → Bundled prerequisite installers (VC++, .NET)
 ///   │   └── runner/           → Published Windows Runner WPF application
 ///   ├── mac/
 ///   │   └── tools/
 ///   │       ├── ollama/       → macOS Ollama universal binary
-///   │       └── piper/        → Optional Piper neural TTS binary + voices
+///   │       ├── piper/        → Optional Piper neural TTS binary + voices
+///   │       └── tesseract/    → Optional Tesseract OCR binary + tessdata
 ///   ├── Runner.app/           → macOS Runner application bundle (root-level,
 ///   │                           launchable directly; the mac-runner-host
 ///   │                           sidecar ships inside Contents/Resources/)
@@ -37,10 +39,16 @@ public static class SsdLayout
     public const string WindowsPiper = "windows/tools/piper";
     public const string WindowsPiperVoices = "windows/tools/piper/voices";
 
+    /// <summary>Optional Tesseract OCR binary + tessdata (image-text extraction for RAG ingest).</summary>
+    public const string WindowsTesseract = "windows/tools/tesseract";
+
     public const string MacTools = "mac/tools";
     public const string MacOllama = "mac/tools/ollama";
     public const string MacPiper = "mac/tools/piper";
     public const string MacPiperVoices = "mac/tools/piper/voices";
+
+    /// <summary>Optional Tesseract OCR binary + tessdata (image-text extraction for RAG ingest).</summary>
+    public const string MacTesseract = "mac/tools/tesseract";
 
     /// <summary>
     /// macOS Runner bundle, staged at the SSD <b>root</b> (not under mac/)
@@ -86,11 +94,13 @@ public static class SsdLayout
                      WindowsRunner,
                      WindowsPiper,
                      WindowsPiperVoices,
+                     WindowsTesseract,
                      Mac,
                      MacTools,
                      MacOllama,
                      MacPiper,
                      MacPiperVoices,
+                     MacTesseract,
                      Models,
                      Blobs,
                      WhisperModels,

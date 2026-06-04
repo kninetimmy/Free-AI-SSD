@@ -489,6 +489,25 @@
                                         ToolTip="Remove the highlighted file from the active library."/>
                             </WrapPanel>
 
+                            <!-- OCR opt-in: recover text baked into PDF images at
+                                 ingest. Only usable when the Tesseract bundle was
+                                 staged by the prep tool; otherwise disabled with a
+                                 hint. Off by default — OCR is slow and purely additive. -->
+                            <CheckBox x:Name="OcrEnabledCheck"
+                                      Content="OCR text inside PDF images when adding files"
+                                      Foreground="{StaticResource TextSecondaryBrush}"
+                                      Margin="0,2,0,0"
+                                      Checked="OcrEnabledCheck_Changed"
+                                      Unchecked="OcrEnabledCheck_Changed"
+                                      ToolTip="When on, PDFs you add are scanned for text baked into images (e.g. labels on cockpit screenshots) and that text is added to the index. Slower ingest; the clean text layer is never replaced."/>
+                            <TextBlock x:Name="OcrUnavailableHint"
+                                       Margin="22,2,0,0"
+                                       FontSize="11"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       TextWrapping="Wrap"
+                                       Visibility="Collapsed"
+                                       Text="OCR engine isn't installed on this drive. Re-run the prep tool and enable &quot;PDF image OCR&quot; to use this."/>
+
                             <Expander x:Name="IndexToolsExpander"
                                       Header="Index tools"
                                       Style="{StaticResource NeumorphicExpander}"

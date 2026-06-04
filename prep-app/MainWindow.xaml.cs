@@ -83,6 +83,7 @@ public partial class MainWindow : Window
         var encryptionService = new EncryptionService();
         var elevationService = new WindowsElevationService();
         var piperStagingService = new PiperStagingService();
+        var tesseractStagingService = new TesseractStagingService();
 
         _viewModel = new PrepViewModel(
             driveService,
@@ -95,7 +96,8 @@ public partial class MainWindow : Window
             dialogService,
             logService,
             elevationService,
-            piperStagingService);
+            piperStagingService,
+            tesseractStagingService);
 
         InitializeComponent();
 

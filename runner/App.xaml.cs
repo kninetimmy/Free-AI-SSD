@@ -41,10 +41,16 @@ public partial class App : System.Windows.Application
         // wedged /api/embed fails fast instead of hanging the default 100s. The shared
         // singleton stays on chat/model-management, where streaming needs a long timeout.
         collection.AddSingleton(sp => new EmbeddingClient(new HttpClient { Timeout = TimeSpan.FromSeconds(60) }));
+        // OCR over PDF images at ingest (opt-in via PortableConfig.OcrEnabled). Resolves the
+        // Tesseract binary staged on the SSD; IsAvailable is false until it's staged, so ingest
+        // works unchanged when OCR isn't set up.
+        collection.AddSingleton<IOcrService>(sp =>
+            TesseractOcrService.FromSsdRoot(ssdRoot, sp.GetRequiredService<SsdLogger>()));
         collection.AddSingleton(sp => new DocumentIngestor(
             sp.GetRequiredService<DocumentLibraryManager>(),
             sp.GetRequiredService<EmbeddingClient>(),
-            sp.GetRequiredService<SsdLogger>()));
+            sp.GetRequiredService<SsdLogger>(),
+            sp.GetRequiredService<IOcrService>()));
 
         // Config store — single chokepoint for all config saves, encrypted or plain.
         collection.AddSingleton<IConfigStore>(sp =>

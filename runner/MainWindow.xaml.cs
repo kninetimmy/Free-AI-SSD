@@ -292,6 +292,7 @@ public partial class MainWindow : System.Windows.Window
         InitializePtt();
         InitializeVoiceUi();
         InitializeModelParametersUi();
+        InitializeOcrUi();
         InitializeNetworkModeUi();
         RefreshProfileVisibility();
         StatusText.Text = "Ready (not running)";
@@ -3359,6 +3360,48 @@ public partial class MainWindow : System.Windows.Window
         if (enabled == _config.RagInlineCitations) return;
 
         _config.RagInlineCitations = enabled;
+        SaveConfigAsync();
+    }
+
+    private bool _suppressOcrEvents;
+
+    /// <summary>
+    /// Loads the OCR opt-in state into the Reference Documents card. The toggle
+    /// is only usable when the Tesseract bundle is staged on the SSD; when it
+    /// isn't, the box is disabled and a hint points the user back to the prep
+    /// tool. Mirrors the suppress-while-loading pattern used elsewhere so
+    /// setting the control doesn't write straight back to disk.
+    /// </summary>
+    private void InitializeOcrUi()
+    {
+        if (_config is null) return;
+
+        var available = TesseractOcrService.FromSsdRoot(_ssdRoot).IsAvailable;
+
+        _suppressOcrEvents = true;
+        try
+        {
+            OcrEnabledCheck.IsChecked = _config.OcrEnabled;
+        }
+        finally
+        {
+            _suppressOcrEvents = false;
+        }
+
+        OcrEnabledCheck.IsEnabled = available;
+        OcrUnavailableHint.Visibility = available
+            ? System.Windows.Visibility.Collapsed
+            : System.Windows.Visibility.Visible;
+    }
+
+    private void OcrEnabledCheck_Changed(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_suppressOcrEvents || _config is null) return;
+
+        var enabled = OcrEnabledCheck.IsChecked == true;
+        if (enabled == _config.OcrEnabled) return;
+
+        _config.OcrEnabled = enabled;
         SaveConfigAsync();
     }
 

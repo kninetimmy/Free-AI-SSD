@@ -7,12 +7,18 @@ public sealed class DocumentIngestor
     private readonly DocumentLibraryManager _libraryManager;
     private readonly EmbeddingClient _embeddingClient;
     private readonly SsdLogger? _logger;
+    private readonly IOcrService? _ocrService;
 
-    public DocumentIngestor(DocumentLibraryManager libraryManager, EmbeddingClient embeddingClient, SsdLogger? logger = null)
+    public DocumentIngestor(
+        DocumentLibraryManager libraryManager,
+        EmbeddingClient embeddingClient,
+        SsdLogger? logger = null,
+        IOcrService? ocrService = null)
     {
         _libraryManager = libraryManager;
         _embeddingClient = embeddingClient;
         _logger = logger;
+        _ocrService = ocrService;
     }
 
     public async Task IngestFilesAsync(
@@ -128,8 +134,9 @@ public sealed class DocumentIngestor
 
             try
             {
-                // Section-aware chunking, preserving document order.
-                var spans = BuildChunkSpans(parsed, config);
+                // Section-aware chunking, preserving document order. OCR (when enabled) appends
+                // supplementary image-text spans; the text-layer chunks are untouched.
+                var spans = await WithOcrSpansAsync(BuildChunkSpans(parsed, config), storedAbsPath, config, cancellationToken);
 
                 var totalChunks = spans.Count;
                 if (totalChunks == 0)
@@ -326,6 +333,70 @@ public sealed class DocumentIngestor
     /// </summary>
     private static List<DocumentChunkSpan> BuildChunkSpans(ParsedDocument parsed, PortableConfig config)
         => DocumentChunker.ChunkBlocks(parsed.Blocks, config.ChunkSize, config.ChunkOverlap);
+
+    private const string OcrSectionLabel = "Image text (OCR)";
+
+    /// <summary>
+    /// Appends OCR-recovered text from images embedded in a PDF as additional chunk spans tagged
+    /// <c>ContentType="ocr"</c>, when OCR is enabled, available, and the file is a PDF. The clean
+    /// text-layer spans are never modified — OCR spans are purely additive. Returns the input spans
+    /// unchanged when OCR does not apply. OCR failures are logged and swallowed (best-effort) so a
+    /// flaky image cannot fail an otherwise-good ingest; cancellation still propagates.
+    /// </summary>
+    private async Task<List<DocumentChunkSpan>> WithOcrSpansAsync(
+        List<DocumentChunkSpan> spans, string filePath, PortableConfig config, CancellationToken ct)
+    {
+        if (!config.OcrEnabled || _ocrService is not { IsAvailable: true })
+        {
+            return spans;
+        }
+        if (!string.Equals(Path.GetExtension(filePath), ".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            return spans;
+        }
+
+        IReadOnlyList<OcrPageText> ocrPages;
+        try
+        {
+            ocrPages = await _ocrService.ExtractPdfImageTextAsync(filePath, config, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger?.Warn($"OCR skipped for '{Path.GetFileName(filePath)}': {ex.Message}");
+            return spans;
+        }
+
+        if (ocrPages.Count == 0)
+        {
+            return spans;
+        }
+
+        var combined = new List<DocumentChunkSpan>(spans);
+        foreach (var page in ocrPages)
+        {
+            foreach (var piece in DocumentChunker.ChunkText(page.Text, config.ChunkSize, config.ChunkOverlap))
+            {
+                combined.Add(new DocumentChunkSpan
+                {
+                    Text = piece,
+                    Page = page.Page,
+                    Section = OcrSectionLabel,
+                    HeadingPath = OcrSectionLabel,
+                    CharOffsetStart = 0,
+                    CharOffsetEnd = piece.Length,
+                    ContentType = "ocr",
+                });
+            }
+        }
+
+        _logger?.Info(
+            $"OCR added {combined.Count - spans.Count} chunk(s) from {ocrPages.Count} image(s) in '{Path.GetFileName(filePath)}'.");
+        return combined;
+    }
 
     /// <summary>
     /// Embeds <paramref name="spans"/> into <paramref name="results"/> in batches of
@@ -612,7 +683,7 @@ public sealed class DocumentIngestor
         CancellationToken cancellationToken)
     {
         var parsed = DocumentParser.Parse(parsePath);
-        var spans = BuildChunkSpans(parsed, config);
+        var spans = await WithOcrSpansAsync(BuildChunkSpans(parsed, config), parsePath, config, cancellationToken);
 
         if (spans.Count == 0)
         {

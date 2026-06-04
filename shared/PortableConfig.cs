@@ -166,6 +166,35 @@ public sealed class PortableConfig
     public int MaxDocumentSizeMB { get; set; } = 512;
 
     /// <summary>
+    /// Opt-in: during PDF ingestion, run OCR over images embedded in the PDF and append the
+    /// recovered text as supplementary chunks (<c>ContentType="ocr"</c>). Recovers text baked into
+    /// screenshots/diagrams (e.g. cockpit MFD labels) that the PDF text layer omits. Off by default
+    /// — OCR is slow and requires the Tesseract tool staged on the SSD. The clean text layer is
+    /// never replaced; OCR text is purely additive.
+    /// </summary>
+    public bool OcrEnabled { get; set; } = false;
+    /// <summary>Tesseract language code(s) for OCR (passed to <c>-l</c>), e.g. "eng".</summary>
+    public string OcrLanguage { get; set; } = "eng";
+    /// <summary>
+    /// Embedded images smaller than this many pixels (width × height) are skipped during OCR —
+    /// filters out icons, rules, and logos that carry no useful text. Default 10,000 (≈100×100).
+    /// </summary>
+    public int OcrMinImagePixels { get; set; } = 10_000;
+    /// <summary>
+    /// Minimum Tesseract per-word confidence (0–100) for an OCR word to be kept. Words below this
+    /// are dropped to suppress the garble dense cockpit imagery produces (spike: PSM 11 sparse
+    /// mode recovers real labels but with noise). Default 55; ≤0 keeps every word.
+    /// </summary>
+    public int OcrMinWordConfidence { get; set; } = 55;
+    /// <summary>
+    /// Hard cap on the number of embedded images OCR'd per file — defense against pathological
+    /// PDFs carrying thousands of images. Default 4000.
+    /// </summary>
+    public int OcrMaxImagesPerFile { get; set; } = 4000;
+    /// <summary>Per-image OCR timeout in seconds; a slow or stuck image is skipped past this. Default 30.</summary>
+    public int OcrPerImageTimeoutSeconds { get; set; } = 30;
+
+    /// <summary>
     /// When true, chat responses are streamed token-by-token from Ollama.
     /// Falls back to non-streaming if streaming fails. Default: true.
     /// </summary>
