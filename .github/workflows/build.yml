@@ -209,6 +209,14 @@ jobs:
         run: |
           swiftc mac-runner/Sources/IngestProgressFormatter.swift mac-runner/Tests/IngestProgressFormatterTests.swift             -parse-as-library             -target "arm64-apple-macos11.0"             -O             -o out/ingest-progress-formatter-tests
           out/ingest-progress-formatter-tests
+      - name: Run Swift unit tests (VoiceTextProcessing)
+        # Task #94: pin the native-TTS sentence chunking + citation stripping +
+        # rate/volume config-encoding bridges (parity with the Windows
+        # StreamingTtsSpeaker). Pure helper; the AVFoundation/Speech glue in
+        # VoiceController.swift is intentionally not linked here.
+        run: |
+          swiftc mac-runner/Sources/VoiceTextProcessing.swift mac-runner/Tests/VoiceTextProcessingTests.swift             -parse-as-library             -target "arm64-apple-macos11.0"             -O             -o out/voice-text-processing-tests
+          out/voice-text-processing-tests
       - name: Publish mac-runner-host (osx-arm64 self-contained single-file)
         # MAC6: build the net8.0 sidecar host so the Swift Runner.app can spawn
         # it. Self-contained so end users don't need a system .NET 8 install
@@ -316,7 +324,7 @@ jobs:
       - name: Build Runner.app bundle
         run: |
           mkdir -p out/Runner.app/Contents/MacOS out/Runner.app/Contents/Resources
-          swiftc mac-runner/Sources/SsdEncryption.swift mac-runner/Sources/MacRunnerHostController.swift mac-runner/Sources/NdjsonFrameBuffer.swift mac-runner/Sources/RunnerChatErrorMessage.swift mac-runner/Sources/IngestProgressFormatter.swift mac-runner/Sources/main.swift             -parse-as-library             -target "arm64-apple-macos11.0"             -O             -o out/Runner.app/Contents/MacOS/Runner             -framework SwiftUI             -framework AppKit
+          swiftc mac-runner/Sources/SsdEncryption.swift mac-runner/Sources/MacRunnerHostController.swift mac-runner/Sources/NdjsonFrameBuffer.swift mac-runner/Sources/RunnerChatErrorMessage.swift mac-runner/Sources/IngestProgressFormatter.swift mac-runner/Sources/VoiceTextProcessing.swift mac-runner/Sources/VoiceController.swift mac-runner/Sources/main.swift             -parse-as-library             -target "arm64-apple-macos11.0"             -O             -o out/Runner.app/Contents/MacOS/Runner             -framework SwiftUI             -framework AppKit             -framework AVFoundation             -framework Speech
           # Bundle the published mac-runner-host binary into Resources/runner-host/
           # so the Swift app can locate it via Bundle.main.resourceURL when the
           # Runner.app is launched directly (e.g. dev or ad-hoc test). The SSD
@@ -343,6 +351,8 @@ jobs:
               <key>LSRequiresNativeExecution</key><true/>
               <key>NSHighResolutionCapable</key><true/>
               <key>NSHumanReadableCopyright</key><string>Copyright (c) 2026 Free-AI-SSD project</string>
+              <key>NSMicrophoneUsageDescription</key><string>Free AI SSD uses the microphone to let you ask questions by voice. Audio is transcribed on-device and never leaves your Mac.</string>
+              <key>NSSpeechRecognitionUsageDescription</key><string>Free AI SSD transcribes your spoken questions using on-device speech recognition. Audio is processed locally and never sent to Apple or any server.</string>
           </dict>
           </plist>
           PLIST
