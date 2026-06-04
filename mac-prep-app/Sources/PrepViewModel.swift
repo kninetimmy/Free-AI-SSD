@@ -47,6 +47,14 @@ final class PrepViewModel: ObservableObject {
     /// a download failure logs but does not block the rest of the flow.
     @Published var installPiper: Bool = false
 
+    /// Opt-in to staging the Tesseract OCR bundle during the staging step. Off
+    /// by default — OCR is slow and adds ~10 MB, and most DCS guides are
+    /// text-layer. When true, the staging block runs a `stage-tesseract` arm
+    /// after `stage-piper` (failure logs but does not block), and the written
+    /// config sets `ocrEnabled = true` so OCR is usable without a second toggle
+    /// hunt in the Runner. Mirrors the Windows PrepApp PDF-image-OCR expander.
+    @Published var installOcr: Bool = false
+
     // C6 Stage 3: detection snapshot for the selected candidate's drive.
     // Updated by `refreshDriveConfigurationState()` whenever
     // `selectedCandidate` changes. Drives the contextual banner on
@@ -927,6 +935,13 @@ final class PrepViewModel: ObservableObject {
                 _ = try? await hostController.send("stage-piper")
             }
 
+            // Optional Tesseract OCR staging. Same fail-soft posture as Piper:
+            // the sidecar catches its own exceptions and returns ok=false, so a
+            // bundle download failure lands in the log without blocking finalize.
+            if installOcr {
+                _ = try? await hostController.send("stage-tesseract")
+            }
+
             appendLog("Staging complete.")
 
             // F2: pull bundled catalog before showing the picker so
@@ -1338,6 +1353,9 @@ final class PrepViewModel: ObservableObject {
             var p = InitialPortableConfigPayload()
             let trimmed = self.huggingFaceToken.trimmingCharacters(in: .whitespacesAndNewlines)
             p.huggingFaceToken = trimmed.isEmpty ? nil : trimmed
+            // When OCR was opted into at staging, enable it in the written config
+            // so it works in the Runner without a second toggle.
+            p.ocrEnabled = self.installOcr
             return p
         }()
         do {
@@ -1377,6 +1395,9 @@ final class PrepViewModel: ObservableObject {
             var p = InitialPortableConfigPayload()
             let trimmed = self.huggingFaceToken.trimmingCharacters(in: .whitespacesAndNewlines)
             p.huggingFaceToken = trimmed.isEmpty ? nil : trimmed
+            // When OCR was opted into at staging, enable it in the written config
+            // so it works in the Runner without a second toggle.
+            p.ocrEnabled = self.installOcr
             return p
         }()
         do {

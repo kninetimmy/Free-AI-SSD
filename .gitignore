@@ -37,3 +37,7 @@ appsettings.*.json
 *.private.json
 portable-config.json
 .memhub/
+
+# Assembled prereq bundles (reproducible via tools/*; the real artifact lives
+# on the frozen GitHub release, not in git — e.g. the macOS Tesseract bundle).
+dist/

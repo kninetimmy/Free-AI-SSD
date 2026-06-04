@@ -37,6 +37,7 @@ internal sealed class HostLifetime : IAsyncDisposable
     private readonly IModelService _modelService;
     private readonly PrereqService _prereqService;
     private readonly PiperStagingService _piperStaging = new();
+    private readonly TesseractStagingService _tesseractStaging = new();
     private readonly ReadinessService _readinessService;
     private readonly ILiveModelCatalogService _liveCatalogService;
     private readonly IHuggingFaceCatalogService _hfCatalogService;
@@ -152,6 +153,9 @@ internal sealed class HostLifetime : IAsyncDisposable
                 break;
             case "stage-piper":
                 await StagePiperAsync(ct);
+                break;
+            case "stage-tesseract":
+                await StageTesseractAsync(ct);
                 break;
             case "discover-models":
                 DiscoverModels();
@@ -308,6 +312,36 @@ internal sealed class HostLifetime : IAsyncDisposable
         {
             EmitLog($"Piper staging failed: {ex.Message}");
             EmitResult("stage-piper", new { ok = false, reason = "stage-exception", message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Stages the Tesseract OCR bundle for the local Mac arch. Optional payload —
+    /// failures are caught and reported as <c>ok=false</c> rather than thrown,
+    /// mirroring <see cref="StagePiperAsync"/> and the Windows PrepViewModel posture:
+    /// an OCR download failure should not block the rest of finalize. The Swift UI
+    /// surfaces the failure; the Runner keeps OCR disabled-with-hint until the bundle
+    /// is present.
+    /// </summary>
+    private async Task StageTesseractAsync(CancellationToken ct)
+    {
+        if (_testMode)
+        {
+            EmitLog("test-mode: skipping StageTesseractAsync");
+            EmitResult("stage-tesseract", new { ok = true, testMode = true });
+            return;
+        }
+
+        try
+        {
+            var platform = TesseractStagingService.DetectCurrentPlatform();
+            await _tesseractStaging.StageTesseractAsync(_ssdRoot, platform, EmitLog, ct);
+            EmitResult("stage-tesseract", new { ok = true, platform = platform.ToString() });
+        }
+        catch (Exception ex)
+        {
+            EmitLog($"Tesseract staging failed: {ex.Message}");
+            EmitResult("stage-tesseract", new { ok = false, reason = "stage-exception", message = ex.Message });
         }
     }
 
