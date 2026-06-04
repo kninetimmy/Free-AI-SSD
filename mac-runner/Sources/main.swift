@@ -131,6 +131,39 @@ final class RunnerViewModel: ObservableObject {
     /// otherwise, mirroring the Windows `IsAvailable` gate.
     @Published var ocrEnabled: Bool = false
 
+    // ── Voice (task #94) ─────────────────────────────────────────────────
+    // Native macOS voice per decision #166: AVSpeechSynthesizer for TTS,
+    // SFSpeechRecognizer (on-device) for STT — no hosted Piper/Whisper, no
+    // sidecar round-trip. Fields persist under the same cross-OS PortableConfig
+    // keys the Windows runner uses (ttsEnabled/ttsVoiceName/ttsRate/ttsVolume,
+    // autoSendVoiceInput) so a drive's intent reads the same on both platforms.
+    /// Speak streamed chat responses aloud. Persisted as `ttsEnabled`.
+    @Published var ttsEnabled: Bool = false
+    /// AVSpeechSynthesisVoice identifier; "" = system default. Persisted as
+    /// `ttsVoiceName` (the field name is shared with Windows SAPI voice names —
+    /// the value is platform-specific, falling back to default on mismatch).
+    @Published var ttsVoiceIdentifier: String = ""
+    /// Speech rate, cross-OS encoding -10…10 (0 = neutral). Persisted as `ttsRate`.
+    @Published var ttsRate: Double = 0
+    /// Speech volume 0…100. Persisted as `ttsVolume`.
+    @Published var ttsVolume: Double = 100
+    /// Auto-send the prompt after a voice transcription completes. Persisted as
+    /// `autoSendVoiceInput` (parity with the Windows STT toggle).
+    @Published var autoSendVoiceInput: Bool = true
+    /// Installed system voices for the picker, refreshed on config load.
+    @Published var availableTtsVoices: [TtsVoiceOption] = []
+    /// True while the mic is capturing for a voice query.
+    @Published var isListening: Bool = false
+    /// Surfaces TTS/STT failures (permission denied, on-device unsupported, no
+    /// speech) on a distinct line so it doesn't collide with chat/RAG banners.
+    @Published var voiceError: String? = nil
+
+    /// Native voice engines. Construction is side-effect-free (no mic/audio
+    /// touch until `start`/`speak`), so these are eager stored properties the
+    /// lock/deinit paths can always stop without forcing lazy instantiation.
+    private let tts = MacTextToSpeech()
+    private let stt = MacSpeechToText()
+
     /// MAC8: Document library state, populated from /api/library when the
     /// Network Mode sidecar is running. The active library + its files/watched
     /// folders surface in the Documents UI; mutations round-trip through the
@@ -249,6 +282,9 @@ final class RunnerViewModel: ObservableObject {
         activeChatSession?.invalidateAndCancel()
         activeIngestTask?.cancel()
         activeIngestSession?.invalidateAndCancel()
+        // Task #94: stop voice engines before teardown.
+        tts.stop()
+        stt.cancel()
         // MAC6: shut the sidecar before the unlock material is zeroized so the
         // host process never outlives an unlocked session.
         hostController.shutdown()
@@ -408,6 +444,13 @@ final class RunnerViewModel: ObservableObject {
         activeChatTask = nil
         isSending = false
 
+        // Task #94: stop any spoken response and abandon a live mic capture —
+        // voice must not outlive the unlocked session.
+        tts.stop()
+        stt.cancel()
+        isListening = false
+        voiceError = nil
+
         // Task #99: a streaming ingest must not outlive the unlocked session
         // either — drop it before the sidecar is shut down below.
         activeIngestTask?.cancel()
@@ -452,6 +495,11 @@ final class RunnerViewModel: ObservableObject {
         activeChatTask?.cancel()
         activeChatTask = nil
         isSending = false
+
+        // Task #94: stop voice alongside the chat stack.
+        tts.stop()
+        stt.cancel()
+        isListening = false
 
         hostController.shutdown()
         networkApiBaseUrl = nil
@@ -735,6 +783,24 @@ final class RunnerViewModel: ObservableObject {
         // Hydrate the OCR opt-in from persisted config (default false). Single
         // place both the plaintext-load and unlock paths route through.
         ocrEnabled = (config["ocrEnabled"] as? Bool) ?? false
+        hydrateVoiceConfig(config)
+    }
+
+    /// Mirror the persisted voice knobs into the published state and apply them
+    /// to the native TTS engine. Voice list is refreshed here so the picker has
+    /// options as soon as a config loads. Defaults match Windows PortableConfig.
+    private func hydrateVoiceConfig(_ config: [String: Any]) {
+        ttsEnabled = (config["ttsEnabled"] as? Bool) ?? false
+        ttsVoiceIdentifier = (config["ttsVoiceName"] as? String) ?? ""
+        ttsRate = Double((config["ttsRate"] as? NSNumber)?.intValue ?? 0)
+        ttsVolume = Double((config["ttsVolume"] as? NSNumber)?.intValue ?? 100)
+        autoSendVoiceInput = (config["autoSendVoiceInput"] as? Bool) ?? true
+        availableTtsVoices = MacTextToSpeech.availableVoices()
+        applyTtsConfig()
+    }
+
+    private func applyTtsConfig() {
+        tts.configure(voiceIdentifier: ttsVoiceIdentifier, rate: Int(ttsRate), volume: Int(ttsVolume))
     }
 
     /// True when the Tesseract OCR bundle is staged on the SSD — i.e. the
@@ -758,6 +824,104 @@ final class RunnerViewModel: ObservableObject {
             config["ocrEnabled"] = enabled
             return config
         }
+    }
+
+    // MARK: - Voice setters & STT capture (task #94)
+
+    func setTtsEnabled(_ enabled: Bool) {
+        ttsEnabled = enabled
+        if !enabled { tts.stop() }
+        saveConfig { current in var c = current; c["ttsEnabled"] = enabled; return c }
+    }
+
+    func setTtsVoice(_ identifier: String) {
+        ttsVoiceIdentifier = identifier
+        applyTtsConfig()
+        saveConfig { current in var c = current; c["ttsVoiceName"] = identifier; return c }
+    }
+
+    /// Slider commit (on drag end) — snap to whole steps, apply, persist. Matches
+    /// the model-param sliders' "commit on editing end" cadence.
+    func commitTtsRate() {
+        let snapped = Int(ttsRate.rounded())
+        ttsRate = Double(snapped)
+        applyTtsConfig()
+        saveConfig { current in var c = current; c["ttsRate"] = snapped; return c }
+    }
+
+    func commitTtsVolume() {
+        let snapped = Int(ttsVolume.rounded())
+        ttsVolume = Double(snapped)
+        applyTtsConfig()
+        saveConfig { current in var c = current; c["ttsVolume"] = snapped; return c }
+    }
+
+    func setAutoSendVoiceInput(_ enabled: Bool) {
+        autoSendVoiceInput = enabled
+        saveConfig { current in var c = current; c["autoSendVoiceInput"] = enabled; return c }
+    }
+
+    /// Settings "Test voice" button — speak a fixed line with the current voice.
+    func testTtsVoice() {
+        voiceError = nil
+        applyTtsConfig()
+        tts.speak("This is a test of the assistant voice.")
+    }
+
+    /// Mic button: start capture if idle, finalize + transcribe if recording.
+    func toggleVoiceInput() {
+        if stt.isRecording {
+            finishVoiceInput()
+        } else {
+            startVoiceInput()
+        }
+    }
+
+    private func startVoiceInput() {
+        voiceError = nil
+        // Don't talk over the user while they dictate.
+        tts.stop()
+        MacSpeechToText.requestAuthorization { [weak self] granted in
+            guard let self else { return }
+            guard granted else {
+                self.voiceError = SpeechToTextError.notAuthorized.errorDescription
+                return
+            }
+            do {
+                try self.stt.start(onPartial: { [weak self] partial in
+                    guard let self, self.isListening else { return }
+                    self.status = partial.isEmpty ? "Listening…" : "Listening… \(partial)"
+                })
+                self.isListening = true
+                self.status = "Listening…"
+            } catch {
+                self.voiceError = (error as? SpeechToTextError)?.errorDescription
+                    ?? error.localizedDescription
+            }
+        }
+    }
+
+    private func finishVoiceInput() {
+        stt.stop { [weak self] result in
+            guard let self else { return }
+            self.isListening = false
+            switch result {
+            case .success(let text):
+                self.insertVoiceTranscript(text)
+            case .failure(let err):
+                self.status = "Idle"
+                self.voiceError = (err as? SpeechToTextError)?.errorDescription
+                    ?? err.localizedDescription
+            }
+        }
+    }
+
+    private func insertVoiceTranscript(_ text: String) {
+        prompt = prompt.isEmpty ? text : prompt + " " + text
+        status = "Idle"
+        // Auto-send mirrors the Windows STT default: dictate and go. Suppressed
+        // while a chat or ingest is in flight (sendPrompt re-checks anyway).
+        if autoSendVoiceInput { sendPrompt() }
     }
 
     /// Mirror the persisted model knobs into the slider/picker state. Setting
@@ -976,8 +1140,18 @@ final class RunnerViewModel: ObservableObject {
         response = ""
         clearRagState()
         chatError = nil
+        voiceError = nil
         isSending = true
         status = "Sending..."
+
+        // Task #94: start a fresh spoken response. beginStreaming stops any
+        // prior in-flight speech so a new query doesn't talk over the last one.
+        if ttsEnabled {
+            applyTtsConfig()
+            tts.beginStreaming()
+        } else {
+            tts.stop()
+        }
 
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -1025,6 +1199,9 @@ final class RunnerViewModel: ObservableObject {
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     self.response.append(token)
+                    // Task #94: stream the token into the sentence chunker so TTS
+                    // speaks each sentence as it completes (no-op when TTS off).
+                    if self.ttsEnabled { self.tts.feed(token) }
                     // C1: clear the "Loading <model>… NNs" status once
                     // tokens start flowing. hasPrefix gate fires once per
                     // request — subsequent token writes find status =
@@ -1079,6 +1256,8 @@ final class RunnerViewModel: ObservableObject {
                     self.response = fallbackText
                 }
                 self.status = usedRag ? "Answered with sources" : "Answered"
+                // Task #94: flush the trailing sentence fragment to TTS.
+                if self.ttsEnabled { self.tts.finishStreaming() }
             }
         case "error":
             // M12: X13 ChatResult.Failure surfaced as a mid-stream NDJSON
@@ -1092,6 +1271,8 @@ final class RunnerViewModel: ObservableObject {
                 self.status = "Chat failed: \(message)"
                 self.chatError = message
                 self.clearRagState()
+                // Task #94: a failed response shouldn't keep speaking buffered text.
+                if self.ttsEnabled { self.tts.stop() }
                 self.log("Chat backend error: \(message)")
             }
         default:
@@ -1125,6 +1306,8 @@ final class RunnerViewModel: ObservableObject {
                     let message = error.localizedDescription
                     self.status = "Chat failed: \(message)"
                     self.chatError = message
+                    // Task #94: stop speaking a response that won't complete.
+                    if self.ttsEnabled { self.tts.stop() }
                     self.log("Chat transport error: \(message)")
                 }
             }
@@ -2170,18 +2353,39 @@ struct ContentView: View {
             // MAC36c: spinner + disabled state while a streaming chat is
             // in flight. Disabled also gates on missing model/prompt so
             // the button can't kick off a no-op request.
-            Button(action: { vm.sendPrompt() }) {
-                HStack(spacing: 6) {
-                    if vm.isSending { ProgressView().controlSize(.small) }
-                    Text("Send")
+            HStack(spacing: 8) {
+                Button(action: { vm.sendPrompt() }) {
+                    HStack(spacing: 6) {
+                        if vm.isSending { ProgressView().controlSize(.small) }
+                        Text("Send")
+                    }
                 }
+                // Task #99: also disabled while documents are indexing — querying a
+                // half-built index answers ungrounded.
+                .disabled(vm.isSending
+                          || vm.libraryBusy
+                          || vm.selectedModel.isEmpty
+                          || vm.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                // Task #94: voice input (native SFSpeechRecognizer, on-device).
+                // Tap to dictate, tap again to stop → transcribe → fill the
+                // prompt (and auto-send when enabled). Permission is requested on
+                // first use. Independent of TTS, so it's always offered while the
+                // chat host is up.
+                Button(action: { vm.toggleVoiceInput() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: vm.isListening ? "mic.fill" : "mic")
+                        Text(vm.isListening ? "Stop" : "Speak")
+                    }
+                }
+                .disabled(vm.networkApiBaseUrl == nil || vm.isSending || vm.libraryBusy)
+                .foregroundColor(vm.isListening ? .red : nil)
             }
-            // Task #99: also disabled while documents are indexing — querying a
-            // half-built index answers ungrounded.
-            .disabled(vm.isSending
-                      || vm.libraryBusy
-                      || vm.selectedModel.isEmpty
-                      || vm.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            if let voiceError = vm.voiceError {
+                Text(voiceError)
+                    .font(.callout)
+                    .foregroundColor(.red)
+            }
             if vm.libraryBusy {
                 Text("Documents are indexing — chat is paused until ready.")
                     .font(.callout)
@@ -2237,6 +2441,10 @@ struct ContentView: View {
             // System-tab "Model parameters" card), including the Thinking control.
             Divider()
             ModelParametersSection(vm: vm)
+
+            // Task #94: native voice — TTS (speak responses) + STT settings.
+            Divider()
+            VoiceSection(vm: vm)
 
             // MAC8: Documents (library management). All ops go through the
             // sidecar's /api/library/* endpoints. Post-MAC34 the sidecar is
@@ -2329,6 +2537,87 @@ struct ModelParametersSection: View {
 
                 Button("Reset to model defaults") { vm.resetModelParams() }
                     .padding(.top, 2)
+            }
+            .padding(.top, 6)
+            .disabled(vm.isEncryptedLocked)
+        }
+    }
+
+    @ViewBuilder
+    private func paramRow<Content: View>(
+        title: String, label: String, @ViewBuilder slider: () -> Content
+    ) -> some View {
+        HStack {
+            Text(title).frame(width: 90, alignment: .leading)
+            slider()
+            Text(label).frame(width: 70, alignment: .trailing)
+                .foregroundColor(.secondary)
+        }
+    }
+}
+
+struct VoiceSection: View {
+    @ObservedObject var vm: RunnerViewModel
+
+    private var rateLabel: String {
+        let r = Int(vm.ttsRate)
+        return r == 0 ? "normal" : (r > 0 ? "+\(r)" : "\(r)")
+    }
+    private var volumeLabel: String { "\(Int(vm.ttsVolume))%" }
+
+    var body: some View {
+        DisclosureGroup("Voice") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Native macOS voice — responses are spoken with AVSpeechSynthesizer and dictation runs on-device, so no audio leaves this Mac.")
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+
+                // ── Spoken responses (TTS) ──
+                Toggle("Speak responses aloud", isOn: Binding(
+                    get: { vm.ttsEnabled },
+                    set: { vm.setTtsEnabled($0) }
+                ))
+
+                HStack {
+                    Text("Voice").frame(width: 90, alignment: .leading)
+                    Picker("", selection: Binding(
+                        get: { vm.ttsVoiceIdentifier },
+                        set: { vm.setTtsVoice($0) }
+                    )) {
+                        Text("System default").tag("")
+                        ForEach(vm.availableTtsVoices) { voice in
+                            Text(voice.label).tag(voice.id)
+                        }
+                    }
+                    .pickerStyle(MenuPickerStyle())
+                    .labelsHidden()
+                    Spacer()
+                }
+
+                paramRow(title: "Rate", label: rateLabel) {
+                    Slider(value: $vm.ttsRate, in: -10...10, step: 1,
+                           onEditingChanged: { editing in if !editing { vm.commitTtsRate() } })
+                }
+                paramRow(title: "Volume", label: volumeLabel) {
+                    Slider(value: $vm.ttsVolume, in: 0...100, step: 5,
+                           onEditingChanged: { editing in if !editing { vm.commitTtsVolume() } })
+                }
+
+                Button("Test voice") { vm.testTtsVoice() }
+                    .padding(.top, 2)
+
+                Divider().padding(.vertical, 4)
+
+                // ── Voice input (STT) ──
+                Text("Voice input")
+                    .font(.headline)
+                Text("Use the Speak button by the prompt to dictate a question.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Toggle("Send automatically after dictation", isOn: Binding(
+                    get: { vm.autoSendVoiceInput },
+                    set: { vm.setAutoSendVoiceInput($0) }
+                ))
             }
             .padding(.top, 6)
             .disabled(vm.isEncryptedLocked)
