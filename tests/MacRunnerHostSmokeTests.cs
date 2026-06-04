@@ -25,19 +25,17 @@ namespace FreeAiSsd.Tests;
 public sealed class MacRunnerHostSmokeTests
 {
     /// <summary>
-    /// Pins the C# defense-in-depth gate inside <see cref="RunnerLocalApiService.StartAsync"/>.
-    /// MAC34a (2026-05-09): the Mac Swift runner now hardcodes
-    /// <c>networkModeEnabled = true</c> in the handshake so this gate is never
-    /// exercised in production — chat sidecar always runs after unlock; LAN
-    /// exposure is governed by <c>networkBindAddress</c> alone. The test stays
-    /// to guarantee that if a future caller (CLI smoke, fuzzing, regressed
-    /// Swift) ever passes false, the host fails closed instead of silently
-    /// hanging without a ready line.
+    /// Pins the #85 contract inside <see cref="RunnerLocalApiService.StartAsync"/>:
+    /// <c>networkModeEnabled</c> now means "expose on the LAN", not "run the API".
+    /// With it OFF (device-only) the sidecar still starts on loopback so the
+    /// <c>/chat/</c> web UI works on this device with no key. This supersedes the
+    /// pre-#85 MAC34a behavior where a false flag failed closed without a ready
+    /// line (the Swift runner used to hardcode the flag true to dodge that gate).
     /// </summary>
     [Fact]
-    public async Task HostRunner_WithNetworkModeDisabled_FailsWithoutReadyLine()
+    public async Task HostRunner_WithLanExposureOff_StartsOnLoopback()
     {
-        using var workdir = new TempDir("freeai-mac6-host-disabled-");
+        using var workdir = new TempDir("freeai-mac6-host-loopback-");
         Directory.CreateDirectory(Path.Combine(workdir.Path, "logs"));
         Directory.CreateDirectory(Path.Combine(workdir.Path, "config"));
 
@@ -59,6 +57,8 @@ public sealed class MacRunnerHostSmokeTests
             }
         });
 
+        // stdin yields the handshake then EOF, which the command loop treats as
+        // shutdown — so a successful start exits cleanly with code 0.
         using var stdin = new StringReader(handshake + Environment.NewLine);
         using var stdout = new StringWriter();
         using var stderr = new StringWriter();
@@ -69,9 +69,10 @@ public sealed class MacRunnerHostSmokeTests
             stderr,
             new[] { "--test-mode" });
 
-        Assert.Equal(3, exitCode);
-        Assert.DoesNotContain("ready:", stdout.ToString(), StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("RunnerLocalApiService did not start", stderr.ToString());
+        Assert.Equal(0, exitCode);
+        Assert.Contains("ready:", stdout.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("127.0.0.1", stdout.ToString());
+        Assert.DoesNotContain("did not start", stderr.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

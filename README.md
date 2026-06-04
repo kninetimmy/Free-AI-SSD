@@ -329,7 +329,7 @@ The resulting drive is byte-for-byte interchangeable with a Windows-prepped driv
 2. Run Runner directly from the SSD:
    - Windows: `<SSD>\windows\runner\FreeAiSsd.Runner.exe`
    - macOS beta: `<SSD>/Runner.app` (at the drive root — double-click)
-3. Windows: load your documents and start chatting with RAG, citations, voice, HOTAS/PTT, and the LAN API. macOS beta: unlock the SSD if encrypted, start Ollama and Network Mode, then use RAG-backed chat with citations against a library already prepared on Windows. Mac document management, voice, HOTAS/PTT, and DCS import are not implemented yet.
+3. Windows: load your documents and start chatting with RAG, citations, voice, HOTAS/PTT, and the LAN API. macOS beta: unlock the SSD if encrypted and start Ollama, then use RAG-backed chat with citations against a library already prepared on Windows (the local chat API host comes up automatically on unlock). Mac document management, voice, HOTAS/PTT, and DCS import are not implemented yet.
 
 ### What Needs Internet vs. What Doesn't
 
@@ -580,10 +580,13 @@ curl -X POST http://RUNNER_HOST:41555/api/voice/query \
 
 Runner serves a standalone browser chat client from the same LAN API host — no app to install on the other device. It's the full assistant minus voice: model picker, document-library selection, RAG-grounded chat with sources, a collapsible thinking view, and per-request temperature/thinking controls. Chat history is saved per-device in the browser (localStorage).
 
-1. On the host, enable **Network Mode (Expose API on LAN)** in Runner. (Binding to the LAN is the same opt-in that powers the Companion app.)
+**On the host PC** the web UI runs on loopback automatically whenever Ollama is up — just click **"Open Chat UI"** in Runner (or open `http://127.0.0.1:41555/chat/`). No Network Mode, no API key for local use.
+
+**To reach it from other devices:**
+1. On the host, tick **"Expose API on my LAN"** in Runner's *Web chat UI & LAN access* settings (encrypted drive only — the same opt-in that powers the Companion app).
 2. Allow inbound TCP **41555** through the host firewall.
 3. From any LAN device — including an iPad on the sim rig — open `http://RUNNER_HOST:41555/chat/` (use the host's LAN IP or `HOSTNAME.local`).
-4. If the host requires an API key, enter it once when prompted; it's stored only in that browser. Change the host/key later from the in-app **Settings**.
+4. Enter the host's API key once when prompted; it's stored only in that browser. Change the host/key later from the in-app **Settings**.
 
 Per-request model parameters set in the web UI (temperature, thinking) apply only to that request and never overwrite the host's saved configuration. Plain HTTP over a trusted home LAN, API-key gated — do not expose port 41555 to the public internet.
 
@@ -654,8 +657,8 @@ The Companion tray app exposes the same two cues under identical key names (`ptt
 
 | Property | Default | Description |
 |---|---|---|
-| `networkModeEnabled` | `false` | Enable Runner-hosted LAN API |
-| `networkBindAddress` | `"127.0.0.1"` | Bind address for Runner API. Defaults to loopback; binding to `0.0.0.0` is an explicit opt-in. |
+| `networkModeEnabled` | `false` | Expose the Runner API on the LAN. The API always runs on loopback when Ollama is up (for the on-PC web UI); this flag rebinds it to `networkBindAddress` and enforces the API key. |
+| `networkBindAddress` | `"127.0.0.1"` | Bind address used when exposed on the LAN (typically `0.0.0.0`). Ignored — forced to loopback — when `networkModeEnabled` is off. |
 | `networkPort` | `41555` | TCP port for Runner API |
 | `networkApiKey` | `""` | Shared secret for API auth |
 | `networkRequireApiKey` | `true` | Require API key on all non-health endpoints |

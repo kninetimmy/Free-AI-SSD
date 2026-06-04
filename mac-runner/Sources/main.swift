@@ -502,14 +502,13 @@ final class RunnerViewModel: ObservableObject {
         } else {
             effectiveBind = "127.0.0.1"
         }
-        // MAC34a: the Mac sidecar's contract is "always run after unlock"
-        // (chat goes through it on loopback even when LAN exposure is off).
-        // RunnerLocalApiService.StartAsync still has a defensive
-        // `if (!config.NetworkModeEnabled) return;` gate inherited from the
-        // shared Windows code path, so we hardcode true in the handshake
-        // regardless of the user-facing toggle. LAN exposure is conveyed
-        // purely via `networkBindAddress` (loopback when toggle is OFF).
-        config["networkModeEnabled"] = true
+        // #85: the shared RunnerLocalApiService now always starts the host and
+        // treats networkModeEnabled as "expose on LAN" — it forces a loopback
+        // bind and skips API-key enforcement when the flag is off. So we pass
+        // the real toggle value (no more MAC34a hardcoded-true workaround); the
+        // sidecar still auto-spawns at unlock because ensureLocalChatStackRunning
+        // calls this regardless of the toggle, and loopback chat just works.
+        config["networkModeEnabled"] = exposed
         config["networkBindAddress"] = effectiveBind
 
         // MAC39: defensive cleanup before re-bind. Mirror of the MAC34b

@@ -46,6 +46,40 @@ public sealed class RunnerLocalApiServiceTests
     }
 
     [Fact]
+    public async Task DeviceOnly_HostStartsOnLoopbackAndServesHealth()
+    {
+        // #85: NetworkModeEnabled=false (device-only) no longer no-ops StartAsync —
+        // the host starts on loopback so the /chat/ web UI works on this device.
+        var fixture = await RunnerLocalApiFixture.StartAsync(
+            requireApiKey: true, allowTts: false, networkModeEnabled: false);
+        using var http = new HttpClient();
+
+        Assert.StartsWith("http://127.0.0.1:", fixture.BaseUrl);
+
+        var response = await http.GetAsync($"{fixture.BaseUrl}/api/health");
+        response.EnsureSuccessStatusCode();
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task DeviceOnly_DoesNotEnforceApiKey_EvenWhenConfigured()
+    {
+        // #85: the no-key rule keys off NetworkModeEnabled (LAN exposure), not the
+        // bind address. Device-only loopback never enforces the key, even if the
+        // saved config still has RequireApiKey=true (the default on a fresh drive).
+        var fixture = await RunnerLocalApiFixture.StartAsync(
+            requireApiKey: true, allowTts: false, networkModeEnabled: false);
+        using var http = new HttpClient();
+
+        var keyless = await http.PostAsJsonAsync(
+            $"{fixture.BaseUrl}/api/chat", new { model = "phi3", prompt = "hello" });
+        Assert.Equal(HttpStatusCode.OK, keyless.StatusCode);
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
     public async Task ApiKeyEnforcement_BlocksRemoteSttWithoutKey()
     {
         var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: true, allowTts: true, allowRemoteStt: true, allowVoiceQuery: true);
@@ -820,7 +854,8 @@ public sealed class RunnerLocalApiServiceTests
             bool voiceAutoSendToChat = true,
             int maxUploadMb = 10,
             IModelManagementService? modelService = null,
-            string? embeddingModelName = null)
+            string? embeddingModelName = null,
+            bool networkModeEnabled = true)
         {
             var chat = new FakeChatService();
             var stt = new FakeSttService();
@@ -830,7 +865,7 @@ public sealed class RunnerLocalApiServiceTests
             var service = new RunnerLocalApiService(chat, stt, ttsProvider, logger: null, modelService: modelService);
             var config = new PortableConfig
             {
-                NetworkModeEnabled = true,
+                NetworkModeEnabled = networkModeEnabled,
                 NetworkBindAddress = "127.0.0.1",
                 NetworkPort = GetFreePort(),
                 NetworkRequireApiKey = requireApiKey,

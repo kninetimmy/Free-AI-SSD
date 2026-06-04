@@ -67,7 +67,7 @@ internal sealed class HostLifetime : IAsyncDisposable
         if (string.IsNullOrWhiteSpace(baseUrl))
         {
             api.LogMessage -= OnLogMessage;
-            throw new InvalidOperationException("RunnerLocalApiService did not start. Ensure networkModeEnabled is true before spawning mac-runner-host.");
+            throw new InvalidOperationException("RunnerLocalApiService did not start (no base URL). Check the host log for the underlying Kestrel/bind failure.");
         }
 
         _api = api;
