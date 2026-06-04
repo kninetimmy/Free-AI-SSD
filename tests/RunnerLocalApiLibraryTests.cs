@@ -215,6 +215,40 @@ public sealed class RunnerLocalApiLibraryTests : IDisposable
     }
 
     [Fact]
+    public async Task UploadFiles_LargerThanDefaultKestrelLimit_ReachesAppLayer()
+    {
+        // Regression: a multipart upload larger than Kestrel's default 30 MB
+        // MaxRequestBodySize (and the 128 MB FormOptions multipart default) was
+        // rejected with a transport-layer 413 before HandleIngestUploadAsync's
+        // per-file size check ever ran, so the Mac runner's library stayed empty
+        // and the model hallucinated. StartAsync now sizes both limits to
+        // MaxDocumentSizeMB (+ headroom). The default fixture cap is 50 MB, so a
+        // ~31 MB body must now pass transport and reach the app layer. We use an
+        // unsupported extension so the proof is the clean app-layer rejection
+        // (no embedding work needed) rather than a 413.
+        await using var fixture = await Fixture.StartAsync(_tempRoot);
+
+        var libraryId = await CreateLibraryAsync(fixture, "BigButReaches");
+
+        using var content = new MultipartFormDataContent();
+        var bytes = new byte[31 * 1024 * 1024]; // 31 MB > old 30 MB Kestrel default, < 50 MB cap
+        var filePart = new ByteArrayContent(bytes);
+        filePart.Headers.ContentType = MediaTypeHeaderValue.Parse("application/octet-stream");
+        content.Add(filePart, name: "files", fileName: "big.bin");
+
+        var response = await fixture.Http.PostAsync(
+            $"{fixture.BaseUrl}/api/library/{libraryId}/files",
+            content);
+
+        Assert.True(response.IsSuccessStatusCode,
+            $"Upload returned {response.StatusCode} (a 413 here means the transport body limit regressed below MaxDocumentSizeMB).");
+        var events = await ReadNdjsonAsync(response);
+        var rejected = Assert.Single(events, e => e.GetProperty("type").GetString() == "file-rejected");
+        Assert.Equal("big.bin", rejected.GetProperty("fileName").GetString());
+        Assert.Contains("Unsupported", rejected.GetProperty("reason").GetString() ?? string.Empty);
+    }
+
+    [Fact]
     public async Task UploadFiles_UnknownLibrary_Returns404()
     {
         await using var fixture = await Fixture.StartAsync(_tempRoot);
