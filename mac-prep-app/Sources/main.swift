@@ -284,13 +284,21 @@ struct EncryptionSetupStepView: View {
                 .pickerStyle(.radioGroup)
                 .labelsHidden()
                 .onChange(of: accessSelection) { newValue in
-                    switch newValue {
-                    case .deviceOnly: vm.selectDeviceOnlyAccess()
-                    case .lan:        vm.requestLanAccess()
+                    // Defer to the next runloop tick: requestLanAccess() runs an
+                    // NSAlert via runModal(), and a nested modal loop spun up
+                    // inside SwiftUI's selection-commit transaction leaves the
+                    // radio unable to commit — the LAN option reads as
+                    // unclickable. Dispatching async lets the selection commit
+                    // first, then the confirm runs and we re-sync from the VM (a
+                    // cancelled LAN confirm leaves it on .deviceOnly, snapping the
+                    // radio back to match).
+                    DispatchQueue.main.async {
+                        switch newValue {
+                        case .deviceOnly: vm.selectDeviceOnlyAccess()
+                        case .lan:        vm.requestLanAccess()
+                        }
+                        accessSelection = vm.webUiAccessMode
                     }
-                    // Re-sync from the VM: a cancelled LAN confirm leaves the VM
-                    // on .deviceOnly, so snap the radio back to match.
-                    accessSelection = vm.webUiAccessMode
                 }
 
                 Text(vm.isLanAccess
