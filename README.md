@@ -22,6 +22,15 @@
 
 Prepare the drive once on a Windows or Mac machine with internet access — download the models, load your documents, and finalize the SSD. PrepApp ships for both hosts: a WPF app on Windows and a native SwiftUI app on Mac, so a Mac-only user can prep without owning a Windows machine. On Windows, the Runner provides the full offline assistant: document-grounded chat, voice I/O, HOTAS PTT, DCS binding import, and the LAN API. The macOS beta Runner provides a subset: RAG-backed chat against an already-indexed library, encrypted config unlock, and the API sidecar. See [Platform Availability](#platform-availability) below for a full feature comparison.
 
+> **New to local AI?** This app runs an AI model *on your own hardware* — nothing is sent to the cloud, and you don't need an account or a subscription. A few terms you'll see below:
+> - **Local LLM** — the AI "brain" (a large language model) that runs on your machine instead of a remote server.
+> - **Ollama** — the small engine that loads and runs those models locally. Free-AI-SSD bundles it on the drive for you.
+> - **Model / GGUF** — a downloadable AI model file (GGUF is the format Ollama uses); you choose which model to stage on the drive.
+> - **RAG** — *Retrieval-Augmented Generation*: the AI reads *your* documents and answers from them (citing sources), instead of relying on training data alone.
+> - **Embeddings** — how the app turns your documents into searchable math so it can find the right passage to answer a question.
+>
+> In short: **prep the drive once online, then carry it anywhere and ask questions about your own documents — fully offline.**
+
 **Quick start:** download from [Releases](../../releases), run `FreeAiSsd.PrepApp.exe` (Windows) or `PrepApp.app` (macOS), then follow [Setup & Installation](#setup) below. A condensed version is at [`docs/QUICKSTART.txt`](docs/QUICKSTART.txt).
 
 ---
@@ -50,27 +59,14 @@ Prepare the drive once on a Windows or Mac machine with internet access — down
 ---
 
 <details>
-<summary>🐛 Bug Tracker — known issues &amp; recent fixes</summary>
+<summary>🐛 Known issues &amp; status</summary>
 
 &nbsp;
 
-### Open bugs
+Open bugs, fixes, and feature status are tracked on GitHub rather than hand-maintained here (so this list can't drift out of date):
 
-| Bug | Platform | Steps to reproduce | Introduced |
-|---|---|---|---|
-| PrepApp — HF source picker broken when managing an existing drive | macOS PrepApp (Windows unverified) | Open a previously-configured drive → choose "Manage models (don't erase)" → expand "Add a model" → switch source dropdown from Ollama to Hugging Face → picker shows a raw scrollable list of `hf.co/…` paths (all tagged Custom) instead of the organized HF catalog browser; no search or filters available | [v1.3.28](../../releases/tag/v1.3.28) |
-| Runner — System TTS `ObjectDisposedException` when the synthesizer is torn down mid-speech | Windows Runner | With TTS enabled, switch the TTS engine (e.g. Piper → System) or start a new query while a System-voice response is still finishing → the `SpeakCompleted` callback runs `_synth.SpeakCompleted -= OnComplete` on an already-disposed `SpeechSynthesizer`, throwing `TargetInvocationException → ObjectDisposedException`. Caught by the global UI exception handler, so the app survives and TTS keeps working, but it logs one unhandled-UI ERROR per occurrence. | Latent since TTS shipped; surfaced on-hardware in [v1.4.0-alpha.5](../../releases/tag/v1.4.0-alpha.5) |
-
----
-
-### Recent fixes
-
-| Fix | Platform | Symptom | Fixed in |
-|---|---|---|---|
-| Mac Runner — HF models show wrong name in picker (`<repo>:<tag>` instead of `hf.co/<owner>/<repo>:<tag>`) | macOS Runner | Selecting an HF model sent a short tag to Ollama, which returned 404; chat failed immediately | [v1.3.28](../../releases/tag/v1.3.28) |
-| Windows PrepApp — crash on launch (NullReferenceException) | Windows PrepApp | `TargetInvocationException → NullReferenceException` at startup; WPF fired `SourceCombo_SelectionChanged` before the ViewModel was initialized | [v1.3.27](../../releases/tag/v1.3.27) |
-| HF model pull completes then fails | Windows + macOS PrepApp | Download reached 100 % then threw "Unable to locate model blob" — manifest resolver used the Ollama built-in registry path instead of `hf.co/` | [v1.3.26](../../releases/tag/v1.3.26) |
-| Mac Runner — port leak after Lock + re-unlock | macOS Runner | After locking the drive and re-selecting the SSD, Kestrel failed to bind its port (already in use); runner was unusable until the app was quit and restarted | [v1.3.20](../../releases/tag/v1.3.20) |
+- **[Open issues](../../issues)** — current known bugs and feature requests
+- **[Releases](../../releases)** — per-version changelog and the fixes shipped in each build
 
 </details>
 
@@ -106,11 +102,11 @@ A clear picture of what works where today. Mac support is actively expanding but
 | Feature | Windows Runner | macOS Runner (beta) |
 |---|---|---|
 | Chat (non-RAG) | ✅ Full | ✅ Full |
-| RAG chat with inline citations | ✅ Full | ⚠️ Query-only — reads a library indexed on Windows |
+| RAG chat (sources panel; inline citations opt-in) | ✅ Full | ⚠️ Query-only — reads a library indexed on Windows |
 | Add / sweep / rebuild document library | ✅ Full | ❌ Not supported yet |
-| Voice input (Whisper STT) | ✅ Fully local | ❌ Not supported yet |
-| Voice output (TTS) | ✅ SAPI + Piper | ❌ Not supported yet |
-| HOTAS Push-to-Talk | ✅ DirectInput | ❌ Not supported yet |
+| Voice input (speech-to-text) | ✅ Whisper.cpp (fully local) | ✅ On-device dictation (`SFSpeechRecognizer`) |
+| Voice output (text-to-speech) | ✅ SAPI + Piper | ✅ Native (`AVSpeechSynthesizer`) |
+| HOTAS Push-to-Talk | ✅ DirectInput | ❌ Not ported yet |
 | DCS Bindings Import | ✅ Full | ❌ Not supported yet |
 | Network Mode (LAN API) | ✅ Full (v2) | ✅ Sidecar-hosted |
 | Web chat UI (`/chat/`, browser) | ✅ Full | ✅ Sidecar-hosted |
@@ -127,14 +123,14 @@ A clear picture of what works where today. Mac support is actively expanding but
 ### Windows Runner
 
 - ✅ **Portable offline AI** — Ollama staged on the SSD, bound to loopback only; no cloud, no account, no subscription
-- ✅ **RAG document library** — PDF / TXT / MD / JSON / CSV with inline source citations and SIMD-optimized vector search; retrieved chunks cited as `[filename p.N]`
+- ✅ **RAG document library** — PDF / TXT / MD / JSON / CSV with a hybrid retriever (semantic + keyword search) and a Sources panel; optional inline citations like `[guide.pdf §Engine Start p.12]`, plus opt-in OCR to recover text from scanned/diagram pages
 - ✅ **DCS World bindings import** — auto-detects Saved Games, scans aircraft, merges stick/throttle/pedals into per-aircraft reference docs for RAG
 - ✅ **Voice input (Whisper.cpp)** — fully local STT; Tiny / Base / Small / Medium models
 - ✅ **Voice output (TTS)** — Windows SAPI or Piper neural TTS; per-device audio routing
 - ✅ **HOTAS Push-to-Talk** — DirectInput joystick button triggers record → transcribe → send → TTS, hands-free; VR-friendly overlay
 - ✅ **Network Mode (LAN API v2)** — authenticated HTTP API for chat, streaming chat, STT upload, TTS, and voice-query orchestration
 - ✅ **Web chat UI** — install-free browser client served from the LAN API (`http://HOST:41555/chat/`); full assistant minus voice, with model/library pickers, RAG sources, and per-device history. Works from any LAN device including an iPad
-- ✅ **Companion tray app** — lightweight Windows client for a second LAN PC; no SSD required; supports its own HOTAS PTT loop
+- ✅ **Companion tray app** — lightweight Windows client for a second LAN PC; no SSD required; auto-discovers the Runner on the LAN (zero-config), supports its own HOTAS + keyboard PTT loop, and can be auto-bundled + enabled by the Flight Sim setup profile for VR
 - ✅ **Headless CLI (`FreeAiSsd.RunnerCli`)** — terminal REPL for SSH/Tailscale access; streams chat, shows RAG sources, zero GUI deps
 
 ### Model Management (PrepApp — Windows and macOS)
@@ -154,15 +150,16 @@ A clear picture of what works where today. Mac support is actively expanding but
 ### macOS Runner (beta)
 
 - 🧪 **Beta** — staged at `<SSD>/Runner.app` (drive root, double-click to launch; no zip to expand)
-- ✅ RAG-backed chat with inline citations against a Windows-prepped active library
+- ✅ RAG-backed chat (Sources panel; optional inline citations) against a Windows-prepped active library
+- ✅ Native voice — on-device dictation (`SFSpeechRecognizer`) and spoken responses (`AVSpeechSynthesizer`); audio never leaves the Mac
 - ✅ Encrypted SSD unlock / save (native CryptoKit + CommonCrypto port, byte-compatible with Windows)
-- ✅ Network Mode API sidecar
-- ⚠️ No document management, voice, HOTAS, or DCS import yet
+- ✅ Network Mode API sidecar (also serves voice-query for a LAN Companion)
+- ⚠️ No document management, HOTAS PTT, or DCS import yet
 
 **Known limitations across all platforms:**
 - RAG ingestion and index management on macOS: not supported (Windows Runner required)
 - Voice upload accepts WAV (PCM 16-bit mono 16kHz) and raw `pcm16le` only; other codecs not implemented
-- PDF extraction requires an embedded text layer; scanned/image-only PDFs need prior OCR
+- PDF extraction reads the embedded text layer; scanned/image-only or diagram-heavy PDFs can be recovered with the opt-in built-in OCR (Tesseract, off by default)
 - DOCX is not supported (PDF / TXT / MD / JSON / CSV only)
 - Direct Ollama LAN exposure is intentionally not supported — Runner API is the only network surface
 - IL-2 Sturmovik and War Thunder binding parsers: planned, not yet implemented
@@ -329,7 +326,7 @@ The resulting drive is byte-for-byte interchangeable with a Windows-prepped driv
 2. Run Runner directly from the SSD:
    - Windows: `<SSD>\windows\runner\FreeAiSsd.Runner.exe`
    - macOS beta: `<SSD>/Runner.app` (at the drive root — double-click)
-3. Windows: load your documents and start chatting with RAG, citations, voice, HOTAS/PTT, and the LAN API. macOS beta: unlock the SSD if encrypted and start Ollama, then use RAG-backed chat with citations against a library already prepared on Windows (the local chat API host comes up automatically on unlock). Mac document management, voice, HOTAS/PTT, and DCS import are not implemented yet.
+3. Windows: load your documents and start chatting with RAG, citations, voice, HOTAS/PTT, and the LAN API. macOS beta: unlock the SSD if encrypted and start Ollama, then use RAG-backed chat (with native on-device voice in/out) against a library already prepared on Windows (the local chat API host comes up automatically on unlock). Mac document management, HOTAS/PTT, and DCS import are not implemented yet.
 
 ### What Needs Internet vs. What Doesn't
 
@@ -364,9 +361,9 @@ The resulting drive is byte-for-byte interchangeable with a Windows-prepped driv
 - If install is blocked, refresh prerequisites from PrepApp while online and retry
 
 **macOS beta limitations**
-- The beta app is a Swift runner plus a local .NET API sidecar. It supports selecting/inferring the SSD, reading installed models, starting macOS Ollama, Network Mode API hosting, and RAG-backed chat with citations against an already-indexed active library.
+- The beta app is a Swift runner plus a local .NET API sidecar. It supports selecting/inferring the SSD, reading installed models, starting macOS Ollama, Network Mode API hosting, native on-device voice (dictation + spoken responses), and RAG-backed chat against an already-indexed active library.
 - It unlocks encrypted SSDs prepped on Windows and saves changes back to the encrypted blob. The on-disk format is identical on both platforms; the Mac unlock path is a native CryptoKit + CommonCrypto reimplementation pinned to the C# format by cross-language tests.
-- It does not provide document library management, Mac-side ingestion/rebuild/sweep, voice/TTS, HOTAS/PTT, or DCS import yet.
+- It does not provide document library management, Mac-side ingestion/rebuild/sweep, HOTAS/PTT, or DCS import yet.
 
 ### Prereq trust model
 
@@ -405,12 +402,12 @@ The Windows Runner includes a **Reference Documents** panel. Add your own files 
 4. Run **Sweep folders now** to ingest new or changed files, or **Rebuild index** for a full re-index
 5. Ask a question — the library is active
 
-**How citations work:** Retrieved chunks are injected into the prompt with inline citations like `[manual.pdf p.12]` or `[notes.txt]`. The **Sources** list shows what was used. If nothing meets the similarity threshold, the model is told "No relevant documents found" and responds without pretending it has context it doesn't.
+**How retrieval works:** A hybrid retriever combines semantic (vector) search with keyword (BM25) search, fuses the results, and pulls neighboring chunks for surrounding context. The **Sources** list always shows what was used. Inline citations like `[guide.pdf §Engine Start p.12]` are opt-in (`ragInlineCitations`, off by default — answers stay concise) and are stripped before text-to-speech when enabled. If nothing relevant is found, the model is told so and won't invent context.
 
 **macOS:** RAG queries work against a library indexed on Windows. Adding documents, folder sweeps, and index rebuilds require the Windows Runner.
 
 **Limitations:**
-- PDF extraction depends on the embedded text layer. Scanned/image-only PDFs may extract poorly without prior OCR.
+- PDF extraction reads the embedded text layer. For scanned/image-only or diagram-heavy PDFs, enable the built-in OCR (`ocrEnabled`, off by default) to recover text from embedded images.
 - DOCX is not supported.
 - Optimized for personal and small-to-medium libraries (up to ~10,000 chunks; a warning is logged if exceeded).
 
@@ -607,18 +604,46 @@ All settings live in `config/portable-config.json` on the SSD.
 | `preferredCompute` | `"auto"` | Compute mode: `"auto"` (detected GPU — AMD→Vulkan, NVIDIA→CUDA, Intel→Vulkan) or `"cpu"` (force CPU). Legacy `"cuda"`/`"rocm"` are treated as `"auto"` |
 | `useStreamingChat` | `true` | Stream tokens as they generate; falls back to non-streaming if streaming fails |
 
+### Chat model parameters
+
+Per-chat overrides for the active model. Sentinel values mean "use the model's built-in default," so the app stays compatible with any GGUF model. The web/desktop UI can set these per request without changing the saved config.
+
+| Property | Default | Description |
+|---|---|---|
+| `modelContextWindow` | `0` | Override Ollama `num_ctx`; `0` = model default |
+| `modelTemperature` | `-1` | Override `temperature` (0.0–2.0); `-1` = model default |
+| `modelTopP` | `-1` | Override `top_p` (0.0–1.0); `-1` = model default |
+| `modelMaxOutputTokens` | `-1` | Override `num_predict` (max tokens per response); `-1` = unbounded. Also caps the thinking budget. |
+| `modelThinkMode` | `""` | Reasoning control: `""` = model default, `"off"`, `"low"`, `"medium"`, `"high"` (only for models that support thinking) |
+
 ### Document Library & RAG
 
 | Property | Default | Description |
 |---|---|---|
 | `activeDocumentLibraryId` | `null` | Active library ID; `null` disables RAG |
-| `retrievalTopK` | `5` | Number of chunks retrieved per query |
+| `retrievalTopK` | `8` | Number of chunks retrieved per query |
+| `hybridRetrievalEnabled` | `true` | Fuse semantic (vector) + keyword (BM25) search; `false` = vector-only. No reindex needed. |
+| `retrievalNeighborRadius` | `1` | Chunks pulled on each side of a hit for context; `0` disables |
+| `ragInlineCitations` | `false` | `true` appends inline labels like `[guide.pdf §Engine Start p.12]` (stripped before TTS); `false` = concise answers, sources still shown in the Sources panel |
 | `chunkSize` | `1200` | Characters per chunk during indexing |
 | `chunkOverlap` | `200` | Characters of overlap between adjacent chunks |
 | `embeddingModelName` | `"nomic-embed-text"` | Embedding model served by local Ollama |
 | `minimumSimilarityThreshold` | `0.3` | Minimum cosine similarity (0.0–1.0) for a chunk to be included; lower = more permissive |
 | `maxEmbeddingConcurrency` | `4` | Concurrent embedding requests during ingestion |
-| `maxDocumentSizeMB` | `50` | Max file size (MB) accepted for ingestion |
+| `maxDocumentSizeMB` | `512` | Max file size (MB) accepted for ingestion |
+
+### Document OCR (opt-in)
+
+Off by default. When enabled (and a Tesseract bundle is staged on the SSD), OCR recovers text baked into images inside PDFs (e.g. cockpit MFD labels, diagrams) and adds it as supplementary searchable chunks — the clean text layer is never replaced.
+
+| Property | Default | Description |
+|---|---|---|
+| `ocrEnabled` | `false` | Run OCR over embedded PDF images during ingestion |
+| `ocrLanguage` | `"eng"` | Tesseract language code(s) passed to `-l` |
+| `ocrMinImagePixels` | `10000` | Skip images smaller than this (width × height) — filters out icons, rules, logos |
+| `ocrMinWordConfidence` | `55` | Drop OCR words below this confidence (0–100) to suppress garble |
+| `ocrMaxImagesPerFile` | `4000` | Hard cap on images OCR'd per file |
+| `ocrPerImageTimeoutSeconds` | `30` | Per-image OCR timeout (a stuck image is skipped) |
 
 ### Voice — Speech-to-Text
 
@@ -685,12 +710,14 @@ The Companion tray app exposes the same two cues under identical key names (`ptt
 - ✅ Manage models on encrypted drives (Windows + Mac PrepApp)
 
 **Windows Runner (full feature set):**
-- ✅ RAG document library (PDF / TXT / MD / JSON / CSV, inline citations, SIMD vector search)
+- ✅ RAG document library (PDF / TXT / MD / JSON / CSV) — hybrid retrieval (semantic + BM25), section-aware chunking, opt-in inline citations, SIMD vector search
+- ✅ Opt-in PDF-image OCR (Tesseract) — recovers text from scanned/diagram pages
 - ✅ DCS World bindings import (auto-detect, multi-device merge)
 - ✅ Voice pipeline (Whisper.cpp STT + Windows SAPI / Piper TTS)
 - ✅ HOTAS Push-to-Talk (DirectInput, VR-friendly overlay)
 - ✅ Network Mode v2 (LAN API, streaming, STT/TTS endpoints)
-- ✅ Companion tray app (second-PC client, HOTAS PTT, `returnAudio` local TTS)
+- ✅ Companion tray app — second-PC client, zero-config LAN auto-discovery, HOTAS + keyboard PTT, `returnAudio` local TTS
+- ✅ Setup profiles (Flight Sim / General Assistant) — profile-tuned defaults at prep time and in Runner; Flight Sim auto-bundles the Companion
 - ✅ Headless CLI (RunnerCli — SSH/Tailscale terminal access)
 
 **Model management (Windows + Mac):**
@@ -701,20 +728,19 @@ The Companion tray app exposes the same two cues under identical key names (`ptt
 
 **macOS:**
 - ✅ Native SwiftUI PrepApp (arm64, exFAT, byte-identical SSD layout to Windows PrepApp)
-- 🧪 macOS Runner beta (RAG-backed chat, encrypted unlock, Network Mode sidecar)
+- 🧪 macOS Runner beta (RAG-backed chat, native on-device voice in/out, encrypted unlock, Network Mode sidecar — also serves voice-query for a LAN Companion)
 
 ### In Progress
 
 - 🔄 **Windows HF token persistence on encrypted drives** — HF credentials currently don't write back through the encrypted config path on Windows; fix in progress
-- 🔄 **Companion keyboard PTT** — bind a keyboard key as an alternative to a HOTAS button for PTT activation
 - 🔄 **Document replacement edge cases** — hardening replace + rebuild for unusual file rename/hash scenarios
 
 ### Planned
 
 - 📋 **Mac document library management** — add/sweep/rebuild from the Mac Runner (currently read-only against a Windows-prepped library)
-- 📋 **Mac voice / TTS / HOTAS / DCS import** — bring Mac Runner to feature parity with Windows
+- 📋 **Mac HOTAS PTT / DCS import** — remaining Mac Runner parity items (native voice in/out already shipped)
 - 📋 **IL-2 Sturmovik and War Thunder binding parsers** — pending example binding files
-- 📋 **Setup profiles / Copilot personas** — mode selection at prep time: general use vs. flight sim (light vs. full Whisper + bindings tools) with curated system prompts
+- 📋 **Copilot persona prompts** — extend the shipped Flight Sim / General Assistant profiles with curated, profile-specific system prompts
 
 </details>
 
@@ -772,7 +798,7 @@ Runner's business logic lives in injectable services with no UI dependencies, en
 | Path traversal prevention | `PathGuards` enforces sibling boundary checks with platform-aware case sensitivity |
 | Shell injection prevention | `ProcessRunner` uses `ArgumentList`, not string concatenation |
 
-No critical vulnerabilities identified in security review (2026-02-19).
+A security review on 2026-02-19 found no critical vulnerabilities in the audited surface. The invariants above are enforced in code and tests; ongoing issues are tracked on [GitHub Issues](../../issues).
 
 ### SSD Directory Layout
 
@@ -785,9 +811,12 @@ docs/libraries/           — Reference Documents library files, manifests, inde
 windows/runner/           — Runner app
 windows/tools/ollama/     — staged Ollama runtime + trust attestation
 windows/tools/piper/      — optional Piper TTS binary and voice models (user-installed)
+windows/tools/tesseract/  — optional Tesseract OCR engine + tessdata
 windows/tools/prereqs/    — offline prerequisite installers + manifest
 Runner.app/               — macOS Runner bundle (root-level, launchable directly)
 mac/tools/ollama/         — staged macOS Ollama runtime + trust attestation
+mac/tools/piper/          — optional Piper TTS binary and voice models
+mac/tools/tesseract/      — optional Tesseract OCR engine + tessdata
 cache/                    — prep-time download cache
 ```
 
@@ -810,6 +839,7 @@ cache/                    — prep-time download cache
 | `companion/` | `net8.0-windows` | WPF Companion tray client (LAN second-PC use) |
 | `tools/FreeAiSsd.PrereqFetch/` | `net8.0` | CI helper that pre-builds the offline prereq bundle via the shared `PrereqResolver` |
 | `tests/` | `net10.0` | xUnit test project (`FreeAiSsd.Tests`) |
+| `tests-ocr/` | `net10.0` | xUnit OCR test project (`FreeAiSsd.Tests.Ocr`) — Tesseract OCR coverage |
 | `docs/` | — | Documentation (includes `QUICKSTART.txt`) |
 
 ### Shared Library Components
@@ -872,32 +902,15 @@ dotnet test FreeAiSsd.sln -c Release
 
 ### Test Coverage
 
-900+ test cases across the test project. 1 Windows-specific path test expected to fail on Linux. Per-component counts below are directional.
+~1,000+ test cases (`[Fact]`/`[Theory]`; Theories expand to more at runtime) across ~100 test files in `tests/` and `tests-ocr/`. One Windows-specific path test is expected to fail on Linux. Coverage spans:
 
-| Area | Tests | Status |
-|---|---|---|
-| `DcsBindingParser` | 44 | Covered |
-| `DcsAircraftScanner` | 33 | Covered |
-| `VectorIndexRetrieval` | 17 | Covered |
-| `SsdEncryption` | 15 | Covered |
-| `DocumentParser` | 14 | Covered |
-| `DocumentIngestionSecurity` | 13 | Covered |
-| `DocumentChunker` | 10 | Covered |
-| `OllamaPackageTrustPolicy` | 9 | Covered |
-| `PrepViewModel` | 20 | Covered |
-| `CitationBuilder` | 8 | Covered |
-| `RagPromptBuilder` | 7 | Covered |
-| `PrepDriveWriteGuard` | 7 | Covered |
-| `RagPipelineIntegration` | 5 | Covered |
-| `ModelOperations` | 5 | Covered |
-| `PathGuards` | 3 | Covered |
-| `PrereqInstallValidator` | 1 | Covered |
-| `DocumentHashDedup` | 1 | Covered |
-| `DownloadManager` | 0 | Not covered |
-| `DriveInspector` | 0 | Not covered |
-| `SsdLayout` | 0 | Not covered |
-| `SystemCompatibility` | 0 | Not covered |
-| `PortableConfig` | 0 | Not covered |
+- DCS binding parsing, aircraft scanning, and batch import
+- The RAG pipeline — chunking, hybrid retrieval, RRF fusion, citations, neighbor expansion, and OCR
+- Encryption, prereq trust/integrity, path guards, and the fail-closed write guard
+- Mac ↔ Windows cross-language encrypted-config parity
+- The LAN API, RunnerCli, Companion config, and model management (HF + Ollama pulls)
+
+CI (`.github/workflows/build.yml`) is the source of truth for the current count and pass/fail status.
 
 ### macOS Signing and Notarization
 
