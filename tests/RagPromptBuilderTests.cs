@@ -283,5 +283,9 @@ public class RagPromptBuilderTests
         var output = RagPromptBuilder.Build("What is photosynthesis?", results);
 
         Assert.Contains("That information is not in the provided context.", output.Prompt);
+        // Drafted softening (RAG accuracy work, task #110): partial context should be
+        // answered, not refused — the exact phrase is reserved for unrelated context.
+        // Pinned alongside the verbatim phrase so the contract can't drift (decision #141).
+        Assert.Contains("covers the question only partially", output.Prompt);
     }
 }

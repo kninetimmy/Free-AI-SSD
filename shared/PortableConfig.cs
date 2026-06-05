@@ -81,8 +81,11 @@ public sealed class PortableConfig
 
     /// <summary>Active reference document library ID (or null for disabled RAG).</summary>
     public string? ActiveDocumentLibraryId { get; set; }
-    /// <summary>Number of chunks to retrieve per query.</summary>
-    public int RetrievalTopK { get; set; } = 5;
+    /// <summary>Number of chunks to retrieve per query (candidates handed to the prompt
+    /// builder, which then packs to the model's token budget; neighbors are extra). Raised
+    /// 5 -> 8 so the right chunk has more room to land inside the live window on large
+    /// multi-hundred-page guides (RAG accuracy work, task #110).</summary>
+    public int RetrievalTopK { get; set; } = 8;
     /// <summary>
     /// When true (default), retrieval fuses the dense-vector arm with a BM25 lexical arm
     /// (reciprocal rank fusion) so exact-token facts the embedder rates below
