@@ -148,6 +148,125 @@ final class MacTextToSpeech {
         utterance.volume = VoiceTextProcessing.avSpeechVolume(fromConfigVolume: configVolume)
         synthesizer.speak(utterance)
     }
+
+    // MARK: - Offline synthesis to WAV (task #106, companion voice path)
+
+    /// Renders `text` to an in-memory 16-bit PCM WAV via AVSpeechSynthesizer.write,
+    /// so the Windows VR companion can play the Runner's spoken reply locally
+    /// (the /api/voice/query returnAudio path). Uses a dedicated synthesizer per
+    /// call — never the streaming `synthesizer` above — because write() and
+    /// speak() cannot share an instance. The completion fires on the synthesizer's
+    /// callback queue; the caller hops to wherever it needs.
+    func synthesizeToWav(
+        text: String,
+        voiceId: String?,
+        rate: Int,
+        volume: Int,
+        completion: @escaping (Result<Data, Error>) -> Void
+    ) {
+        let clean = VoiceTextProcessing.stripCitations(text)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else {
+            completion(.failure(VoiceSynthesisError.emptyText))
+            return
+        }
+
+        let utterance = AVSpeechUtterance(string: clean)
+        if let voiceId, let voice = AVSpeechSynthesisVoice(identifier: voiceId) {
+            utterance.voice = voice
+        }
+        utterance.rate = VoiceTextProcessing.avSpeechRate(
+            fromConfigRate: rate,
+            min: AVSpeechUtteranceMinimumSpeechRate,
+            defaultRate: AVSpeechUtteranceDefaultSpeechRate,
+            max: AVSpeechUtteranceMaximumSpeechRate)
+        utterance.volume = VoiceTextProcessing.avSpeechVolume(fromConfigVolume: volume)
+
+        // Retain the writer for the duration of the async write() so it isn't
+        // deallocated mid-render; dropped from the set on completion.
+        let writer = AVSpeechSynthesizer()
+        writeLock.lock(); activeWriters.append(writer); writeLock.unlock()
+
+        var pcm = Data()
+        var sampleRate = 22050
+        var channels = 1
+        var finished = false
+
+        let finish: (Result<Data, Error>) -> Void = { [weak self] result in
+            guard let self else { return }
+            if finished { return }
+            finished = true
+            self.writeLock.lock()
+            self.activeWriters.removeAll { $0 === writer }
+            self.writeLock.unlock()
+            completion(result)
+        }
+
+        writer.write(utterance) { buffer in
+            guard let pcmBuffer = buffer as? AVAudioPCMBuffer else {
+                finish(.failure(VoiceSynthesisError.unsupportedBuffer))
+                return
+            }
+            if pcmBuffer.frameLength == 0 {
+                // Empty buffer marks end-of-stream.
+                if pcm.isEmpty {
+                    finish(.failure(VoiceSynthesisError.noAudioProduced))
+                } else {
+                    finish(.success(VoiceRpcProtocol.wrapPcm16ToWav(pcm, sampleRate: sampleRate, channels: channels)))
+                }
+                return
+            }
+            sampleRate = Int(pcmBuffer.format.sampleRate)
+            channels = Int(pcmBuffer.format.channelCount)
+            Self.appendInt16PCM(from: pcmBuffer, into: &pcm)
+        }
+    }
+
+    /// Lock + set guarding the per-call write synthesizers so concurrent
+    /// companion requests don't race on retention.
+    private let writeLock = NSLock()
+    private var activeWriters: [AVSpeechSynthesizer] = []
+
+    /// Append a buffer's samples as little-endian Int16 PCM. AVSpeechSynthesizer
+    /// may hand back either Int16 or Float32 buffers depending on the voice, so
+    /// handle both (float is scaled/clamped to the 16-bit range).
+    private static func appendInt16PCM(from buffer: AVAudioPCMBuffer, into pcm: inout Data) {
+        let frames = Int(buffer.frameLength)
+        guard frames > 0 else { return }
+        let channelCount = Int(buffer.format.channelCount)
+
+        if let int16 = buffer.int16ChannelData {
+            for frame in 0..<frames {
+                for ch in 0..<channelCount {
+                    var sample = int16[ch][frame].littleEndian
+                    withUnsafeBytes(of: &sample) { pcm.append(contentsOf: $0) }
+                }
+            }
+        } else if let floats = buffer.floatChannelData {
+            for frame in 0..<frames {
+                for ch in 0..<channelCount {
+                    let clamped = max(-1.0, min(1.0, floats[ch][frame]))
+                    var sample = Int16(clamped * 32767.0).littleEndian
+                    withUnsafeBytes(of: &sample) { pcm.append(contentsOf: $0) }
+                }
+            }
+        }
+    }
+}
+
+/// Failure modes for the offline TTS-to-WAV path (task #106).
+enum VoiceSynthesisError: LocalizedError {
+    case emptyText
+    case unsupportedBuffer
+    case noAudioProduced
+
+    var errorDescription: String? {
+        switch self {
+        case .emptyText: return "Nothing to speak."
+        case .unsupportedBuffer: return "The speech synthesizer returned an unsupported audio buffer."
+        case .noAudioProduced: return "The speech synthesizer produced no audio."
+        }
+    }
 }
 
 // MARK: - Speech to text
@@ -332,6 +451,92 @@ final class MacSpeechToText {
             } else {
                 completion(.failure(SpeechToTextError.noSpeechDetected))
             }
+        }
+    }
+
+    // MARK: - File recognition (task #106, companion voice path)
+
+    private let fileTaskLock = NSLock()
+    private var fileTasks: [SFSpeechRecognitionTask] = []
+
+    /// Transcribe a WAV buffer on-device for the companion voice path. The
+    /// companion's /api/voice/query upload (16-bit mono 16 kHz) arrives at the
+    /// sidecar, which RPCs the WAV here; we run SFSpeechURLRecognitionRequest
+    /// pinned to on-device (`requiresOnDeviceRecognition`, decision #168) so the
+    /// audio never leaves the machine. Independent of the live-mic `start`/`stop`
+    /// path above — safe to call while that's idle. Completion fires once.
+    func recognizeFile(wavData: Data, completion: @escaping (Result<String, Error>) -> Void) {
+        ensureAuthorized { [weak self] granted in
+            guard let self else { return }
+            guard granted else {
+                completion(.failure(SpeechToTextError.notAuthorized))
+                return
+            }
+            guard let recognizer = self.recognizer, recognizer.isAvailable else {
+                completion(.failure(SpeechToTextError.recognizerUnavailable))
+                return
+            }
+            guard recognizer.supportsOnDeviceRecognition else {
+                completion(.failure(SpeechToTextError.onDeviceUnsupported))
+                return
+            }
+
+            let tmpUrl = FileManager.default.temporaryDirectory
+                .appendingPathComponent("free-ai-stt-\(UUID().uuidString).wav")
+            do {
+                try wavData.write(to: tmpUrl)
+            } catch {
+                completion(.failure(SpeechToTextError.engineFailure(error.localizedDescription)))
+                return
+            }
+
+            let request = SFSpeechURLRecognitionRequest(url: tmpUrl)
+            request.requiresOnDeviceRecognition = true
+            request.shouldReportPartialResults = false
+
+            var done = false
+            var taskRef: SFSpeechRecognitionTask?
+            let settle: (Result<String, Error>) -> Void = { [weak self] result in
+                if done { return }
+                done = true
+                try? FileManager.default.removeItem(at: tmpUrl)
+                if let self, let task = taskRef {
+                    self.fileTaskLock.lock()
+                    self.fileTasks.removeAll { $0 === task }
+                    self.fileTaskLock.unlock()
+                }
+                completion(result)
+            }
+
+            let task = recognizer.recognitionTask(with: request) { result, error in
+                if let result, result.isFinal {
+                    let text = result.bestTranscription.formattedString
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    settle(.success(text))
+                } else if let error {
+                    settle(.failure(SpeechToTextError.recognitionFailed(error.localizedDescription)))
+                }
+                // Non-final results without error: keep waiting for the final one.
+            }
+            taskRef = task
+            self.fileTaskLock.lock(); self.fileTasks.append(task); self.fileTaskLock.unlock()
+        }
+    }
+
+    /// Resolve speech-recognition authorization for the server path, requesting
+    /// it if the user hasn't decided yet. Unlike the interactive mic flow this
+    /// only needs speech permission (no mic capture), so it doesn't prompt for
+    /// the microphone.
+    private func ensureAuthorized(_ completion: @escaping (Bool) -> Void) {
+        switch SFSpeechRecognizer.authorizationStatus() {
+        case .authorized:
+            completion(true)
+        case .notDetermined:
+            SFSpeechRecognizer.requestAuthorization { status in
+                DispatchQueue.main.async { completion(status == .authorized) }
+            }
+        default:
+            completion(false)
         }
     }
 

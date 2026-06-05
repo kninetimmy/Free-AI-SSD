@@ -235,8 +235,44 @@ final class RunnerViewModel: ObservableObject {
         ctl.onLogLine = { [weak self] line in
             self?.log("[api] \(line)")
         }
+        // Task #106: service the sidecar's voice RPC requests with the native
+        // macOS engines so a Windows VR companion can do voice against this Mac host.
+        ctl.onVoiceRequest = { [weak self] request, respond in
+            self?.handleVoiceRequest(request, respond: respond)
+        }
         return ctl
     }()
+
+    /// Task #106: bridge a sidecar voice RPC request to the native macOS engines.
+    /// STT runs on-device file recognition; TTS renders to a WAV the companion
+    /// plays locally. Runs off the host's stdout read queue; the native calls are
+    /// already async, and `respond` writes the result back to the sidecar's stdin.
+    private func handleVoiceRequest(_ request: VoiceRpcRequest, respond: @escaping (String) -> Void) {
+        switch request {
+        case .stt(let id, let wavBase64):
+            guard let wavData = Data(base64Encoded: wavBase64) else {
+                respond(VoiceRpcProtocol.sttResponse(id: id, text: nil, error: "Invalid base64 audio."))
+                return
+            }
+            stt.recognizeFile(wavData: wavData) { result in
+                switch result {
+                case .success(let text):
+                    respond(VoiceRpcProtocol.sttResponse(id: id, text: text, error: nil))
+                case .failure(let error):
+                    respond(VoiceRpcProtocol.sttResponse(id: id, text: nil, error: error.localizedDescription))
+                }
+            }
+        case .tts(let id, let text, let voiceId, let rate, let volume):
+            tts.synthesizeToWav(text: text, voiceId: voiceId, rate: rate, volume: volume) { result in
+                switch result {
+                case .success(let wav):
+                    respond(VoiceRpcProtocol.ttsResponse(id: id, wavBase64: wav.base64EncodedString(), error: nil))
+                case .failure(let error):
+                    respond(VoiceRpcProtocol.ttsResponse(id: id, wavBase64: nil, error: error.localizedDescription))
+                }
+            }
+        }
+    }
 
     /// Cached PBKDF2 output held while the session is unlocked. Kept private
     /// and zeroized on every lock path (manual lock, app background, app

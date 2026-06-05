@@ -15,8 +15,11 @@ namespace FreeAiSsd.MacRunnerHost;
 /// - <see cref="MacOllamaLifecycleService"/> in place of the Windows one.
 ///   The host does not start Ollama; it just consumes the trust gate's
 ///   contract via <c>IOllamaLifecycleService</c>.
-/// - <see cref="NoOpSpeechToTextService"/> in place of WhisperSpeechToTextService.
-/// - <see cref="NoOpTtsProvider"/> in place of TtsProvider.
+/// - <see cref="RpcSpeechToTextService"/> in place of WhisperSpeechToTextService
+///   and <see cref="RpcTextToSpeechService"/> in place of the Windows TTS engine
+///   (task #106): both round-trip to the Swift parent's native macOS Speech /
+///   AVSpeechSynthesizer over <see cref="VoiceRpcChannel"/> so /api/voice/query
+///   works on a Mac host. Pre-#106 these were NoOp and the endpoint 503'd.
 ///
 /// The Swift parent owns Ollama lifecycle (it already does for direct chat),
 /// and hands the resolved Ollama host URL to this process via the init
@@ -33,6 +36,10 @@ internal sealed class HostLifetime : IAsyncDisposable
     private readonly HttpClient _httpClient;
     private ServiceProvider? _services;
     private IRunnerLocalApiService? _api;
+    // Task #106: the per-container voice RPC channel. Rebuilt with the container
+    // on each (re)start; Program.cs's stdin loop routes voice-*-response frames
+    // here via TryDispatchVoiceResponse.
+    private VoiceRpcChannel? _voiceChannel;
 
     public HostLifetime(string ssdRoot, TextWriter stdout, TextWriter stderr, bool testMode = false)
     {
@@ -101,6 +108,14 @@ internal sealed class HostLifetime : IAsyncDisposable
             }
         }
 
+        // Fault any in-flight voice RPC requests before the container goes away so
+        // a pending /api/voice/query doesn't hang across a restart/shutdown.
+        if (_voiceChannel is not null)
+        {
+            _voiceChannel.Dispose();
+            _voiceChannel = null;
+        }
+
         if (_services is not null)
         {
             try
@@ -114,6 +129,14 @@ internal sealed class HostLifetime : IAsyncDisposable
             _services = null;
         }
     }
+
+    /// <summary>
+    /// Routes a stdin command line to the voice RPC channel. Returns true if the
+    /// line was a voice-*-response frame (and has been handled), false otherwise
+    /// so the caller can fall through to its own command handling.
+    /// </summary>
+    internal bool TryDispatchVoiceResponse(string line)
+        => _voiceChannel?.TryCompleteFromStdinLine(line) ?? false;
 
     public async ValueTask DisposeAsync()
     {
@@ -183,8 +206,19 @@ internal sealed class HostLifetime : IAsyncDisposable
             collection.AddSingleton<IChatService, ChatService>();
         }
 
-        collection.AddSingleton<ISpeechToTextService, NoOpSpeechToTextService>();
-        collection.AddSingleton<ITtsProvider, NoOpTtsProvider>();
+        // Task #106 (Phase 2 VR companion): native STT/TTS over the sidecar<->Swift
+        // RPC channel instead of NoOp, so /api/voice/query works on a Mac host. The
+        // channel writes request frames through the same locked stdout writer the
+        // log/ready lines use; Swift replies on stdin (dispatched by Program.cs).
+        var voiceChannel = new VoiceRpcChannel(WriteLineSafe, _logger);
+        _voiceChannel = voiceChannel;
+        collection.AddSingleton<ISpeechToTextService>(_ => new RpcSpeechToTextService(voiceChannel));
+        collection.AddSingleton<ITtsProvider>(_ =>
+        {
+            var provider = new TtsProvider();
+            provider.SetCurrent(new RpcTextToSpeechService(voiceChannel, config));
+            return provider;
+        });
 
         collection.AddSingleton<IRunnerLocalApiService>(sp => new RunnerLocalApiService(
             sp.GetRequiredService<IChatService>(),

@@ -96,6 +96,14 @@ namespace FreeAiSsd.MacRunnerHost
                     continue;
                 }
 
+                // Task #106: voice-*-response frames from the Swift parent complete a
+                // pending /api/voice/query STT/TTS round-trip. Dispatch them first so
+                // they're never mistaken for an unknown command.
+                if (lifetime.TryDispatchVoiceResponse(line))
+                {
+                    continue;
+                }
+
                 if (line.Equals("shutdown", StringComparison.OrdinalIgnoreCase))
                 {
                     break;
