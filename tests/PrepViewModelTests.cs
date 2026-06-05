@@ -461,6 +461,48 @@ public class PrepViewModelTests
     }
 
     [Fact]
+    public void ApplyProfileSelection_FlightSim_TurnsOnVrCompanion()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        Assert.False(vm.InstallVrCompanion);
+
+        vm.ApplyProfileSelection(UserProfile.FlightSim);
+
+        Assert.Equal(UserProfile.FlightSim, vm.SelectedProfile);
+        Assert.True(vm.InstallVrCompanion);
+    }
+
+    [Fact]
+    public void ApplyProfileSelection_GeneralAssistant_LeavesVrCompanionOff()
+    {
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+
+        vm.ApplyProfileSelection(UserProfile.GeneralAssistant);
+
+        Assert.Equal(UserProfile.GeneralAssistant, vm.SelectedProfile);
+        Assert.False(vm.InstallVrCompanion);
+    }
+
+    [Fact]
+    public void SettingSelectedProfileDirectly_DoesNotStompVrCompanionChoice()
+    {
+        // The preference-restore path assigns SelectedProfile directly; it must
+        // not re-force the companion on and clobber a user's saved opt-out.
+        SetupDefaultMocks();
+        var vm = CreateViewModel();
+        vm.Initialize();
+        vm.InstallVrCompanion = false;
+
+        vm.SelectedProfile = UserProfile.FlightSim;
+
+        Assert.False(vm.InstallVrCompanion);
+    }
+
+    [Fact]
     public async Task FinalizeCommand_SelectedProfile_PersistsActiveProfile_AndProfileDefaults()
     {
         SetupDefaultMocks();

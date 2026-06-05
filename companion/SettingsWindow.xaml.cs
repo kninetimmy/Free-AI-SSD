@@ -30,7 +30,7 @@ public partial class SettingsWindow : Window
             ? "No key set. Leave blank for none."
             : "Key is set. Leave blank to keep it, click 'Clear key' to remove it, or enter a new one.";
         ServerRequiresApiKeyCheck.IsChecked = !current.ServerRequiresApiKey;
-        PttBindingText.Text = string.IsNullOrWhiteSpace(current.PttBinding) ? "key:F8" : current.PttBinding;
+        PttBindingText.Text = string.IsNullOrWhiteSpace(current.PttBinding) ? CompanionDefaults.DefaultPttBinding : current.PttBinding;
         InputDeviceCombo.ItemsSource = inputDevices;
         InputDeviceCombo.Text = current.InputDeviceName ?? string.Empty;
         OutputDeviceText.Text = current.OutputDeviceName ?? string.Empty;

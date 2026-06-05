@@ -9,6 +9,7 @@ using System.Windows;
 using System.Windows.Forms;
 using FreeAiSsd.Shared;
 using FreeAiSsd.Shared.Client;
+using FreeAiSsd.Shared.Discovery;
 using FreeAiSsd.Shared.Models;
 using NAudio.Wave;
 
@@ -26,6 +27,7 @@ internal sealed class CompanionRuntime : IDisposable
     private readonly NotifyIcon _tray;
     private readonly HttpClient _http = new();
     private readonly CancellationTokenSource _cts = new();
+    private readonly RunnerBeaconListener _discovery;
     private readonly string _configPath;
     private CompanionConfig _config = new();
     private KeyboardPttHotkey? _hotkey;
@@ -39,6 +41,7 @@ internal sealed class CompanionRuntime : IDisposable
         _audio = audio;
         _hotas = hotas;
         _log = log;
+        _discovery = new RunnerBeaconListener(msg => _log.Write(msg));
         _configPath = Path.Combine(AppContext.BaseDirectory, "companion-config.json");
         _tray = new NotifyIcon
         {
@@ -79,12 +82,29 @@ internal sealed class CompanionRuntime : IDisposable
         }
 
         StartLive();
+        MaybeShowHotasRebindNudge();
+    }
+
+    // While the companion is still on the seeded keyboard default (a fresh
+    // FlightSim drive), gently remind the user they can bind a HOTAS button.
+    // Non-blocking and self-dismissing; stops appearing once they rebind.
+    private void MaybeShowHotasRebindNudge()
+    {
+        if (string.Equals(_config.PttBinding?.Trim(), CompanionDefaults.DefaultPttBinding, StringComparison.OrdinalIgnoreCase))
+        {
+            _tray.ShowBalloonTip(
+                4000,
+                "Companion ready",
+                "Push-to-talk is on F8. Open Settings from the tray to bind your HOTAS button instead.",
+                ToolTipIcon.Info);
+        }
     }
 
     private void StartLive()
     {
         // codex
         _liveModeEnabled = true;
+        _discovery.Start();
         InitializeBindings();
         ApplyOverlayVisibility();
         if (!_healthLoopStarted)
@@ -188,15 +208,82 @@ internal sealed class CompanionRuntime : IDisposable
     {
         if (!TryBuildBaseUri(out var baseUri, out var error))
         {
-            _tray.ShowBalloonTip(2500, "Companion config", error, ToolTipIcon.Warning);
+            // No address yet and discovery hasn't found a Runner — that's the
+            // normal first-few-seconds state, so log quietly and let the next
+            // probe pick up the beacon rather than ballooning every cycle.
+            if (string.IsNullOrWhiteSpace(_config.HostAddress))
+            {
+                _log.Write(error);
+            }
+            else
+            {
+                _tray.ShowBalloonTip(2500, "Companion config", error, ToolTipIcon.Warning);
+            }
+
             return;
         }
 
-        using var req = new HttpRequestMessage(HttpMethod.Get, new Uri(baseUri, "/api/health"));
-        using var res = await _http.SendAsync(req, _cts.Token);
-        if (!res.IsSuccessStatusCode)
+        try
         {
-            _tray.ShowBalloonTip(2500, "Runner unreachable", $"Health check failed: {(int)res.StatusCode}", ToolTipIcon.Warning);
+            using var req = new HttpRequestMessage(HttpMethod.Get, new Uri(baseUri, "/api/health"));
+            using var res = await _http.SendAsync(req, _cts.Token);
+            if (!res.IsSuccessStatusCode)
+            {
+                _tray.ShowBalloonTip(2500, "Runner unreachable", $"Health check failed: {(int)res.StatusCode}", ToolTipIcon.Warning);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The configured host is unreachable (Runner moved IP, powered off, or
+            // we adopted a stale address). Re-consult discovery: if the matching
+            // Runner is now advertising a different address, adopt it so the next
+            // probe self-heals without the user touching Settings.
+            if (TryAdoptDiscoveredRunner())
+            {
+                _log.Write($"Health probe failed ({ex.Message}); adopted discovered Runner address.");
+            }
+            else
+            {
+                _tray.ShowBalloonTip(2500, "Runner unreachable", "Searching the LAN for your Runner...", ToolTipIcon.Warning);
+            }
+        }
+    }
+
+    // Adopts a LAN-discovered Runner address into the live config when one matches
+    // this companion's API-key fingerprint (or is the only Runner on the subnet).
+    // Persists so the address sticks across restarts and survives the host's DHCP
+    // lease changing. Returns true once the config points at a usable host.
+    private bool TryAdoptDiscoveredRunner()
+    {
+        var fingerprint = RunnerBeacon.ComputeFingerprint(_config.ApiKey);
+        var match = _discovery.BestMatch(fingerprint);
+        if (match is null)
+        {
+            return false;
+        }
+
+        var changed = !string.Equals(_config.HostAddress?.Trim(), match.Host, StringComparison.OrdinalIgnoreCase)
+                      || _config.HostPort != match.Port;
+        if (changed)
+        {
+            _config.HostAddress = match.Host;
+            _config.HostPort = match.Port;
+            TrySaveConfig();
+            _log.Write($"Discovered Runner '{match.Name}' at {match.Host}:{match.Port}.");
+        }
+
+        return !string.IsNullOrWhiteSpace(_config.HostAddress);
+    }
+
+    private void TrySaveConfig()
+    {
+        try
+        {
+            _config.Save(_configPath);
+        }
+        catch (Exception ex)
+        {
+            _log.Write($"Failed to persist discovered Runner address: {ex.Message}");
         }
     }
 
@@ -389,8 +476,15 @@ internal sealed class CompanionRuntime : IDisposable
         var host = _config.HostAddress?.Trim();
         if (string.IsNullOrWhiteSpace(host))
         {
-            error = "HostAddress is required.";
-            return false;
+            if (TryAdoptDiscoveredRunner())
+            {
+                host = _config.HostAddress?.Trim();
+            }
+            else
+            {
+                error = "No Runner address configured and none discovered on the LAN yet.";
+                return false;
+            }
         }
 
         var candidate = $"http://{host}:{_config.HostPort}";
@@ -557,6 +651,7 @@ internal sealed class CompanionRuntime : IDisposable
     public void Dispose()
     {
         _cts.Cancel();
+        _discovery.Dispose();
         _hotas.Stop();
         _hotas.Dispose();
         _audio.Dispose();

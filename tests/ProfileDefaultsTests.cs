@@ -38,6 +38,28 @@ public sealed class ProfileDefaultsTests
     }
 
     [Fact]
+    public void FlightSim_EnablesRemoteVoiceQuery()
+    {
+        // The VR companion's only protocol is /api/voice/query, gated off by
+        // default. A FlightSim drive bundles the companion, so the runner must
+        // accept remote voice queries or the companion 403s out of the box.
+        var config = new PortableConfig();
+        Assert.False(config.NetworkAllowRemoteVoiceQuery);
+        ProfileDefaults.Apply(config, UserProfile.FlightSim);
+        Assert.True(config.NetworkAllowRemoteVoiceQuery);
+    }
+
+    [Fact]
+    public void FlightSim_DoesNotEnableRemoteRawStt()
+    {
+        // voice/query is the only endpoint the companion uses; raw remote STT
+        // stays off (no need to widen that surface).
+        var config = new PortableConfig();
+        ProfileDefaults.Apply(config, UserProfile.FlightSim);
+        Assert.False(config.NetworkAllowRemoteStt);
+    }
+
+    [Fact]
     public void GeneralAssistant_DisablesPtt()
     {
         var config = new PortableConfig { PttEnabled = true };

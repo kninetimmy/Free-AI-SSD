@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using FreeAiSsd.Shared;
+using FreeAiSsd.Shared.Discovery;
 using FreeAiSsd.Shared.Documents;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -30,6 +31,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
     private readonly SemaphoreSlim _sttInitGate = new(1, 1);
     private readonly SemaphoreSlim _sttTranscribeGate = new(1, 1);
     private readonly IndexingActivity _indexing = new();
+    private readonly RunnerBeaconBroadcaster _beacon;
     private WebApplication? _app;
 
     /// <summary>
@@ -75,6 +77,7 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         _logger = logger;
         _ssdRoot = string.IsNullOrWhiteSpace(ssdRoot) ? AppContext.BaseDirectory : ssdRoot;
         _staticFilesRoot = string.IsNullOrWhiteSpace(staticFilesRoot) ? null : staticFilesRoot;
+        _beacon = new RunnerBeaconBroadcaster(msg => { _logger?.Info(msg); LogMessage?.Invoke(msg); });
         _chatService.LogMessage += OnChatLogMessage;
     }
 
@@ -590,6 +593,15 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         await app.StartAsync(cancellationToken);
         _logger?.Info($"Network API started at {CurrentBaseUrl}");
         LogMessage?.Invoke($"Network API started at {CurrentBaseUrl}");
+
+        // Advertise on the LAN only when exposed there, so a companion can find
+        // this Runner without a hand-typed IP. The beacon carries host:port +
+        // an API-key fingerprint (never the key, never the IP — that comes from
+        // the packet source). Loopback-only sessions stay silent.
+        if (lanExposed)
+        {
+            _beacon.Start(Environment.MachineName, networkPort, RunnerBeacon.ComputeFingerprint(config.NetworkApiKey));
+        }
     }
 
     private void MapLibraryEndpoints(RouteGroupBuilder api, PortableConfig config, string ollamaHost)
@@ -1140,6 +1152,10 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
 
         try
         {
+            // Stop advertising before the listener goes away so companions don't
+            // briefly chase a dead endpoint.
+            await _beacon.StopAsync().ConfigureAwait(false);
+
             // ConfigureAwait(false) so a sync-blocking caller on the UI thread
             // (Runner OnClosing) can't deadlock waiting for these continuations.
             await _app.StopAsync(cancellationToken).ConfigureAwait(false);

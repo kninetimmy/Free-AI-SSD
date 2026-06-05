@@ -1178,7 +1178,7 @@ public partial class MainWindow : Window
 
     private void SelectProfile(UserProfile profile)
     {
-        _viewModel.SelectedProfile = profile;
+        _viewModel.ApplyProfileSelection(profile);
         SyncProfileSelectionCards();
     }
 
