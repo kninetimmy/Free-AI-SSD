@@ -75,7 +75,7 @@ public static class RagPromptBuilder
         {
             sb.AppendLine("Do not include source labels, file names, page numbers, or bracketed citations in your answer.");
         }
-        sb.AppendLine("If the reference context does not contain the answer, reply exactly: \"That information is not in the provided context.\" Do not use outside knowledge or guess.");
+        sb.AppendLine("Use only that context — do not add outside knowledge or invent specifics such as numbers, names, or settings. If the context covers the question only partially, answer with what it does support and state what it does not specify. Reply exactly \"That information is not in the provided context.\" only when the context is unrelated to the question.");
         sb.AppendLine();
         sb.AppendLine("Reference context:");
 
