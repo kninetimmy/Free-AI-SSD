@@ -41,9 +41,12 @@ public sealed class CompanionConfig
         File.WriteAllText(path, json);
     }
 
+    // HostAddress is intentionally NOT required: the companion auto-discovers the
+    // Runner on the LAN (RunnerBeaconListener) and fills the address at runtime, so
+    // a blank host is "discover it" rather than "needs setup". A bad port is still
+    // a misconfiguration worth flagging.
     public bool IsComplete()
-        => !string.IsNullOrWhiteSpace(HostAddress)
-           && HostPort > 0
+        => HostPort > 0
            && HostPort <= 65535
            && !string.IsNullOrWhiteSpace(PttBinding)
            && (!ServerRequiresApiKey || !string.IsNullOrWhiteSpace(ApiKey));

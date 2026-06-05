@@ -696,6 +696,21 @@ public class PrepViewModel : BaseViewModel
 
     public bool HasSelectedProfile => _selectedProfile is not null;
 
+    /// <summary>
+    /// Applies a user-initiated profile choice, including the profile's prep-UI
+    /// defaults. Distinct from setting <see cref="SelectedProfile"/> directly
+    /// (which the preference-restore path uses) so restoring a saved drive never
+    /// stomps a deliberate opt-out. FlightSim turns the VR companion on by default
+    /// — the companion is the whole point of that profile — but the user can still
+    /// uncheck it afterward.
+    /// </summary>
+    public void ApplyProfileSelection(UserProfile profile)
+    {
+        SelectedProfile = profile;
+        if (profile == UserProfile.FlightSim)
+            InstallVrCompanion = true;
+    }
+
     public string ProfileSelectionWarning
     {
         get => _profileSelectionWarning;
@@ -2877,7 +2892,10 @@ public class PrepViewModel : BaseViewModel
                         HostAddress = CompanionHostAddress,
                         HostPort = CompanionHostPort,
                         ApiKey = config.NetworkApiKey,
-                        PttBinding = string.Empty,
+                        // Seed a working keyboard PTT so the companion is complete on
+                        // first launch and never force-opens Settings. Flight-sim users
+                        // rebind to their HOTAS button from the tray nudge when ready.
+                        PttBinding = CompanionDefaults.DefaultPttBinding,
                         AutoReconnect = true,
                         SchemaVersion = 1
                     };
@@ -2886,12 +2904,16 @@ public class PrepViewModel : BaseViewModel
                     var readmeLines = new[]
                     {
                         "Free AI SSD VR Companion Quick Setup",
-                        "1. Plug this SSD into your VR PC.",
-                        "2. Open the companion folder and run FreeAiSsd.Companion.exe.",
-                        "3. Verify HostAddress/HostPort in companion-config.json or Settings.",
-                        "4. Hold your configured PTT binding while speaking in DCS.",
-                        "5. Release PTT to send /api/voice/query to the host Runner.",
-                        "6. AI response audio plays on this VR PC output device."
+                        "1. Copy the companion folder to your VR PC (the one running DCS).",
+                        "2. Run FreeAiSsd.Companion.exe. It auto-discovers your Runner on the LAN",
+                        "   and is ready immediately on the F8 push-to-talk key.",
+                        "3. (Optional) Open Settings from the tray to bind your HOTAS button",
+                        "   instead of F8, or to pick a specific Runner if you have more than one.",
+                        "4. Hold push-to-talk while speaking in DCS, release to ask the Runner,",
+                        "   and the AI response plays on your VR PC output device.",
+                        "",
+                        "The Runner can be on a Windows OR a Mac machine — the companion talks to",
+                        "either over the same LAN API."
                     };
                     await File.WriteAllLinesAsync(Path.Combine(companionDir, "README-VR.txt"), readmeLines);
                     AppendLog("VR companion staged to SSD:/companion.");

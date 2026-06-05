@@ -190,4 +190,28 @@ public sealed class CompanionConfigTests
         };
         Assert.False(config.IsComplete());
     }
+
+    [Fact]
+    public void IsComplete_ReturnsTrue_WhenHostBlank_BecauseDiscoverySuppliesIt()
+    {
+        // A freshly prepped FlightSim drive may ship with no host address — the
+        // companion auto-discovers the Runner on the LAN. A blank host must not
+        // force the Settings dialog open.
+        var config = new CompanionConfig
+        {
+            HostAddress = "",
+            HostPort = 41555,
+            PttBinding = CompanionDefaults.DefaultPttBinding,
+            ApiKey = "secret",
+        };
+        Assert.True(config.IsComplete());
+    }
+
+    [Fact]
+    public void DefaultPttBinding_IsAKeyboardBinding()
+    {
+        // The seeded default must parse as a keyboard PTT so first launch works
+        // immediately without a HOTAS.
+        Assert.StartsWith("key:", CompanionDefaults.DefaultPttBinding);
+    }
 }
