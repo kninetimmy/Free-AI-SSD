@@ -217,6 +217,14 @@ jobs:
         run: |
           swiftc mac-runner/Sources/VoiceTextProcessing.swift mac-runner/Tests/VoiceTextProcessingTests.swift             -parse-as-library             -target "arm64-apple-macos11.0"             -O             -o out/voice-text-processing-tests
           out/voice-text-processing-tests
+      - name: Run Swift unit tests (VoiceRpcProtocol)
+        # Task #106: pin the sidecar<->Swift voice RPC wire format — request
+        # parsing, response encoding, and the PCM->WAV header (parity with the
+        # C# VoiceRpcProtocol). Pure helper; the SFSpeech/AVSpeech round-trip in
+        # VoiceController.swift is on-hardware only and not linked here.
+        run: |
+          swiftc mac-runner/Sources/VoiceRpcProtocol.swift mac-runner/Tests/VoiceRpcProtocolTests.swift             -parse-as-library             -target "arm64-apple-macos11.0"             -O             -o out/voice-rpc-protocol-tests
+          out/voice-rpc-protocol-tests
       - name: Publish mac-runner-host (osx-arm64 self-contained single-file)
         # MAC6: build the net8.0 sidecar host so the Swift Runner.app can spawn
         # it. Self-contained so end users don't need a system .NET 8 install
@@ -324,7 +332,7 @@ jobs:
       - name: Build Runner.app bundle
         run: |
           mkdir -p out/Runner.app/Contents/MacOS out/Runner.app/Contents/Resources
-          swiftc mac-runner/Sources/SsdEncryption.swift mac-runner/Sources/MacRunnerHostController.swift mac-runner/Sources/NdjsonFrameBuffer.swift mac-runner/Sources/RunnerChatErrorMessage.swift mac-runner/Sources/IngestProgressFormatter.swift mac-runner/Sources/VoiceTextProcessing.swift mac-runner/Sources/VoiceController.swift mac-runner/Sources/main.swift             -parse-as-library             -target "arm64-apple-macos11.0"             -O             -o out/Runner.app/Contents/MacOS/Runner             -framework SwiftUI             -framework AppKit             -framework AVFoundation             -framework Speech
+          swiftc mac-runner/Sources/SsdEncryption.swift mac-runner/Sources/MacRunnerHostController.swift mac-runner/Sources/NdjsonFrameBuffer.swift mac-runner/Sources/RunnerChatErrorMessage.swift mac-runner/Sources/IngestProgressFormatter.swift mac-runner/Sources/VoiceTextProcessing.swift mac-runner/Sources/VoiceRpcProtocol.swift mac-runner/Sources/VoiceController.swift mac-runner/Sources/main.swift             -parse-as-library             -target "arm64-apple-macos11.0"             -O             -o out/Runner.app/Contents/MacOS/Runner             -framework SwiftUI             -framework AppKit             -framework AVFoundation             -framework Speech
           # Bundle the published mac-runner-host binary into Resources/runner-host/
           # so the Swift app can locate it via Bundle.main.resourceURL when the
           # Runner.app is launched directly (e.g. dev or ad-hoc test). The SSD

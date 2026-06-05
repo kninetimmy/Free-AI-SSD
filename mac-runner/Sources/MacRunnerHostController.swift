@@ -42,6 +42,13 @@ final class MacRunnerHostController {
     var onStatusChange: ((Status) -> Void)?
     var onLogLine: ((String) -> Void)?
 
+    /// Task #106: services a voice RPC request from the sidecar (STT/TTS over the
+    /// stdio channel). The owner (RunnerViewModel) performs the native macOS work
+    /// and calls `respond` with the response line, which we write back to the
+    /// sidecar's stdin. The handler is invoked on the stdout read queue, so it
+    /// must dispatch its own heavy work and not block.
+    var onVoiceRequest: ((VoiceRpcRequest, @escaping (String) -> Void) -> Void)?
+
     private(set) var status: Status = .stopped {
         didSet {
             if let cb = onStatusChange {
@@ -201,11 +208,39 @@ final class MacRunnerHostController {
             if let cb = onLogLine {
                 DispatchQueue.main.async { cb(logBody) }
             }
+        } else if VoiceRpcProtocol.isVoiceRequest(trimmed) {
+            // Task #106: the sidecar is asking us to do native STT/TTS. Parse,
+            // hand to the owner's handler, and write its response back to stdin.
+            guard let request = VoiceRpcProtocol.parseRequest(trimmed),
+                  let handler = onVoiceRequest else {
+                if let cb = onLogLine {
+                    DispatchQueue.main.async { cb("[voice] dropped unhandled request frame") }
+                }
+                return
+            }
+            handler(request) { [weak self] responseLine in
+                self?.writeToHostStdin(responseLine)
+            }
         } else {
             if let cb = onLogLine {
                 DispatchQueue.main.async { cb(trimmed) }
             }
         }
+    }
+
+    /// Serializes writes to the sidecar's stdin so concurrent voice responses
+    /// (and the shutdown command) never interleave bytes. Best-effort: a write to
+    /// a dead child is swallowed by the FileHandle layer (macOS 11-safe Data API).
+    private let stdinWriteLock = NSLock()
+
+    /// Write a single newline-terminated command/response line to the sidecar's
+    /// stdin. Used by the voice RPC path (task #106) to return STT/TTS results.
+    func writeToHostStdin(_ line: String) {
+        guard let stdin = stdinPipe else { return }
+        guard let payload = (line + "\n").data(using: .utf8) else { return }
+        stdinWriteLock.lock()
+        defer { stdinWriteLock.unlock() }
+        stdin.fileHandleForWriting.write(payload)
     }
 
     private func handleStderrLine(_ line: String) {
