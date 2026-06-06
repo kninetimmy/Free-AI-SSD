@@ -360,8 +360,12 @@ public sealed class PortableConfig
             var config = JsonSerializer.Deserialize<PortableConfig>(json, JsonOptions());
             return (config ?? new PortableConfig(), config is not null);
         }
-        catch
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
+            // #115-9: swallow only genuine "config corrupt / unreadable" failures and
+            // signal them via IsValid=false (write-adjacent callers must refuse to persist
+            // over a config they couldn't load). Any other exception propagates — fail
+            // loudly rather than silently degrading real settings to all-defaults.
             return (new PortableConfig(), false);
         }
     }
@@ -382,8 +386,12 @@ public sealed class PortableConfig
             var config = JsonSerializer.Deserialize<PortableConfig>(json, JsonOptions());
             return (config ?? new PortableConfig(), config is not null);
         }
-        catch
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
+            // #115-9: swallow only genuine "config corrupt / unreadable" failures and
+            // signal them via IsValid=false (write-adjacent callers must refuse to persist
+            // over a config they couldn't load). Any other exception propagates — fail
+            // loudly rather than silently degrading real settings to all-defaults.
             return (new PortableConfig(), false);
         }
     }
