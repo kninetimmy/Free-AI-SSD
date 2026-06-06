@@ -180,10 +180,11 @@ public sealed class SsdEncryptionTests
     }
 
     /// <summary>
-    /// Verifies that zero/invalid iteration count is detected as a parameter error.
+    /// Verifies that a zero iteration count is rejected as an invalid parameter
+    /// (it falls below the hardened PBKDF2 floor).
     /// </summary>
     [Fact]
-    public async Task TryUnlockPortableConfig_WhenIterationsAreInvalid_ReturnsParametersMissingError()
+    public async Task TryUnlockPortableConfig_WhenIterationsAreZero_ReturnsInvalidParametersError()
     {
         var root = CreateTempRoot();
         try
@@ -195,7 +196,60 @@ public sealed class SsdEncryptionTests
 
             Assert.False(unlocked);
             Assert.Null(decrypted);
-            Assert.Equal("Encryption parameters are missing.", error);
+            Assert.Equal("Encryption parameters are invalid.", error);
+        }
+        finally
+        {
+            CleanupTempRoot(root);
+        }
+    }
+
+    /// <summary>
+    /// Security regression (#113): a PBKDF2 iteration count tampered DOWN below the
+    /// hardened floor must be rejected at the validation gate — never fed to the KDF.
+    /// The count is read from attacker-editable portable-config.encrypted.json and is
+    /// not authenticated by AES-GCM, so a downgrade must fail closed.
+    /// </summary>
+    [Fact]
+    public async Task TryUnlockPortableConfig_WhenIterationsTamperedBelowFloor_FailsClosed()
+    {
+        var root = CreateTempRoot();
+        try
+        {
+            await SeedEncryptedConfigAsync(root, "test-password-123");
+            MutateEncryptedConfigJson(root, node => node["iterations"] = 1000);
+
+            var unlocked = SsdEncryption.TryUnlockPortableConfig(root, "test-password-123", out var decrypted, out var error);
+
+            Assert.False(unlocked);
+            Assert.Null(decrypted);
+            Assert.Equal("Encryption parameters are invalid.", error);
+        }
+        finally
+        {
+            CleanupTempRoot(root);
+        }
+    }
+
+    /// <summary>
+    /// Security regression (#113): a PBKDF2 iteration count tampered UP past the sane
+    /// ceiling must be rejected rather than honoured — otherwise a one-character edit
+    /// turns unlock into a denial of service (the KDF runs for minutes/hours).
+    /// </summary>
+    [Fact]
+    public async Task TryUnlockPortableConfig_WhenIterationsTamperedAboveCeiling_FailsClosed()
+    {
+        var root = CreateTempRoot();
+        try
+        {
+            await SeedEncryptedConfigAsync(root, "test-password-123");
+            MutateEncryptedConfigJson(root, node => node["iterations"] = 2_000_000_000);
+
+            var unlocked = SsdEncryption.TryUnlockPortableConfig(root, "test-password-123", out var decrypted, out var error);
+
+            Assert.False(unlocked);
+            Assert.Null(decrypted);
+            Assert.Equal("Encryption parameters are invalid.", error);
         }
         finally
         {

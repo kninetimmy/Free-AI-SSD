@@ -48,6 +48,16 @@ public static class SsdEncryption
     private const int Pbkdf2Iterations = 210_000;
 
     /// <summary>
+    /// Upper bound on the PBKDF2 iteration count accepted from an on-disk encrypted
+    /// blob. The count lives in attacker-editable portable-config.encrypted.json and is
+    /// not covered by the AES-GCM tag, so it must be range-checked on decrypt:
+    /// <see cref="Pbkdf2Iterations"/> is the floor (reject a downgrade) and this is the
+    /// ceiling (reject an inflated value that would hang unlock as a denial of service).
+    /// Generous enough to honour any future hardening bump while bounding the work.
+    /// </summary>
+    private const int Pbkdf2IterationsMax = 10_000_000;
+
+    /// <summary>
     /// Checks whether encryption is explicitly enabled in the state file.
     /// Returns false if the state file is missing or unreadable.
     /// </summary>
@@ -411,7 +421,19 @@ public static class SsdEncryption
             return false;
         }
 
-        if (encrypted.Iterations <= 0 || string.IsNullOrWhiteSpace(encrypted.Salt))
+        // Fail closed on a tampered PBKDF2 iteration count. The value is read from
+        // attacker-editable portable-config.encrypted.json and is NOT covered by the
+        // AES-GCM tag, so it is never trusted blindly: below the hardened floor is a
+        // downgrade attempt, above the ceiling is an unlock-time DoS. A genuine drive
+        // always stores exactly Pbkdf2Iterations, so the only legitimate values lie in
+        // [Pbkdf2Iterations, Pbkdf2IterationsMax].
+        if (encrypted.Iterations < Pbkdf2Iterations || encrypted.Iterations > Pbkdf2IterationsMax)
+        {
+            error = "Encryption parameters are invalid.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(encrypted.Salt))
         {
             error = "Encryption parameters are missing.";
             return false;
@@ -598,8 +620,19 @@ public static class SsdEncryption
             return false;
         }
 
-        // Validate essential encryption parameters are present.
-        if (encrypted.Iterations <= 0 || string.IsNullOrWhiteSpace(encrypted.Salt))
+        // Validate essential encryption parameters. Fail closed on a tampered PBKDF2
+        // iteration count: it is read from attacker-editable
+        // portable-config.encrypted.json and is NOT covered by the AES-GCM tag, so a
+        // value below the hardened floor is a downgrade attempt and one above the
+        // ceiling is an unlock-time DoS. A genuine drive always stores exactly
+        // Pbkdf2Iterations; only [Pbkdf2Iterations, Pbkdf2IterationsMax] is legitimate.
+        if (encrypted.Iterations < Pbkdf2Iterations || encrypted.Iterations > Pbkdf2IterationsMax)
+        {
+            error = "Encryption parameters are invalid.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(encrypted.Salt))
         {
             error = "Encryption parameters are missing.";
             return false;
