@@ -99,11 +99,16 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
         //   - device-only (false): force loopback, do not enforce an API key
         //     (loopback has no remote attack surface, same posture as Ollama).
         //   - LAN (true): bind the configured address and enforce the key.
-        // Keying the no-key rule on NetworkModeEnabled (not the bind address)
-        // keeps the auth tests — enabled + loopback + RequireApiKey — meaningful.
         var lanExposed = config.NetworkModeEnabled;
         var bindAddress = lanExposed ? NormalizeBindAddress(config.NetworkBindAddress) : "127.0.0.1";
-        var enforceApiKey = lanExposed && config.NetworkRequireApiKey;
+
+        // #114: enforcement is derived from the RESOLVED bind, never from the
+        // NetworkRequireApiKey flag alone. Any non-loopback (LAN-reachable) bind
+        // ALWAYS requires the key — otherwise unchecking "Require API Key" while
+        // bound to 0.0.0.0 would serve every route unauthenticated to the LAN. On
+        // loopback the key stays opt-in (no remote attack surface), which keeps the
+        // enabled + loopback + RequireApiKey auth tests meaningful.
+        var enforceApiKey = lanExposed && (!IsLoopbackAddress(bindAddress) || config.NetworkRequireApiKey);
         var configuredPort = ValidatePort(config.NetworkPort);
 
         // MAC39: scan for a free port from configuredPort..+20. The previous
@@ -124,6 +129,18 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
 
         if (!IsLoopbackAddress(bindAddress))
         {
+            // #114: a non-loopback bind is LAN-reachable, so the API key is mandatory
+            // (enforceApiKey is forced true above). Fail closed at startup if no key
+            // is set rather than standing up an endpoint that would reject every
+            // request — surface the misconfiguration loudly instead. Both callers
+            // (Windows MainWindow, Mac sidecar Program) catch and log StartAsync.
+            if (string.IsNullOrWhiteSpace(config.NetworkApiKey))
+            {
+                throw new InvalidOperationException(
+                    $"Refusing to expose the Runner API on non-loopback address {bindAddress} without an API key. " +
+                    "Set an API key, or disable LAN exposure, before starting.");
+            }
+
             var warning = $"Network Mode bind address is not loopback: exposing Runner API on {bindAddress}:{networkPort}. There is no TLS. Only use on a trusted LAN.";
             _logger?.Warn(warning);
             LogMessage?.Invoke(warning);

@@ -426,6 +426,17 @@ public sealed class PortableConfig
         "The API key is a shared secret and must not be written to disk unencrypted.";
 
     /// <summary>
+    /// Error thrown by the config write chokepoint (#114) when Network Mode exposes the API
+    /// on a non-loopback (LAN-reachable) address but no API key is set. Such a host would
+    /// serve every route unauthenticated, so the runtime refuses to start it; the config is
+    /// refused on save so the drive cannot be persisted into that wide-open / unstartable state.
+    /// </summary>
+    public const string NetworkApiKeyRequiredForLanMessage =
+        "Network Mode exposes the Runner API on a non-loopback (LAN) address, but no API key is set. " +
+        "Generate or set an API key, or bind to loopback / disable LAN exposure, before saving. " +
+        "A LAN-reachable API must always require a key.";
+
+    /// <summary>
     /// Persists the config to disk using an atomic write pattern:
     /// 1. Serialize to a temporary ".tmp" file.
     /// 2. Replace the original file atomically (or move if new).
