@@ -179,13 +179,21 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
 
         var app = builder.Build();
 
-        // Static-file plumbing for the future X4 SPA (web chat UI). When the
-        // host's content root contains a wwwroot/ directory we serve it via
-        // ASP.NET's default-files + static-files middleware so the same Mac
-        // and Windows Kestrel can serve /chat/ once X4 ships its assets.
-        // No assets are bundled in MAC6 — the directory is created empty so
-        // builds carry it; if a host has zero SPA files the middleware
-        // falls through cleanly and the API endpoints below behave as before.
+        // Static-file plumbing for the X4 web chat SPA. When the host's content root
+        // contains a wwwroot/ directory we serve it via ASP.NET's default-files +
+        // static-files middleware, so the same Mac and Windows Kestrel serve /chat/.
+        // runner-core ships wwwroot/chat/ (index.html + ES-module client), so these
+        // assets are present in both publishes; if a host had zero SPA files the
+        // middleware would simply fall through.
+        //
+        // #115-7 (public-by-design, reviewed): this middleware is registered BEFORE the
+        // API-key gate below, so the SPA shell is served WITHOUT a key. That is
+        // intentional and not a leak — like a login page, a browser must load the page
+        // before it can present a key, and the shell embeds no secrets (the user enters
+        // the API key in-browser, persisted per-device, and it rides every subsequent
+        // /api/* call). Every /api/* route still goes through the key gate; only the
+        // static shell is public. Do not move the gate ahead of these registrations
+        // without breaking the web UI's first-run flow.
         var wwwroot = ResolveWwwroot(_staticFilesRoot);
         if (wwwroot is not null)
         {
