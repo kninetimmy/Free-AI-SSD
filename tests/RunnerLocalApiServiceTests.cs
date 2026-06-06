@@ -80,6 +80,62 @@ public sealed class RunnerLocalApiServiceTests
     }
 
     [Fact]
+    public async Task NonLoopbackBind_EnforcesApiKey_EvenWhenRequireApiKeyFalse()
+    {
+        // #114 regression: enforcement must derive from the resolved bind, not the
+        // NetworkRequireApiKey flag. A LAN-reachable (non-loopback) bind ALWAYS
+        // requires the key, so unchecking "Require API Key" cannot open 0.0.0.0.
+        var fixture = await RunnerLocalApiFixture.StartAsync(
+            requireApiKey: false, allowTts: true, networkModeEnabled: true, bindAddress: "0.0.0.0");
+        using var http = new HttpClient();
+
+        var unauthorized = await http.PostAsJsonAsync(
+            $"{fixture.ConnectBaseUrl}/api/chat", new { model = "phi3", prompt = "hello" });
+        Assert.Equal(HttpStatusCode.Unauthorized, unauthorized.StatusCode);
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, $"{fixture.ConnectBaseUrl}/api/chat")
+        {
+            Content = JsonContent.Create(new { model = "phi3", prompt = "hello" })
+        };
+        req.Headers.Add("Authorization", "Bearer secret-key");
+        var authorized = await http.SendAsync(req);
+        authorized.EnsureSuccessStatusCode();
+
+        await fixture.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task NonLoopbackBind_WithoutApiKey_FailsClosedAtStartup()
+    {
+        // #114 regression: a non-loopback bind with no key would serve every route
+        // unauthenticated, so StartAsync must refuse to stand the host up at all.
+        var chat = new FakeChatService();
+        var stt = new FakeSttService();
+        var ttsProvider = new TtsProvider();
+        ttsProvider.SetCurrent(new FakeTtsService());
+        await using var service = new RunnerLocalApiService(chat, stt, ttsProvider, logger: null);
+
+        var config = new PortableConfig
+        {
+            NetworkModeEnabled = true,
+            NetworkBindAddress = "0.0.0.0",
+            // Any valid port; StartAsync throws before Kestrel ever binds.
+            NetworkPort = 18080,
+            NetworkRequireApiKey = false,
+            NetworkApiKey = "",
+            Models = new List<ModelConfigEntry>
+            {
+                new() { Name = "phi3", Status = ModelInstallStatus.Installed }
+            }
+        };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.StartAsync(config, "127.0.0.1:11434"));
+        Assert.Contains("without an API key", ex.Message);
+        Assert.False(service.IsRunning);
+    }
+
+    [Fact]
     public async Task ApiKeyEnforcement_BlocksRemoteSttWithoutKey()
     {
         var fixture = await RunnerLocalApiFixture.StartAsync(requireApiKey: true, allowTts: true, allowRemoteStt: true, allowVoiceQuery: true);
@@ -846,6 +902,13 @@ public sealed class RunnerLocalApiServiceTests
         public FakeTtsService Tts { get; }
         public string BaseUrl => _service.CurrentBaseUrl!;
 
+        /// <summary>
+        /// A loopback-connectable form of <see cref="BaseUrl"/>. When the host binds
+        /// a wildcard address (0.0.0.0), the advertised URL is not a routable
+        /// destination; loopback is part of the wildcard bind, so connect via it.
+        /// </summary>
+        public string ConnectBaseUrl => BaseUrl.Replace("://0.0.0.0:", "://127.0.0.1:");
+
         public static async Task<RunnerLocalApiFixture> StartAsync(
             bool requireApiKey,
             bool allowTts,
@@ -855,7 +918,8 @@ public sealed class RunnerLocalApiServiceTests
             int maxUploadMb = 10,
             IModelManagementService? modelService = null,
             string? embeddingModelName = null,
-            bool networkModeEnabled = true)
+            bool networkModeEnabled = true,
+            string bindAddress = "127.0.0.1")
         {
             var chat = new FakeChatService();
             var stt = new FakeSttService();
@@ -866,7 +930,7 @@ public sealed class RunnerLocalApiServiceTests
             var config = new PortableConfig
             {
                 NetworkModeEnabled = networkModeEnabled,
-                NetworkBindAddress = "127.0.0.1",
+                NetworkBindAddress = bindAddress,
                 NetworkPort = GetFreePort(),
                 NetworkRequireApiKey = requireApiKey,
                 NetworkApiKey = "secret-key",

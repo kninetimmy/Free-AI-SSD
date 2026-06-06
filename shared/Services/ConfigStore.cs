@@ -1,3 +1,4 @@
+using System.Net;
 using System.Security.Cryptography;
 
 namespace FreeAiSsd.Shared.Services;
@@ -97,6 +98,18 @@ public sealed class ConfigStore : IConfigStore
             throw new InvalidOperationException(PortableConfig.NetworkModeEncryptionRequiredMessage);
         }
 
+        // #114: a non-loopback (LAN-reachable) bind with no API key would serve the
+        // Runner API unauthenticated, and RunnerLocalApiService now refuses to start
+        // such a host. Refuse to persist that config so the UI can't save the drive
+        // into an unstartable / wide-open state. Independent of encryption — the
+        // exposure is a runtime property of the bind, not of how config is stored.
+        if (config.NetworkModeEnabled
+            && IsNonLoopbackBind(config.NetworkBindAddress)
+            && string.IsNullOrWhiteSpace(config.NetworkApiKey))
+        {
+            throw new InvalidOperationException(PortableConfig.NetworkApiKeyRequiredForLanMessage);
+        }
+
         await _saveGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
@@ -159,5 +172,21 @@ public sealed class ConfigStore : IConfigStore
                 _saveGate.Release();
             }
         }
+    }
+
+    /// <summary>
+    /// True only when <paramref name="address"/> parses to a non-loopback IP. A blank or
+    /// unparseable value is treated as loopback here: the runtime normalizes blank to
+    /// 127.0.0.1, and an unparseable address is rejected loudly by StartAsync — neither is
+    /// the LAN-reachable case the #114 write guard targets.
+    /// </summary>
+    private static bool IsNonLoopbackBind(string? address)
+    {
+        if (string.IsNullOrWhiteSpace(address))
+        {
+            return false;
+        }
+
+        return IPAddress.TryParse(address.Trim(), out var ip) && !IPAddress.IsLoopback(ip);
     }
 }

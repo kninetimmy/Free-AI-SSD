@@ -294,6 +294,64 @@ public sealed class ConfigStoreTests
         finally { CleanupTempRoot(root); }
     }
 
+    [Fact]
+    public async Task ConfigStore_SaveAsync_FailsClosed_OnNonLoopbackBindWithoutApiKey()
+    {
+        // #114: a non-loopback (LAN-reachable) bind with no API key would serve the
+        // Runner API unauthenticated. The write chokepoint must refuse to persist it
+        // — even with RequireApiKey unchecked — so the drive can't reach that state.
+        var root = CreateTempRoot();
+        try
+        {
+            SsdLayout.EnsureStructure(root);
+            var store = new ConfigStore();
+
+            var wideOpen = new PortableConfig
+            {
+                NetworkModeEnabled = true,
+                NetworkBindAddress = "0.0.0.0",
+                NetworkRequireApiKey = false,
+                NetworkApiKey = "",
+            };
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => store.SaveAsync(root, wideOpen, CancellationToken.None));
+            Assert.Equal(PortableConfig.NetworkApiKeyRequiredForLanMessage, ex.Message);
+
+            var plaintextPath = Path.Combine(root, SsdLayout.Config, "portable-config.json");
+            Assert.False(File.Exists(plaintextPath));
+        }
+        finally { CleanupTempRoot(root); }
+    }
+
+    [Fact]
+    public async Task ConfigStore_SaveAsync_AllowsLoopbackBind_WithoutApiKey()
+    {
+        // #114 guard must target non-loopback only: a device-only loopback bind with
+        // no key is the normal case and must still save.
+        var root = CreateTempRoot();
+        try
+        {
+            SsdLayout.EnsureStructure(root);
+            var store = new ConfigStore();
+
+            var loopback = new PortableConfig
+            {
+                NetworkModeEnabled = true,
+                NetworkBindAddress = "127.0.0.1",
+                NetworkRequireApiKey = false,
+                NetworkApiKey = "",
+                OllamaPort = 12345,
+            };
+
+            await store.SaveAsync(root, loopback, CancellationToken.None);
+
+            var plaintextPath = Path.Combine(root, SsdLayout.Config, "portable-config.json");
+            Assert.True(File.Exists(plaintextPath));
+        }
+        finally { CleanupTempRoot(root); }
+    }
+
     /// <summary>
     /// Stage 3 integration test: simulates the Runner wiring path.
     /// TryUnlockPortableConfigWithMaterial → UnlockSession → SaveAsync → LockSession
