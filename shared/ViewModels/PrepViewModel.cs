@@ -3054,36 +3054,51 @@ public class PrepViewModel : BaseViewModel
             return;
         }
 
-        var configPath = GetConfigPath(_selectedDrive.RootPath);
-        var config = await _modelService.LoadConfigAsync(configPath);
-
-        // Recover stale "Downloading" statuses left behind by a crash or forced exit.
-        // If no model operation is currently running, any model still marked as
-        // Downloading was interrupted and should be reset to NotInstalled.
-        if (!_isModelOperationRunning)
+        try
         {
-            var staleModels = config.Models.Where(m => m.Status == ModelInstallStatus.Downloading).ToList();
-            if (staleModels.Count > 0)
+            var configPath = GetConfigPath(_selectedDrive.RootPath);
+            var config = await _modelService.LoadConfigAsync(configPath);
+
+            // Recover stale "Downloading" statuses left behind by a crash or forced exit.
+            // If no model operation is currently running, any model still marked as
+            // Downloading was interrupted and should be reset to NotInstalled.
+            if (!_isModelOperationRunning)
             {
-                foreach (var stale in staleModels)
+                var staleModels = config.Models.Where(m => m.Status == ModelInstallStatus.Downloading).ToList();
+                if (staleModels.Count > 0)
                 {
-                    stale.Status = ModelInstallStatus.NotInstalled;
-                    stale.Sha256 = null;
-                    stale.SizeBytes = null;
-                    stale.LastVerifiedUtc = null;
-                    AppendLog($"Recovered stale download status for '{stale.Name}' → NotInstalled.");
+                    foreach (var stale in staleModels)
+                    {
+                        stale.Status = ModelInstallStatus.NotInstalled;
+                        stale.Sha256 = null;
+                        stale.SizeBytes = null;
+                        stale.LastVerifiedUtc = null;
+                        AppendLog($"Recovered stale download status for '{stale.Name}' → NotInstalled.");
+                    }
+                    await _modelService.SaveConfigAsync(configPath, config);
                 }
-                await _modelService.SaveConfigAsync(configPath, config);
             }
+
+            var discovered = _modelService.DiscoverModelsOnDisk(Path.Combine(_selectedDrive.RootPath, SsdLayout.Models));
+            var freeDiskGb = _driveService.GetFreeDiskSpaceGb(_selectedDrive.RootPath);
+
+            var rows = BuildModelGridRows(config.Models, discovered, freeDiskGb);
+            ModelRows.Clear();
+            foreach (var row in rows)
+                ModelRows.Add(row);
         }
-
-        var discovered = _modelService.DiscoverModelsOnDisk(Path.Combine(_selectedDrive.RootPath, SsdLayout.Models));
-        var freeDiskGb = _driveService.GetFreeDiskSpaceGb(_selectedDrive.RootPath);
-
-        var rows = BuildModelGridRows(config.Models, discovered, freeDiskGb);
-        ModelRows.Clear();
-        foreach (var row in rows)
-            ModelRows.Add(row);
+        catch (Exception ex)
+        {
+            // #115-6: this runs fire-and-forget on every drive-select. A yanked or
+            // read-only SSD makes DiscoverModelsOnDisk (TOCTOU EnumerateFiles-after-Exists)
+            // or config IO throw; the unobserved exception would otherwise be lost and the
+            // grid left stale. Log it and fall back to the starter catalog so the grid
+            // stays coherent — the sibling fire-and-forget calls are likewise guarded.
+            AppendLog($"Could not refresh model statuses: {ex.Message}");
+            ModelRows.Clear();
+            foreach (var row in BuildStarterOnlyRows(freeDiskGb: null, takenNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase)))
+                ModelRows.Add(row);
+        }
     }
 
     private List<ModelGridRow> BuildModelGridRows(
