@@ -404,10 +404,15 @@ public partial class MainWindow : System.Windows.Window
             // synchronously. Off-load it to a background thread so the WPF dispatcher
             // isn't frozen during the derive (it scales with the stored iteration count).
             // out-params don't compose with Task.Run, so return a tuple.
+            //
+            // Capture the password on the UI thread first: UnlockDriveDialog.Password
+            // reads the PasswordBox control, which throws InvalidOperationException if
+            // accessed from the Task.Run thread-pool thread.
+            var password = dialog.Password;
             var (unlocked, unlockedConfig, unlockMaterial, error) = await Task.Run(() =>
             {
                 var ok = SsdEncryption.TryUnlockPortableConfigWithMaterial(
-                    _ssdRoot, dialog.Password, out var cfg, out var mat, out var err);
+                    _ssdRoot, password, out var cfg, out var mat, out var err);
                 return (ok, cfg, mat, err);
             });
 
