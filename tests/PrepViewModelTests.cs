@@ -560,14 +560,14 @@ public class PrepViewModelTests
         Assert.Equal(string.Empty, vm.ProfileSelectionWarning);
     }
 
-    /// MAC34: pin the API-key generation that closes the
-    /// "API key is required by configuration but not set on host" 503
-    /// trap. Pre-MAC34 finalize wrote `NetworkApiKey = ""` with
-    /// `NetworkRequireApiKey = true`, so any LAN-bound request 503'd. This
-    /// test asserts a non-empty 64-char lowercase-hex key is set on the
-    /// config that flows through `SaveConfigAsync`.
+    /// #115/#5: a device-only (unencrypted) finalize must NOT generate or persist
+    /// the LAN API key. The key is a shared secret and must never land in a
+    /// plaintext config; it is generated only on the encrypted path (pinned by
+    /// FinalizeCommand_LanAccess_PopulatesAndShowsFinalizedApiKey). A LAN API on an
+    /// unencrypted drive is already refused by PortableConfig.SaveAsync + #114's
+    /// non-loopback-bind guard, so a device-only drive never needs the key.
     [Fact]
-    public async Task FinalizeCommand_GeneratesNetworkApiKey_WhenEmpty()
+    public async Task FinalizeCommand_DeviceOnly_DoesNotGenerateNetworkApiKey()
     {
         SetupDefaultMocks();
         _driveService.Setup(d => d.EnsureWritable(It.IsAny<string>(), It.IsAny<string>(), out It.Ref<string?>.IsAny)).Returns(true);
@@ -597,13 +597,15 @@ public class PrepViewModelTests
         var vm = CreateViewModel();
         vm.Initialize();
         vm.SelectedProfile = UserProfile.GeneralAssistant;
+        Assert.False(vm.EnableEncryption); // device-only is the default
 
         vm.FinalizeCommand.Execute(null);
         await WaitForCommandAsync(vm.FinalizeCommand);
 
-        Assert.False(string.IsNullOrWhiteSpace(config.NetworkApiKey));
-        Assert.Equal(64, config.NetworkApiKey.Length);
-        Assert.Matches("^[0-9a-f]{64}$", config.NetworkApiKey);
+        Assert.Equal("Complete", vm.StatusText);
+        // No key written to the plaintext config, and nothing surfaced on Done.
+        Assert.Equal(string.Empty, config.NetworkApiKey);
+        Assert.True(string.IsNullOrEmpty(vm.FinalizedNetworkApiKey));
     }
 
     /// MAC34: confirms `FinalizeCommand` is idempotent on `NetworkApiKey` —

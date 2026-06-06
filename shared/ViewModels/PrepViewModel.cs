@@ -2760,18 +2760,9 @@ public class PrepViewModel : BaseViewModel
             config.PreferredCompute = "auto";
             config.IsEncrypted = false;
             config.EncryptionScheme = null;
-            // MAC34: ensure NetworkApiKey is populated before any persist.
-            // Pre-MAC34, this defaulted to "" with NetworkRequireApiKey=true,
-            // so toggling Network Mode would 503 every request via the
-            // RunnerLocalApiService fail-closed guard. Mirror the Mac
-            // PrepApp's EncryptedConfigWriter.generateRandomApiKey behavior:
-            // 32 bytes of OS RNG, hex-encoded, set once at first prep.
-            // Existing keys are preserved (idempotent re-finalize).
-            if (string.IsNullOrWhiteSpace(config.NetworkApiKey))
-            {
-                config.NetworkApiKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(32))
-                    .ToLowerInvariant();
-            }
+            // The LAN API key (a shared secret) is generated later, only on the
+            // encrypted finalize branch — never on this plaintext path. See the
+            // encryption branch below (#115/#5).
 
             // C27 Stage 3: thread the user-entered HF token through. Trim
             // whitespace; empty input *preserves* any existing token on
@@ -2960,6 +2951,20 @@ public class PrepViewModel : BaseViewModel
                     AppendLog("Finalize cancelled: encryption passphrase setup cancelled.");
                     StatusText = "Finalize blocked";
                     return;
+                }
+
+                // Generate the LAN API key only here — on the encrypted path, after every
+                // gate has passed. The key is a shared secret and reaches disk only inside
+                // the encrypted blob (EnableConfigEncryptionAsync deletes any plaintext
+                // config). A plaintext device-only drive never carries it, and a LAN API on
+                // an unencrypted drive is already refused by PortableConfig.SaveAsync +
+                // #114's non-loopback-bind guard, so it is never needed there. Idempotent:
+                // an existing key (re-finalize) is preserved. (MAC34: mirrors the Mac
+                // EncryptedConfigWriter.generateRandomApiKey — 32 bytes of OS RNG, hex.)
+                if (string.IsNullOrWhiteSpace(config.NetworkApiKey))
+                {
+                    config.NetworkApiKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(32))
+                        .ToLowerInvariant();
                 }
 
                 config.IsEncrypted = true;
