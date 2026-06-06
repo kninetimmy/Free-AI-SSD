@@ -213,15 +213,26 @@ public static class PrereqInstallValidator
         try
         {
             // Use PowerShell to retrieve the Authenticode signature status and signer subject.
-            using var ps = Process.Start(new ProcessStartInfo
+            var psi = new ProcessStartInfo
             {
                 FileName = "powershell",
-                Arguments = $"-NoProfile -ExecutionPolicy Bypass -Command \"$s = Get-AuthenticodeSignature -FilePath '{installerPath.Replace("'", "''")}'; Write-Output ($s.Status.ToString()); Write-Output ($s.SignerCertificate.Subject)\"",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true
-            });
+            };
+            // Pass the installer path out-of-band via an environment variable so it never
+            // enters the -Command string — no manual quote-escaping, no shell-injection
+            // surface (security invariant). -LiteralPath takes the value verbatim.
+            psi.Environment["FREEAI_SIG_PATH"] = installerPath;
+            psi.ArgumentList.Add("-NoProfile");
+            psi.ArgumentList.Add("-ExecutionPolicy");
+            psi.ArgumentList.Add("Bypass");
+            psi.ArgumentList.Add("-Command");
+            psi.ArgumentList.Add(
+                "$s = Get-AuthenticodeSignature -LiteralPath $env:FREEAI_SIG_PATH; " +
+                "Write-Output ($s.Status.ToString()); Write-Output ($s.SignerCertificate.Subject)");
+            using var ps = Process.Start(psi);
 
             if (ps is null)
             {

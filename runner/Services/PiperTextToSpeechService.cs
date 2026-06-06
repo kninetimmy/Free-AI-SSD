@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using FreeAiSsd.Shared;
 using NAudio.Wave;
 
 namespace FreeAiSsd.Runner.Services;
@@ -167,13 +168,17 @@ public sealed class PiperTextToSpeechService : ITextToSpeechService
             var psi = new ProcessStartInfo
             {
                 FileName = piperExe,
-                Arguments = $"--model \"{modelPath}\" --output_raw",
                 UseShellExecute = false,
                 RedirectStandardInput = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true
             };
+            // ArgumentList lets the OS quote each argument — never string-concat a
+            // config-derived path into a command line (shell-injection invariant).
+            psi.ArgumentList.Add("--model");
+            psi.ArgumentList.Add(modelPath);
+            psi.ArgumentList.Add("--output_raw");
 
             using var process = Process.Start(psi);
             if (process is null)
@@ -255,13 +260,16 @@ public sealed class PiperTextToSpeechService : ITextToSpeechService
         if (_selectedVoice is not null)
         {
             var explicit_ = Path.Combine(voicesDir, _selectedVoice + ".onnx");
+            // _selectedVoice derives from config (TtsVoiceName); confine the resolved
+            // path under the SSD root before it reaches a process launch.
             if (File.Exists(explicit_))
-                return explicit_;
+                return PathGuards.EnsureUnderRoot(_ssdRoot, explicit_);
         }
 
         // Fall back to first available voice
         if (!Directory.Exists(voicesDir)) return null;
-        return Directory.GetFiles(voicesDir, "*.onnx").FirstOrDefault();
+        var fallback = Directory.GetFiles(voicesDir, "*.onnx").FirstOrDefault();
+        return fallback is null ? null : PathGuards.EnsureUnderRoot(_ssdRoot, fallback);
     }
 
     private void RunPiperAndPlay(string text, CancellationToken ct)
@@ -285,13 +293,17 @@ public sealed class PiperTextToSpeechService : ITextToSpeechService
         var psi = new ProcessStartInfo
         {
             FileName = piperExe,
-            Arguments = $"--model \"{modelPath}\" --output_raw",
             UseShellExecute = false,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true
         };
+        // ArgumentList lets the OS quote each argument — never string-concat a
+        // config-derived path into a command line (shell-injection invariant).
+        psi.ArgumentList.Add("--model");
+        psi.ArgumentList.Add(modelPath);
+        psi.ArgumentList.Add("--output_raw");
 
         var process = Process.Start(psi);
         if (process is null)
