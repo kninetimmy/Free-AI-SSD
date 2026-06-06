@@ -400,9 +400,18 @@ public partial class MainWindow : System.Windows.Window
                 return false;
             }
 
-            if (!SsdEncryption.TryUnlockPortableConfigWithMaterial(
-                    _ssdRoot, dialog.Password, out var unlockedConfig, out var unlockMaterial, out var error)
-                || unlockedConfig is null || unlockMaterial is null)
+            // #115-2: TryUnlockPortableConfigWithMaterial runs PBKDF2 (210k+ iterations)
+            // synchronously. Off-load it to a background thread so the WPF dispatcher
+            // isn't frozen during the derive (it scales with the stored iteration count).
+            // out-params don't compose with Task.Run, so return a tuple.
+            var (unlocked, unlockedConfig, unlockMaterial, error) = await Task.Run(() =>
+            {
+                var ok = SsdEncryption.TryUnlockPortableConfigWithMaterial(
+                    _ssdRoot, dialog.Password, out var cfg, out var mat, out var err);
+                return (ok, cfg, mat, err);
+            });
+
+            if (!unlocked || unlockedConfig is null || unlockMaterial is null)
             {
                 StatusText.Text = "Unlock failed";
                 AppendLog($"Unlock failed: {error}");
