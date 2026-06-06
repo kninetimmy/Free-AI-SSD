@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using FreeAiSsd.Shared.Io;
 using Microsoft.Data.Sqlite;
 
@@ -161,10 +162,25 @@ public sealed class DocumentLibraryManager
         Directory.CreateDirectory(Path.Combine(GetLibraryPath(libraryId), "index"));
     }
 
-    public string GetLibraryPath(string libraryId) => Path.Combine(_ssdRoot, SsdLayout.DocLibraries, libraryId);
+    public string GetLibraryPath(string libraryId) => Path.Combine(_ssdRoot, SsdLayout.DocLibraries, ValidateLibraryId(libraryId));
     public string GetFilesPath(string libraryId) => Path.Combine(GetLibraryPath(libraryId), "files");
     public string GetIndexPath(string libraryId) => Path.Combine(GetLibraryPath(libraryId), "index");
     public string GetManifestPath(string libraryId) => Path.Combine(GetLibraryPath(libraryId), "library.json");
+
+    private static readonly Regex LibraryIdPattern = new("^[A-Za-z0-9_-]+$", RegexOptions.Compiled);
+
+    // Defense-in-depth: libraryId arrives from the LAN route. Today's callers gate it
+    // against the registry (always a safe slug or GUID), but reject anything that isn't
+    // a bare slug here so the id can never compose a "..", absolute, or separator-bearing
+    // path. All Get*Path helpers funnel through GetLibraryPath, so this is the chokepoint.
+    private static string ValidateLibraryId(string libraryId)
+    {
+        if (string.IsNullOrEmpty(libraryId) || !LibraryIdPattern.IsMatch(libraryId))
+        {
+            throw new ArgumentException($"Invalid library id: '{libraryId}'.", nameof(libraryId));
+        }
+        return libraryId;
+    }
 
     public DocumentLibraryManifest LoadManifest(string libraryId)
     {
