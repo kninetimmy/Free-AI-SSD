@@ -407,9 +407,23 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             // `loading` frames. Each frame keeps the Mac URLSession 180s
             // per-packet timer alive across cold-load and lets the client paint
             // a "Loading <model>… NNs" indicator.
+            //
+            // #115-8: the handler fires from a thread-pool tick and is launched
+            // unawaited, so it can outlive the request scope. Track the in-flight write
+            // and swallow the benign end-of-request races — ObjectDisposedException
+            // (writeGate/response already disposed) and OperationCanceledException
+            // (client gone) — so the orphan write never surfaces as an unobserved
+            // exception or touches the disposed `using var writeGate`.
+            Task heartbeat = Task.CompletedTask;
+            async Task SendHeartbeatAsync(int seconds)
+            {
+                try { await WriteFrameAsync(new { type = "loading", elapsedSeconds = seconds }); }
+                catch (ObjectDisposedException) { }
+                catch (OperationCanceledException) { }
+            }
             void OnFirstTokenPending(int seconds)
             {
-                _ = WriteFrameAsync(new { type = "loading", elapsedSeconds = seconds });
+                heartbeat = SendHeartbeatAsync(seconds);
             }
             _chatService.FirstTokenPending += OnFirstTokenPending;
 
@@ -428,6 +442,9 @@ public sealed class RunnerLocalApiService : IRunnerLocalApiService
             finally
             {
                 _chatService.FirstTokenPending -= OnFirstTokenPending;
+                // Drain a heartbeat launched just before unsubscribe so it cannot race
+                // the `using var writeGate` disposal at the end of this handler.
+                await heartbeat;
             }
 
             switch (streamResult)
