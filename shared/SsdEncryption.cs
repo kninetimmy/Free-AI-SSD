@@ -638,6 +638,10 @@ public static class SsdEncryption
             return false;
         }
 
+        // Declared outside the try so the finally can zero it on every path. Unlike
+        // the sibling ...WithMaterial (which hands the key to UnlockMaterial), this
+        // variant retains the derived key nowhere, so it must not outlive the method.
+        byte[]? key = null;
         try
         {
             // Decode Base64 fields and derive the decryption key.
@@ -645,7 +649,7 @@ public static class SsdEncryption
             var nonce = Convert.FromBase64String(encrypted.Nonce);
             var tag = Convert.FromBase64String(encrypted.Tag);
             var ciphertext = Convert.FromBase64String(encrypted.Ciphertext);
-            var key = DeriveKey(password, salt, encrypted.Iterations);
+            key = DeriveKey(password, salt, encrypted.Iterations);
 
             // Decrypt with AES-256-GCM. Authentication failure (wrong password
             // or tampered data) throws CryptographicException.
@@ -677,6 +681,10 @@ public static class SsdEncryption
             // Other failures (e.g., malformed Base64) = generic decryption error.
             error = "Failed to decrypt portable config.";
             return false;
+        }
+        finally
+        {
+            if (key is not null) CryptographicOperations.ZeroMemory(key);
         }
     }
 
