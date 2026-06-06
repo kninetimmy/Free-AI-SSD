@@ -50,15 +50,26 @@ public sealed class VectorIndex
     {
         var conn = new SqliteConnection($"Data Source={_dbPath}");
         conn.Open();
-        using (var cmd = conn.CreateCommand())
+        try
         {
-            cmd.CommandText = "PRAGMA journal_mode=WAL";
-            cmd.ExecuteScalar();
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "PRAGMA journal_mode=WAL";
+                cmd.ExecuteScalar();
+            }
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "PRAGMA busy_timeout=5000";
+                cmd.ExecuteNonQuery();
+            }
         }
-        using (var cmd = conn.CreateCommand())
+        catch
         {
-            cmd.CommandText = "PRAGMA busy_timeout=5000";
-            cmd.ExecuteNonQuery();
+            // A PRAGMA failure here would leak the opened connection — the caller's
+            // `using` never binds it because we never return — and with it any
+            // -wal/-shm file lock on the SSD. Dispose before rethrowing.
+            conn.Dispose();
+            throw;
         }
         return conn;
     }
@@ -498,19 +509,21 @@ CREATE INDEX IF NOT EXISTS idx_chunks_sha ON chunks(sha256);
         using var conn = OpenConnection();
         using var tx = conn.BeginTransaction();
 
-        var delete = conn.CreateCommand();
-        delete.Transaction = tx;
-        delete.CommandText = "DELETE FROM chunks WHERE library_id=$libraryId AND stored_relative_path=$path";
-        delete.Parameters.AddWithValue("$libraryId", libraryId);
-        delete.Parameters.AddWithValue("$path", storedRelativePath);
-        delete.ExecuteNonQuery();
+        using (var delete = conn.CreateCommand())
+        {
+            delete.Transaction = tx;
+            delete.CommandText = "DELETE FROM chunks WHERE library_id=$libraryId AND stored_relative_path=$path";
+            delete.Parameters.AddWithValue("$libraryId", libraryId);
+            delete.Parameters.AddWithValue("$path", storedRelativePath);
+            delete.ExecuteNonQuery();
+        }
 
         foreach (var c in chunks)
         {
             // Pre-normalize so search only needs a dot product.
             var normalized = EmbeddingSerializer.Normalize(c.Embedding);
 
-            var ins = conn.CreateCommand();
+            using var ins = conn.CreateCommand();
             ins.Transaction = tx;
             ins.CommandText = @"INSERT INTO chunks
 (library_id, source_file_name, stored_relative_path, page, chunk_index, text, text_length, sha256, embedding,
