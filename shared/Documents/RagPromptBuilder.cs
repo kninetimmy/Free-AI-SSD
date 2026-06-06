@@ -18,13 +18,7 @@ public static class RagPromptBuilder
     {
         if (retrieval.Count == 0)
         {
-            if (librarySearched)
-            {
-                var noResultPrompt = "No relevant documents found in the library.\n\nUser question:\n" + userPrompt;
-                return new RagPromptBuildResult { Prompt = noResultPrompt, UsedContext = false };
-            }
-
-            return new RagPromptBuildResult { Prompt = userPrompt, UsedContext = false };
+            return NoUsableContext(userPrompt, librarySearched);
         }
 
         // Render each chunk's block once, then decide inclusion under the budget.
@@ -38,12 +32,14 @@ public static class RagPromptBuilder
         var included = new HashSet<(string Path, int Index)>();
         var usedChars = 0;
 
-        // Pass 1 — matched chunks are the priority. Stop at the first hit that doesn't fit;
-        // the rest are lower-ranked. (For a hit-only list this matches the prior behavior.)
+        // Pass 1 — matched chunks are the priority: include every hit that fits the budget,
+        // skipping (not stopping at) an oversized one so a large top-ranked hit can't shut
+        // out the smaller lower-ranked hits that may hold the answer. Mirrors the neighbor
+        // pass below. Order is preserved in Pass 3 regardless of which hits were skipped.
         foreach (var (result, block) in entries)
         {
             if (result.IsNeighbor) continue;
-            if (usedChars + block.Length > maxContextChars) break;
+            if (usedChars + block.Length > maxContextChars) continue;
             included.Add((result.Chunk.StoredRelativePath, result.Chunk.ChunkIndex));
             usedChars += block.Length;
         }
@@ -94,10 +90,13 @@ public static class RagPromptBuilder
             }
         }
 
-        // No matched chunk fit — fall back to the bare prompt (neighbors are never shown alone).
+        // No matched chunk fit — neighbors are never shown alone. Honor librarySearched the
+        // same way the empty-retrieval path does, so a library that was consulted but yielded
+        // nothing usable still tells the model so, instead of silently sending the bare
+        // ungrounded question (X22 grounding violation).
         if (emittedHits.Count == 0)
         {
-            return new RagPromptBuildResult { Prompt = userPrompt, UsedContext = false };
+            return NoUsableContext(userPrompt, librarySearched);
         }
 
         sb.AppendLine("User question:");
@@ -108,5 +107,22 @@ public static class RagPromptBuilder
             Sources = CitationBuilder.BuildDistinct(emittedHits),
             UsedContext = true
         };
+    }
+
+    /// <summary>
+    /// The "no usable context" result, shared by the empty-retrieval path and the
+    /// all-hits-overflow fallback. When the library was searched but yielded nothing
+    /// usable, frame the prompt so the model knows the library was consulted and came up
+    /// empty; otherwise (no library searched) pass the bare question through unchanged.
+    /// </summary>
+    private static RagPromptBuildResult NoUsableContext(string userPrompt, bool librarySearched)
+    {
+        if (librarySearched)
+        {
+            var noResultPrompt = "No relevant documents found in the library.\n\nUser question:\n" + userPrompt;
+            return new RagPromptBuildResult { Prompt = noResultPrompt, UsedContext = false };
+        }
+
+        return new RagPromptBuildResult { Prompt = userPrompt, UsedContext = false };
     }
 }

@@ -141,6 +141,46 @@ public class RagPromptBuilderTests
     }
 
     [Fact]
+    public void Build_FirstHitOverflows_LaterHitFits_KeepsAnswerBearingHit()
+    {
+        // #119 regression: a large top-ranked hit overflows the budget while a smaller
+        // lower-ranked hit (which holds the answer) fits. Pass 1 must skip the oversized
+        // hit and keep packing — not abort at it — so the answer-bearing chunk still
+        // reaches the model. Build_AllChunksTooLargeForContext only covers a single hit.
+        var results = new List<RetrievalResult>
+        {
+            MakeResult(new string('X', 3000), 0.95, "big.txt", chunkIndex: 0),
+            MakeResult("THE ANSWER", 0.80, "small.txt", chunkIndex: 1),
+        };
+
+        var output = RagPromptBuilder.Build("query", results, maxContextChars: 2000, librarySearched: true);
+
+        Assert.True(output.UsedContext);
+        Assert.Contains("THE ANSWER", output.Prompt);
+        Assert.DoesNotContain(new string('X', 3000), output.Prompt);
+        Assert.Single(output.Sources); // only the hit that fit is a source
+    }
+
+    [Fact]
+    public void Build_AllHitsOverflow_LibrarySearched_ReturnsNoRelevantDocsNote()
+    {
+        // #119 regression: when no hit fits the budget, the fallback must honor
+        // librarySearched and frame the prompt as "no relevant documents" (like the
+        // empty-retrieval path) rather than sending a bare ungrounded question that
+        // silently ignores that the library was consulted (X22 grounding violation).
+        var results = new List<RetrievalResult>
+        {
+            MakeResult(new string('X', 3000), 0.9, "big.txt"),
+        };
+
+        var output = RagPromptBuilder.Build("What is AI?", results, maxContextChars: 100, librarySearched: true);
+
+        Assert.False(output.UsedContext);
+        Assert.Contains("No relevant documents found", output.Prompt);
+        Assert.Contains("What is AI?", output.Prompt);
+    }
+
+    [Fact]
     public void Build_HitPriority_NeighborNeverDisplacesItsHit()
     {
         // Reading order puts a large preceding neighbor before the small matched chunk.
